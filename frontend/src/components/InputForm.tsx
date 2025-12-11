@@ -12,7 +12,16 @@ import { Label } from "@/components/ui/label";
 import { ConfigSelector } from "./ConfigSelector";
 import { ProgressDisplay } from "./ProgressDisplay";
 import type { WorkflowStep } from "@/types/workflow";
-import { CalendarDays, CalendarRange, Calendar } from "lucide-react";
+import {
+  CalendarDays,
+  CalendarRange,
+  Calendar,
+  Bot,
+  Play,
+  Check,
+  X,
+} from "lucide-react";
+import { toast } from "sonner";
 
 interface InputFormProps {
   onSubmit: (data: {
@@ -40,16 +49,29 @@ interface ProfileConfig {
   };
 }
 
+interface Plan {
+  since: string;
+  until: string;
+  summaryType: "today" | "week" | "month" | "custom";
+  focus: string;
+}
+
 export function InputForm({
   onSubmit,
   loading,
   workflowSteps,
 }: InputFormProps) {
+  const [mode, setMode] = useState<"quick" | "command">("quick");
   const [userInput, setUserInput] = useState("");
+  const [commandInput, setCommandInput] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [currentConfig, setCurrentConfig] = useState<ProfileConfig | null>(
     null
   );
+
+  // AI Command Mode States
+  const [analyzing, setAnalyzing] = useState(false);
+  const [plan, setPlan] = useState<Plan | null>(null);
 
   // 当配置变化时,更新默认值
   const handleConfigChange = (config: ProfileConfig) => {
@@ -146,92 +168,244 @@ export function InputForm({
     });
   };
 
+  const handleAnalyzeCommand = async () => {
+    if (!commandInput.trim()) return;
+
+    setAnalyzing(true);
+    setPlan(null);
+
+    try {
+      const response = await fetch("http://localhost:3456/api/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: commandInput }),
+      });
+
+      if (!response.ok) throw new Error("Analysis failed");
+
+      const data = await response.json();
+      setPlan(data);
+      toast.success("计划已生成，请确认");
+    } catch (error) {
+      console.error("Analysis error:", error);
+      toast.error("分析命令失败，请重试");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const handleExecutePlan = async () => {
+    if (!plan) return;
+
+    await onSubmit({
+      userInput: plan.focus !== "everything" ? `Focus on: ${plan.focus}` : "",
+      selectedRepos, // Use currently selected repos
+      since: plan.since,
+      until: plan.until,
+      summaryType: plan.summaryType,
+    });
+  };
+
   return (
     <Card className="w-full">
       <CardHeader>
-        <CardTitle>Generate</CardTitle>
-        <CardDescription>
-          {/* 系统会根据配置自动加载默认仓库和时间设置,您也可以临时修改 */}
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle>Generate Summary</CardTitle>
+            <CardDescription>
+              {mode === "quick"
+                ? "快速生成常用总结"
+                : "使用自然语言描述你的需求"}
+            </CardDescription>
+          </div>
+          <div className="flex bg-slate-100 p-1 rounded-lg">
+            <button
+              onClick={() => setMode("quick")}
+              className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${
+                mode === "quick"
+                  ? "bg-white text-primary shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              快速模式
+            </button>
+            <button
+              onClick={() => setMode("command")}
+              className={`px-3 py-1 text-sm font-medium rounded-md transition-all flex items-center gap-1 ${
+                mode === "command"
+                  ? "bg-white text-primary shadow-sm"
+                  : "text-slate-500 hover:text-slate-900"
+              }`}
+            >
+              <Bot className="h-3 w-3" />
+              智能命令
+            </button>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-6">
-          {/* 快速操作按钮 */}
-          <div className="grid grid-cols-3 gap-4">
-            <Button
-              variant="outline"
-              className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
-              onClick={() => handleQuickSummary("today")}
-              disabled={loading}
-            >
-              <CalendarDays className="h-6 w-6" />
-              <span>今日总结</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
-              onClick={() => handleQuickSummary("week")}
-              disabled={loading}
-            >
-              <CalendarRange className="h-6 w-6" />
-              <span>本周总结</span>
-            </Button>
-            <Button
-              variant="outline"
-              className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
-              onClick={() => handleQuickSummary("month")}
-              disabled={loading}
-            >
-              <Calendar className="h-6 w-6" />
-              <span>本月总结</span>
-            </Button>
-          </div>
-
-          <div className="relative">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t" />
+        {/* 配置选择器 (Always visible) */}
+        <div className="mb-6">
+          <ConfigSelector onConfigChange={handleConfigChange} />
+          {selectedRepos.length > 0 && (
+            <div className="text-sm text-muted-foreground mt-2">
+              已选中 {selectedRepos.length} 个仓库
             </div>
-            <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-background px-2 text-muted-foreground">
-                或者自定义生成
-              </span>
+          )}
+        </div>
+
+        {mode === "quick" ? (
+          <div className="space-y-6">
+            {/* 快速操作按钮 */}
+            <div className="grid grid-cols-3 gap-4">
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+                onClick={() => handleQuickSummary("today")}
+                disabled={loading}
+              >
+                <CalendarDays className="h-6 w-6" />
+                <span>今日总结</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+                onClick={() => handleQuickSummary("week")}
+                disabled={loading}
+              >
+                <CalendarRange className="h-6 w-6" />
+                <span>本周总结</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+                onClick={() => handleQuickSummary("month")}
+                disabled={loading}
+              >
+                <Calendar className="h-6 w-6" />
+                <span>本月总结</span>
+              </Button>
             </div>
-          </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            {/* 配置选择器 */}
-            <ConfigSelector onConfigChange={handleConfigChange} />
-
-            {/* 显示选中的仓库数量 */}
-            {selectedRepos.length > 0 && (
-              <div className="text-sm text-muted-foreground">
-                已选中 {selectedRepos.length} 个仓库
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
               </div>
-            )}
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                  或者自定义生成
+                </span>
+              </div>
+            </div>
 
-            {/* 工作笔记 */}
+            <form onSubmit={handleSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="userInput">今日工作笔记 (可选)</Label>
+                <Textarea
+                  id="userInput"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  placeholder="例如:完成了用户登录功能,修复了 API 接口的 bug..."
+                  className="min-h-[100px]"
+                />
+              </div>
 
+              <Button type="submit" disabled={loading} className="w-full">
+                {loading ? "正在生成总结..." : "生成工作总结"}
+              </Button>
+            </form>
+          </div>
+        ) : (
+          <div className="space-y-6">
             <div className="space-y-2">
-              <Label htmlFor="userInput">今日工作笔记 (可选)</Label>
+              <Label htmlFor="commandInput">输入你的需求</Label>
               <Textarea
-                id="userInput"
-                value={userInput}
-                onChange={(e) => setUserInput(e.target.value)}
-                placeholder="例如:完成了用户登录功能,修复了 API 接口的 bug..."
-                className="min-h-[100px]"
+                id="commandInput"
+                value={commandInput}
+                onChange={(e) => setCommandInput(e.target.value)}
+                placeholder="例如: 生成 12 月 1 日～今天的总结，重点关注 Bug 修复..."
+                className="min-h-[100px] text-base"
               />
             </div>
 
-            {/* 进度显示 */}
-            {workflowSteps.length > 0 && (
-              <ProgressDisplay steps={workflowSteps} currentStep={0} />
+            {!plan && (
+              <Button
+                onClick={handleAnalyzeCommand}
+                disabled={analyzing || !commandInput.trim()}
+                className="w-full"
+              >
+                {analyzing ? "正在分析..." : "生成方案"}
+              </Button>
             )}
 
-            <Button type="submit" disabled={loading} className="w-full">
-              {loading ? "正在生成总结..." : "生成工作总结"}
-            </Button>
-          </form>
-        </div>
+            {plan && (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-4 animate-in fade-in slide-in-from-top-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                    <Check className="h-4 w-4 text-green-500" />
+                    方案已生成
+                  </h3>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPlan(null)}
+                    className="h-8 w-8 p-0"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="grid gap-3 text-sm">
+                  <div className="grid grid-cols-[80px_1fr] gap-2">
+                    <span className="text-slate-500">开始时间:</span>
+                    <span className="font-mono font-medium">{plan.since}</span>
+                  </div>
+                  <div className="grid grid-cols-[80px_1fr] gap-2">
+                    <span className="text-slate-500">结束时间:</span>
+                    <span className="font-mono font-medium">
+                      {plan.until || "Now"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-[80px_1fr] gap-2">
+                    <span className="text-slate-500">类型:</span>
+                    <span className="capitalize bg-blue-50 text-blue-700 px-2 py-0.5 rounded inline-block w-fit">
+                      {plan.summaryType}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-[80px_1fr] gap-2">
+                    <span className="text-slate-500">关注点:</span>
+                    <span>{plan.focus}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex gap-3">
+                  <Button
+                    onClick={handleExecutePlan}
+                    disabled={loading}
+                    className="flex-1 bg-green-600 hover:bg-green-700"
+                  >
+                    <Play className="h-4 w-4 mr-2" />
+                    {loading ? "执行中..." : "确认并执行"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setPlan(null)}
+                    disabled={loading}
+                  >
+                    取消
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 进度显示 (Shared) */}
+        {workflowSteps.length > 0 && (
+          <div className="mt-6">
+            <ProgressDisplay steps={workflowSteps} currentStep={0} />
+          </div>
+        )}
       </CardContent>
     </Card>
   );

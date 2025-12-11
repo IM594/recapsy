@@ -257,17 +257,26 @@ export async function aiProcessor(state: WorkflowState) {
     const now = new Date();
     const currentDate = now.toISOString().split("T")[0];
     const currentYear = now.getFullYear();
-    const currentWeek = getISOWeekNumber(now);
+
+    // Calculate week number based on 'since' date if available, otherwise use current date
+    const targetDate = state.since ? new Date(state.since) : now;
+    const targetWeek = getISOWeekNumber(targetDate);
 
     const summaryType = state.summaryType || "custom";
-    console.log(`[AI Processor] 生成总结类型: ${summaryType}`);
+    console.log(
+      `[AI Processor] 生成总结类型: ${summaryType}, 目标周数: ${targetWeek}`
+    );
 
     let promptInstructions = "";
 
     if (summaryType === "today") {
       promptInstructions = `
 请生成一份**今日工作总结**。
-重点关注今天完成的事项。
+**风格要求**：
+- 面向管理者或非技术人员，语言通俗易懂。
+- **不要**直接复制 Git commit message 的格式（如 "feat(bot):..."），请将其转化为自然语言描述。
+- 将相关的细碎提交合并为一个完整的工作项。
+
 输出结构：
 1. **今日事项**：列出今天完成的具体工作项。
 2. **今日总结**：简要总结今天的工作成果。
@@ -275,19 +284,27 @@ export async function aiProcessor(state: WorkflowState) {
     } else if (summaryType === "week") {
       promptInstructions = `
 请生成一份**本周工作总结**。
-重点关注本周完成的事项。
-**重要：请按日期从小到大（升序）排列。**
+**风格要求**：
+- 面向管理者或非技术人员，语言通俗易懂。
+- **不要**直接复制 Git commit message 的格式（如 "feat(bot):..."），请将其转化为自然语言描述。
+- **重点在于归纳和总结**，而不是罗列流水账。将相关的技术细节合并为高层级的功能点或成就。
+- **重要：请按日期从小到大（升序）排列。**
+
 输出结构：
 1. **本周事项**：
    - 使用 "### YYYYMMDD" 作为标题。
-   - 在每个日期下，列出具体的工作项。
+   - 在每个日期下，列出具体的工作项（经过润色和合并的）。
 2. **本周总结**：总结本周的主要工作成果和进展。
 `;
     } else if (summaryType === "month") {
       promptInstructions = `
 请生成一份**本月工作总结**。
-重点关注本月完成的事项。
-**重要：请按日期从小到大（升序）排列。**
+**风格要求**：
+- 面向管理者或非技术人员，语言通俗易懂。
+- **不要**直接复制 Git commit message 的格式。
+- **高度概括**：忽略琐碎的 bug 修复和重构细节，专注于主要功能的交付和业务价值。
+- **重要：请按日期从小到大（升序）排列。**
+
 输出结构：
 1. **本月事项**：
    - 使用 "### YYYYMMDD" 作为标题。
@@ -300,7 +317,11 @@ export async function aiProcessor(state: WorkflowState) {
       // Default / Custom
       promptInstructions = `
 请生成一份结构化的工作总结。
-**重要：请按日期从小到大（升序）排列。**
+**风格要求**：
+- 面向管理者或非技术人员，语言通俗易懂。
+- **不要**直接复制 Git commit message 的格式。
+- **重要：请按日期从小到大（升序）排列。**
+
 输出结构：
 1. **按日期分组的详细记录**：
    - 使用 "### YYYYMMDD" 作为标题。
@@ -313,8 +334,8 @@ export async function aiProcessor(state: WorkflowState) {
     const prompt = `你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结。
 
 当前日期: ${currentDate}
-当前年份: ${currentYear}
-当前周数: 第 ${currentWeek} 周
+目标时间范围所属年份: ${targetDate.getFullYear()}
+目标时间范围所属周数: 第 ${targetWeek} 周
 
 ## Git 提交记录
 ${state.gitCommits || "无"}

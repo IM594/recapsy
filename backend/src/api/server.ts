@@ -5,6 +5,7 @@ import summaryRouter from "./routes/summary";
 import historyRouter from "./routes/history";
 import reposRouter from "./routes/repos";
 import configRouter from "./routes/config";
+import planRouter from "./routes/plan";
 import { createWorkflowGraph } from "../workflow/graph";
 import { generateThreadId } from "../workflow/checkpointer";
 import { ConfigManager } from "../lib/config-manager";
@@ -38,6 +39,7 @@ app.use("/api", summaryRouter);
 app.use("/api", historyRouter);
 app.use("/api", reposRouter);
 app.use("/api/config", configRouter);
+app.use("/api", planRouter);
 
 // 健康检查
 app.get("/health", (req, res) => {
