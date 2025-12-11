@@ -145,6 +145,14 @@ export function InputForm({
     }
 
     console.log(`[UI] 快速总结: ${type}, since=${since}, until=${until}`);
+    toast.info(
+      `正在生成 ${
+        type === "today" ? "今日" : type === "week" ? "本周" : "本月"
+      } 总结`,
+      {
+        description: `时间范围: ${since} ~ ${until}`,
+      }
+    );
 
     await onSubmit({
       userInput,

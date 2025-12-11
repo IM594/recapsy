@@ -133,8 +133,7 @@ ${state.externalData || "无"}
 
 ${promptInstructions}
 
-请生成一个 JSON 对象，包含一个 "markdownContent" 字段，该字段的值是一个完整的 Markdown 格式的工作总结字符串。
-请确保返回的是合法的 JSON 格式，且 "markdownContent" 字段包含完整的 Markdown 文本。`;
+请直接输出 Markdown 格式的总结内容。不要使用 JSON 格式，也不要用 \`\`\`markdown 代码块包裹。直接返回 Markdown 文本。`;
 
     console.log(`[AI Processor] Prompt 长度: ${prompt.length} 字符`);
     console.log(`[AI Processor] 开始调用 OpenAI API...`);
@@ -145,25 +144,11 @@ ${promptInstructions}
 
     console.log(`[AI Processor] API 调用完成,耗时: ${duration}ms`);
 
-    let parsed;
-    try {
-      const content = String(response.content);
-      // 尝试提取 JSON (可能被包裹在 ```json ... ``` 中)
-      const jsonMatch =
-        content.match(/```json\s*([\s\S]*?)\s*```/) ||
-        content.match(/```\s*([\s\S]*?)\s*```/);
-      const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    const markdownContent = String(response.content);
 
-      parsed = JSON.parse(jsonStr.trim());
-
-      if (!parsed.markdownContent) {
-        throw new Error("返回的 JSON 中缺少 markdownContent 字段");
-      }
-
-      console.log(`[AI Processor] JSON 解析成功`);
-    } catch (parseError) {
-      console.error(`[AI Processor] JSON 解析失败:`, parseError);
-      throw new Error(`AI 返回的内容无法解析为 JSON: ${parseError}`);
+    // 简单验证一下是否为空
+    if (!markdownContent || markdownContent.trim().length === 0) {
+      throw new Error("AI 返回的内容为空");
     }
 
     progressTracker.updateProgress(threadId, {
@@ -174,7 +159,9 @@ ${promptInstructions}
     });
 
     return {
-      processedContent: parsed,
+      processedContent: {
+        markdownContent: markdownContent,
+      },
     };
   } catch (error: any) {
     console.error("AI 处理失败:", error);

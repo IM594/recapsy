@@ -68,12 +68,26 @@ export async function collectGitCommits(state: WorkflowState) {
     });
 
     const results = await Promise.all(commitPromises);
-    const validResults = results.filter((r) => r !== null);
+    const validResults = results.filter((r) => r !== null) as string[];
+
+    // Calculate total commits
+    let totalCommits = 0;
+    // Simple regex to match Commit Hash at start of line (7+ hex chars)
+    const commitHashRegex = /^[0-9a-f]{7,}\s/m;
+
+    validResults.forEach((content) => {
+      const lines = content.split("\n");
+      lines.forEach((line) => {
+        if (commitHashRegex.test(line)) {
+          totalCommits++;
+        }
+      });
+    });
 
     progressTracker.updateProgress(threadId, {
       step: "collectGitCommits",
       status: "completed",
-      message: `成功收集 ${validResults.length} 个仓库的提交记录`,
+      message: `成功收集 ${validResults.length} 个仓库共 ${totalCommits} 条提交记录`,
       timestamp: Date.now(),
     });
 

@@ -2,7 +2,10 @@ import { useState } from "react";
 import { InputForm } from "./components/InputForm";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import type { WorkflowStep } from "./types/workflow";
-import { Sparkles, CheckCircle2, FileText, ListTodo } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Badge } from "@/components/ui/badge";
+import { Sparkles, CheckCircle2, FileText, Copy, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { Toaster, toast } from "sonner";
 
@@ -65,27 +68,7 @@ function App() {
         if (progressEvent.step === "completed") {
           // 如果是成功完成,保存结果
           if (progressEvent.status === "completed") {
-            let summaryData = progressEvent.summary;
-
-            // 尝试解析 JSON，兼容旧格式
-            try {
-              if (
-                summaryData &&
-                (summaryData.startsWith("{") || summaryData.startsWith("["))
-              ) {
-                const parsed = JSON.parse(summaryData);
-                // 如果是新格式的 JSON (包含 markdownContent)
-                if (parsed.markdownContent) {
-                  summaryData = parsed.markdownContent;
-                } else {
-                  // 旧格式对象
-                  summaryData = parsed;
-                }
-              }
-            } catch (e) {
-              // 解析失败，说明是普通字符串，直接使用
-              console.log("Summary is not JSON, using as string");
-            }
+            const summaryData = progressEvent.summary;
 
             setResult({
               summary: summaryData,
@@ -141,51 +124,62 @@ function App() {
                     <CheckCircle2 className="h-5 w-5 text-green-500" />
                     生成完成
                   </CardTitle>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(result.summary);
+                        toast.success("内容已复制");
+                      }}
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      复制
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const blob = new Blob([result.summary], {
+                          type: "text/markdown",
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement("a");
+                        a.href = url;
+                        a.download = "summary.md";
+                        a.click();
+                        URL.revokeObjectURL(url);
+                      }}
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      下载
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
-              <CardContent className="pt-6 bg-white">
-                {result.summary && (
-                  <div className="space-y-6">
-                    <article className="prose prose-slate max-w-none prose-p:leading-relaxed prose-headings:font-semibold prose-a:text-primary hover:prose-a:text-primary/80">
-                      {typeof result.summary === "string" ? (
-                        <ReactMarkdown>{result.summary}</ReactMarkdown>
-                      ) : (
-                        <>
-                          <ReactMarkdown>
-                            {result.summary.summary}
-                          </ReactMarkdown>
-                          {result.summary.achievements?.length > 0 && (
-                            <div className="pt-4">
-                              <h4 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                                <ListTodo className="h-4 w-4 text-primary" />
-                                完成事项
-                              </h4>
-                              <ul className="space-y-2">
-                                {result.summary.achievements.map(
-                                  (item: string, i: number) => (
-                                    <li
-                                      key={i}
-                                      className="flex items-start text-sm text-slate-600 group"
-                                    >
-                                      <span className="mr-3 mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300 group-hover:bg-primary transition-colors" />
-                                      <span className="leading-relaxed">
-                                        {item}
-                                      </span>
-                                    </li>
-                                  )
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </article>
-                  </div>
-                )}
+              <CardContent className="p-0 bg-white">
+                <ScrollArea className="h-[500px] w-full p-6">
+                  <article className="prose prose-slate max-w-none prose-p:leading-relaxed prose-headings:font-semibold prose-a:text-primary hover:prose-a:text-primary/80">
+                    <ReactMarkdown>{result.summary}</ReactMarkdown>
+                  </article>
+                </ScrollArea>
 
-                <div className="mt-8 pt-4 border-t border-slate-50 flex items-center gap-2 text-xs text-slate-400 font-mono">
-                  <FileText className="h-3 w-3 flex-shrink-0" />
-                  <span className="truncate">{result.outputPath}</span>
+                <div className="border-t border-slate-50 p-4 bg-slate-50/50 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-xs text-slate-400 font-mono">
+                    <FileText className="h-3 w-3 flex-shrink-0" />
+                    <span
+                      className="truncate max-w-[300px]"
+                      title={result.outputPath}
+                    >
+                      {result.outputPath}
+                    </span>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className="text-xs bg-white text-slate-500 font-normal"
+                  >
+                    Markdown Genererated
+                  </Badge>
                 </div>
               </CardContent>
             </Card>
