@@ -6,7 +6,7 @@ import {
   collectExternalData,
   aiProcessor,
   exportMarkdown,
-} from "./nodes";
+} from "./nodes/index";
 import { createCheckpointer } from "./checkpointer";
 
 export function createWorkflowGraph() {
