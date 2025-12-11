@@ -70,3 +70,7 @@ checkpoints/
 .nuxt
 .cache
 .parcel-cache
+
+# User configuration files
+backend/config.json
+backend/config.*.json

@@ -4,6 +4,8 @@ import { ChatOpenAI } from "@langchain/openai";
 import fs from "fs/promises";
 import path from "path";
 import { WorkflowState } from "./state";
+import { ConfigManager } from "../lib/config-manager";
+import { progressTracker } from "../lib/progress-tracker";
 
 const execAsync = promisify(exec);
 
@@ -14,19 +16,37 @@ import { getRepoCommits } from "../lib/git";
 
 // 1️⃣ Git Commit 收集器 - 运行命令获取 commit
 export async function collectGitCommits(state: WorkflowState) {
+  const threadId = state.threadId || "unknown";
+
+  progressTracker.updateProgress(threadId, {
+    step: "collectGitCommits",
+    status: "running",
+    message: `正在收集 ${state.selectedRepos?.length || 0} 个仓库的提交记录...`,
+    timestamp: Date.now(),
+  });
+
+  const configManager = ConfigManager.getInstance();
+  const config = configManager.getActiveProfile();
+
   console.log(
     `📦 [Git Collector] 收集 Git commits... 选中仓库: ${
       state.selectedRepos?.length || 0
-    }, authorPattern=${process.env.GIT_AUTHOR_PATTERN || "未设置"}`
+    }, authorPattern=${config.git.authorPattern || "未设置"}`
   );
 
   try {
     const repos = state.selectedRepos || [];
-    const authorPattern = process.env.GIT_AUTHOR_PATTERN || "";
-    const since = state.since || process.env.GIT_SINCE || "yesterday";
+    const authorPattern = config.git.authorPattern || "";
+    const since = state.since || config.git.since || "yesterday";
     const until = state.until || "";
 
     if (repos.length === 0) {
+      progressTracker.updateProgress(threadId, {
+        step: "collectGitCommits",
+        status: "completed",
+        message: "未选择任何仓库",
+        timestamp: Date.now(),
+      });
       return {
         gitCommits: "未选择任何 Git 仓库",
       };
@@ -34,10 +54,17 @@ export async function collectGitCommits(state: WorkflowState) {
 
     const commitPromises = repos.map(async (repoPath) => {
       console.log(
-        `[Git Collector] 读取仓库: ${repoPath}, since=${since}, until=${until ||
-          "now"}, author="${authorPattern}"`
+        `[Git Collector] 读取仓库: ${repoPath}, since=${since}, until=${
+          until || "now"
+        }, author="${authorPattern}"`
       );
-      const commits = await getRepoCommits(repoPath, authorPattern, since, until);
+      const commits = await getRepoCommits(
+        repoPath,
+        authorPattern,
+        since,
+        until
+      );
+
       console.log(
         `[Git Collector] ${repoPath} 获取到 ${
           commits ? commits.split("\n").length : 0
@@ -51,6 +78,13 @@ export async function collectGitCommits(state: WorkflowState) {
     const results = await Promise.all(commitPromises);
     const validResults = results.filter((r) => r !== null);
 
+    progressTracker.updateProgress(threadId, {
+      step: "collectGitCommits",
+      status: "completed",
+      message: `成功收集 ${validResults.length} 个仓库的提交记录`,
+      timestamp: Date.now(),
+    });
+
     return {
       gitCommits:
         validResults.length > 0
@@ -59,6 +93,13 @@ export async function collectGitCommits(state: WorkflowState) {
     };
   } catch (error) {
     console.error("Git 收集失败:", error);
+    progressTracker.updateProgress(threadId, {
+      step: "collectGitCommits",
+      status: "error",
+      message: "Git 收集失败",
+      isCritical: true, // Git 收集失败是致命的
+      timestamp: Date.now(),
+    });
     return {
       gitCommits: "无法获取 Git 记录",
     };
@@ -67,135 +108,237 @@ export async function collectGitCommits(state: WorkflowState) {
 
 // 2️⃣ 用户输入接收器 - 从前端接收数据
 export async function collectUserInput(state: WorkflowState) {
+  const threadId = state.threadId || "unknown";
+
+  progressTracker.updateProgress(threadId, {
+    step: "collectUserInput",
+    status: "running",
+    message: "正在处理用户输入...",
+    timestamp: Date.now(),
+  });
+
   console.log(
-    `✍️ [User Input] 接收用户输入... 文本长度: ${
+    `✍️ [User Input Collector] 接收用户输入，长度: ${
       state.userInput?.length || 0
     }`
   );
-  // 实际数据在 invoke 时传入，这里只需返回空对象或保持原样
+
+  progressTracker.updateProgress(threadId, {
+    step: "collectUserInput",
+    status: "completed",
+    message: `用户输入: ${state.userInput?.length || 0} 字符`,
+    timestamp: Date.now(),
+  });
+
   return {};
 }
 
 // 3️⃣ 外部 API 调用器 - 调用其他应用的 API
 export async function collectExternalData(state: WorkflowState) {
-  console.log(
-    `🌐 [External API] 调用外部 API... 配置 key: ${
-      process.env.TODOIST_API_KEY ? "已配置" : "未配置，使用模拟数据"
-    }`
-  );
+  const threadId = state.threadId || "unknown";
+
+  progressTracker.updateProgress(threadId, {
+    step: "collectExternalData",
+    status: "running",
+    message: "正在调用外部 API...",
+    timestamp: Date.now(),
+  });
+
+  console.log("🌐 [External Data Collector] 收集外部数据...");
+
+  const todoistApiKey = process.env.TODOIST_API_KEY;
+  if (!todoistApiKey) {
+    console.log("[External Data Collector] 未配置 TODOIST_API_KEY，跳过");
+    progressTracker.updateProgress(threadId, {
+      step: "collectExternalData",
+      status: "completed",
+      message: "未配置外部 API,已跳过",
+      timestamp: Date.now(),
+    });
+    return {
+      externalData: "未配置外部 API",
+    };
+  }
 
   try {
-    // 示例: 模拟调用 Todoist API
-    // 如果没有 API Key，返回模拟数据
-    if (
-      !process.env.TODOIST_API_KEY ||
-      process.env.TODOIST_API_KEY === "your_todoist_api_key_here"
-    ) {
-      return {
-        externalData:
-          "（模拟数据）完成任务：\n- 更新架构文档\n- 初始化项目结构",
-      };
-    }
-
     const response = await fetch("https://api.todoist.com/rest/v2/tasks", {
       headers: {
-        Authorization: `Bearer ${process.env.TODOIST_API_KEY}`,
+        Authorization: `Bearer ${todoistApiKey}`,
       },
     });
 
     if (!response.ok) {
-      throw new Error(`API Error: ${response.statusText}`);
+      console.error(
+        `[External Data Collector] Todoist API 请求失败: ${response.status}`
+      );
+      progressTracker.updateProgress(threadId, {
+        step: "collectExternalData",
+        status: "error",
+        message: "外部 API 请求失败",
+        isCritical: false, // 外部 API 失败不是致命的
+        timestamp: Date.now(),
+      });
+      return {
+        externalData: "外部 API 请求失败",
+      };
     }
 
-    const tasks: any[] = await response.json();
-    console.log(`[External API] 获取到任务数量: ${tasks.length}`);
-    const completedToday = tasks
-      // 简单过滤，实际可能需要查询 completed items API
-      .map((task: any) => task.content)
+    const tasks = await response.json();
+    console.log(
+      `[External Data Collector] 获取到 ${tasks.length} 个 Todoist 任务`
+    );
+
+    const taskList = tasks
+      .slice(0, 10)
+      .map((t: any) => `- ${t.content}`)
       .join("\n");
 
+    progressTracker.updateProgress(threadId, {
+      step: "collectExternalData",
+      status: "completed",
+      message: `成功获取 ${tasks.length} 个任务`,
+      timestamp: Date.now(),
+    });
+
     return {
-      externalData: completedToday || "今天没有完成的任务",
+      externalData: taskList || "无待办事项",
     };
   } catch (error) {
-    console.error("外部 API 调用失败:", error);
+    console.error("[External Data Collector] 外部数据收集失败:", error);
+    progressTracker.updateProgress(threadId, {
+      step: "collectExternalData",
+      status: "error",
+      message: "外部数据收集失败",
+      isCritical: false, // 外部数据收集失败不是致命的
+      timestamp: Date.now(),
+    });
     return {
-      externalData: "无法获取外部数据",
+      externalData: "外部数据收集失败",
     };
   }
 }
 
 // ========== AI 处理节点 ==========
 
-// 4️⃣ AI 汇总处理器 - 汇总所有数据并生成结构化内容
+// 4️⃣ AI 处理器 - 调用 LLM 分析数据
 export async function aiProcessor(state: WorkflowState) {
-  console.log(
-    `🤖 [AI Processor] AI 处理中... git长度: ${
-      state.gitCommits?.length || 0
-    }, 输入长度: ${state.userInput?.length || 0}, 外部数据长度: ${
-      state.externalData?.length || 0
-    }`
-  );
+  const threadId = state.threadId || "unknown";
+  const MODEL_NAME = "claude-opus-4-5-20251101";
+  const TEMPERATURE = 0.7;
 
-  const llm = new ChatOpenAI({
-    modelName: "claude-opus-4-5-20251101",
-    temperature: 0.7,
-    configuration: {
-      baseURL: process.env.OPENAI_BASE_URL,
-    },
+  progressTracker.updateProgress(threadId, {
+    step: "aiProcessor",
+    status: "running",
+    message: "正在调用 AI 分析数据...",
+    timestamp: Date.now(),
   });
 
-  const prompt = `
-你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结。
-
-## 今日 Git 提交记录
-${state.gitCommits}
-
-## 用户手动输入
-${state.userInput}
-
-## 外部系统数据
-${state.externalData}
-
-请以 JSON 格式返回，包含以下字段：
-{
-  "summary": "一句话总结今天的工作",
-  "achievements": ["成就1", "成就2", ...],
-  "challenges": ["挑战1", "挑战2", ...],
-  "nextSteps": ["明天要做的事1", "明天要做的事2", ...]
-}
-
-请确保返回的是有效的 JSON 格式，不要包含 Markdown 代码块标记（如 \`\`\`json）。
-`;
-
-  const response = await llm.invoke(prompt);
-  const content = response.content as string;
-
-  // 提取 JSON (处理可能的 markdown 代码块)
-  let jsonStr = content;
-  const jsonMatch =
-    content.match(/```json\n([\s\S]*?)\n```/) ||
-    content.match(/```\n([\s\S]*?)\n```/) ||
-    content.match(/\{[\s\S]*\}/);
-
-  if (jsonMatch) {
-    jsonStr = jsonMatch[1] || jsonMatch[0];
-  }
+  console.log(
+    `🤖 [AI Processor] 开始 AI 处理... gitCommits 长度: ${
+      state.gitCommits?.length || 0
+    }, userInput 长度: ${state.userInput?.length || 0}`
+  );
 
   try {
-    const processedContent = JSON.parse(jsonStr);
-    console.log("[AI Processor] AI 返回已解析");
+    const model = new ChatOpenAI({
+      modelName: MODEL_NAME,
+      temperature: TEMPERATURE,
+    });
+
+    console.log(
+      `[AI Processor] 模型配置: modelName=${MODEL_NAME}, temperature=${TEMPERATURE}`
+    );
+    console.log(
+      `[AI Processor] OpenAI Base URL: ${
+        process.env.OPENAI_BASE_URL || "default"
+      }`
+    );
+
+    const prompt = `你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结:
+
+## Git 提交记录
+${state.gitCommits || "无"}
+
+## 用户补充说明
+${state.userInput || "无"}
+
+## 外部数据
+${state.externalData || "无"}
+
+请生成一个 JSON 对象,包含以下字段:
+- summary: 工作总结的主要内容(字符串)
+- achievements: 主要成就列表(字符串数组)
+- nextSteps: 下一步计划(字符串数组,可选)
+
+只返回 JSON,不要其他内容。`;
+
+    console.log(`[AI Processor] Prompt 长度: ${prompt.length} 字符`);
+    console.log(`[AI Processor] 开始调用 OpenAI API...`);
+
+    const startTime = Date.now();
+    const response = await model.invoke(prompt);
+    const duration = Date.now() - startTime;
+
+    console.log(`[AI Processor] API 调用完成,耗时: ${duration}ms`);
+    console.log(`[AI Processor] 响应类型: ${typeof response.content}`);
+    console.log(
+      `[AI Processor] 响应长度: ${String(response.content).length} 字符`
+    );
+    console.log(
+      `[AI Processor] 响应内容预览: ${String(response.content).substring(
+        0,
+        200
+      )}...`
+    );
+
+    let parsed;
+    try {
+      const content = String(response.content);
+      // 尝试提取 JSON (可能被包裹在 ```json ... ``` 中)
+      const jsonMatch =
+        content.match(/```json\s*([\s\S]*?)\s*```/) ||
+        content.match(/```\s*([\s\S]*?)\s*```/);
+      const jsonStr = jsonMatch ? jsonMatch[1] : content;
+
+      console.log(`[AI Processor] 提取的 JSON 字符串长度: ${jsonStr.length}`);
+      parsed = JSON.parse(jsonStr.trim());
+      console.log(`[AI Processor] JSON 解析成功`);
+      console.log(
+        `[AI Processor] 解析结果包含字段: ${Object.keys(parsed).join(", ")}`
+      );
+    } catch (parseError) {
+      console.error(`[AI Processor] JSON 解析失败:`, parseError);
+      console.error(`[AI Processor] 原始响应内容:`, String(response.content));
+      throw new Error(`AI 返回的内容无法解析为 JSON: ${parseError}`);
+    }
+
+    progressTracker.updateProgress(threadId, {
+      step: "aiProcessor",
+      status: "completed",
+      message: `AI 处理完成,生成了 ${parsed.achievements?.length || 0} 项成就`,
+      timestamp: Date.now(),
+    });
+
+    console.log(`[AI Processor] 处理完成,返回结果`);
     return {
-      processedContent,
+      processedContent: parsed,
     };
-  } catch (e) {
-    console.error("JSON 解析失败:", e);
-    // Fallback
+  } catch (error: any) {
+    console.error("AI 处理失败:", error);
+    console.error("错误堆栈:", error.stack);
+    console.error("错误详情:", JSON.stringify(error, null, 2));
+    progressTracker.updateProgress(threadId, {
+      step: "aiProcessor",
+      status: "error",
+      message: "AI 处理失败",
+      isCritical: true, // AI 处理失败是致命的
+      timestamp: Date.now(),
+    });
     return {
       processedContent: {
-        summary: "无法解析 AI 返回的内容",
+        summary: "处理失败",
         achievements: [],
-        challenges: ["AI 返回格式错误"],
+        challenges: [],
         nextSteps: [],
       },
     };
@@ -204,45 +347,91 @@ ${state.externalData}
 
 // ========== 输出节点 ==========
 
-// 5️⃣ Markdown 导出器 - 生成 Markdown 文件
+// 5️⃣ Markdown 导出器 - 生成文件
 export async function exportMarkdown(state: WorkflowState) {
+  const threadId = state.threadId || "unknown";
+
+  progressTracker.updateProgress(threadId, {
+    step: "exportMarkdown",
+    status: "running",
+    message: "正在生成 Markdown 文件...",
+    timestamp: Date.now(),
+  });
+
+  console.log("📝 [Markdown Exporter] 开始导出 Markdown...");
   console.log(
-    "📝 [Markdown Exporter] 导出 Markdown...",
-    `summary长度: ${state.processedContent?.summary?.length || 0}`
+    `[Markdown Exporter] state.processedContent:`,
+    state.processedContent
+  );
+  console.log(
+    `[Markdown Exporter] processedContent 类型: ${typeof state.processedContent}`
   );
 
-  const { processedContent } = state;
-  const date = new Date().toISOString().split("T")[0];
+  try {
+    const summary = state.processedContent;
 
-  // 生成 Markdown 内容
-  const markdown = `# 工作总结 - ${date}
+    if (!summary) {
+      throw new Error("processedContent 为空或 undefined");
+    }
 
-## 📊 今日概览
-${processedContent.summary}
+    console.log(
+      `[Markdown Exporter] summary 对象:`,
+      JSON.stringify(summary, null, 2)
+    );
+    console.log(
+      `[Markdown Exporter] summary.achievements 存在: ${!!summary.achievements}`
+    );
+    console.log(
+      `[Markdown Exporter] summary.achievements 类型: ${typeof summary.achievements}`
+    );
 
-## 🎯 主要成就
-${processedContent.achievements.map((item: string) => `- ${item}`).join("\n")}
+    const date = new Date().toISOString().split("T")[0];
+    const filename = `summary_${date}.md`;
+    const outputPath = path.join(process.cwd(), "outputs", filename);
 
-## 💪 遇到的挑战
-${processedContent.challenges.map((item: string) => `- ${item}`).join("\n")}
+    // 确保 outputs 目录存在
+    await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-## 📅 明日计划
-${processedContent.nextSteps.map((item: string) => `- ${item}`).join("\n")}
+    const content = `# 工作总结 - ${date}
+
+## 总结
+${summary.summary || "无"}
+
+## 主要成就
+${summary.achievements?.map((item: string) => `- ${item}`).join("\n") || "无"}
+
+## 下一步计划
+${summary.nextSteps?.map((item: string) => `- ${item}`).join("\n") || "无"}
 
 ---
-*生成时间: ${new Date().toLocaleString("zh-CN")}*
+生成时间: ${new Date().toLocaleString("zh-CN")}
 `;
 
-  // 保存文件
-  const outputDir = path.join(process.cwd(), "outputs");
-  await fs.mkdir(outputDir, { recursive: true });
+    await fs.writeFile(outputPath, content, "utf-8");
+    console.log(`[Markdown Exporter] 文件已生成: ${outputPath}`);
 
-  const outputPath = path.join(outputDir, `summary-${date}.md`);
-  await fs.writeFile(outputPath, markdown, "utf-8");
+    progressTracker.updateProgress(threadId, {
+      step: "exportMarkdown",
+      status: "completed",
+      message: `已生成文件: ${filename}`,
+      timestamp: Date.now(),
+    });
 
-  console.log(`✅ Markdown 已保存: ${outputPath}`);
-
-  return {
-    outputPath,
-  };
+    return {
+      outputPath,
+    };
+  } catch (error: any) {
+    console.error("导出 Markdown 失败:", error);
+    console.error("错误堆栈:", error.stack);
+    progressTracker.updateProgress(threadId, {
+      step: "exportMarkdown",
+      status: "error",
+      message: "导出 Markdown 失败",
+      isCritical: true, // 导出失败是致命的
+      timestamp: Date.now(),
+    });
+    return {
+      outputPath: "",
+    };
+  }
 }

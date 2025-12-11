@@ -1,6 +1,11 @@
 import { Annotation } from "@langchain/langgraph";
 
 export const WorkflowStateAnnotation = Annotation.Root({
+  // Thread ID for progress tracking
+  threadId: Annotation<string>({
+    reducer: (prev, next) => next || prev || "",
+  }),
+
   // 各个数据源收集的原始数据
   gitCommits: Annotation<string>({
     reducer: (prev, next) => next || prev || "",

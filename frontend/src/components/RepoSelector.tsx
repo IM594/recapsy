@@ -13,13 +13,16 @@ interface Repo {
 interface RepoSelectorProps {
   selectedRepos: string[];
   onSelectionChange: (repos: string[]) => void;
+  defaultRootPath?: string;
 }
 
 export function RepoSelector({
   selectedRepos,
   onSelectionChange,
+  defaultRootPath = "",
 }: RepoSelectorProps) {
-  const [rootPath, setRootPath] = useState("");
+  const [rootPath, setRootPath] = useState(defaultRootPath);
+
   const [repos, setRepos] = useState<Repo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

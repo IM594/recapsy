@@ -4,8 +4,10 @@ import dotenv from "dotenv";
 import summaryRouter from "./routes/summary";
 import historyRouter from "./routes/history";
 import reposRouter from "./routes/repos";
+import configRouter from "./routes/config";
 import { createWorkflowGraph } from "../workflow/graph";
 import { generateThreadId } from "../workflow/checkpointer";
+import { ConfigManager } from "../lib/config-manager";
 
 dotenv.config();
 
@@ -35,6 +37,7 @@ app.use((req, res, next) => {
 app.use("/api", summaryRouter);
 app.use("/api", historyRouter);
 app.use("/api", reposRouter);
+app.use("/api/config", configRouter);
 
 // 健康检查
 app.get("/health", (req, res) => {
@@ -79,9 +82,11 @@ function scheduleDailySummary() {
     }
     const delay = next.getTime() - now.getTime();
     console.log(
-      `[Scheduler] 下次自动汇总时间: ${next.toISOString()}（约 ${(delay / 1000 / 60).toFixed(
-        1
-      )} 分钟后）`
+      `[Scheduler] 下次自动汇总时间: ${next.toISOString()}（约 ${(
+        delay /
+        1000 /
+        60
+      ).toFixed(1)} 分钟后）`
     );
     setTimeout(async () => {
       await runDailySummary(selectedRepos, userInput);
@@ -125,7 +130,13 @@ async function runDailySummary(selectedRepos: string[], userInput: string) {
 export default app;
 
 // 启动服务器
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`🚀 服务器运行在 http://localhost:${PORT}`);
+
+  // 初始化配置管理器
+  const configManager = ConfigManager.getInstance();
+  await configManager.load();
+  console.log("✅ 配置管理器初始化完成");
+
   scheduleDailySummary();
 });
