@@ -10,16 +10,7 @@ import {
 import { Settings } from "lucide-react";
 import { ConfigDialog } from "./ConfigDialog";
 import { toast } from "sonner";
-
-interface ProfileConfig {
-  name: string;
-  git: {
-    rootPaths: string[];
-    defaultRepos?: string[];
-    authorPattern?: string;
-    since?: string;
-  };
-}
+import type { ProfileConfig } from "@/types";
 
 interface ConfigSelectorProps {
   onConfigChange: (config: ProfileConfig) => void;

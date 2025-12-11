@@ -88,7 +88,6 @@ daily-work-summarizer/
 │   │   ├── components/
 │   │   │   ├── ui/            # shadcn/ui 组件
 │   │   │   ├── InputForm.tsx  # 输入表单
-│   │   │   ├── ResultView.tsx # 结果展示
 │   │   │   └── WorkflowVisualization.tsx # React Flow 可视化
 │   │   ├── lib/
 │   │   │   └── utils.ts       # 工具函数

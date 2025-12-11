@@ -1,5 +1,6 @@
 import { Router, Request, Response } from "express";
 import { ChatOpenAI } from "@langchain/openai";
+import { AI_MODEL_NAME, PARSING_TEMPERATURE } from "../../lib/ai-config";
 
 const router = Router();
 
@@ -12,12 +13,9 @@ router.post("/plan", async (req: Request, res: Response) => {
       return;
     }
 
-    const MODEL_NAME = "claude-opus-4-5-20251101";
-    const TEMPERATURE = 0; // Low temperature for deterministic parsing
-
     const model = new ChatOpenAI({
-      modelName: MODEL_NAME,
-      temperature: TEMPERATURE,
+      modelName: AI_MODEL_NAME,
+      temperature: PARSING_TEMPERATURE,
     });
 
     const now = new Date();

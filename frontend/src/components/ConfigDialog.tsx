@@ -11,25 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
-
-interface ProfileConfig {
-  name: string;
-  git: {
-    rootPaths: string[];
-    defaultRepos?: string[];
-    authorPattern?: string;
-    timeMode?: "relative" | "absolute";
-    since?: string;
-    until?: string;
-    absoluteSince?: string;
-    absoluteUntil?: string;
-    _scannedRepos?: any[]; // 临时存储扫描结果
-  };
-  output: {
-    directory: string;
-    format: string;
-  };
-}
+import type { ProfileConfig } from "@/types";
 
 interface ConfigDialogProps {
   open: boolean;

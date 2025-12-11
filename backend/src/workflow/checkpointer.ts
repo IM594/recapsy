@@ -1,15 +1,9 @@
 import { SqliteSaver } from "@langchain/langgraph-checkpoint-sqlite";
 import path from "path";
-import fs from "fs";
 
 // 创建 SQLite Checkpointer
 export function createCheckpointer() {
   const dbPath = path.join(process.cwd(), "checkpoints.db");
-
-  // 确保文件存在（虽然 SqliteSaver 通常会自动创建，但显式检查更好）
-  // if (!fs.existsSync(dbPath)) {
-  //   fs.writeFileSync(dbPath, "");
-  // }
 
   // 从连接字符串创建 Checkpointer
   const checkpointer = SqliteSaver.fromConnString(dbPath);

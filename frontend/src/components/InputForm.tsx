@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { ConfigSelector } from "./ConfigSelector";
 import { ProgressDisplay } from "./ProgressDisplay";
 import type { WorkflowStep } from "@/types/workflow";
+import type { ProfileConfig } from "@/types";
 import {
   CalendarDays,
   CalendarRange,
@@ -33,20 +34,6 @@ interface InputFormProps {
   }) => Promise<void>;
   loading: boolean;
   workflowSteps: WorkflowStep[];
-}
-
-interface ProfileConfig {
-  name: string;
-  git: {
-    rootPaths: string[];
-    defaultRepos?: string[];
-    authorPattern?: string;
-    timeMode?: "relative" | "absolute";
-    since?: string;
-    until?: string;
-    absoluteSince?: string;
-    absoluteUntil?: string;
-  };
 }
 
 interface Plan {

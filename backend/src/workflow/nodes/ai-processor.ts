@@ -1,9 +1,7 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { WorkflowState } from "../state";
 import { progressTracker } from "../../lib/progress-tracker";
-
-const MODEL_NAME = "claude-opus-4-5-20251101";
-const TEMPERATURE = 0.7;
+import { AI_MODEL_NAME, SUMMARY_TEMPERATURE } from "../../lib/ai-config";
 
 /**
  * 计算 ISO 周数
@@ -37,8 +35,8 @@ export async function aiProcessor(state: WorkflowState) {
 
   try {
     const model = new ChatOpenAI({
-      modelName: MODEL_NAME,
-      temperature: TEMPERATURE,
+      modelName: AI_MODEL_NAME,
+      temperature: SUMMARY_TEMPERATURE,
     });
 
     const now = new Date();
