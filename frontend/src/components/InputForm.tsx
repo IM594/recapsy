@@ -9,6 +9,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigSelector } from "./ConfigSelector";
 import { ProgressDisplay } from "./ProgressDisplay";
 import type { WorkflowStep } from "@/types/workflow";
@@ -48,7 +49,6 @@ export function InputForm({
   loading,
   workflowSteps,
 }: InputFormProps) {
-  const [mode, setMode] = useState<"quick" | "command">("quick");
   const [userInput, setUserInput] = useState("");
   const [commandInput, setCommandInput] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
@@ -196,39 +196,8 @@ export function InputForm({
   return (
     <Card className="w-full">
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Generate Summary</CardTitle>
-            <CardDescription>
-              {mode === "quick"
-                ? "快速生成常用总结"
-                : "使用自然语言描述你的需求"}
-            </CardDescription>
-          </div>
-          <div className="flex bg-slate-100 p-1 rounded-lg">
-            <button
-              onClick={() => setMode("quick")}
-              className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${
-                mode === "quick"
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
-            >
-              快速模式
-            </button>
-            <button
-              onClick={() => setMode("command")}
-              className={`px-3 py-1 text-sm font-medium rounded-md transition-all flex items-center gap-1 ${
-                mode === "command"
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-slate-500 hover:text-slate-900"
-              }`}
-            >
-              <Bot className="h-3 w-3" />
-              智能命令
-            </button>
-          </div>
-        </div>
+        <CardTitle>Generate Summary</CardTitle>
+        <CardDescription>选择你的总结方式：快速模式或智能命令</CardDescription>
       </CardHeader>
       <CardContent>
         {/* 配置选择器 (Always visible) */}
@@ -241,8 +210,16 @@ export function InputForm({
           )}
         </div>
 
-        {mode === "quick" ? (
-          <div className="space-y-6">
+        <Tabs defaultValue="quick" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-6">
+            <TabsTrigger value="quick">快速模式 (Quick Mode)</TabsTrigger>
+            <TabsTrigger value="command">
+              <Bot className="h-4 w-4 mr-2" />
+              智能命令 (AI Command)
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="quick" className="space-y-6">
             {/* 快速操作按钮 */}
             <div className="grid grid-cols-3 gap-4">
               <Button
@@ -301,9 +278,9 @@ export function InputForm({
                 {loading ? "正在生成总结..." : "生成工作总结"}
               </Button>
             </form>
-          </div>
-        ) : (
-          <div className="space-y-6">
+          </TabsContent>
+
+          <TabsContent value="command" className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="commandInput">输入你的需求</Label>
               <Textarea
@@ -384,8 +361,8 @@ export function InputForm({
                 </div>
               </div>
             )}
-          </div>
-        )}
+          </TabsContent>
+        </Tabs>
 
         {/* 进度显示 (Shared) */}
         {workflowSteps.length > 0 && (

@@ -9,6 +9,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Trash2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import type { ProfileConfig } from "@/types";
@@ -170,17 +178,23 @@ export function ConfigDialog({
           <div className="space-y-2">
             <Label>选择配置 Profile</Label>
             <div className="flex gap-2">
-              <select
-                className="flex-1 px-3 py-2 text-sm border rounded-md"
-                value={selectedProfile}
-                onChange={(e) => loadConfig(e.target.value)}
-              >
-                {profiles.map((profile) => (
-                  <option key={profile} value={profile}>
-                    {profile}
-                  </option>
-                ))}
-              </select>
+              <div className="flex-1">
+                <Select
+                  value={selectedProfile}
+                  onValueChange={(value) => loadConfig(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择配置" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {profiles.map((profile) => (
+                      <SelectItem key={profile} value={profile}>
+                        {profile}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               {selectedProfile !== "default" && (
                 <Button
                   type="button"
@@ -328,15 +342,15 @@ export function ConfigDialog({
                           key={repo.path}
                           className="flex items-center space-x-2 p-2 hover:bg-slate-100 rounded cursor-pointer"
                         >
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={(config.git.defaultRepos || []).includes(
                               repo.path
                             )}
-                            onChange={(e) => {
+                            onCheckedChange={(checked) => {
+                              const isChecked = checked === true;
                               const currentRepos =
                                 config.git.defaultRepos || [];
-                              if (e.target.checked) {
+                              if (isChecked) {
                                 setConfig({
                                   ...config,
                                   git: {
@@ -356,7 +370,6 @@ export function ConfigDialog({
                                 });
                               }
                             }}
-                            className="rounded"
                           />
                           <span className="text-sm flex-1">{repo.name}</span>
                           <span className="text-xs text-muted-foreground truncate max-w-[200px]">
@@ -379,22 +392,30 @@ export function ConfigDialog({
           {/* 时间配置模式 */}
           <div className="space-y-2">
             <Label>时间配置模式</Label>
-            <select
-              className="w-full px-3 py-2 text-sm border rounded-md"
+            <Select
               value={config.git.timeMode || "relative"}
-              onChange={(e) =>
+              onValueChange={(value) =>
                 setConfig({
                   ...config,
                   git: {
                     ...config.git,
-                    timeMode: e.target.value as "relative" | "absolute",
+                    timeMode: value as "relative" | "absolute",
                   },
                 })
               }
             >
-              <option value="relative">相对时间 (如 yesterday)</option>
-              <option value="absolute">具体时间 (指定日期时间)</option>
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="relative">
+                  相对时间 (如 yesterday)
+                </SelectItem>
+                <SelectItem value="absolute">
+                  具体时间 (指定日期时间)
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* 相对时间配置 */}
@@ -402,50 +423,61 @@ export function ConfigDialog({
             <>
               <div className="space-y-2">
                 <Label>默认开始时间 (相对)</Label>
-                <select
-                  className="w-full px-3 py-2 text-sm border rounded-md bg-white"
+                <Select
                   value={config.git.since || "yesterday"}
-                  onChange={(e) =>
+                  onValueChange={(value) =>
                     setConfig({
                       ...config,
-                      git: { ...config.git, since: e.target.value },
+                      git: { ...config.git, since: value },
                     })
                   }
                 >
-                  <option value="1 hour ago">1 小时前</option>
-                  <option value="3 hours ago">3 小时前</option>
-                  <option value="6 hours ago">6 小时前</option>
-                  <option value="12 hours ago">12 小时前</option>
-                  <option value="yesterday">昨天</option>
-                  <option value="2 days ago">2 天前</option>
-                  <option value="3 days ago">3 天前</option>
-                  <option value="1 week ago">1 周前</option>
-                  <option value="2 weeks ago">2 周前</option>
-                  <option value="1 month ago">1 个月前</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1 hour ago">1 小时前</SelectItem>
+                    <SelectItem value="3 hours ago">3 小时前</SelectItem>
+                    <SelectItem value="6 hours ago">6 小时前</SelectItem>
+                    <SelectItem value="12 hours ago">12 小时前</SelectItem>
+                    <SelectItem value="yesterday">昨天</SelectItem>
+                    <SelectItem value="2 days ago">2 天前</SelectItem>
+                    <SelectItem value="3 days ago">3 天前</SelectItem>
+                    <SelectItem value="1 week ago">1 周前</SelectItem>
+                    <SelectItem value="2 weeks ago">2 周前</SelectItem>
+                    <SelectItem value="1 month ago">1 个月前</SelectItem>
+                  </SelectContent>
+                </Select>
                 <p className="text-xs text-muted-foreground">
                   选择默认的时间范围起点
                 </p>
               </div>
               <div className="space-y-2">
                 <Label>默认结束时间 (相对,可选)</Label>
-                <select
-                  className="w-full px-3 py-2 text-sm border rounded-md bg-white"
-                  value={config.git.until || ""}
-                  onChange={(e) =>
+                <Select
+                  value={config.git.until || "NOW"}
+                  onValueChange={(value) =>
                     setConfig({
                       ...config,
-                      git: { ...config.git, until: e.target.value },
+                      git: {
+                        ...config.git,
+                        until: value === "NOW" ? "" : value,
+                      },
                     })
                   }
                 >
-                  <option value="">当前时间</option>
-                  <option value="1 hour ago">1 小时前</option>
-                  <option value="3 hours ago">3 小时前</option>
-                  <option value="6 hours ago">6 小时前</option>
-                  <option value="12 hours ago">12 小时前</option>
-                  <option value="yesterday">昨天</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue placeholder="当前时间" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NOW">当前时间</SelectItem>
+                    <SelectItem value="1 hour ago">1 小时前</SelectItem>
+                    <SelectItem value="3 hours ago">3 小时前</SelectItem>
+                    <SelectItem value="6 hours ago">6 小时前</SelectItem>
+                    <SelectItem value="12 hours ago">12 小时前</SelectItem>
+                    <SelectItem value="yesterday">昨天</SelectItem>
+                  </SelectContent>
+                </Select>
                 <p className="text-xs text-muted-foreground">
                   通常选择"当前时间"即可
                 </p>
