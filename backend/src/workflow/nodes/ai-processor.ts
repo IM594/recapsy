@@ -47,9 +47,14 @@ export async function aiProcessor(state: WorkflowState) {
     const targetDate = state.since ? new Date(state.since) : now;
     const targetWeek = getISOWeekNumber(targetDate);
 
+    // Format explicit date range for the prompt
+    const sinceStr = state.since || "Start";
+    const untilStr = state.until || "End";
+    const dateRangeStr = `${sinceStr} - ${untilStr}`;
+
     const summaryType = state.summaryType || "custom";
     console.log(
-      `[AI Processor] 生成总结类型: ${summaryType}, 目标周数: ${targetWeek}`
+      `[AI Processor] 生成总结类型: ${summaryType}, 目标周数: ${targetWeek}, 范围: ${dateRangeStr}`
     );
 
     let promptInstructions = "";
@@ -68,7 +73,7 @@ export async function aiProcessor(state: WorkflowState) {
 `;
     } else if (summaryType === "week") {
       promptInstructions = `
-请生成一份**本周工作总结**。
+请生成一份**本周工作总结** (第 ${targetWeek} 周)。
 **风格要求**：
 - 面向管理者或非技术人员，语言通俗易懂。
 - **不要**直接复制 Git commit message 的格式（如 "feat(bot):..."），请将其转化为自然语言描述。
@@ -101,11 +106,12 @@ export async function aiProcessor(state: WorkflowState) {
     } else {
       // Default / Custom
       promptInstructions = `
-请生成一份结构化的工作总结。
+请生成一份结构化的工作总结，时间范围：${dateRangeStr}。
 **风格要求**：
 - 面向管理者或非技术人员，语言通俗易懂。
 - **不要**直接复制 Git commit message 的格式。
 - **重要：请按日期从小到大（升序）排列。**
+- **标题**：请使用 "${dateRangeStr} 工作总结" 或类似的包含具体日期的标题，**不要**仅仅使用 "Week X" 这种模糊的标题，除非该时间段确实只包含该周。
 
 输出结构：
 1. **按日期分组的详细记录**：
@@ -119,8 +125,9 @@ export async function aiProcessor(state: WorkflowState) {
     const prompt = `你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结。
 
 当前日期: ${currentDate}
+目标时间范围: ${dateRangeStr}
 目标时间范围所属年份: ${targetDate.getFullYear()}
-目标时间范围所属周数: 第 ${targetWeek} 周
+(参考信息: 如果是单周，可能是第 ${targetWeek} 周)
 
 ## Git 提交记录
 ${state.gitCommits || "无"}
