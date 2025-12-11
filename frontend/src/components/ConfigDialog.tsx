@@ -16,8 +16,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Trash2, Plus } from "lucide-react";
+import { RepoSelectionList } from "./RepoSelectionList";
 import { toast } from "sonner";
 import type { ProfileConfig } from "@/types";
 
@@ -281,104 +281,38 @@ export function ConfigDialog({
               从项目根目录扫描仓库,选中的仓库会在每次打开应用时自动加载
             </p>
 
-            {/* 扫描区域 */}
+            {/* 仓库选择组件 */}
             {config.git.rootPaths.length > 0 && (
               <div className="border rounded-md p-3 bg-slate-50">
-                <div className="flex gap-2 mb-3">
-                  <select
-                    className="flex-1 px-3 py-2 text-sm border rounded-md bg-white"
-                    value={config.git.rootPaths[0] || ""}
-                    disabled
-                  >
-                    <option>
-                      {config.git.rootPaths[0] || "请先添加项目根目录"}
-                    </option>
-                  </select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    onClick={async () => {
-                      if (!config.git.rootPaths[0]) return;
-                      setLoading(true);
-                      try {
-                        const response = await fetch(
-                          `http://localhost:3456/api/repos?rootPath=${encodeURIComponent(
-                            config.git.rootPaths[0]
-                          )}`
-                        );
-                        const data = await response.json();
-                        // 临时存储扫描结果
-                        setConfig({
-                          ...config,
-                          git: {
-                            ...config.git,
-                            _scannedRepos: data.repos,
-                          },
-                        });
-                      } catch (error) {
-                        console.error("扫描失败:", error);
-                        toast.error("扫描仓库失败");
-                      } finally {
-                        setLoading(false);
-                      }
+                <Label className="mb-2 block">默认选中的仓库</Label>
+                <p className="text-xs text-muted-foreground mb-3">
+                  选中的仓库会在每次打开应用时自动加载
+                </p>
+                <div className="bg-white rounded-md border">
+                  <RepoSelectionList
+                    rootPaths={config.git.rootPaths}
+                    selectedRepos={config.git.defaultRepos || []}
+                    onSelectionChange={(selected) => {
+                      setConfig({
+                        ...config,
+                        git: {
+                          ...config.git,
+                          defaultRepos: selected,
+                        },
+                      });
                     }}
-                    disabled={loading || !config.git.rootPaths[0]}
-                  >
-                    {loading ? "扫描中..." : "扫描仓库"}
-                  </Button>
+                    scannedRepos={config.git._scannedRepos}
+                    onScan={(repos) => {
+                      setConfig({
+                        ...config,
+                        git: {
+                          ...config.git,
+                          _scannedRepos: repos,
+                        },
+                      });
+                    }}
+                  />
                 </div>
-
-                {/* 仓库列表 */}
-                {config.git._scannedRepos &&
-                  config.git._scannedRepos.length > 0 && (
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      <p className="text-sm font-medium">
-                        选择默认仓库 ({(config.git.defaultRepos || []).length}/
-                        {config.git._scannedRepos.length})
-                      </p>
-                      {config.git._scannedRepos.map((repo: any) => (
-                        <label
-                          key={repo.path}
-                          className="flex items-center space-x-2 p-2 hover:bg-slate-100 rounded cursor-pointer"
-                        >
-                          <Checkbox
-                            checked={(config.git.defaultRepos || []).includes(
-                              repo.path
-                            )}
-                            onCheckedChange={(checked) => {
-                              const isChecked = checked === true;
-                              const currentRepos =
-                                config.git.defaultRepos || [];
-                              if (isChecked) {
-                                setConfig({
-                                  ...config,
-                                  git: {
-                                    ...config.git,
-                                    defaultRepos: [...currentRepos, repo.path],
-                                  },
-                                });
-                              } else {
-                                setConfig({
-                                  ...config,
-                                  git: {
-                                    ...config.git,
-                                    defaultRepos: currentRepos.filter(
-                                      (p) => p !== repo.path
-                                    ),
-                                  },
-                                });
-                              }
-                            }}
-                          />
-                          <span className="text-sm flex-1">{repo.name}</span>
-                          <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-                            {repo.path}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
               </div>
             )}
 

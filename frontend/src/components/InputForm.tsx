@@ -11,7 +11,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ConfigSelector } from "./ConfigSelector";
-import { ProgressDisplay } from "./ProgressDisplay";
+import { RepoSelectionList } from "./RepoSelectionList";
 import type { WorkflowStep } from "@/types/workflow";
 import type { ProfileConfig } from "@/types";
 import {
@@ -22,6 +22,7 @@ import {
   Play,
   Check,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,9 +33,11 @@ interface InputFormProps {
     since?: string;
     until?: string;
     summaryType?: "today" | "week" | "month" | "custom";
+    configName?: string;
   }) => Promise<void>;
   loading: boolean;
   workflowSteps: WorkflowStep[];
+  runMeta?: any; // Accepting runMeta for compatibility if passed, though unused now.
 }
 
 interface Plan {
@@ -44,17 +47,14 @@ interface Plan {
   focus: string;
 }
 
-export function InputForm({
-  onSubmit,
-  loading,
-  workflowSteps,
-}: InputFormProps) {
+export function InputForm({ onSubmit, loading }: InputFormProps) {
   const [userInput, setUserInput] = useState("");
   const [commandInput, setCommandInput] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
   const [currentConfig, setCurrentConfig] = useState<ProfileConfig | null>(
     null
   );
+  const [isRepoListOpen, setIsRepoListOpen] = useState(false);
 
   // AI Command Mode States
   const [analyzing, setAnalyzing] = useState(false);
@@ -98,6 +98,7 @@ export function InputForm({
       since: finalSince,
       until: finalUntil,
       summaryType: "custom",
+      configName: currentConfig?.name,
     });
   };
 
@@ -160,6 +161,7 @@ export function InputForm({
       since,
       until,
       summaryType: type,
+      configName: currentConfig?.name,
     });
   };
 
@@ -198,6 +200,7 @@ export function InputForm({
       since: plan.since,
       until: plan.until,
       summaryType: plan.summaryType,
+      configName: currentConfig?.name,
     });
   };
 
@@ -211,9 +214,53 @@ export function InputForm({
         {/* 配置选择器 (Always visible) */}
         <div className="mb-6">
           <ConfigSelector onConfigChange={handleConfigChange} />
-          {selectedRepos.length > 0 && (
-            <div className="text-sm text-muted-foreground mt-2">
-              已选中 {selectedRepos.length} 个仓库
+
+          {currentConfig && (
+            <div className="mt-4 border rounded-md bg-white shadow-sm overflow-hidden">
+              <div
+                className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                onClick={() => setIsRepoListOpen(!isRepoListOpen)}
+              >
+                <Label className="cursor-pointer flex items-center gap-2">
+                  <span>📍 本次运行的仓库范围</span>
+                  <span className="text-xs font-normal text-muted-foreground">
+                    (已选 {selectedRepos.length} 个)
+                  </span>
+                </Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">
+                    {isRepoListOpen ? "收起" : "展开编辑"}
+                  </span>
+                  <ChevronDown
+                    className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${
+                      isRepoListOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </div>
+              </div>
+
+              {isRepoListOpen && (
+                <div className="p-4 pt-0 border-t">
+                  <div className="pt-4">
+                    <RepoSelectionList
+                      rootPaths={currentConfig.git.rootPaths}
+                      selectedRepos={selectedRepos}
+                      onSelectionChange={setSelectedRepos}
+                      scannedRepos={currentConfig.git._scannedRepos}
+                      onScan={(repos) => {
+                        // Update local config state with scanned repos so they are cached for this session
+                        setCurrentConfig({
+                          ...currentConfig,
+                          git: {
+                            ...currentConfig.git,
+                            _scannedRepos: repos,
+                          },
+                        });
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -372,12 +419,7 @@ export function InputForm({
           </TabsContent>
         </Tabs>
 
-        {/* 进度显示 (Shared) */}
-        {workflowSteps.length > 0 && (
-          <div className="mt-6">
-            <ProgressDisplay steps={workflowSteps} currentStep={0} />
-          </div>
-        )}
+        {/* ProgressDisplay removed from here, integrated into App.tsx */}
       </CardContent>
     </Card>
   );
