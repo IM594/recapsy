@@ -34,10 +34,11 @@ export const WorkflowStateAnnotation = Annotation.Root({
 
   // AI 处理后的结构化内容
   processedContent: Annotation<{
-    summary: string;
-    achievements: string[];
-    challenges: string[];
-    nextSteps: string[];
+    markdownContent?: string;
+    summary?: string;
+    achievements?: string[];
+    challenges?: string[];
+    nextSteps?: string[];
   }>(),
 
   // 最终的 Markdown 文件路径

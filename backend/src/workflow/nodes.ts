@@ -220,6 +220,15 @@ export async function collectExternalData(state: WorkflowState) {
 
 // ========== AI 处理节点 ==========
 
+// Helper to calculate ISO week number
+function getISOWeekNumber(d: Date): number {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+}
+
 // 4️⃣ AI 处理器 - 调用 LLM 分析数据
 export async function aiProcessor(state: WorkflowState) {
   const threadId = state.threadId || "unknown";
@@ -245,16 +254,16 @@ export async function aiProcessor(state: WorkflowState) {
       temperature: TEMPERATURE,
     });
 
-    console.log(
-      `[AI Processor] 模型配置: modelName=${MODEL_NAME}, temperature=${TEMPERATURE}`
-    );
-    console.log(
-      `[AI Processor] OpenAI Base URL: ${
-        process.env.OPENAI_BASE_URL || "default"
-      }`
-    );
+    const now = new Date();
+    const currentDate = now.toISOString().split("T")[0];
+    const currentYear = now.getFullYear();
+    const currentWeek = getISOWeekNumber(now);
 
-    const prompt = `你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结:
+    const prompt = `你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结。
+
+当前日期: ${currentDate}
+当前年份: ${currentYear}
+当前周数: 第 ${currentWeek} 周
 
 ## Git 提交记录
 ${state.gitCommits || "无"}
@@ -265,12 +274,48 @@ ${state.userInput || "无"}
 ## 外部数据
 ${state.externalData || "无"}
 
-请生成一个 JSON 对象,包含以下字段:
-- summary: 工作总结的主要内容(字符串)
-- achievements: 主要成就列表(字符串数组)
-- nextSteps: 下一步计划(字符串数组,可选)
+请生成一个 JSON 对象，包含一个 "markdownContent" 字段，该字段的值是一个完整的 Markdown 格式的工作总结字符串。
 
-只返回 JSON,不要其他内容。`;
+Markdown 内容必须严格遵循以下结构：
+
+1.  **按日期分组的详细记录**：
+    -   使用 "### YYYYMMDD" 作为标题（例如 "### 20251204"）。
+    -   在每个日期下，列出具体的工作项。
+    -   工作项应简洁明了，合并相似的提交。
+
+2.  **周总结（如果有跨越多天的数据）**：
+    -   使用 "#### 第X周总结 (MM/DD - MM/DD)" 作为标题。
+    -   总结本周完成的主要工作。
+    -   *注意：请根据日期自行计算是第几周。*
+
+3.  **月度总结（如果有跨越多天的数据）**：
+    -   使用 "## X月总结" 作为标题。
+    -   **主要工作**：列出本月的主要工作点。
+    -   **亮点与价值**：列出本月的工作亮点和产生的价值。
+
+示例输出结构：
+
+### 20251204
+- 新增 ToolCallTiming 和 EnhancedMeta 接口
+- ...
+
+### 20251205
+- ...
+
+#### 第2周总结 (12/04 - 12/08)
+完成实时日志功能增强...
+
+---
+
+## 12月总结
+
+**主要工作**
+- ...
+
+**亮点与价值**
+- ...
+
+请确保返回的是合法的 JSON 格式，且 "markdownContent" 字段包含完整的 Markdown 文本。`;
 
     console.log(`[AI Processor] Prompt 长度: ${prompt.length} 字符`);
     console.log(`[AI Processor] 开始调用 OpenAI API...`);
@@ -280,16 +325,6 @@ ${state.externalData || "无"}
     const duration = Date.now() - startTime;
 
     console.log(`[AI Processor] API 调用完成,耗时: ${duration}ms`);
-    console.log(`[AI Processor] 响应类型: ${typeof response.content}`);
-    console.log(
-      `[AI Processor] 响应长度: ${String(response.content).length} 字符`
-    );
-    console.log(
-      `[AI Processor] 响应内容预览: ${String(response.content).substring(
-        0,
-        200
-      )}...`
-    );
 
     let parsed;
     try {
@@ -300,46 +335,40 @@ ${state.externalData || "无"}
         content.match(/```\s*([\s\S]*?)\s*```/);
       const jsonStr = jsonMatch ? jsonMatch[1] : content;
 
-      console.log(`[AI Processor] 提取的 JSON 字符串长度: ${jsonStr.length}`);
       parsed = JSON.parse(jsonStr.trim());
+
+      if (!parsed.markdownContent) {
+        throw new Error("返回的 JSON 中缺少 markdownContent 字段");
+      }
+
       console.log(`[AI Processor] JSON 解析成功`);
-      console.log(
-        `[AI Processor] 解析结果包含字段: ${Object.keys(parsed).join(", ")}`
-      );
     } catch (parseError) {
       console.error(`[AI Processor] JSON 解析失败:`, parseError);
-      console.error(`[AI Processor] 原始响应内容:`, String(response.content));
       throw new Error(`AI 返回的内容无法解析为 JSON: ${parseError}`);
     }
 
     progressTracker.updateProgress(threadId, {
       step: "aiProcessor",
       status: "completed",
-      message: `AI 处理完成,生成了 ${parsed.achievements?.length || 0} 项成就`,
+      message: `AI 处理完成`,
       timestamp: Date.now(),
     });
 
-    console.log(`[AI Processor] 处理完成,返回结果`);
     return {
       processedContent: parsed,
     };
   } catch (error: any) {
     console.error("AI 处理失败:", error);
-    console.error("错误堆栈:", error.stack);
-    console.error("错误详情:", JSON.stringify(error, null, 2));
     progressTracker.updateProgress(threadId, {
       step: "aiProcessor",
       status: "error",
       message: "AI 处理失败",
-      isCritical: true, // AI 处理失败是致命的
+      isCritical: true,
       timestamp: Date.now(),
     });
     return {
       processedContent: {
-        summary: "处理失败",
-        achievements: [],
-        challenges: [],
-        nextSteps: [],
+        markdownContent: "# 处理失败\n\nAI 处理过程中发生错误。",
       },
     };
   }
@@ -359,31 +388,13 @@ export async function exportMarkdown(state: WorkflowState) {
   });
 
   console.log("📝 [Markdown Exporter] 开始导出 Markdown...");
-  console.log(
-    `[Markdown Exporter] state.processedContent:`,
-    state.processedContent
-  );
-  console.log(
-    `[Markdown Exporter] processedContent 类型: ${typeof state.processedContent}`
-  );
 
   try {
-    const summary = state.processedContent;
+    const { markdownContent } = state.processedContent || {};
 
-    if (!summary) {
-      throw new Error("processedContent 为空或 undefined");
+    if (!markdownContent) {
+      throw new Error("processedContent.markdownContent 为空");
     }
-
-    console.log(
-      `[Markdown Exporter] summary 对象:`,
-      JSON.stringify(summary, null, 2)
-    );
-    console.log(
-      `[Markdown Exporter] summary.achievements 存在: ${!!summary.achievements}`
-    );
-    console.log(
-      `[Markdown Exporter] summary.achievements 类型: ${typeof summary.achievements}`
-    );
 
     const date = new Date().toISOString().split("T")[0];
     const filename = `summary_${date}.md`;
@@ -392,28 +403,20 @@ export async function exportMarkdown(state: WorkflowState) {
     // 确保 outputs 目录存在
     await fs.mkdir(path.dirname(outputPath), { recursive: true });
 
-    const content = `# 工作总结 - ${date}
+    // 添加生成时间注脚
+    const finalContent = `${markdownContent}\n\n---\n生成时间: ${new Date().toLocaleString(
+      "zh-CN"
+    )}\n`;
 
-## 总结
-${summary.summary || "无"}
-
-## 主要成就
-${summary.achievements?.map((item: string) => `- ${item}`).join("\n") || "无"}
-
-## 下一步计划
-${summary.nextSteps?.map((item: string) => `- ${item}`).join("\n") || "无"}
-
----
-生成时间: ${new Date().toLocaleString("zh-CN")}
-`;
-
-    await fs.writeFile(outputPath, content, "utf-8");
+    await fs.writeFile(outputPath, finalContent, "utf-8");
     console.log(`[Markdown Exporter] 文件已生成: ${outputPath}`);
 
     progressTracker.updateProgress(threadId, {
       step: "exportMarkdown",
       status: "completed",
       message: `已生成文件: ${filename}`,
+      summary: markdownContent, // 将 markdown 内容传给前端展示
+      outputPath: outputPath,
       timestamp: Date.now(),
     });
 
@@ -422,12 +425,11 @@ ${summary.nextSteps?.map((item: string) => `- ${item}`).join("\n") || "无"}
     };
   } catch (error: any) {
     console.error("导出 Markdown 失败:", error);
-    console.error("错误堆栈:", error.stack);
     progressTracker.updateProgress(threadId, {
       step: "exportMarkdown",
       status: "error",
       message: "导出 Markdown 失败",
-      isCritical: true, // 导出失败是致命的
+      isCritical: true,
       timestamp: Date.now(),
     });
     return {

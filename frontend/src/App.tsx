@@ -64,10 +64,30 @@ function App() {
         if (progressEvent.step === "completed") {
           // 如果是成功完成,保存结果
           if (progressEvent.status === "completed") {
+            let summaryData = progressEvent.summary;
+
+            // 尝试解析 JSON，兼容旧格式
+            try {
+              if (
+                summaryData &&
+                (summaryData.startsWith("{") || summaryData.startsWith("["))
+              ) {
+                const parsed = JSON.parse(summaryData);
+                // 如果是新格式的 JSON (包含 markdownContent)
+                if (parsed.markdownContent) {
+                  summaryData = parsed.markdownContent;
+                } else {
+                  // 旧格式对象
+                  summaryData = parsed;
+                }
+              }
+            } catch (e) {
+              // 解析失败，说明是普通字符串，直接使用
+              console.log("Summary is not JSON, using as string");
+            }
+
             setResult({
-              summary: progressEvent.summary
-                ? JSON.parse(progressEvent.summary)
-                : null,
+              summary: summaryData,
               outputPath: progressEvent.outputPath,
             });
           } else if (progressEvent.status === "error") {
@@ -126,30 +146,39 @@ function App() {
                 {result.summary && (
                   <div className="space-y-6">
                     <article className="prose prose-slate max-w-none prose-p:leading-relaxed prose-headings:font-semibold prose-a:text-primary hover:prose-a:text-primary/80">
-                      <ReactMarkdown>{result.summary.summary}</ReactMarkdown>
-                    </article>
-
-                    {result.summary.achievements?.length > 0 && (
-                      <div className="pt-4">
-                        <h4 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                          <ListTodo className="h-4 w-4 text-primary" />
-                          完成事项
-                        </h4>
-                        <ul className="space-y-2">
-                          {result.summary.achievements.map(
-                            (item: string, i: number) => (
-                              <li
-                                key={i}
-                                className="flex items-start text-sm text-slate-600 group"
-                              >
-                                <span className="mr-3 mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300 group-hover:bg-primary transition-colors" />
-                                <span className="leading-relaxed">{item}</span>
-                              </li>
-                            )
+                      {typeof result.summary === "string" ? (
+                        <ReactMarkdown>{result.summary}</ReactMarkdown>
+                      ) : (
+                        <>
+                          <ReactMarkdown>
+                            {result.summary.summary}
+                          </ReactMarkdown>
+                          {result.summary.achievements?.length > 0 && (
+                            <div className="pt-4">
+                              <h4 className="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                                <ListTodo className="h-4 w-4 text-primary" />
+                                完成事项
+                              </h4>
+                              <ul className="space-y-2">
+                                {result.summary.achievements.map(
+                                  (item: string, i: number) => (
+                                    <li
+                                      key={i}
+                                      className="flex items-start text-sm text-slate-600 group"
+                                    >
+                                      <span className="mr-3 mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-slate-300 group-hover:bg-primary transition-colors" />
+                                      <span className="leading-relaxed">
+                                        {item}
+                                      </span>
+                                    </li>
+                                  )
+                                )}
+                              </ul>
+                            </div>
                           )}
-                        </ul>
-                      </div>
-                    )}
+                        </>
+                      )}
+                    </article>
                   </div>
                 )}
 

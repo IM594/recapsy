@@ -82,7 +82,9 @@ router.post("/summarize", async (req, res) => {
           step: "completed",
           status: "completed",
           message: `输出文件: ${result.outputPath}`,
-          summary: JSON.stringify(result.processedContent), // 转换为字符串
+          summary:
+            result.processedContent.markdownContent ||
+            JSON.stringify(result.processedContent),
           outputPath: result.outputPath,
           timestamp: Date.now(),
         });
