@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { ConfigSelector } from "./ConfigSelector";
 import { ProgressDisplay } from "./ProgressDisplay";
 import type { WorkflowStep } from "@/types/workflow";
+import { CalendarDays, CalendarRange, Calendar } from "lucide-react";
 
 interface InputFormProps {
   onSubmit: (data: {
@@ -19,6 +20,7 @@ interface InputFormProps {
     selectedRepos: string[];
     since?: string;
     until?: string;
+    summaryType?: "today" | "week" | "month" | "custom";
   }) => Promise<void>;
   loading: boolean;
   workflowSteps: WorkflowStep[];
@@ -86,6 +88,61 @@ export function InputForm({
       selectedRepos,
       since: finalSince,
       until: finalUntil,
+      summaryType: "custom",
+    });
+  };
+
+  const handleQuickSummary = async (type: "today" | "week" | "month") => {
+    const now = new Date();
+    let since = "";
+
+    // Helper to format date as YYYY-MM-DD HH:MM:SS (Local Time)
+    const formatLocal = (date: Date) => {
+      const pad = (n: number) => n.toString().padStart(2, "0");
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+        date.getDate()
+      )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+        date.getSeconds()
+      )}`;
+    };
+
+    // Helper to get start of day in local time
+    const getStartOfDay = (date: Date) => {
+      const newDate = new Date(date);
+      newDate.setHours(0, 0, 0, 0);
+      return newDate;
+    };
+
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+    const until = formatLocal(endOfToday);
+
+    if (type === "today") {
+      const start = getStartOfDay(now);
+      since = formatLocal(start);
+    } else if (type === "week") {
+      // This Monday 00:00:00
+      const day = now.getDay(); // 0 is Sunday
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+      const monday = new Date(now);
+      monday.setDate(diff);
+      const start = getStartOfDay(monday);
+      since = formatLocal(start);
+    } else if (type === "month") {
+      // 1st of this month 00:00:00
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const start = getStartOfDay(firstDay);
+      since = formatLocal(start);
+    }
+
+    console.log(`[UI] 快速总结: ${type}, since=${since}, until=${until}`);
+
+    await onSubmit({
+      userInput,
+      selectedRepos,
+      since,
+      until,
+      summaryType: type,
     });
   };
 
@@ -98,39 +155,83 @@ export function InputForm({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* 配置选择器 */}
-          <ConfigSelector onConfigChange={handleConfigChange} />
-
-          {/* 显示选中的仓库数量 */}
-          {selectedRepos.length > 0 && (
-            <div className="text-sm text-muted-foreground">
-              已选中 {selectedRepos.length} 个仓库
-            </div>
-          )}
-
-          {/* 工作笔记 */}
-
-          <div className="space-y-2">
-            <Label htmlFor="userInput">今日工作笔记 (可选)</Label>
-            <Textarea
-              id="userInput"
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              placeholder="例如:完成了用户登录功能,修复了 API 接口的 bug..."
-              className="min-h-[100px]"
-            />
+        <div className="space-y-6">
+          {/* 快速操作按钮 */}
+          <div className="grid grid-cols-3 gap-4">
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+              onClick={() => handleQuickSummary("today")}
+              disabled={loading}
+            >
+              <CalendarDays className="h-6 w-6" />
+              <span>今日总结</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+              onClick={() => handleQuickSummary("week")}
+              disabled={loading}
+            >
+              <CalendarRange className="h-6 w-6" />
+              <span>本周总结</span>
+            </Button>
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+              onClick={() => handleQuickSummary("month")}
+              disabled={loading}
+            >
+              <Calendar className="h-6 w-6" />
+              <span>本月总结</span>
+            </Button>
           </div>
 
-          {/* 进度显示 */}
-          {workflowSteps.length > 0 && (
-            <ProgressDisplay steps={workflowSteps} currentStep={0} />
-          )}
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-background px-2 text-muted-foreground">
+                或者自定义生成
+              </span>
+            </div>
+          </div>
 
-          <Button type="submit" disabled={loading} className="w-full">
-            {loading ? "正在生成总结..." : "生成工作总结"}
-          </Button>
-        </form>
+          <form onSubmit={handleSubmit} className="space-y-6">
+            {/* 配置选择器 */}
+            <ConfigSelector onConfigChange={handleConfigChange} />
+
+            {/* 显示选中的仓库数量 */}
+            {selectedRepos.length > 0 && (
+              <div className="text-sm text-muted-foreground">
+                已选中 {selectedRepos.length} 个仓库
+              </div>
+            )}
+
+            {/* 工作笔记 */}
+
+            <div className="space-y-2">
+              <Label htmlFor="userInput">今日工作笔记 (可选)</Label>
+              <Textarea
+                id="userInput"
+                value={userInput}
+                onChange={(e) => setUserInput(e.target.value)}
+                placeholder="例如:完成了用户登录功能,修复了 API 接口的 bug..."
+                className="min-h-[100px]"
+              />
+            </div>
+
+            {/* 进度显示 */}
+            {workflowSteps.length > 0 && (
+              <ProgressDisplay steps={workflowSteps} currentStep={0} />
+            )}
+
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? "正在生成总结..." : "生成工作总结"}
+            </Button>
+          </form>
+        </div>
       </CardContent>
     </Card>
   );

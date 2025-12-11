@@ -16,6 +16,7 @@ function App() {
     selectedRepos: string[];
     since?: string;
     until?: string;
+    summaryType?: "today" | "week" | "month" | "custom";
   }) => {
     setLoading(true);
     setResult(null);

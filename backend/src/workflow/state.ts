@@ -41,6 +41,11 @@ export const WorkflowStateAnnotation = Annotation.Root({
     nextSteps?: string[];
   }>(),
 
+  // 总结类型
+  summaryType: Annotation<"today" | "week" | "month" | "custom">({
+    reducer: (prev, next) => next || prev || "custom",
+  }),
+
   // 最终的 Markdown 文件路径
   outputPath: Annotation<string>(),
 });

@@ -101,6 +101,8 @@ export async function getRepoCommits(
 
     const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} --max-count=${maxCommits} ${statFlag} --no-color --date=iso-strict --pretty=format:"%h %an %ad %s"`;
 
+    console.log(`[Git] 执行命令: ${cmd}`);
+
     const { stdout } = await execAsync(cmd, { cwd: repoPath });
 
     console.log(

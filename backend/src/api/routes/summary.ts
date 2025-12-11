@@ -41,7 +41,7 @@ router.get("/progress/:threadId", (req: Request, res: Response) => {
 
 router.post("/summarize", async (req, res) => {
   try {
-    const { userInput, selectedRepos, since, until } = req.body;
+    const { userInput, selectedRepos, since, until, summaryType } = req.body;
 
     const threadId = generateThreadId();
     console.log(
@@ -49,7 +49,7 @@ router.post("/summarize", async (req, res) => {
         selectedRepos?.length || 0
       }，用户输入长度: ${userInput?.length || 0}, since=${
         since || "-"
-      }, until=${until || "-"}`
+      }, until=${until || "-"}, type=${summaryType || "custom"}`
     );
 
     // 初始化进度追踪
@@ -71,6 +71,7 @@ router.post("/summarize", async (req, res) => {
             selectedRepos: selectedRepos || [],
             since: since || "",
             until: until || "",
+            summaryType: summaryType || "custom",
           },
           {
             configurable: { thread_id: threadId },

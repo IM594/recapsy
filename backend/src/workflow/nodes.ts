@@ -54,9 +54,9 @@ export async function collectGitCommits(state: WorkflowState) {
 
     const commitPromises = repos.map(async (repoPath) => {
       console.log(
-        `[Git Collector] 读取仓库: ${repoPath}, since=${since}, until=${
+        `[Git Collector] 读取仓库: ${repoPath}, since="${since}", until="${
           until || "now"
-        }, author="${authorPattern}"`
+        }", author="${authorPattern}"`
       );
       const commits = await getRepoCommits(
         repoPath,
@@ -259,6 +259,57 @@ export async function aiProcessor(state: WorkflowState) {
     const currentYear = now.getFullYear();
     const currentWeek = getISOWeekNumber(now);
 
+    const summaryType = state.summaryType || "custom";
+    console.log(`[AI Processor] 生成总结类型: ${summaryType}`);
+
+    let promptInstructions = "";
+
+    if (summaryType === "today") {
+      promptInstructions = `
+请生成一份**今日工作总结**。
+重点关注今天完成的事项。
+输出结构：
+1. **今日事项**：列出今天完成的具体工作项。
+2. **今日总结**：简要总结今天的工作成果。
+`;
+    } else if (summaryType === "week") {
+      promptInstructions = `
+请生成一份**本周工作总结**。
+重点关注本周完成的事项。
+**重要：请按日期从小到大（升序）排列。**
+输出结构：
+1. **本周事项**：
+   - 使用 "### YYYYMMDD" 作为标题。
+   - 在每个日期下，列出具体的工作项。
+2. **本周总结**：总结本周的主要工作成果和进展。
+`;
+    } else if (summaryType === "month") {
+      promptInstructions = `
+请生成一份**本月工作总结**。
+重点关注本月完成的事项。
+**重要：请按日期从小到大（升序）排列。**
+输出结构：
+1. **本月事项**：
+   - 使用 "### YYYYMMDD" 作为标题。
+   - 在每个日期下，列出具体的工作项。
+2. **本月总结**：
+   - **主要工作**：列出本月的主要工作点。
+   - **亮点与价值**：列出本月的工作亮点和产生的价值。
+`;
+    } else {
+      // Default / Custom
+      promptInstructions = `
+请生成一份结构化的工作总结。
+**重要：请按日期从小到大（升序）排列。**
+输出结构：
+1. **按日期分组的详细记录**：
+   - 使用 "### YYYYMMDD" 作为标题。
+   - 在每个日期下，列出具体的工作项。
+2. **总结**：
+   - 总结这段时间的主要工作。
+`;
+    }
+
     const prompt = `你是一个专业的工作总结助手。请根据以下信息生成一份结构化的工作总结。
 
 当前日期: ${currentDate}
@@ -274,47 +325,9 @@ ${state.userInput || "无"}
 ## 外部数据
 ${state.externalData || "无"}
 
+${promptInstructions}
+
 请生成一个 JSON 对象，包含一个 "markdownContent" 字段，该字段的值是一个完整的 Markdown 格式的工作总结字符串。
-
-Markdown 内容必须严格遵循以下结构：
-
-1.  **按日期分组的详细记录**：
-    -   使用 "### YYYYMMDD" 作为标题（例如 "### 20251204"）。
-    -   在每个日期下，列出具体的工作项。
-    -   工作项应简洁明了，合并相似的提交。
-
-2.  **周总结（如果有跨越多天的数据）**：
-    -   使用 "#### 第X周总结 (MM/DD - MM/DD)" 作为标题。
-    -   总结本周完成的主要工作。
-    -   *注意：请根据日期自行计算是第几周。*
-
-3.  **月度总结（如果有跨越多天的数据）**：
-    -   使用 "## X月总结" 作为标题。
-    -   **主要工作**：列出本月的主要工作点。
-    -   **亮点与价值**：列出本月的工作亮点和产生的价值。
-
-示例输出结构：
-
-### 20251204
-- 新增 ToolCallTiming 和 EnhancedMeta 接口
-- ...
-
-### 20251205
-- ...
-
-#### 第2周总结 (12/04 - 12/08)
-完成实时日志功能增强...
-
----
-
-## 12月总结
-
-**主要工作**
-- ...
-
-**亮点与价值**
-- ...
-
 请确保返回的是合法的 JSON 格式，且 "markdownContent" 字段包含完整的 Markdown 文本。`;
 
     console.log(`[AI Processor] Prompt 长度: ${prompt.length} 字符`);
