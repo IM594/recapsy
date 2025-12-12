@@ -19,10 +19,24 @@ export async function exportMarkdown(state: WorkflowState) {
   console.log("📝 [Markdown Exporter] 开始导出 Markdown...");
 
   try {
-    const { markdownContent } = state.processedContent || {};
+    // Debugging: Log available state keys
+    console.log("[Markdown Exporter] State Keys:", Object.keys(state));
+    console.log(
+      "[Markdown Exporter] Processed Content:",
+      state.processedContent
+    );
+
+    const processedContent = state.processedContent || {};
+    const { markdownContent } = processedContent;
 
     if (!markdownContent) {
-      throw new Error("processedContent.markdownContent 为空");
+      console.error(
+        "[Markdown Exporter] Missing content. State dump:",
+        JSON.stringify(state, null, 2)
+      );
+      throw new Error(
+        "processedContent.markdownContent 为空 (Content Generation Skipped?)"
+      );
     }
 
     const date = new Date().toISOString().split("T")[0];

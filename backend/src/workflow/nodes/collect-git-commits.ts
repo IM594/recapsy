@@ -41,6 +41,7 @@ export async function collectGitCommits(state: WorkflowState) {
       });
       return {
         gitCommits: "未选择任何 Git 仓库",
+        collectorProgress: ["git_collector"],
       };
     }
 
@@ -96,6 +97,7 @@ export async function collectGitCommits(state: WorkflowState) {
         validResults.length > 0
           ? validResults.join("\n\n")
           : "今天没有提交记录",
+      collectorProgress: ["git_collector"],
     };
   } catch (error) {
     console.error("Git 收集失败:", error);
@@ -108,6 +110,7 @@ export async function collectGitCommits(state: WorkflowState) {
     });
     return {
       gitCommits: "无法获取 Git 记录",
+      collectorProgress: ["git_collector"],
     };
   }
 }

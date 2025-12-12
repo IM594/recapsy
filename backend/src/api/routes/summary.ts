@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { createWorkflowGraph } from "../../workflow/graph";
 import { generateThreadId } from "../../workflow/checkpointer";
 import { progressTracker } from "../../lib/progress-tracker";
+import { ConfigManager } from "../../lib/config-manager";
 
 const router = Router();
 const workflow = createWorkflowGraph();
@@ -41,7 +42,14 @@ router.get("/progress/:threadId", (req: Request, res: Response) => {
 
 router.post("/summarize", async (req, res) => {
   try {
-    const { userInput, selectedRepos, since, until, summaryType } = req.body;
+    const {
+      userInput,
+      selectedRepos,
+      since,
+      until,
+      summaryType,
+      deepAnalysis,
+    } = req.body;
 
     const threadId = generateThreadId();
     console.log(
@@ -49,7 +57,9 @@ router.post("/summarize", async (req, res) => {
         selectedRepos?.length || 0
       }，用户输入长度: ${userInput?.length || 0}, since=${
         since || "-"
-      }, until=${until || "-"}, type=${summaryType || "custom"}`
+      }, until=${until || "-"}, type=${summaryType || "custom"}, deep=${
+        deepAnalysis ? "yes" : "no"
+      }`
     );
 
     // 初始化进度追踪
@@ -64,6 +74,16 @@ router.post("/summarize", async (req, res) => {
     // 异步执行工作流
     (async () => {
       try {
+        // 加载 AI 配置
+        const configManager = ConfigManager.getInstance();
+        const aiConfigs = {
+          diffPreprocessor: configManager.getAIConfig("diffPreprocessor"),
+          aiProcessor: configManager.getAIConfig("aiProcessor"),
+          technicalAnalyst: configManager.getAIConfig("technicalAnalyst"),
+          contextAnalyst: configManager.getAIConfig("contextAnalyst"),
+          synthesizer: configManager.getAIConfig("synthesizer"),
+        };
+
         const result = await workflow.invoke(
           {
             threadId,
@@ -72,6 +92,8 @@ router.post("/summarize", async (req, res) => {
             since: since || "",
             until: until || "",
             summaryType: summaryType || "custom",
+            deepAnalysis: deepAnalysis || false,
+            aiConfigs, // 添加 AI 配置
           },
           {
             configurable: { thread_id: threadId },

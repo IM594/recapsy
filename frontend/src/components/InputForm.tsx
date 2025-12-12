@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
 import { ConfigSelector } from "./ConfigSelector";
 import { RepoSelectionList } from "./RepoSelectionList";
 import type { WorkflowStep } from "@/types/workflow";
@@ -34,6 +35,7 @@ interface InputFormProps {
     until?: string;
     summaryType?: "today" | "week" | "month" | "custom";
     configName?: string;
+    deepAnalysis?: boolean;
   }) => Promise<void>;
   loading: boolean;
   workflowSteps: WorkflowStep[];
@@ -51,6 +53,7 @@ export function InputForm({ onSubmit, loading }: InputFormProps) {
   const [userInput, setUserInput] = useState("");
   const [commandInput, setCommandInput] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [deepAnalysis, setDeepAnalysis] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<ProfileConfig | null>(
     null
   );
@@ -99,6 +102,7 @@ export function InputForm({ onSubmit, loading }: InputFormProps) {
       until: finalUntil,
       summaryType: "custom",
       configName: currentConfig?.name,
+      deepAnalysis,
     });
   };
 
@@ -162,6 +166,7 @@ export function InputForm({ onSubmit, loading }: InputFormProps) {
       until,
       summaryType: type,
       configName: currentConfig?.name,
+      deepAnalysis,
     });
   };
 
@@ -201,6 +206,7 @@ export function InputForm({ onSubmit, loading }: InputFormProps) {
       until: plan.until,
       summaryType: plan.summaryType,
       configName: currentConfig?.name,
+      deepAnalysis,
     });
   };
 
@@ -212,7 +218,26 @@ export function InputForm({ onSubmit, loading }: InputFormProps) {
       </CardHeader>
       <CardContent>
         {/* 配置选择器 (Always visible) */}
-        <div className="mb-6">
+        <div className="mb-6 space-y-4">
+          <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border">
+            <div className="space-y-0.5">
+              <Label className="text-base font-medium flex items-center gap-2">
+                🧠 深度分析模式 (Deep Analysis)
+                <span className="text-xs font-normal px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
+                  Experimental
+                </span>
+              </Label>
+              <p className="text-sm text-muted-foreground">
+                使用多智能体架构，分析代码 Diff 细节。速度较慢但更精准。
+              </p>
+            </div>
+            <Switch
+              checked={deepAnalysis}
+              onCheckedChange={setDeepAnalysis}
+              disabled={loading}
+            />
+          </div>
+
           <ConfigSelector onConfigChange={handleConfigChange} />
 
           {currentConfig && (

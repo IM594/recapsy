@@ -46,6 +46,39 @@ export const WorkflowStateAnnotation = Annotation.Root({
     reducer: (prev, next) => next || prev || "custom",
   }),
 
+  // Feature Flags
+  deepAnalysis: Annotation<boolean>({
+    reducer: (prev, next) => next ?? prev ?? false,
+  }),
+
+  // High-Volume Data for Deep Analysis
+  gitDiffs: Annotation<any>({
+    reducer: (prev, next) => next || prev || null,
+  }),
+
+  // Intermediate Agent Outputs
+  technicalAnalysis: Annotation<string>({
+    reducer: (prev, next) => next || prev || "",
+  }),
+
+  contextualAnalysis: Annotation<string>({
+    reducer: (prev, next) => next || prev || "",
+  }),
+
+  // Track which collectors have finished
+  collectorProgress: Annotation<string[]>({
+    reducer: (prev, next) => {
+      if (!prev) return next || [];
+      if (!next) return prev;
+      return Array.from(new Set([...prev, ...next]));
+    },
+  }),
+
+  // AI 节点配置 (从 ConfigManager 传入)
+  aiConfigs: Annotation<Record<string, any>>({
+    reducer: (prev, next) => next || prev || {},
+  }),
+
   // 最终的 Markdown 文件路径
   outputPath: Annotation<string>(),
 });

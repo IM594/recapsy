@@ -27,5 +27,7 @@ export async function collectUserInput(state: WorkflowState) {
     timestamp: Date.now(),
   });
 
-  return {};
+  return {
+    collectorProgress: ["user_input"],
+  };
 }

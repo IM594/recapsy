@@ -26,6 +26,7 @@ function App() {
     until?: string;
     summaryType?: "today" | "week" | "month" | "custom";
     configName?: string;
+    deepAnalysis?: boolean;
   }) => {
     setLoading(true);
     setResult(null);
@@ -49,6 +50,7 @@ function App() {
         since: data.since,
         until: data.until,
         summaryType: data.summaryType,
+        deepAnalysis: data.deepAnalysis,
       };
 
       const response = await fetch("http://localhost:3456/api/summarize", {

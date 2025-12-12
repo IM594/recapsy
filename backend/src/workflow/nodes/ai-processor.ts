@@ -34,9 +34,19 @@ export async function aiProcessor(state: WorkflowState) {
   );
 
   try {
+    // 从 state 获取 AI 配置
+    const aiConfig = state.aiConfigs?.["aiProcessor"];
+    if (!aiConfig) {
+      throw new Error("缺少 aiProcessor 的 AI 配置");
+    }
+
     const model = new ChatOpenAI({
-      modelName: AI_MODEL_NAME,
-      temperature: SUMMARY_TEMPERATURE,
+      modelName: aiConfig.modelName,
+      temperature: aiConfig.temperature,
+      openAIApiKey: aiConfig.apiKey,
+      configuration: {
+        baseURL: aiConfig.baseURL,
+      },
     });
 
     const now = new Date();

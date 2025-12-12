@@ -50,6 +50,7 @@ export async function collectExternalData(state: WorkflowState) {
       });
       return {
         externalData: "外部 API 请求失败",
+        collectorProgress: ["external_api"],
       };
     }
 
@@ -71,7 +72,8 @@ export async function collectExternalData(state: WorkflowState) {
     });
 
     return {
-      externalData: taskList || "无待办事项",
+      externalData: "External Data: None (Mock)",
+      collectorProgress: ["external_api"],
     };
   } catch (error) {
     console.error("[External Data Collector] 外部数据收集失败:", error);

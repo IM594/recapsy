@@ -471,6 +471,227 @@ export function ConfigDialog({
             />
           </div>
 
+          {/* AI 配置 */}
+          <div className="space-y-4 border-t pt-4">
+            <div>
+              <Label className="text-base font-semibold">🤖 AI 模型配置</Label>
+              <p className="text-xs text-muted-foreground mt-1">
+                为不同的 workflow 节点配置不同的 AI 模型和参数
+              </p>
+            </div>
+
+            {/* 默认 AI 配置 */}
+            <div className="space-y-3 p-3 border rounded-md bg-slate-50">
+              <Label className="text-sm font-medium">
+                默认配置 (所有节点的 fallback)
+              </Label>
+              <div className="space-y-2">
+                <div>
+                  <Label className="text-xs">模型名称 *</Label>
+                  <Input
+                    value={config.ai?.default?.modelName || ""}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        ai: {
+                          ...config.ai,
+                          default: {
+                            ...config.ai?.default,
+                            modelName: e.target.value,
+                          },
+                        } as any,
+                      })
+                    }
+                    placeholder="claude-opus-4-5-20251101"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Base URL</Label>
+                  <Input
+                    value={config.ai?.default?.baseURL || ""}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        ai: {
+                          ...config.ai,
+                          default: {
+                            ...config.ai?.default,
+                            baseURL: e.target.value,
+                          },
+                        } as any,
+                      })
+                    }
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">API Key</Label>
+                  <Input
+                    type="password"
+                    value={config.ai?.default?.apiKey || ""}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        ai: {
+                          ...config.ai,
+                          default: {
+                            ...config.ai?.default,
+                            apiKey: e.target.value,
+                          },
+                        } as any,
+                      })
+                    }
+                    placeholder="sk-..."
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Temperature</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    value={config.ai?.default?.temperature ?? 0.7}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        ai: {
+                          ...config.ai,
+                          default: {
+                            ...config.ai?.default,
+                            temperature: parseFloat(e.target.value),
+                          },
+                        } as any,
+                      })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 节点特定配置 (可选) */}
+            <details className="space-y-2">
+              <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground">
+                高级: 节点特定配置 (可选,点击展开)
+              </summary>
+              <p className="text-xs text-muted-foreground mb-2">
+                为特定节点配置不同的模型。留空则使用默认配置。
+              </p>
+
+              {/* Diff Preprocessor */}
+              <div className="space-y-2 p-2 border rounded-md">
+                <Label className="text-xs font-medium">Diff 预处理器</Label>
+                <Input
+                  className="text-xs"
+                  value={config.ai?.diffPreprocessor?.modelName || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      ai: {
+                        ...config.ai,
+                        diffPreprocessor: {
+                          ...config.ai?.diffPreprocessor,
+                          modelName: e.target.value,
+                        },
+                      } as any,
+                    })
+                  }
+                  placeholder="留空使用默认配置"
+                />
+              </div>
+
+              {/* Technical Analyst */}
+              <div className="space-y-2 p-2 border rounded-md">
+                <Label className="text-xs font-medium">技术分析师</Label>
+                <Input
+                  className="text-xs"
+                  value={config.ai?.technicalAnalyst?.modelName || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      ai: {
+                        ...config.ai,
+                        technicalAnalyst: {
+                          ...config.ai?.technicalAnalyst,
+                          modelName: e.target.value,
+                        },
+                      } as any,
+                    })
+                  }
+                  placeholder="留空使用默认配置"
+                />
+              </div>
+
+              {/* Context Analyst */}
+              <div className="space-y-2 p-2 border rounded-md">
+                <Label className="text-xs font-medium">上下文分析师</Label>
+                <Input
+                  className="text-xs"
+                  value={config.ai?.contextAnalyst?.modelName || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      ai: {
+                        ...config.ai,
+                        contextAnalyst: {
+                          ...config.ai?.contextAnalyst,
+                          modelName: e.target.value,
+                        },
+                      } as any,
+                    })
+                  }
+                  placeholder="留空使用默认配置"
+                />
+              </div>
+
+              {/* Synthesizer */}
+              <div className="space-y-2 p-2 border rounded-md">
+                <Label className="text-xs font-medium">综合器</Label>
+                <Input
+                  className="text-xs"
+                  value={config.ai?.synthesizer?.modelName || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      ai: {
+                        ...config.ai,
+                        synthesizer: {
+                          ...config.ai?.synthesizer,
+                          modelName: e.target.value,
+                        },
+                      } as any,
+                    })
+                  }
+                  placeholder="留空使用默认配置"
+                />
+              </div>
+
+              {/* AI Processor (Legacy) */}
+              <div className="space-y-2 p-2 border rounded-md">
+                <Label className="text-xs font-medium">
+                  AI 处理器 (Legacy Mode)
+                </Label>
+                <Input
+                  className="text-xs"
+                  value={config.ai?.aiProcessor?.modelName || ""}
+                  onChange={(e) =>
+                    setConfig({
+                      ...config,
+                      ai: {
+                        ...config.ai,
+                        aiProcessor: {
+                          ...config.ai?.aiProcessor,
+                          modelName: e.target.value,
+                        },
+                      } as any,
+                    })
+                  }
+                  placeholder="留空使用默认配置"
+                />
+              </div>
+            </details>
+          </div>
+
           {/* 操作按钮 */}
           <div className="flex justify-end gap-2 pt-4">
             <Button

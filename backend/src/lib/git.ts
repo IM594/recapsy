@@ -177,3 +177,155 @@ export async function getRepoCommits(
     return "";
   }
 }
+
+export interface GitDiff {
+  file: string;
+  diff: string;
+  tokenCount: number; // Estimated token count
+}
+
+/**
+ * Get detailed diffs from a repository with intelligent filtering.
+ */
+export async function getRepoDiffs(
+  repoPath: string,
+  authorPattern: string,
+  since: string = "yesterday",
+  until: string = ""
+): Promise<GitDiff[]> {
+  try {
+    // 1. Construct command
+    const authorClause = authorPattern ? `--author "${authorPattern}"` : "";
+    const untilClause = until ? `--until="${until}"` : "";
+
+    // Using --name-only first to identify files, then getting diffs might be slow.
+    // Let's use `git log -p` and parse it, but excluding obviously bad files first via pathspec is hard with `log`.
+    // Better approach: `git log` to find commits, then `git show`? No, too many calls.
+    // Use `git log -p` and strict parsing.
+
+    // Add pathspec exclusions to git log directly (efficient)
+    const excludeSpecs = [
+      "':(exclude)package-lock.json'",
+      "':(exclude)pnpm-lock.yaml'",
+      "':(exclude)yarn.lock'",
+      "':(exclude)*.lock'",
+      "':(exclude)*.svg'",
+      "':(exclude)*.png'",
+      "':(exclude)*.jpg'",
+      "':(exclude)*.jpeg'",
+      "':(exclude)*.gif'",
+      "':(exclude)*.ico'",
+      "':(exclude)dist/*'",
+      "':(exclude)build/*'",
+      "':(exclude).next/*'",
+      "':(exclude)node_modules/*'",
+      "':(exclude)*.min.js'",
+      "':(exclude)*.min.css'",
+      "':(exclude)*.map'",
+    ];
+
+    const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} -p --no-color --date=iso-strict ${excludeSpecs.join(
+      " "
+    )}`;
+
+    // Increase buffer size for large diffs
+    const { stdout } = await execAsync(cmd, {
+      cwd: repoPath,
+      maxBuffer: 1024 * 1024 * 10,
+    });
+
+    // 2. Parse the massive diff output
+    // Git diff format:
+    // commit ...
+    // ...
+    // diff --git a/file b/file
+
+    const diffs: GitDiff[] = [];
+    const lines = stdout.split("\n");
+
+    let currentFile = "";
+    let currentDiffLines: string[] = [];
+
+    // Limit per-file diff size (lines) to avoid one huge file eating all context
+    const MAX_LINES_PER_FILE = 500;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      if (line.startsWith("diff --git")) {
+        // Save previous file if exists
+        if (currentFile && currentDiffLines.length > 0) {
+          const diffContent = currentDiffLines.join("\n");
+          // Estimate tokens (chars / 4)
+          const tokenCount = Math.ceil(diffContent.length / 4);
+
+          // Only add if it has content and reasonable size
+          if (tokenCount > 0) {
+            diffs.push({
+              file: currentFile,
+              diff: diffContent,
+              tokenCount,
+            });
+          }
+        }
+
+        // Start new file
+        // Format: diff --git a/path/to/file b/path/to/file
+        const parts = line.split(" ");
+        if (parts.length >= 4) {
+          // extract filename (remove b/ prefix)
+          const bPath = parts[3];
+          currentFile = bPath.startsWith("b/") ? bPath.substring(2) : bPath;
+        } else {
+          currentFile = "unknown";
+        }
+        currentDiffLines = [line];
+      } else {
+        // Accumulate lines for current file
+        if (currentFile) {
+          if (currentDiffLines.length < MAX_LINES_PER_FILE) {
+            currentDiffLines.push(line);
+          } else if (currentDiffLines.length === MAX_LINES_PER_FILE) {
+            currentDiffLines.push("... (Diff truncated due to size)");
+          }
+        }
+      }
+    }
+
+    // Save last file
+    if (currentFile && currentDiffLines.length > 0) {
+      const diffContent = currentDiffLines.join("\n");
+      diffs.push({
+        file: currentFile,
+        diff: diffContent,
+        tokenCount: Math.ceil(diffContent.length / 4),
+      });
+    }
+
+    // Merge diffs implementation detail:
+    // Since git log shows commits sequentially, the same file might appear multiple times.
+    // We should merge them or keep them separate?
+    // Ideally we want "Net Change" for the file, but git log gives change per commit.
+    // Merging diff chunks from different commits is hard.
+    // A simpler way for "Summary": Group by filename and append diffs.
+
+    const mergedDiffs = new Map<string, GitDiff>();
+
+    for (const d of diffs) {
+      if (mergedDiffs.has(d.file)) {
+        const existing = mergedDiffs.get(d.file)!;
+        existing.diff += "\n\n" + d.diff;
+        existing.tokenCount += d.tokenCount;
+      } else {
+        mergedDiffs.set(d.file, d);
+      }
+    }
+
+    return Array.from(mergedDiffs.values()).sort(
+      (a, b) => b.tokenCount - a.tokenCount
+    ); // Sort by size descending
+  } catch (error) {
+    console.warn(`[Git] 获取 Diff 失败: ${error}`);
+    return [];
+  }
+}

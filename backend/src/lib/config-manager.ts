@@ -78,6 +78,15 @@ export class ConfigManager {
             cron: "0 18 * * *",
             timezone: "Asia/Shanghai",
           },
+          ai: {
+            default: {
+              modelName:
+                process.env.AI_MODEL_NAME || "claude-opus-4-5-20251101",
+              baseURL: process.env.OPENAI_BASE_URL,
+              apiKey: process.env.OPENAI_API_KEY,
+              temperature: 0.7,
+            },
+          },
         },
       },
       activeProfile: "default",
@@ -255,5 +264,35 @@ export class ConfigManager {
     delete this.config.profiles[name];
     await this.save();
     console.log(`[ConfigManager] 删除配置 Profile: ${name}`);
+  }
+
+  /**
+   * 获取指定节点的 AI 配置
+   * 如果节点没有特定配置,返回默认配置
+   * 如果没有配置 AI 字段,抛出错误
+   */
+  public getAIConfig(nodeName: string): any {
+    const profile = this.getActiveProfile();
+
+    if (!profile.ai) {
+      throw new Error(
+        `配置 Profile "${this.config?.activeProfile}" 缺少 AI 配置。请在配置文件中添加 "ai" 字段。`
+      );
+    }
+
+    if (!profile.ai.default) {
+      throw new Error(
+        `配置 Profile "${this.config?.activeProfile}" 缺少默认 AI 配置。请在 "ai" 字段中添加 "default" 配置。`
+      );
+    }
+
+    // 根据节点名称获取特定配置,如果没有则使用默认配置
+    const nodeConfig = (profile.ai as any)[nodeName] || profile.ai.default;
+
+    // 合并默认配置和节点配置
+    return {
+      ...profile.ai.default,
+      ...nodeConfig,
+    };
   }
 }

@@ -48,6 +48,38 @@ export interface ExternalApiConfig {
   todoistApiKey?: string;
 }
 
+/**
+ * AI 模型配置
+ */
+export interface AIConfig {
+  /** AI 模型名称 */
+  modelName: string;
+  /** API Base URL */
+  baseURL?: string;
+  /** API Key */
+  apiKey?: string;
+  /** Temperature 参数 */
+  temperature?: number;
+}
+
+/**
+ * AI 节点配置映射
+ */
+export interface AINodeConfigs {
+  /** 默认 AI 配置 (所有节点的 fallback) */
+  default: AIConfig;
+  /** Diff 预处理器配置 */
+  diffPreprocessor?: AIConfig;
+  /** AI 处理器配置 (legacy mode) */
+  aiProcessor?: AIConfig;
+  /** 技术分析师配置 */
+  technicalAnalyst?: AIConfig;
+  /** 上下文分析师配置 */
+  contextAnalyst?: AIConfig;
+  /** 综合器配置 */
+  synthesizer?: AIConfig;
+}
+
 export interface ProfileConfig {
   /** 配置名称 */
   name: string;
@@ -59,6 +91,8 @@ export interface ProfileConfig {
   schedule?: ScheduleConfig;
   /** 外部 API 配置 */
   externalApi?: ExternalApiConfig;
+  /** AI 节点配置 */
+  ai?: AINodeConfigs;
 }
 
 export interface AppConfig {
