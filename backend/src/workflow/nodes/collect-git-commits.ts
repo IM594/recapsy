@@ -1,116 +1,60 @@
 import path from "path";
 import { WorkflowState } from "../state";
-import { ConfigManager } from "../../lib/config-manager";
-import { progressTracker } from "../../lib/progress-tracker";
 import { getRepoCommits } from "../../lib/git";
+import logger from "../../lib/logger";
 
 /**
  * Git Commit 收集器 - 运行命令获取 commit
  */
 export async function collectGitCommits(state: WorkflowState) {
-  const threadId = state.threadId || "unknown";
+  const startTime = Date.now();
+  const repos = state.selectedRepos || [];
 
-  progressTracker.updateProgress(threadId, {
-    step: "collectGitCommits",
-    status: "running",
-    message: `正在收集 ${state.selectedRepos?.length || 0} 个仓库的提交记录...`,
-    timestamp: Date.now(),
+  // 在函数内部读取环境变量，确保 dotenv 已加载
+  const authorPattern = process.env.GIT_AUTHOR_PATTERN || "";
+
+  const since = state.since || "yesterday";
+  const until = state.until || "";
+
+  logger.step("📦", "Git Collector - 收集提交记录", {
+    仓库数量: repos.length,
+    时间范围: `${since} → ${until || "now"}`,
+    作者过滤: authorPattern || "(未设置 - 将包含所有作者)",
+    环境变量: `GIT_AUTHOR_PATTERN=${
+      process.env.GIT_AUTHOR_PATTERN || "(未设置)"
+    }`,
   });
 
-  const configManager = ConfigManager.getInstance();
-  const config = configManager.getActiveProfile();
-
-  console.log(
-    `📦 [Git Collector] 收集 Git commits... 选中仓库: ${
-      state.selectedRepos?.length || 0
-    }, authorPattern=${config.git.authorPattern || "未设置"}`
-  );
-
-  try {
-    const repos = state.selectedRepos || [];
-    const authorPattern = config.git.authorPattern || "";
-    const since = state.since || config.git.since || "yesterday";
-    const until = state.until || "";
-
-    if (repos.length === 0) {
-      progressTracker.updateProgress(threadId, {
-        step: "collectGitCommits",
-        status: "completed",
-        message: "未选择任何仓库",
-        timestamp: Date.now(),
-      });
-      return {
-        gitCommits: "未选择任何 Git 仓库",
-        collectorProgress: ["git_collector"],
-      };
-    }
-
-    const commitPromises = repos.map(async (repoPath) => {
-      console.log(
-        `[Git Collector] 读取仓库: ${repoPath}, since="${since}", until="${
-          until || "now"
-        }", author="${authorPattern}"`
-      );
-      const commits = await getRepoCommits(
-        repoPath,
-        authorPattern,
-        since,
-        until
-      );
-
-      console.log(
-        `[Git Collector] ${repoPath} 获取到 ${
-          commits ? commits.split("\n").length : 0
-        } 条记录`
-      );
-      if (!commits) return null;
-      const repoName = path.basename(repoPath);
-      return `### ${repoName}\n${commits}`;
-    });
-
-    const results = await Promise.all(commitPromises);
-    const validResults = results.filter((r) => r !== null) as string[];
-
-    // Calculate total commits
-    let totalCommits = 0;
-    // Simple regex to match Commit Hash at start of line (7+ hex chars)
-    const commitHashRegex = /^[0-9a-f]{7,}\s/m;
-
-    validResults.forEach((content) => {
-      const lines = content.split("\n");
-      lines.forEach((line) => {
-        if (commitHashRegex.test(line)) {
-          totalCommits++;
-        }
-      });
-    });
-
-    progressTracker.updateProgress(threadId, {
-      step: "collectGitCommits",
-      status: "completed",
-      message: `成功收集 ${validResults.length} 个仓库共 ${totalCommits} 条提交记录`,
-      timestamp: Date.now(),
-    });
-
+  if (repos.length === 0) {
+    logger.warn("未选择任何仓库");
     return {
-      gitCommits:
-        validResults.length > 0
-          ? validResults.join("\n\n")
-          : "今天没有提交记录",
-      collectorProgress: ["git_collector"],
-    };
-  } catch (error) {
-    console.error("Git 收集失败:", error);
-    progressTracker.updateProgress(threadId, {
-      step: "collectGitCommits",
-      status: "error",
-      message: "Git 收集失败",
-      isCritical: true,
-      timestamp: Date.now(),
-    });
-    return {
-      gitCommits: "无法获取 Git 记录",
-      collectorProgress: ["git_collector"],
+      gitCommits: "未选择任何 Git 仓库",
     };
   }
+
+  let totalCommits = 0;
+  const commitPromises = repos.map(async (repoPath) => {
+    const repoName = path.basename(repoPath);
+    const commits = await getRepoCommits(repoPath, authorPattern, since, until);
+
+    const commitCount = commits
+      ? commits.split("\n").filter((l) => l.trim()).length
+      : 0;
+    totalCommits += commitCount;
+
+    logger.info(`${repoName}: ${commitCount} 条提交`);
+
+    if (!commits) return null;
+    return `### ${repoName}\n${commits}`;
+  });
+
+  const results = await Promise.all(commitPromises);
+  const validResults = results.filter((r) => r !== null) as string[];
+
+  logger.stepDone(`共收集 ${totalCommits} 条提交`, Date.now() - startTime);
+
+  return {
+    gitCommits:
+      validResults.length > 0 ? validResults.join("\n\n") : "今天没有提交记录",
+  };
 }

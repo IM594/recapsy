@@ -1,6 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Card,
   CardContent,
@@ -9,204 +8,130 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
-import { ConfigSelector } from "./ConfigSelector";
-import { RepoSelectionList } from "./RepoSelectionList";
-import type { WorkflowStep } from "@/types/workflow";
-import type { ProfileConfig } from "@/types";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   CalendarDays,
   CalendarRange,
   Calendar,
-  Bot,
-  Play,
-  Check,
-  X,
-  ChevronDown,
+  FolderSearch,
 } from "lucide-react";
 import { toast } from "sonner";
 
 interface InputFormProps {
   onSubmit: (data: {
-    userInput: string;
     selectedRepos: string[];
     since?: string;
     until?: string;
-    summaryType?: "today" | "week" | "month" | "custom";
-    configName?: string;
-    deepAnalysis?: boolean;
+    summaryType?: "today" | "week" | "month";
   }) => Promise<void>;
   loading: boolean;
-  workflowSteps: WorkflowStep[];
-  runMeta?: any; // Accepting runMeta for compatibility if passed, though unused now.
 }
 
-interface Plan {
-  since: string;
-  until: string;
-  summaryType: "today" | "week" | "month" | "custom";
-  focus: string;
+interface Repo {
+  name: string;
+  path: string;
 }
+
+// 从环境变量或默认值读取扫描路径
+const DEFAULT_SCAN_PATH = "/Users/user/Downloads/projects";
 
 export function InputForm({ onSubmit, loading }: InputFormProps) {
-  const [userInput, setUserInput] = useState("");
-  const [commandInput, setCommandInput] = useState("");
   const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
-  const [deepAnalysis, setDeepAnalysis] = useState(false);
-  const [currentConfig, setCurrentConfig] = useState<ProfileConfig | null>(
-    null
-  );
-  const [isRepoListOpen, setIsRepoListOpen] = useState(false);
+  const [repos, setRepos] = useState<Repo[]>([]);
+  const [scanning, setScanning] = useState(false);
 
-  // AI Command Mode States
-  const [analyzing, setAnalyzing] = useState(false);
-  const [plan, setPlan] = useState<Plan | null>(null);
+  // 页面加载时自动扫描
+  useEffect(() => {
+    scanRepos();
+  }, []);
 
-  // 当配置变化时,更新默认值
-  const handleConfigChange = (config: ProfileConfig) => {
-    setCurrentConfig(config);
-
-    // 如果配置有默认仓库,自动设置
-    if (config.git.defaultRepos && config.git.defaultRepos.length > 0) {
-      setSelectedRepos(config.git.defaultRepos);
+  const scanRepos = async () => {
+    setScanning(true);
+    try {
+      const response = await fetch(
+        `http://localhost:3456/api/repos?rootPath=${encodeURIComponent(
+          DEFAULT_SCAN_PATH
+        )}`
+      );
+      if (!response.ok) throw new Error("扫描失败");
+      const data = await response.json();
+      setRepos(data.repos || []);
+      toast.success(`发现 ${data.repos?.length || 0} 个仓库`);
+    } catch (error) {
+      console.error("扫描失败:", error);
+      toast.error("扫描仓库失败");
+    } finally {
+      setScanning(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // 直接使用配置的时间设置
-    let finalSince = "";
-    let finalUntil = "";
-
-    if (currentConfig?.git.timeMode === "absolute") {
-      // 具体时间模式
-      finalSince = currentConfig.git.absoluteSince || "";
-      finalUntil = currentConfig.git.absoluteUntil || "";
-    } else {
-      // 相对时间模式
-      finalSince = currentConfig?.git.since || "yesterday";
-      finalUntil = currentConfig?.git.until || "";
-    }
-
-    console.log(
-      "[UI] 准备提交",
-      `仓库数量=${selectedRepos.length}, 输入长度=${userInput.length}, since=${finalSince}, until=${finalUntil}`
+  const toggleRepo = (path: string) => {
+    setSelectedRepos((prev) =>
+      prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path]
     );
+  };
 
-    await onSubmit({
-      userInput,
-      selectedRepos,
-      since: finalSince,
-      until: finalUntil,
-      summaryType: "custom",
-      configName: currentConfig?.name,
-      deepAnalysis,
-    });
+  const selectAll = () => {
+    setSelectedRepos(repos.map((r) => r.path));
+  };
+
+  const selectNone = () => {
+    setSelectedRepos([]);
+  };
+
+  // Helper to format date as YYYY-MM-DD HH:MM:SS (Local Time)
+  const formatLocal = (date: Date) => {
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+      date.getDate()
+    )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+      date.getSeconds()
+    )}`;
+  };
+
+  const getStartOfDay = (date: Date) => {
+    const newDate = new Date(date);
+    newDate.setHours(0, 0, 0, 0);
+    return newDate;
   };
 
   const handleQuickSummary = async (type: "today" | "week" | "month") => {
+    if (selectedRepos.length === 0) {
+      toast.error("请先选择至少一个仓库");
+      return;
+    }
+
     const now = new Date();
     let since = "";
-
-    // Helper to format date as YYYY-MM-DD HH:MM:SS (Local Time)
-    const formatLocal = (date: Date) => {
-      const pad = (n: number) => n.toString().padStart(2, "0");
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-        date.getDate()
-      )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
-        date.getSeconds()
-      )}`;
-    };
-
-    // Helper to get start of day in local time
-    const getStartOfDay = (date: Date) => {
-      const newDate = new Date(date);
-      newDate.setHours(0, 0, 0, 0);
-      return newDate;
-    };
 
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
     const until = formatLocal(endOfToday);
 
     if (type === "today") {
-      const start = getStartOfDay(now);
-      since = formatLocal(start);
+      since = formatLocal(getStartOfDay(now));
     } else if (type === "week") {
-      // This Monday 00:00:00
-      const day = now.getDay(); // 0 is Sunday
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is sunday
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
       const monday = new Date(now);
       monday.setDate(diff);
-      const start = getStartOfDay(monday);
-      since = formatLocal(start);
+      since = formatLocal(getStartOfDay(monday));
     } else if (type === "month") {
-      // 1st of this month 00:00:00
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      const start = getStartOfDay(firstDay);
-      since = formatLocal(start);
+      since = formatLocal(getStartOfDay(firstDay));
     }
 
-    console.log(`[UI] 快速总结: ${type}, since=${since}, until=${until}`);
     toast.info(
-      `正在生成 ${
+      `正在生成${
         type === "today" ? "今日" : type === "week" ? "本周" : "本月"
-      } 总结`,
-      {
-        description: `时间范围: ${since} ~ ${until}`,
-      }
+      }总结`
     );
 
     await onSubmit({
-      userInput,
       selectedRepos,
       since,
       until,
       summaryType: type,
-      configName: currentConfig?.name,
-      deepAnalysis,
-    });
-  };
-
-  const handleAnalyzeCommand = async () => {
-    if (!commandInput.trim()) return;
-
-    setAnalyzing(true);
-    setPlan(null);
-
-    try {
-      const response = await fetch("http://localhost:3456/api/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: commandInput }),
-      });
-
-      if (!response.ok) throw new Error("Analysis failed");
-
-      const data = await response.json();
-      setPlan(data);
-      toast.success("计划已生成，请确认");
-    } catch (error) {
-      console.error("Analysis error:", error);
-      toast.error("分析命令失败，请重试");
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  const handleExecutePlan = async () => {
-    if (!plan) return;
-
-    await onSubmit({
-      userInput: plan.focus !== "everything" ? `Focus on: ${plan.focus}` : "",
-      selectedRepos, // Use currently selected repos
-      since: plan.since,
-      until: plan.until,
-      summaryType: plan.summaryType,
-      configName: currentConfig?.name,
-      deepAnalysis,
     });
   };
 
@@ -214,237 +139,101 @@ export function InputForm({ onSubmit, loading }: InputFormProps) {
     <Card className="w-full">
       <CardHeader>
         <CardTitle>Generate Summary</CardTitle>
-        <CardDescription>选择你的总结方式：快速模式或智能命令</CardDescription>
+        <CardDescription>选择仓库，一键生成工作总结</CardDescription>
       </CardHeader>
-      <CardContent>
-        {/* 配置选择器 (Always visible) */}
-        <div className="mb-6 space-y-4">
-          <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border">
-            <div className="space-y-0.5">
-              <Label className="text-base font-medium flex items-center gap-2">
-                🧠 深度分析模式 (Deep Analysis)
-                <span className="text-xs font-normal px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                  Experimental
-                </span>
-              </Label>
-              <p className="text-sm text-muted-foreground">
-                使用多智能体架构，分析代码 Diff 细节。速度较慢但更精准。
-              </p>
+      <CardContent className="space-y-6">
+        {/* 仓库选择 */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-base font-medium">
+              📍 选择仓库 ({selectedRepos.length}/{repos.length})
+            </Label>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={selectAll}
+                disabled={loading}
+              >
+                全选
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={selectNone}
+                disabled={loading}
+              >
+                清空
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={scanRepos}
+                disabled={scanning || loading}
+              >
+                <FolderSearch className="h-4 w-4 mr-1" />
+                {scanning ? "扫描中..." : "重新扫描"}
+              </Button>
             </div>
-            <Switch
-              checked={deepAnalysis}
-              onCheckedChange={setDeepAnalysis}
-              disabled={loading}
-            />
           </div>
 
-          <ConfigSelector onConfigChange={handleConfigChange} />
-
-          {currentConfig && (
-            <div className="mt-4 border rounded-md bg-white shadow-sm overflow-hidden">
-              <div
-                className="p-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
-                onClick={() => setIsRepoListOpen(!isRepoListOpen)}
-              >
-                <Label className="cursor-pointer flex items-center gap-2">
-                  <span>📍 本次运行的仓库范围</span>
-                  <span className="text-xs font-normal text-muted-foreground">
-                    (已选 {selectedRepos.length} 个)
-                  </span>
-                </Label>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">
-                    {isRepoListOpen ? "收起" : "展开编辑"}
-                  </span>
-                  <ChevronDown
-                    className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${
-                      isRepoListOpen ? "rotate-180" : ""
-                    }`}
-                  />
-                </div>
+          <div className="border rounded-lg max-h-48 overflow-y-auto">
+            {repos.length === 0 ? (
+              <div className="p-4 text-center text-muted-foreground">
+                {scanning ? "正在扫描..." : "暂无仓库，点击扫描"}
               </div>
-
-              {isRepoListOpen && (
-                <div className="p-4 pt-0 border-t">
-                  <div className="pt-4">
-                    <RepoSelectionList
-                      rootPaths={currentConfig.git.rootPaths}
-                      selectedRepos={selectedRepos}
-                      onSelectionChange={setSelectedRepos}
-                      scannedRepos={currentConfig.git._scannedRepos}
-                      onScan={(repos) => {
-                        // Update local config state with scanned repos so they are cached for this session
-                        setCurrentConfig({
-                          ...currentConfig,
-                          git: {
-                            ...currentConfig.git,
-                            _scannedRepos: repos,
-                          },
-                        });
-                      }}
+            ) : (
+              <div className="divide-y">
+                {repos.map((repo) => (
+                  <label
+                    key={repo.path}
+                    className="flex items-center gap-3 p-3 hover:bg-slate-50 cursor-pointer"
+                  >
+                    <Checkbox
+                      checked={selectedRepos.includes(repo.path)}
+                      onCheckedChange={() => toggleRepo(repo.path)}
                     />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+                    <span className="font-medium">{repo.name}</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      {repo.path}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
-        <Tabs defaultValue="quick" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 mb-6">
-            <TabsTrigger value="quick">快速模式 (Quick Mode)</TabsTrigger>
-            <TabsTrigger value="command">
-              <Bot className="h-4 w-4 mr-2" />
-              智能命令 (AI Command)
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="quick" className="space-y-6">
-            {/* 快速操作按钮 */}
-            <div className="grid grid-cols-3 gap-4">
-              <Button
-                variant="outline"
-                className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
-                onClick={() => handleQuickSummary("today")}
-                disabled={loading}
-              >
-                <CalendarDays className="h-6 w-6" />
-                <span>今日总结</span>
-              </Button>
-              <Button
-                variant="outline"
-                className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
-                onClick={() => handleQuickSummary("week")}
-                disabled={loading}
-              >
-                <CalendarRange className="h-6 w-6" />
-                <span>本周总结</span>
-              </Button>
-              <Button
-                variant="outline"
-                className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
-                onClick={() => handleQuickSummary("month")}
-                disabled={loading}
-              >
-                <Calendar className="h-6 w-6" />
-                <span>本月总结</span>
-              </Button>
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">
-                  或者自定义生成
-                </span>
-              </div>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="userInput">今日工作笔记 (可选)</Label>
-                <Textarea
-                  id="userInput"
-                  value={userInput}
-                  onChange={(e) => setUserInput(e.target.value)}
-                  placeholder="例如:完成了用户登录功能,修复了 API 接口的 bug..."
-                  className="min-h-[100px]"
-                />
-              </div>
-
-              <Button type="submit" disabled={loading} className="w-full">
-                {loading ? "正在生成总结..." : "生成工作总结"}
-              </Button>
-            </form>
-          </TabsContent>
-
-          <TabsContent value="command" className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="commandInput">输入你的需求</Label>
-              <Textarea
-                id="commandInput"
-                value={commandInput}
-                onChange={(e) => setCommandInput(e.target.value)}
-                placeholder="例如: 生成 12 月 1 日～今天的总结，重点关注 Bug 修复..."
-                className="min-h-[100px] text-base"
-              />
-            </div>
-
-            {!plan && (
-              <Button
-                onClick={handleAnalyzeCommand}
-                disabled={analyzing || !commandInput.trim()}
-                className="w-full"
-              >
-                {analyzing ? "正在分析..." : "生成方案"}
-              </Button>
-            )}
-
-            {plan && (
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-4 animate-in fade-in slide-in-from-top-2">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                    <Check className="h-4 w-4 text-green-500" />
-                    方案已生成
-                  </h3>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPlan(null)}
-                    className="h-8 w-8 p-0"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="grid gap-3 text-sm">
-                  <div className="grid grid-cols-[80px_1fr] gap-2">
-                    <span className="text-slate-500">开始时间:</span>
-                    <span className="font-mono font-medium">{plan.since}</span>
-                  </div>
-                  <div className="grid grid-cols-[80px_1fr] gap-2">
-                    <span className="text-slate-500">结束时间:</span>
-                    <span className="font-mono font-medium">
-                      {plan.until || "Now"}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-[80px_1fr] gap-2">
-                    <span className="text-slate-500">类型:</span>
-                    <span className="capitalize bg-blue-50 text-blue-700 px-2 py-0.5 rounded inline-block w-fit">
-                      {plan.summaryType}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-[80px_1fr] gap-2">
-                    <span className="text-slate-500">关注点:</span>
-                    <span>{plan.focus}</span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex gap-3">
-                  <Button
-                    onClick={handleExecutePlan}
-                    disabled={loading}
-                    className="flex-1 bg-green-600 hover:bg-green-700"
-                  >
-                    <Play className="h-4 w-4 mr-2" />
-                    {loading ? "执行中..." : "确认并执行"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setPlan(null)}
-                    disabled={loading}
-                  >
-                    取消
-                  </Button>
-                </div>
-              </div>
-            )}
-          </TabsContent>
-        </Tabs>
-
-        {/* ProgressDisplay removed from here, integrated into App.tsx */}
+        {/* 快速总结按钮 */}
+        <div className="grid grid-cols-3 gap-4">
+          <Button
+            variant="outline"
+            className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+            onClick={() => handleQuickSummary("today")}
+            disabled={loading || selectedRepos.length === 0}
+          >
+            <CalendarDays className="h-6 w-6" />
+            <span>今日总结</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+            onClick={() => handleQuickSummary("week")}
+            disabled={loading || selectedRepos.length === 0}
+          >
+            <CalendarRange className="h-6 w-6" />
+            <span>本周总结</span>
+          </Button>
+          <Button
+            variant="outline"
+            className="h-20 flex flex-col gap-2 hover:border-primary hover:text-primary transition-colors"
+            onClick={() => handleQuickSummary("month")}
+            disabled={loading || selectedRepos.length === 0}
+          >
+            <Calendar className="h-6 w-6" />
+            <span>本月总结</span>
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

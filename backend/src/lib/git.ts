@@ -78,17 +78,11 @@ export async function getRepoCommits(
   until: string = ""
 ): Promise<string> {
   try {
-    // 先同步最新远端记录
+    // 先同步最新远端记录（静默执行）
     try {
-      console.log(`[Git] fetch 开始: repo=${repoPath}`);
       await execAsync("git fetch --all --prune", { cwd: repoPath });
-      console.log(`[Git] fetch 完成: repo=${repoPath}`);
     } catch (fetchErr) {
-      console.warn(
-        `[Git] fetch 失败(忽略继续): repo=${repoPath}, error=${
-          (fetchErr as Error)?.message
-        }`
-      );
+      // 忽略 fetch 错误
     }
 
     // git log -E --author "pattern" --since="since" --pretty=format:"%h - %s (%an)"
@@ -102,8 +96,6 @@ export async function getRepoCommits(
     // 格式说明: Hash, AuthorName, AuthorDate(ISO), Subject
     // 移除 --max-count 参数
     const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} ${statFlag} --no-color --date=iso-strict --pretty=format:"COMMIT_START %h %an %ad %s"`;
-
-    console.log(`[Git] 执行命令: ${cmd}`);
 
     const { stdout } = await execAsync(cmd, { cwd: repoPath });
 
@@ -123,11 +115,7 @@ export async function getRepoCommits(
     // 如果 since 是无效日期，说明是相对时间，我们信任 git log 的 --since 过滤结果（虽然是 commit date）
     const shouldFilterByAuthorDate = !isNaN(sinceDate.getTime());
 
-    if (shouldFilterByAuthorDate) {
-      console.log(
-        `[Git] 启用应用层 Author Date 过滤: ${sinceDate.toString()} ~ ${untilDate.toString()}`
-      );
-    }
+    // 应用层过滤（静默）
 
     const lines = stdout.split("\n");
     let filteredOutput = "";
@@ -158,9 +146,7 @@ export async function getRepoCommits(
               filteredOutput += line.replace("COMMIT_START ", "") + "\n";
             } else {
               currentCommitValid = false;
-              console.log(
-                `[Git] 过滤掉超出范围的 Commit: ${dateStr} (范围: ${sinceDate.toISOString()} ~ ${untilDate.toISOString()})`
-              );
+              // 静默过滤
             }
           } else {
             // If date parsing failed or relative time used, pass through
@@ -177,7 +163,6 @@ export async function getRepoCommits(
           } else {
             // Malformed line with filtering enabled, skip
             currentCommitValid = false;
-            console.log(`[Git] 无法解析日期的行: ${line.substring(0, 100)}`);
           }
         }
       } else {
@@ -188,9 +173,7 @@ export async function getRepoCommits(
       }
     }
 
-    console.log(
-      `[Git] 读取提交: repo=${repoPath}, since=${since}, 原始行数=${lines.length}, 过滤后 Commit 数=${validCommitCount}`
-    );
+    // 日志已在上层输出
 
     return filteredOutput.trim();
   } catch (error) {
