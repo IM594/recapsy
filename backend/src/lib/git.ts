@@ -108,8 +108,16 @@ export async function getRepoCommits(
     const { stdout } = await execAsync(cmd, { cwd: repoPath });
 
     // 手动过滤 Author Date
-    const sinceDate = new Date(since);
-    const untilDate = until ? new Date(until) : new Date();
+    // 注意：since/until 可能是 "2025-12-11 00:00:00" 格式（本地时间），需要正确解析
+    // JavaScript Date 对空格分隔的日期字符串解析行为不一致，需要转换为 ISO 格式
+    const parseLocalDate = (dateStr: string): Date => {
+      // 将 "2025-12-11 00:00:00" 转换为 "2025-12-11T00:00:00" 以正确解析为本地时间
+      const normalized = dateStr.replace(" ", "T");
+      return new Date(normalized);
+    };
+
+    const sinceDate = parseLocalDate(since);
+    const untilDate = until ? parseLocalDate(until) : new Date();
 
     // 检查 since 是否为有效日期 (如果是相对时间如 "yesterday"，则 new Date 可能无法解析或解析不准，甚至 Invalid Date)
     // 如果 since 是无效日期，说明是相对时间，我们信任 git log 的 --since 过滤结果（虽然是 commit date）
@@ -117,7 +125,7 @@ export async function getRepoCommits(
 
     if (shouldFilterByAuthorDate) {
       console.log(
-        `[Git] 启用应用层 Author Date 过滤: ${sinceDate.toISOString()} ~ ${untilDate.toISOString()}`
+        `[Git] 启用应用层 Author Date 过滤: ${sinceDate.toString()} ~ ${untilDate.toString()}`
       );
     }
 
@@ -129,10 +137,14 @@ export async function getRepoCommits(
     for (const line of lines) {
       if (line.startsWith("COMMIT_START ")) {
         // 解析 Header: COMMIT_START %h %an %ad %s
-        // 示例: COMMIT_START abc1234 User 2025-12-01T12:00:00+08:00 Some message
-        const parts = line.split(" ");
-        if (parts.length >= 4) {
-          const dateStr = parts[3]; // ISO String should be at index 3
+        // 示例: COMMIT_START abc1234 Zhaohao Lu 2025-12-01T12:00:00+08:00 Some message
+        // 注意: author name 可能包含空格，所以需要用正则匹配 ISO 日期
+        const isoDateRegex =
+          /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}/;
+        const dateMatch = line.match(isoDateRegex);
+
+        if (dateMatch) {
+          const dateStr = dateMatch[0];
           const authorDate = new Date(dateStr);
 
           if (shouldFilterByAuthorDate && !isNaN(authorDate.getTime())) {
@@ -146,7 +158,9 @@ export async function getRepoCommits(
               filteredOutput += line.replace("COMMIT_START ", "") + "\n";
             } else {
               currentCommitValid = false;
-              // console.log(`[Git] 过滤掉过期 Commit: ${dateStr}`);
+              console.log(
+                `[Git] 过滤掉超出范围的 Commit: ${dateStr} (范围: ${sinceDate.toISOString()} ~ ${untilDate.toISOString()})`
+              );
             }
           } else {
             // If date parsing failed or relative time used, pass through
@@ -155,8 +169,16 @@ export async function getRepoCommits(
             filteredOutput += line.replace("COMMIT_START ", "") + "\n";
           }
         } else {
-          // Malformed header, pass through if currently valid
-          if (currentCommitValid) filteredOutput += line + "\n";
+          // No date found in line, pass through if currently valid or skip filtering
+          if (!shouldFilterByAuthorDate) {
+            currentCommitValid = true;
+            validCommitCount++;
+            filteredOutput += line.replace("COMMIT_START ", "") + "\n";
+          } else {
+            // Malformed line with filtering enabled, skip
+            currentCommitValid = false;
+            console.log(`[Git] 无法解析日期的行: ${line.substring(0, 100)}`);
+          }
         }
       } else {
         // Stat lines or other lines, append if belong to a valid commit

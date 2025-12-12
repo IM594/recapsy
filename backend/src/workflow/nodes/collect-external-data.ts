@@ -27,6 +27,7 @@ export async function collectExternalData(state: WorkflowState) {
     });
     return {
       externalData: "未配置外部 API",
+      collectorProgress: ["external_api"],
     };
   }
 
@@ -86,6 +87,7 @@ export async function collectExternalData(state: WorkflowState) {
     });
     return {
       externalData: "外部数据收集失败",
+      collectorProgress: ["external_api"],
     };
   }
 }

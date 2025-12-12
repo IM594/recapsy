@@ -28,6 +28,7 @@ export async function collectUserInput(state: WorkflowState) {
   });
 
   return {
+    userInput: state.userInput || "",
     collectorProgress: ["user_input"],
   };
 }

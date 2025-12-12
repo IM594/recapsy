@@ -6,6 +6,7 @@ import { getRepoDiffs, GitDiff } from "../../lib/git";
 
 /**
  * Git Diff Collector
+ * @param state - 工作流状态
  */
 export async function collectGitDiffs(state: WorkflowState) {
   const threadId = state.threadId || "unknown";

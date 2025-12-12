@@ -104,11 +104,11 @@ router.post("/summarize", async (req, res) => {
         progressTracker.updateProgress(threadId, {
           step: "completed",
           status: "completed",
-          message: `输出文件: ${result.outputPath}`,
+          message: `输出文件: ${result.outputPath || "生成失败"}`,
           summary:
-            result.processedContent.markdownContent ||
-            JSON.stringify(result.processedContent),
-          outputPath: result.outputPath,
+            result.processedContent?.markdownContent ||
+            JSON.stringify(result.processedContent || {}),
+          outputPath: result.outputPath || "",
           timestamp: Date.now(),
         });
 

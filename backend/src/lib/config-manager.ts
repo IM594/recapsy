@@ -289,10 +289,27 @@ export class ConfigManager {
     // 根据节点名称获取特定配置,如果没有则使用默认配置
     const nodeConfig = (profile.ai as any)[nodeName] || profile.ai.default;
 
-    // 合并默认配置和节点配置
-    return {
+    // 硬编码的最终回退默认值
+    const hardcodedDefaults = {
+      modelName: "claude-opus-4-5-20251101",
+      baseURL: "https://api.openai.com/v1",
+      apiKey: "",
+      temperature: 0.7,
+    };
+
+    // 合并配置，过滤掉 null/undefined 值
+    const merged = {
+      ...hardcodedDefaults,
       ...profile.ai.default,
       ...nodeConfig,
+    };
+
+    // 过滤掉 null 值,使用 hardcodedDefaults 回退
+    return {
+      modelName: merged.modelName ?? hardcodedDefaults.modelName,
+      baseURL: merged.baseURL ?? hardcodedDefaults.baseURL,
+      apiKey: merged.apiKey ?? hardcodedDefaults.apiKey,
+      temperature: merged.temperature ?? hardcodedDefaults.temperature,
     };
   }
 }
