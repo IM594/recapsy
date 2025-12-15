@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { InputForm } from "./components/InputForm";
 import { ResultCard } from "./components/ResultCard";
+import { DevToolPanel } from "./components/DevToolPanel";
 import { Sparkles, Loader2 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
@@ -61,6 +62,9 @@ function App() {
 
         <main className="space-y-8">
           <InputForm onSubmit={handleSubmit} loading={loading} />
+
+          {/* DevTool Panel - Collapsible */}
+          <DevToolPanel />
 
           {loading && (
             <div className="flex items-center justify-center p-8">

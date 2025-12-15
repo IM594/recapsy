@@ -2,12 +2,6 @@ import { ChatOpenAI } from "@langchain/openai";
 import { WorkflowState } from "../state";
 import logger from "../../lib/logger";
 
-// 直接从环境变量读取配置
-const AI_MODEL = process.env.AI_MODEL_NAME || "claude-opus-4-5-20251101";
-const AI_BASE_URL = process.env.OPENAI_BASE_URL;
-const AI_API_KEY = process.env.OPENAI_API_KEY;
-const AI_TEMPERATURE = 0.7;
-
 /**
  * 计算 ISO 周数
  */
@@ -36,6 +30,12 @@ export async function aiProcessor(state: WorkflowState) {
     week: `本周总结 (W${targetWeek})`,
     month: "本月总结",
   };
+
+  // 在运行时读取环境变量,确保 dotenv 已加载
+  const AI_MODEL = process.env.AI_MODEL_NAME;
+  const AI_BASE_URL = process.env.OPENAI_BASE_URL;
+  const AI_API_KEY = process.env.OPENAI_API_KEY;
+  const AI_TEMPERATURE = 0.7;
 
   logger.step("🤖", "AI Processor - 调用 LLM 分析", {
     总结类型: typeLabels[summaryType] || summaryType,
