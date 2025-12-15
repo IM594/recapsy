@@ -399,123 +399,150 @@ export async function getCommitsByDay(
   // Map: date -> DailyCommitData
   const dailyMap = new Map<string, DailyCommitData>();
 
-  for (const repoPath of repoPaths) {
-    const repoName = path.basename(repoPath);
-    console.log(`[Git] Collecting commits from ${repoName}...`);
+  // 并发收集所有仓库的提交
+  const results = await Promise.allSettled(
+    repoPaths.map(async (repoPath) => {
+      const repoName = path.basename(repoPath);
+      console.log(`[Git] Collecting commits from ${repoName}...`);
 
-    try {
-      // Fetch latest
       try {
-        await execAsync("git fetch --all --prune", { cwd: repoPath });
-      } catch {
-        // Ignore fetch errors
-      }
-
-      const authorClause = authorPattern ? `--author "${authorPattern}"` : "";
-      const untilClause = until ? `--until="${until}"` : "";
-
-      // Get structured commit data
-      // Format: hash|author|date|subject
-      const formatStr = "%H|%an|%aI|%s";
-      const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} --no-color --pretty=format:"${formatStr}"`;
-
-      const { stdout } = await execAsync(cmd, {
-        cwd: repoPath,
-        maxBuffer: 1024 * 1024 * 50, // 50MB buffer for large repos
-      });
-
-      if (!stdout.trim()) continue;
-
-      const lines = stdout.trim().split("\n");
-
-      for (const line of lines) {
-        const parts = line.split("|");
-        if (parts.length < 4) continue;
-
-        const [hash, author, authorDate, ...messageParts] = parts;
-        const message = messageParts.join("|"); // In case message contains |
-        const dateOnly = authorDate.split("T")[0]; // YYYY-MM-DD
-
-        // Get file stats for this commit
-        let files: FileChange[] = [];
-        let diffContent: string | undefined;
-
+        // Fetch latest
         try {
-          // Get numstat for file changes
-          const statCmd = `git show ${hash} --numstat --format=""`;
-          const { stdout: statOut } = await execAsync(statCmd, {
-            cwd: repoPath,
-          });
-
-          const statLines = statOut.trim().split("\n").filter(Boolean);
-          let fileCount = 0;
-
-          for (const statLine of statLines) {
-            if (fileCount >= maxFilesPerDay) break;
-
-            const [add, del, filePath] = statLine.split("\t");
-            if (!filePath) continue;
-
-            // Skip binary files (shown as - - in numstat)
-            if (add === "-" || del === "-") continue;
-
-            files.push({
-              path: filePath,
-              additions: parseInt(add) || 0,
-              deletions: parseInt(del) || 0,
-            });
-            fileCount++;
-          }
-
-          // Get diff if requested
-          if (includeDiffs && files.length > 0) {
-            // Build exclusion pathspec
-            const excludeSpecs = [
-              "':(exclude)package-lock.json'",
-              "':(exclude)pnpm-lock.yaml'",
-              "':(exclude)yarn.lock'",
-              "':(exclude)*.lock'",
-              "':(exclude)*.min.js'",
-              "':(exclude)*.min.css'",
-              "':(exclude)*.map'",
-              "':(exclude)*.d.ts'",
-              "':(exclude)dist/*'",
-              "':(exclude)build/*'",
-              "':(exclude)node_modules/*'",
-            ];
-
-            const diffCmd = `git show ${hash} --no-color -p ${excludeSpecs.join(
-              " "
-            )}`;
-            const { stdout: diffOut } = await execAsync(diffCmd, {
-              cwd: repoPath,
-              maxBuffer: 1024 * 1024 * 5, // 5MB per commit
-            });
-
-            // Truncate diff if too long
-            const diffLines = diffOut.split("\n");
-            if (diffLines.length > maxDiffLinesPerFile * files.length) {
-              diffContent = diffLines
-                .slice(0, maxDiffLinesPerFile * Math.min(files.length, 10))
-                .join("\n");
-              diffContent += "\n... (diff truncated)";
-            } else {
-              diffContent = diffOut;
-            }
-          }
+          await execAsync("git fetch --all --prune", { cwd: repoPath });
         } catch {
-          // Ignore errors getting file stats
+          // Ignore fetch errors
         }
 
-        const commitInfo: CommitInfo = {
-          hash: hash.substring(0, 8),
-          author,
-          authorDate,
-          message,
-          files,
-          diff: diffContent,
-        };
+        const authorClause = authorPattern ? `--author "${authorPattern}"` : "";
+        const untilClause = until ? `--until="${until}"` : "";
 
+        // Get structured commit data
+        // Format: hash|author|date|subject
+        const formatStr = "%H|%an|%aI|%s";
+        const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} --no-color --pretty=format:"${formatStr}"`;
+
+        const { stdout } = await execAsync(cmd, {
+          cwd: repoPath,
+          maxBuffer: 1024 * 1024 * 50, // 50MB buffer for large repos
+        });
+
+        if (!stdout.trim()) {
+          console.log(`[Git] ${repoName}: no commits found`);
+          return { repoName, commits: [] };
+        }
+
+        const lines = stdout.trim().split("\n");
+        const repoCommits: Array<{
+          dateOnly: string;
+          commitInfo: CommitInfo;
+        }> = [];
+
+        for (const line of lines) {
+          const parts = line.split("|");
+          if (parts.length < 4) continue;
+
+          const [hash, author, authorDate, ...messageParts] = parts;
+          const message = messageParts.join("|"); // In case message contains |
+          const dateOnly = authorDate.split("T")[0]; // YYYY-MM-DD
+
+          // Get file stats for this commit
+          let files: FileChange[] = [];
+          let diffContent: string | undefined;
+
+          try {
+            // Get numstat for file changes
+            const statCmd = `git show ${hash} --numstat --format=""`;
+            const { stdout: statOut } = await execAsync(statCmd, {
+              cwd: repoPath,
+            });
+
+            const statLines = statOut.trim().split("\n").filter(Boolean);
+            let fileCount = 0;
+
+            for (const statLine of statLines) {
+              if (fileCount >= maxFilesPerDay) break;
+
+              const [add, del, filePath] = statLine.split("\t");
+              if (!filePath) continue;
+
+              // Skip binary files (shown as - - in numstat)
+              if (add === "-" || del === "-") continue;
+
+              files.push({
+                path: filePath,
+                additions: parseInt(add) || 0,
+                deletions: parseInt(del) || 0,
+              });
+              fileCount++;
+            }
+
+            // Get diff if requested
+            if (includeDiffs && files.length > 0) {
+              // Build exclusion pathspec
+              const excludeSpecs = [
+                "':(exclude)package-lock.json'",
+                "':(exclude)pnpm-lock.yaml'",
+                "':(exclude)yarn.lock'",
+                "':(exclude)*.lock'",
+                "':(exclude)*.min.js'",
+                "':(exclude)*.min.css'",
+                "':(exclude)*.map'",
+                "':(exclude)*.d.ts'",
+                "':(exclude)dist/*'",
+                "':(exclude)build/*'",
+                "':(exclude)node_modules/*'",
+              ];
+
+              const diffCmd = `git show ${hash} --no-color -p ${excludeSpecs.join(
+                " "
+              )}`;
+              const { stdout: diffOut } = await execAsync(diffCmd, {
+                cwd: repoPath,
+                maxBuffer: 1024 * 1024 * 5, // 5MB per commit
+              });
+
+              // Truncate diff if too long
+              const diffLines = diffOut.split("\n");
+              if (diffLines.length > maxDiffLinesPerFile * files.length) {
+                diffContent = diffLines
+                  .slice(0, maxDiffLinesPerFile * Math.min(files.length, 10))
+                  .join("\n");
+                diffContent += "\n... (diff truncated)";
+              } else {
+                diffContent = diffOut;
+              }
+            }
+          } catch {
+            // Ignore errors getting file stats
+          }
+
+          const commitInfo: CommitInfo = {
+            hash: hash.substring(0, 8),
+            author,
+            authorDate,
+            message,
+            files,
+            diff: diffContent,
+          };
+
+          repoCommits.push({ dateOnly, commitInfo });
+        }
+
+        console.log(`[Git] ${repoName}: collected ${lines.length} commits`);
+        return { repoName, commits: repoCommits };
+      } catch (error) {
+        console.warn(`[Git] Error collecting from ${repoName}:`, error);
+        return { repoName, commits: [] };
+      }
+    })
+  );
+
+  // 合并所有仓库的结果到 dailyMap
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      const { repoName, commits } = result.value;
+
+      for (const { dateOnly, commitInfo } of commits) {
         // Add to daily map
         if (!dailyMap.has(dateOnly)) {
           dailyMap.set(dateOnly, {
@@ -534,24 +561,20 @@ export async function getCommitsByDay(
         const daily = dailyMap.get(dateOnly)!;
         daily.commits.push(commitInfo);
         daily.stats.totalCommits++;
-        daily.stats.totalAdditions += files.reduce(
+        daily.stats.totalAdditions += commitInfo.files.reduce(
           (sum, f) => sum + f.additions,
           0
         );
-        daily.stats.totalDeletions += files.reduce(
+        daily.stats.totalDeletions += commitInfo.files.reduce(
           (sum, f) => sum + f.deletions,
           0
         );
-        daily.stats.filesChanged += files.length;
+        daily.stats.filesChanged += commitInfo.files.length;
 
         if (!daily.repos.includes(repoName)) {
           daily.repos.push(repoName);
         }
       }
-
-      console.log(`[Git] ${repoName}: collected ${lines.length} commits`);
-    } catch (error) {
-      console.warn(`[Git] Error collecting from ${repoName}:`, error);
     }
   }
 

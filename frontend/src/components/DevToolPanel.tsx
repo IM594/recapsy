@@ -53,6 +53,10 @@ export function DevToolPanel() {
   );
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Preload daily summaries
+  const [preloadJson, setPreloadJson] = useState("");
+  const [preloadedData, setPreloadedData] = useState<any[] | null>(null);
+
   // Load repos from environment or API
   useEffect(() => {
     const fetchRepos = async () => {
@@ -99,14 +103,37 @@ export function DevToolPanel() {
     return response.json();
   };
 
-  const handleTest = async () => {
-    if (selectedRepos.length === 0) {
-      toast.error("请至少选择一个仓库");
-      return;
+  const handleLoadPreloadData = () => {
+    try {
+      const parsed = JSON.parse(preloadJson);
+      if (!Array.isArray(parsed)) {
+        toast.error("JSON 必须是一个数组");
+        return;
+      }
+      setPreloadedData(parsed);
+      toast.success(`成功加载 ${parsed.length} 条记录`);
+    } catch (error) {
+      toast.error("JSON 格式错误，请检查");
     }
-    if (!author) {
-      toast.error("请输入 Author");
-      return;
+  };
+
+  const handleTest = async () => {
+    // 如果有预加载数据，且测试模式是 monthly 或 yearly，则跳过前面的步骤
+    const skipEarlySteps =
+      preloadedData &&
+      (testMode === "monthly_summary" ||
+        testMode === "yearly_summary" ||
+        testMode === "full_pipeline");
+
+    if (!skipEarlySteps) {
+      if (selectedRepos.length === 0) {
+        toast.error("请至少选择一个仓库");
+        return;
+      }
+      if (!author) {
+        toast.error("请输入 Author");
+        return;
+      }
     }
 
     setLoading(true);
@@ -114,116 +141,142 @@ export function DevToolPanel() {
 
     try {
       const newResults = new Map<string, DevToolResponse>();
+      let dailySummaries: any[] | null = null;
 
-      // Step 1: Collect data
-      toast.info("正在收集数据...");
-      const collectResult = await executeNode("collect_data", {
-        repos: selectedRepos,
-        since,
-        until,
-        authorPattern: author,
-      });
-      newResults.set("collect_data", collectResult);
-      setResults(new Map(newResults));
+      // 如果有预加载数据，直接使用
+      if (skipEarlySteps) {
+        dailySummaries = preloadedData;
+        toast.info(`使用预加载的 ${dailySummaries!.length} 条日摘要`);
 
-      if (!collectResult.success) {
-        toast.error(`数据收集失败: ${collectResult.error}`);
-        return;
-      }
-
-      const dailyData = collectResult.output as any[];
-      if (!dailyData || dailyData.length === 0) {
-        toast.warning("未找到符合条件的提交记录");
-        return;
-      }
-
-      toast.success(`收集到 ${dailyData.length} 天的数据`);
-
-      // Stop here if only testing collect_data
-      if (testMode === "collect_data") {
-        return;
-      }
-
-      // Step 2: Daily summaries (concurrent processing)
-      if (
-        testMode === "daily_summary" ||
-        testMode === "monthly_summary" ||
-        testMode === "yearly_summary" ||
-        testMode === "full_pipeline"
-      ) {
-        toast.info(`正在并发生成 ${dailyData.length} 天的日摘要...`);
-
-        // 并发生成所有日摘要
-        const dailyPromises = dailyData.map((dayData) =>
-          executeNode("daily_summarizer", dayData)
-        );
-        const dailyResults = await Promise.all(dailyPromises);
-
-        // 收集成功的结果
-        const dailySummaries = dailyResults
-          .filter((r) => r.success)
-          .map((r) => r.output);
-
-        const failedCount = dailyResults.length - dailySummaries.length;
-        if (failedCount > 0) {
-          toast.warning(`${failedCount} 天的摘要生成失败`);
-        }
-
-        if (dailySummaries.length === 0) {
-          toast.error("未能生成任何日摘要");
-          return;
-        }
-
-        // 将所有 daily summaries 存储到 results 中
+        // 存储到 results 中供显示
         newResults.set("daily_summaries", {
           success: true,
           nodeName: "daily_summarizer",
-          executionTimeMs: dailyResults.reduce(
-            (sum, r) => sum + r.executionTimeMs,
-            0
-          ),
+          executionTimeMs: 0,
           output: dailySummaries,
         });
         setResults(new Map(newResults));
-
-        toast.success(`成功生成 ${dailySummaries.length} 天的日摘要`);
-
-        if (testMode === "daily_summary") {
-          return;
-        }
-
-        // Step 3: Monthly summary (aggregate all daily summaries)
-        toast.info(`正在聚合 ${dailySummaries.length} 天的摘要为月度报告...`);
-        const month = since.substring(0, 7); // YYYY-MM
-        const monthlyResult = await executeNode("monthly_summarizer", {
-          month,
-          dailySummaries,
+      } else {
+        // Step 1: Collect data
+        toast.info("正在收集数据...");
+        const collectResult = await executeNode("collect_data", {
+          repos: selectedRepos,
+          since,
+          until,
+          authorPattern: author,
         });
-        newResults.set("monthly_summary", monthlyResult);
+        newResults.set("collect_data", collectResult);
         setResults(new Map(newResults));
 
-        if (!monthlyResult.success) {
-          toast.error(`月摘要失败: ${monthlyResult.error}`);
+        if (!collectResult.success) {
+          toast.error(`数据收集失败: ${collectResult.error}`);
           return;
         }
 
-        toast.success("月摘要生成成功");
-
-        if (testMode === "monthly_summary") {
+        const dailyData = collectResult.output as any[];
+        if (!dailyData || dailyData.length === 0) {
+          toast.warning("未找到符合条件的提交记录");
           return;
         }
+
+        toast.success(`收集到 ${dailyData.length} 天的数据`);
+
+        // Stop here if only testing collect_data
+        if (testMode === "collect_data") {
+          return;
+        }
+
+        // Step 2: Daily summaries (concurrent processing)
+        if (
+          testMode === "daily_summary" ||
+          testMode === "monthly_summary" ||
+          testMode === "yearly_summary" ||
+          testMode === "full_pipeline"
+        ) {
+          toast.info(`正在并发生成 ${dailyData.length} 天的日摘要...`);
+
+          // 并发生成所有日摘要
+          const dailyPromises = dailyData.map((dayData) =>
+            executeNode("daily_summarizer", dayData)
+          );
+          const dailyResults = await Promise.all(dailyPromises);
+
+          // 收集成功的结果
+          dailySummaries = dailyResults
+            .filter((r) => r.success)
+            .map((r) => r.output);
+
+          const failedCount = dailyResults.length - dailySummaries.length;
+          if (failedCount > 0) {
+            toast.warning(`${failedCount} 天的摘要生成失败`);
+          }
+
+          if (dailySummaries.length === 0) {
+            toast.error("未能生成任何日摘要");
+            return;
+          }
+
+          // 将所有 daily summaries 存储到 results 中
+          newResults.set("daily_summaries", {
+            success: true,
+            nodeName: "daily_summarizer",
+            executionTimeMs: dailyResults.reduce(
+              (sum, r) => sum + r.executionTimeMs,
+              0
+            ),
+            output: dailySummaries,
+          });
+          setResults(new Map(newResults));
+
+          toast.success(`成功生成 ${dailySummaries.length} 天的日摘要`);
+
+          if (testMode === "daily_summary") {
+            return;
+          }
+        }
+      }
+
+      // Step 3: Monthly summary (aggregate all daily summaries)
+      if (!dailySummaries) {
+        toast.error("缺少日摘要数据");
+        return;
+      }
+
+      toast.info(`正在聚合 ${dailySummaries.length} 天的摘要为月度报告...`);
+      // 从第一个摘要的日期提取月份
+      const month =
+        dailySummaries[0]?.date?.substring(0, 7) || since.substring(0, 7);
+      const monthlyResult = await executeNode("monthly_summarizer", {
+        month,
+        dailySummaries,
+      });
+      newResults.set("monthly_summary", monthlyResult);
+      setResults(new Map(newResults));
+
+      if (!monthlyResult.success) {
+        toast.error(`月摘要失败: ${monthlyResult.error}`);
+        return;
+      }
+
+      toast.success("月摘要生成成功");
+
+      if (testMode === "monthly_summary") {
+        return;
       }
 
       // Step 4: Yearly summary
       if (testMode === "yearly_summary" || testMode === "full_pipeline") {
         toast.info("正在生成年度总结...");
-        const monthlySummary = results.get("monthly_summary")?.output;
+        const monthlySummary = newResults.get("monthly_summary")?.output;
         if (!monthlySummary) {
           toast.error("缺少月度摘要数据");
           return;
         }
 
-        const year = parseInt(since.substring(0, 4));
+        // 从月度摘要的 month 字段提取年份
+        const year = parseInt(
+          monthlySummary.month?.substring(0, 4) || since.substring(0, 4)
+        );
         const yearlyResult = await executeNode("yearly_summarizer", {
           year,
           monthlySummaries: [monthlySummary], // In real scenario, would have 12 months
@@ -333,6 +386,35 @@ export function DevToolPanel() {
             </div>
           </div>
 
+          {/* Preload Daily Summaries */}
+          <div className="space-y-2 border-t pt-4">
+            <Label>📥 预加载日摘要（可选）</Label>
+            <p className="text-xs text-muted-foreground">
+              粘贴已有的 daily_summaries JSON 数组，可跳过数据收集和日摘要生成
+            </p>
+            <textarea
+              className="w-full h-24 p-2 text-xs font-mono border rounded-lg resize-none"
+              placeholder='{"date":"2025-01-01","summary":"...","keyChanges":[...]}'
+              value={preloadJson}
+              onChange={(e) => setPreloadJson(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLoadPreloadData}
+                disabled={!preloadJson.trim()}
+              >
+                加载数据
+              </Button>
+              {preloadedData && (
+                <Badge variant="default" className="text-xs">
+                  ✓ 已加载 {preloadedData.length} 条
+                </Badge>
+              )}
+            </div>
+          </div>
+
           {/* Test Mode */}
           <div className="space-y-2">
             <Label>测试模式</Label>
@@ -372,7 +454,10 @@ export function DevToolPanel() {
           <Button
             className="w-full"
             onClick={handleTest}
-            disabled={loading || selectedRepos.length === 0 || !author}
+            disabled={
+              loading ||
+              (!preloadedData && (selectedRepos.length === 0 || !author))
+            }
           >
             {loading ? (
               <>
