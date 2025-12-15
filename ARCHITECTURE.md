@@ -69,39 +69,48 @@ daily-work-summarizer/
 │   ├── src/
 │   │   ├── workflow/          # LangGraph 工作流
 │   │   │   ├── graph.ts       # 工作流图定义
-│   │   │   ├── nodes.ts       # 节点实现
 │   │   │   ├── state.ts       # 状态定义
-│   │   │   └── checkpointer.ts # Checkpointer 配置
+│   │   │   └── nodes/         # 节点实现
+│   │   │       ├── ai-processor.ts
+│   │   │       ├── collect-git-commits.ts
+│   │   │       ├── export-markdown.ts
+│   │   │       └── index.ts
 │   │   ├── api/
 │   │   │   ├── routes/
 │   │   │   │   ├── summary.ts # 总结路由
-│   │   │   │   └── history.ts # 历史记录路由
+│   │   │   │   └── repos.ts   # 仓库路由
 │   │   │   └── server.ts      # Express 服务器
-│   │   └── index.ts
-│   ├── checkpoints.db         # SQLite 数据库 (自动生成)
+│   │   └── lib/
+│   │       ├── git.ts         # Git 操作
+│   │       └── logger.ts      # 日志工具
 │   ├── package.json
 │   ├── tsconfig.json
-│   └── .env.example
+│   └── .env                   # 环境变量 (不提交到 Git)
 │
 ├── frontend/                   # 前端应用
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── ui/            # shadcn/ui 组件
 │   │   │   ├── InputForm.tsx  # 输入表单
-│   │   │   └── WorkflowVisualization.tsx # React Flow 可视化
+│   │   │   └── ResultCard.tsx # 结果展示
 │   │   ├── lib/
 │   │   │   └── utils.ts       # 工具函数
 │   │   ├── App.tsx
-│   │   └── main.tsx
+│   │   ├── main.tsx
+│   │   └── index.css
 │   ├── components.json        # shadcn 配置
 │   ├── package.json
 │   ├── vite.config.ts
 │   ├── tailwind.config.js
+│   ├── eslint.config.js       # ESLint 配置
 │   └── tsconfig.json
 │
 ├── package.json               # 根 package.json (pnpm workspace)
 ├── pnpm-workspace.yaml        # pnpm workspace 配置
-└── README.md
+├── .gitignore
+├── README.md
+├── ARCHITECTURE.md            # 架构文档
+└── CLAUDE.md                  # 开发指南
 ```
 
 ---
