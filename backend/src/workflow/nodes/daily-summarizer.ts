@@ -10,7 +10,7 @@ import logger from "../../lib/logger";
  * Generate a summary for a single day's work
  */
 export async function processDailySummary(
-  dailyData: DailyCommitData
+  dailyData: DailyCommitData & { additionalInstructions?: string }
 ): Promise<DailySummary> {
   const startTime = Date.now();
 
@@ -58,8 +58,15 @@ ${dailyData.repos.join(", ")}
 ${commitSummaries.join("\n\n")}
 ${diffSection}
 
+## 额外指令
+${
+  dailyData.additionalInstructions
+    ? `> ${dailyData.additionalInstructions}`
+    : "无"
+}
+
 ## 要求
-1. 用自然语言描述今天完成的主要工作，不要直接复制 commit message
+1. 用自然语言描述今天完成的主要工作，保留专有名词，不要直接复制 commit message
 2. 将相关的小提交合并为一个工作项描述
 3. 提取 3-5 个关键变更点
 4. 总计不超过 300 字

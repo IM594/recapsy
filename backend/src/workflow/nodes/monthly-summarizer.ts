@@ -11,7 +11,8 @@ import logger from "../../lib/logger";
  */
 export async function processMonthSummary(
   month: string, // YYYY-MM format
-  dailySummaries: DailySummary[]
+  dailySummaries: DailySummary[],
+  additionalInstructions?: string
 ): Promise<MonthlySummary> {
   const startTime = Date.now();
 
@@ -31,6 +32,9 @@ ${month}
 
 ## 每日总结
 ${dailySummaryTexts.join("\n\n---\n\n")}
+
+## 额外指令
+${additionalInstructions ? `> ${additionalInstructions}` : "无"}
 
 ## 要求
 1. 归纳本月的主要工作成果，而不是简单罗列每天的工作

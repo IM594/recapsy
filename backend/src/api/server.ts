@@ -3,7 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import summaryRouter from "./routes/summary";
 import reposRouter from "./routes/repos";
-import devtoolRouter from "./routes/devtool";
+import workflowRouter from "./routes/workflow";
+import regenerateRouter from "./routes/regenerate";
 
 dotenv.config();
 
@@ -35,7 +36,8 @@ app.use((req, res, next) => {
 // 路由
 app.use("/api", summaryRouter);
 app.use("/api", reposRouter);
-app.use("/api", devtoolRouter);
+app.use("/api/workflow", workflowRouter);
+app.use("/api", regenerateRouter);
 
 // 健康检查
 app.get("/health", (req, res) => {

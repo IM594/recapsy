@@ -1,11 +1,50 @@
 import { useState } from "react";
 import { InputForm } from "./components/InputForm";
 import { ResultCard } from "./components/ResultCard";
-import { DevToolPanel } from "./components/DevToolPanel";
+import { YearEndContainer } from "./components/YearEndContainer";
 import { Sparkles, Loader2 } from "lucide-react";
 import { Toaster, toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 function App() {
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <header className="text-center space-y-2">
+          <div className="inline-flex items-center justify-center p-3 bg-white rounded-full shadow-sm mb-4">
+            <Sparkles className="h-6 w-6 text-primary mr-2" />
+            <span className="font-bold text-xl tracking-tight">
+              Daily Work Summarizer
+            </span>
+          </div>
+        </header>
+
+        <main className="space-y-8">
+          <Tabs defaultValue="review" className="w-full">
+            <div className="flex justify-center mb-8">
+              <TabsList className="grid w-full max-w-md grid-cols-2">
+                <TabsTrigger value="generator">Daily/Weekly Tools</TabsTrigger>
+                <TabsTrigger value="review">Year-End Review</TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="generator" className="space-y-8">
+              <SummaryGenerator />
+            </TabsContent>
+
+            <TabsContent value="review">
+              <YearEndContainer />
+            </TabsContent>
+          </Tabs>
+        </main>
+      </div>
+      <Toaster />
+    </div>
+  );
+}
+
+// Wrapper for the existing InputForm + Result part to keep App clean
+function SummaryGenerator() {
   const [result, setResult] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
@@ -49,43 +88,17 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="max-w-3xl mx-auto space-y-8">
-        <header className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center p-3 bg-white rounded-full shadow-sm mb-4">
-            <Sparkles className="h-6 w-6 text-primary mr-2" />
-            <span className="font-bold text-xl tracking-tight">
-              Daily Work Summarizer
-            </span>
-          </div>
-        </header>
-
-        <main className="space-y-8">
-          <InputForm onSubmit={handleSubmit} loading={loading} />
-
-          {/* DevTool Panel - Collapsible */}
-          <DevToolPanel />
-
-          {loading && (
-            <div className="flex items-center justify-center p-8">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <span className="ml-2 text-slate-500">正在生成总结...</span>
-            </div>
-          )}
-
-          {result && (
-            <ResultCard
-              summary={result.summary}
-              outputPath={result.outputPath}
-            />
-          )}
-        </main>
-
-        <footer className="text-center text-sm text-slate-400 pt-8">
-          <p>Powered by LangGraph</p>
-        </footer>
-      </div>
-      <Toaster />
+    <div className="max-w-3xl mx-auto space-y-8">
+      <InputForm onSubmit={handleSubmit} loading={loading} />
+      {loading && (
+        <div className="flex items-center justify-center p-8">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <span className="ml-2 text-primary font-medium">生成中...</span>
+        </div>
+      )}
+      {result && (
+        <ResultCard summary={result.summary} outputPath={result.outputPath} />
+      )}
     </div>
   );
 }

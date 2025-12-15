@@ -11,7 +11,8 @@ import logger from "../../lib/logger";
  */
 export async function processYearEndSummary(
   year: number,
-  monthlySummaries: MonthlySummary[]
+  monthlySummaries: MonthlySummary[],
+  additionalInstructions?: string
 ): Promise<YearEndSummary> {
   const startTime = Date.now();
 
@@ -29,6 +30,9 @@ export async function processYearEndSummary(
 # ${year} 年度工作数据
 
 ${monthlySummaryTexts.join("\n\n---\n\n")}
+
+## 额外指令
+${additionalInstructions ? `> ${additionalInstructions}` : "无"}
 
 ## 要求
 1. **年度概述**：用 2-3 段话概述全年的工作重点和成果
