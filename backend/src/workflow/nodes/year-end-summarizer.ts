@@ -2,7 +2,7 @@
  * Year-End Summarizer - Generate comprehensive year-end self-review
  */
 
-import { ChatOpenAI } from "@langchain/openai";
+import { createLLM } from "../../lib/llm";
 import type { MonthlySummary, YearEndSummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
@@ -69,20 +69,7 @@ ${additionalInstructions ? `> ${additionalInstructions}` : "无"}
 ## 🎯 总结与展望
 （简短的总结和对未来的展望）`;
 
-  // 在运行时读取环境变量,确保 dotenv 已加载
-  const AI_MODEL = process.env.AI_MODEL_NAME;
-  const AI_BASE_URL = process.env.OPENAI_BASE_URL;
-  const AI_API_KEY = process.env.OPENAI_API_KEY;
-
-  const model = new ChatOpenAI({
-    modelName: AI_MODEL,
-    temperature: 0.6,
-    openAIApiKey: AI_API_KEY,
-    configuration: {
-      baseURL: AI_BASE_URL,
-    },
-  });
-
+  const model = createLLM({ temperature: 0.6 });
   const response = await model.invoke(prompt);
   const overview = String(response.content);
 

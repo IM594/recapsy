@@ -4,6 +4,8 @@ import logger from "../../lib/logger";
 import { CheckpointManager } from "../../lib/checkpoint";
 import { processDailySummary } from "../../workflow/nodes/daily-summarizer";
 import { processWeeklySummary } from "../../workflow/nodes/weekly-summarizer";
+import { processMonthSummary } from "../../workflow/nodes/monthly-summarizer";
+import { processYearEndSummary } from "../../workflow/nodes/year-end-summarizer";
 
 const router = Router();
 
@@ -35,15 +37,18 @@ router.post("/generate", async (req, res) => {
 
   const checkpoint = getCheckpointManager(year);
 
-  // Check if already running
+  // CRITICAL: Initialize checkpoint FIRST to ensure state persistence works
+  await checkpoint.initialize(selectedRepos || [], author || "");
+
+  // Check if already running (now we can reliably read from disk)
   if (checkpoint.isRunning()) {
     return res
       .status(409)
       .json({ error: "Task already running", status: checkpoint.getStatus() });
   }
 
-  // Set running state immediately
-  await checkpoint.setRunning(true);
+  // Atomically set running state with phase
+  await checkpoint.setRunningWithPhase(true, "starting");
 
   // Start background task
   setImmediate(async () => {
@@ -53,9 +58,6 @@ router.post("/generate", async (req, res) => {
         range: `${since} -> ${until}`,
       });
 
-      // Initialize the checkpoint manager BEFORE workflow starts
-      // This ensures it's in the activeCheckpoints Map so SSE can find it
-      await checkpoint.initialize(selectedRepos || [], author || "");
       await checkpoint.updateProgress("init", 0, "Initializing workflow...");
 
       const workflow = createSummaryWorkflow();
@@ -67,14 +69,6 @@ router.post("/generate", async (req, res) => {
         since: since || "",
         until: until || "",
       });
-
-      // For daily task, we manually save to checkpoint as it might not be fully automated in graph for single-day run
-      if (taskType === "daily" && result.dailySummaries?.length > 0) {
-        // Graph nodes already save to checkpoint, so we might duplicate strict save logic here
-        // but verify if 'persist' node is reached.
-        // Since graph has "persist" node, it should be auto-saved.
-        // We just log success.
-      }
 
       await checkpoint.markComplete(result);
       logger.taskEnd("Workflow Execution", 0, "completed");
@@ -108,9 +102,10 @@ router.get("/events", async (req, res) => {
   sendEvent("status", currentStatus);
 
   // Event handlers
+  // Use "workflow_error" to avoid conflict with EventSource built-in "error" event
   const onProgress = (data: any) => sendEvent("progress", data);
   const onComplete = (data: any) => sendEvent("complete", data);
-  const onError = (err: any) => sendEvent("error", { message: err });
+  const onError = (err: any) => sendEvent("workflow_error", { message: err });
 
   checkpoint.on("progress", onProgress);
   checkpoint.on("complete", onComplete);
@@ -125,26 +120,24 @@ router.get("/events", async (req, res) => {
 
 /**
  * GET /api/summary/status
- * Get current task status
+ * Get current task status (read-only, no side effects)
  */
 router.get("/status", async (req, res) => {
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const checkpoint = getCheckpointManager(year);
-  // Ensure we have latest from disk if this is a fresh instance (fallback)
-  if (!checkpoint.getCheckpoint()) {
-    await checkpoint.initialize([], "");
-  }
+  // Load existing checkpoint from disk without creating new one
+  await checkpoint.loadIfExists();
   res.json(checkpoint.getStatus());
 });
 
 /**
  * GET /api/summary/data
- * Get generated data (daily/monthly/yearly)
+ * Get generated data (daily/monthly/yearly) - read-only
  */
 router.get("/data", async (req, res) => {
   const { type, year = new Date().getFullYear(), repo } = req.query;
   const checkpoint = getCheckpointManager(Number(year));
-  await checkpoint.initialize([], ""); // Ensure loaded
+  await checkpoint.loadIfExists(); // Read-only load, no state mutation
 
   try {
     if (type === "daily") {
@@ -190,7 +183,7 @@ router.post("/regenerate", async (req, res) => {
     year = new Date().getFullYear(),
   } = req.body;
   const checkpoint = getCheckpointManager(year);
-  await checkpoint.initialize([], "");
+  await checkpoint.loadIfExists();
 
   try {
     if (type === "daily") {
@@ -214,24 +207,14 @@ router.post("/regenerate", async (req, res) => {
       ); // YYYY-MM-DD
       const weekEndStr = new Date(existing.weekEnd).toLocaleDateString("en-CA"); // YYYY-MM-DD
 
-      console.log(
-        `[Regenerate] Weekly Range (UTC parsed to Local YMD): ${weekStartStr} -> ${weekEndStr}`
-      );
-      console.log(
-        `[Regenerate] Original ISO: ${existing.weekStart} -> ${existing.weekEnd}`
+      logger.info(
+        `[Regenerate] Weekly Range: ${weekStartStr} -> ${weekEndStr}`
       );
 
       // Load all dailies and filter by range
       const allDailies = await checkpoint.loadAllDailySummaries();
-      console.log(
-        `[Regenerate] Found ${allDailies.length} total daily summaries`
-      );
-
       const relevantDailies = allDailies.filter(
         (d) => d.date >= weekStartStr && d.date <= weekEndStr
-      );
-      console.log(
-        `[Regenerate] Filtered ${relevantDailies.length} relevant dailies`
       );
 
       if (relevantDailies.length === 0) {
@@ -251,8 +234,36 @@ router.post("/regenerate", async (req, res) => {
       return res.json(result);
     }
 
-    // Implement monthly/yearly similarly if needed
-    res.status(501).json({ error: "Not implemented for this type yet" });
+    if (type === "monthly") {
+      // id is month in YYYY-MM format
+      const allDailies = await checkpoint.loadAllDailySummaries();
+      const relevantDailies = allDailies.filter((d) =>
+        d.date.startsWith(id)
+      );
+
+      if (relevantDailies.length === 0) {
+        throw new Error(`No daily summaries found for month ${id}`);
+      }
+
+      const result = await processMonthSummary(id, relevantDailies, customPrompt);
+      await checkpoint.saveMonthlySummary(result);
+      return res.json(result);
+    }
+
+    if (type === "yearly") {
+      // id is year as string
+      const monthlySummaries = await checkpoint.loadAllMonthlySummaries();
+
+      if (monthlySummaries.length === 0) {
+        throw new Error(`No monthly summaries found for year ${year}`);
+      }
+
+      const result = await processYearEndSummary(year, monthlySummaries, customPrompt);
+      await checkpoint.saveYearEndSummary(result.overview);
+      return res.json({ summary: result.overview, ...result });
+    }
+
+    res.status(400).json({ error: `Invalid type: ${type}` });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -267,7 +278,7 @@ router.post("/reset", async (req, res) => {
   const checkpoint = getCheckpointManager(year);
 
   try {
-    await checkpoint.initialize([], "");
+    await checkpoint.loadIfExists();
     await checkpoint.resetStatus();
     res.json({ success: true, status: checkpoint.getStatus() });
   } catch (error: any) {

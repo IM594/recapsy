@@ -83,8 +83,10 @@ export interface YearEndCheckpoint {
   // Progress tracking
   phase:
     | "idle"
+    | "starting"
     | "collecting"
     | "daily_summary"
+    | "weekly_summary"
     | "monthly_summary"
     | "yearly_summary"
     | "complete"

@@ -6,6 +6,7 @@ import { Sparkles, ArrowLeft } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
+import { SummaryProvider } from "./hooks/SummaryContext";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSummary } from "./hooks/useSummary";
 
@@ -30,26 +31,55 @@ function AppContent() {
     if (!status.isRunning && status.phase === "complete" && status.result) {
       console.log("Status result:", status.result);
       let summaryContent = "";
+      let contextId = "";
+      let contextRepo = "default";
 
-      // 根据 taskType 决定显示哪个摘要
       const taskType = status.result.taskType;
+      const since = status.result.since;
 
+      // 根据请求的 since 时间，找到对应的摘要
       if (taskType === "daily" && status.result.dailySummaries?.length > 0) {
-        summaryContent = status.result.dailySummaries[0].summary;
+        // 从 since 提取本地日期 YYYY-MM-DD
+        const targetDate = new Date(since).toLocaleDateString("en-CA");
+        const matched = status.result.dailySummaries.find(
+          (d: { date: string }) => d.date === targetDate
+        );
+        if (matched) {
+          summaryContent = matched.summary;
+          contextId = matched.date;
+          contextRepo = matched.repo;
+        }
       } else if (
         taskType === "weekly" &&
         status.result.weeklySummaries?.length > 0
       ) {
-        summaryContent = status.result.weeklySummaries[0].summary;
+        // 从 since 提取本地日期作为周起始
+        const targetWeekStart = new Date(since).toLocaleDateString("en-CA");
+        const matched = status.result.weeklySummaries.find(
+          (w: { weekStart: string }) => w.weekStart === targetWeekStart
+        );
+        if (matched) {
+          summaryContent = matched.summary;
+          contextId = matched.weekStart;
+        }
       } else if (
         taskType === "monthly" &&
         status.result.monthlySummaries?.length > 0
       ) {
-        summaryContent = status.result.monthlySummaries[0].summary;
+        // 从 since 提取本地月份 YYYY-MM
+        const targetMonth = new Date(since).toLocaleDateString("en-CA").substring(0, 7);
+        const matched = status.result.monthlySummaries.find(
+          (m: { month: string }) => m.month === targetMonth
+        );
+        if (matched) {
+          summaryContent = matched.summary;
+          contextId = matched.month;
+        }
       }
       // 年度总结的特殊格式
       else if (status.result.result?.content) {
         summaryContent = status.result.result.content;
+        contextId = String(status.result.year);
       }
       // 最后的 fallback
       else if (status.result.content) {
@@ -62,19 +92,8 @@ function AppContent() {
           outputPath: "",
           context: {
             type: taskType,
-            // Determine ID and Repo based on result structure
-            // For daily, id is date, repo is repo
-            // For weekly, id is weekStart
-            id:
-              taskType === "daily"
-                ? status.result.dailySummaries[0]?.date
-                : taskType === "weekly"
-                ? status.result.weeklySummaries[0]?.weekStart
-                : "",
-            repo:
-              taskType === "daily"
-                ? status.result.dailySummaries[0]?.repo
-                : "default",
+            id: contextId,
+            repo: contextRepo,
           },
         });
       } else {
@@ -237,7 +256,9 @@ function AppContent() {
 function App() {
   return (
     <SettingsProvider>
-      <AppContent />
+      <SummaryProvider>
+        <AppContent />
+      </SummaryProvider>
     </SettingsProvider>
   );
 }

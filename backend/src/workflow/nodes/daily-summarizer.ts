@@ -2,7 +2,7 @@
  * Daily Summarizer - Process a single day's commits and generate summary
  */
 
-import { ChatOpenAI } from "@langchain/openai";
+import { createLLM } from "../../lib/llm";
 import type { DailyCommitData, DailySummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
@@ -80,19 +80,7 @@ ${
 - 变更2
 - ...`;
 
-  // 在运行时读取环境变量,确保 dotenv 已加载
-  const AI_MODEL = process.env.AI_MODEL_NAME;
-  const AI_BASE_URL = process.env.OPENAI_BASE_URL;
-  const AI_API_KEY = process.env.OPENAI_API_KEY;
-
-  const model = new ChatOpenAI({
-    modelName: AI_MODEL,
-    temperature: 0.5,
-    openAIApiKey: AI_API_KEY,
-    configuration: {
-      baseURL: AI_BASE_URL,
-    },
-  });
+  const model = createLLM({ temperature: 0.5 });
 
   const response = await model.invoke(prompt);
   const summary = String(response.content);

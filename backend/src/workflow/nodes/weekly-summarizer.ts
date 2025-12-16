@@ -2,7 +2,7 @@
  * Weekly Summarizer Node - Aggregate daily summaries into weekly report
  */
 
-import { ChatOpenAI } from "@langchain/openai";
+import { createLLM } from "../../lib/llm";
 import { WorkflowState } from "../state";
 import { CheckpointManager } from "../../lib/checkpoint";
 import type { WeeklySummary, DailySummary } from "../../lib/types";
@@ -18,20 +18,7 @@ export async function processWeeklySummary(
   customPrompt?: string
 ): Promise<WeeklySummary> {
   const totalDays = dailySummaries.length;
-
-  // 在运行时读取环境变量,确保 dotenv 已加载
-  const AI_MODEL = process.env.AI_MODEL_NAME;
-  const AI_BASE_URL = process.env.OPENAI_BASE_URL;
-  const AI_API_KEY = process.env.OPENAI_API_KEY;
-
-  const model = new ChatOpenAI({
-    model: AI_MODEL,
-    temperature: 0.3,
-    apiKey: AI_API_KEY,
-    configuration: {
-      baseURL: AI_BASE_URL,
-    },
-  });
+  const model = createLLM({ temperature: 0.3 });
 
   // Build context for AI
   const dailyDetails = dailySummaries

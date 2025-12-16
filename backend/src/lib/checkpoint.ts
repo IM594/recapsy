@@ -97,6 +97,23 @@ export class CheckpointManager extends EventEmitter {
   }
 
   /**
+   * Load existing checkpoint from disk (read-only, no side effects)
+   * Does not create directories or new checkpoint file
+   */
+  async loadIfExists(): Promise<boolean> {
+    if (this.checkpoint) return true;
+
+    try {
+      const data = await fs.readFile(this.checkpointPath, "utf-8");
+      this.checkpoint = JSON.parse(data);
+      return true;
+    } catch {
+      // No checkpoint exists, leave as null
+      return false;
+    }
+  }
+
+  /**
    * Save checkpoint to disk
    */
   async save(): Promise<void> {
@@ -132,6 +149,24 @@ export class CheckpointManager extends EventEmitter {
       this.checkpoint.isRunning = running;
       if (!running) {
         this.checkpoint.currentStep = null;
+      }
+      await this.save();
+    }
+  }
+
+  /**
+   * Atomically set running state with phase (ensures state persistence)
+   */
+  async setRunningWithPhase(
+    running: boolean,
+    phase: YearEndCheckpoint["phase"]
+  ): Promise<void> {
+    if (this.checkpoint) {
+      this.checkpoint.isRunning = running;
+      this.checkpoint.phase = phase;
+      if (!running) {
+        this.checkpoint.currentStep = null;
+        this.checkpoint.progress = 0;
       }
       await this.save();
     }
