@@ -20,7 +20,7 @@ function App() {
         </header>
 
         <main className="space-y-8">
-          <Tabs defaultValue="review" className="w-full">
+          <Tabs defaultValue="generator" className="w-full">
             <div className="flex justify-center mb-8">
               <TabsList className="grid w-full max-w-md grid-cols-2">
                 <TabsTrigger value="generator">Daily/Weekly Tools</TabsTrigger>

@@ -141,7 +141,7 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
   }
 
   return (
-    <div className="grid grid-cols-12 gap-6 h-[800px]">
+    <div className="grid grid-cols-12 gap-6 h-[calc(100vh-12rem)] min-h-[500px]">
       {/* Sidebar - Tree View */}
       <Card className="col-span-3 flex flex-col h-full border-2 border-slate-200">
         <CardHeader className="py-4 px-4 bg-slate-50 border-b">

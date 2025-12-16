@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { YearEndGenerator } from "./YearEndGenerator";
 import { YearEndReview } from "./YearEndReview";
+import { YearEndLanding } from "./YearEndLanding";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 
@@ -11,8 +12,10 @@ interface YearEndContainerProps {
 export function YearEndContainer({
   initialYear = 2025,
 }: YearEndContainerProps) {
-  const [view, setView] = useState<"generator" | "review">("generator");
-  const [, setHasData] = useState(false); // Can be used for initial state if needed
+  const [view, setView] = useState<"landing" | "generator" | "review">(
+    "landing"
+  );
+  const [hasData, setHasData] = useState(false);
   const [year] = useState(initialYear);
 
   // Check if data exists on mount
@@ -28,7 +31,7 @@ export function YearEndContainer({
       const data = await res.json();
       if (data.structure && data.structure.hasYearlySummary) {
         setHasData(true);
-        setView("review");
+        // Removed auto-redirect to 'review' based on user feedback
       }
     } catch (error) {
       console.error("Failed to check existing data", error);
@@ -42,25 +45,35 @@ export function YearEndContainer({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center mb-6">
-        {view === "review" && (
+      {/* Navigation Header only for non-landing pages */}
+      {view !== "landing" && (
+        <div className="flex justify-between items-center mb-6">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            onClick={() => setView("generator")}
-            className="gap-2"
+            onClick={() => setView("landing")}
+            className="gap-2 text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" />
-            Start New Review
+            Back to Dashboard
           </Button>
-        )}
-      </div>
-
-      {view === "generator" ? (
-        <YearEndGenerator onComplete={handleGenerationComplete} year={year} />
-      ) : (
-        <YearEndReview year={year} />
+        </div>
       )}
+
+      {view === "landing" && (
+        <YearEndLanding
+          year={year}
+          hasData={hasData}
+          onStartNew={() => setView("generator")}
+          onViewReport={() => setView("review")}
+        />
+      )}
+
+      {view === "generator" && (
+        <YearEndGenerator onComplete={handleGenerationComplete} year={year} />
+      )}
+
+      {view === "review" && <YearEndReview year={year} />}
     </div>
   );
 }

@@ -12,16 +12,19 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Loader2,
-  Play,
   CheckCircle2,
   Sparkles,
-  Calendar,
   GitGraph,
   User,
   AlertCircle,
+  ArrowRight,
+  Circle,
+  Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Repo {
   name: string;
@@ -40,12 +43,29 @@ interface YearEndGeneratorProps {
   year?: number;
 }
 
+type StepStatus = "pending" | "running" | "completed" | "error";
+
+interface ProcessStep {
+  id: string;
+  title: string;
+  description: string;
+  status: StepStatus;
+}
+
 export function YearEndGenerator({
   onComplete,
   year = 2025,
 }: YearEndGeneratorProps) {
+  // Config State
   const [repos, setRepos] = useState<Repo[]>([]);
-  const [selectedRepos, setSelectedRepos] = useState<string[]>([]);
+  const [selectedRepos, setSelectedRepos] = useState<string[]>(() => {
+    const saved = localStorage.getItem("ye_selected_repos");
+    try {
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [author, setAuthor] = useState(
     () => localStorage.getItem("ye_author") || ""
   );
@@ -55,10 +75,37 @@ export function YearEndGenerator({
   const [until, setUntil] = useState(
     () => localStorage.getItem("ye_until") || `${year}-12-31`
   );
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [currentStep, setCurrentStep] = useState<string>("");
+
+  // Execution State
+  const [isExecuting, setIsExecuting] = useState(false);
   const [logs, setLogs] = useState<StepResult[]>([]);
+  const [showLogs, setShowLogs] = useState(false);
+  const [steps, setSteps] = useState<ProcessStep[]>([
+    {
+      id: "collect",
+      title: "Data Collection",
+      description: "Collecting git commits and diffs",
+      status: "pending",
+    },
+    {
+      id: "daily",
+      title: "Daily Processing",
+      description: "Generating summaries for each active day",
+      status: "pending",
+    },
+    {
+      id: "monthly",
+      title: "Monthly Aggregation",
+      description: "Compiling monthly reports",
+      status: "pending",
+    },
+    {
+      id: "yearly",
+      title: "Annual Review",
+      description: "Synthesizing the final year-end summary",
+      status: "pending",
+    },
+  ]);
 
   // Load repos
   useEffect(() => {
@@ -70,17 +117,6 @@ export function YearEndGenerator({
         if (response.ok) {
           const data = await response.json();
           setRepos(data.repos || []);
-
-          // Restore selected repos from local storage
-          const saved = localStorage.getItem("ye_selected_repos");
-          if (saved) {
-            try {
-              const parsed = JSON.parse(saved);
-              if (Array.isArray(parsed)) setSelectedRepos(parsed);
-            } catch (e) {
-              console.error("Failed to parse saved repos", e);
-            }
-          }
         }
       } catch (error) {
         console.error("Failed to load repos:", error);
@@ -112,6 +148,12 @@ export function YearEndGenerator({
     );
   };
 
+  const updateStepStatus = (id: string, status: StepStatus) => {
+    setSteps((prev) =>
+      prev.map((step) => (step.id === id ? { ...step, status } : step))
+    );
+  };
+
   const addLog = (step: string, success: boolean, message?: string) => {
     setLogs((prev) => [
       { step, success, message, timestamp: new Date().toLocaleTimeString() },
@@ -138,14 +180,14 @@ export function YearEndGenerator({
       return;
     }
 
-    setLoading(true);
-    setProgress(0);
+    setIsExecuting(true);
     setLogs([]);
+    setSteps((s) => s.map((step) => ({ ...step, status: "pending" })));
 
     try {
       // Step 1: Data Collection
-      setCurrentStep("Collecting commits & diffs...");
-      toast.info("Starting data collection...");
+      updateStepStatus("collect", "running");
+      addLog("Data Collection", true, "Starting commit collection...");
 
       const collectResult = await executeNode("collect_data", {
         repos: selectedRepos,
@@ -160,13 +202,13 @@ export function YearEndGenerator({
 
       const dailyData = collectResult.output as any[];
       if (!dailyData || dailyData.length === 0) {
+        updateStepStatus("collect", "error");
         addLog("Data Collection", false, "No commits found");
         toast.warning("No matching commits found");
-        setLoading(false);
+        setIsExecuting(false);
         return;
       }
 
-      // Detailed log for collection
       const totalCommits = dailyData.reduce(
         (sum, d) => sum + (d.commits?.length || 0),
         0
@@ -174,75 +216,49 @@ export function YearEndGenerator({
       addLog(
         "Data Collection",
         true,
-        `Found ${totalCommits} commits across ${dailyData.length} days. Ready to process.`
+        `Found ${totalCommits} commits across ${dailyData.length} days.`
       );
-      setProgress(20);
+      updateStepStatus("collect", "completed");
 
       // Step 2: Daily Summaries
-      setCurrentStep(`Processing ${dailyData.length} daily summaries...`);
+      updateStepStatus("daily", "running");
       const dailySummaries: any[] = [];
-
-      // Batch process in chunks of 5
       const batchSize = 5;
+
       for (let i = 0; i < dailyData.length; i += batchSize) {
         const batch = dailyData.slice(i, i + batchSize);
-        // Process sequentially or concurrently but update UI per item
-        // To update UI properly without batching weirdness, we'll map promises
-        // but handle state updates in their .then()
-
         await Promise.all(
           batch.map(async (day) => {
             try {
-              addLog("Processing", true, `Processing ${day.date}...`); // Start log
               const res = await executeNode("daily_summarizer", day);
-
               if (res.success) {
                 dailySummaries.push(res.output);
                 addLog(
                   "Daily Summary",
                   true,
-                  `✅ ${day.date}: Generated summary (${res.output.summary.length} chars)`
+                  `Summary generated for ${day.date}`
                 );
               } else {
                 addLog(
                   "Daily Summary",
                   false,
-                  `❌ ${day.date}: Failed - ${res.error}`
+                  `Failed for ${day.date}: ${res.error}`
                 );
               }
             } catch (err) {
-              const errMsg = err instanceof Error ? err.message : String(err);
-              addLog(
-                "Daily Summary",
-                false,
-                `❌ ${day.date}: Error - ${errMsg}`
-              );
+              addLog("Daily Summary", false, `Error for ${day.date}`);
             }
           })
         );
-
-        const processedCount = Math.min(i + batchSize, dailyData.length);
-        const percent =
-          20 + Math.floor((processedCount / dailyData.length) * 50);
-        setProgress(percent);
-
-        // Log batch completion
-        // addLog("Processing", true, `Batch ${Math.floor(i / batchSize) + 1} completed.`);
       }
 
       if (dailySummaries.length === 0) {
         throw new Error("Failed to generate any daily summaries");
       }
-
-      addLog(
-        "Daily Summaries",
-        true,
-        `Successfully generated ${dailySummaries.length} daily summaries.`
-      );
+      updateStepStatus("daily", "completed");
 
       // Step 3: Monthly Summaries
-      setCurrentStep("Aggregating monthly reports...");
-
+      updateStepStatus("monthly", "running");
       const months = new Set(dailySummaries.map((d) => d.date.substring(0, 7)));
       const monthlySummaries = [];
       const monthList = Array.from(months).sort();
@@ -258,26 +274,15 @@ export function YearEndGenerator({
 
         if (res.success) {
           monthlySummaries.push(res.output);
-          addLog(
-            "Monthly Summary",
-            true,
-            `Generated for ${month} (${monthDailies.length} days)`
-          );
+          addLog("Monthly Summary", true, `Generated for ${month}`);
         } else {
           addLog("Monthly Summary", false, `Failed for ${month}: ${res.error}`);
         }
       }
-
-      addLog(
-        "Monthly Summaries",
-        true,
-        `Completed ${monthlySummaries.length} monthly reports.`
-      );
-      setProgress(90);
+      updateStepStatus("monthly", "completed");
 
       // Step 4: Annual Summary
-      setCurrentStep("Generating Year-End Self Review...");
-
+      updateStepStatus("yearly", "running");
       const yearlyResult = await executeNode("yearly_summarizer", {
         year,
         monthlySummaries,
@@ -286,9 +291,9 @@ export function YearEndGenerator({
       if (!yearlyResult.success) {
         throw new Error(yearlyResult.error);
       }
+      updateStepStatus("yearly", "completed");
 
-      addLog("Annual Summary", true, "Year-end review generation complete!");
-      setProgress(100);
+      addLog("Annual Summary", true, "Review generation complete!");
       toast.success("All Done! Redirecting to review...");
 
       setTimeout(() => {
@@ -296,191 +301,277 @@ export function YearEndGenerator({
       }, 1000);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      addLog(currentStep, false, msg);
+      const currentStepIndex = steps.findIndex((s) => s.status === "running");
+      if (currentStepIndex !== -1) {
+        updateStepStatus(steps[currentStepIndex].id, "error");
+      }
+      addLog("Error", false, msg);
       toast.error(`Error: ${msg}`);
-      setLoading(false);
+      setIsExecuting(false);
     }
   };
 
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-      {/* Configuration Form */}
-      <Card className="border-2 border-slate-200">
-        <CardHeader>
+  if (isExecuting) {
+    return (
+      <Card className="max-w-3xl mx-auto border-2 border-slate-200 shadow-sm">
+        <CardHeader className="border-b bg-slate-50/50">
           <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-indigo-500" />
-            Start New Review
+            <Sparkles className="h-5 w-5 text-indigo-500 animate-pulse" />
+            Generating Your Year-End Review
           </CardTitle>
           <CardDescription>
-            Configure settings for your {year} Self-Review
+            Please wait while we analyze your work patterns and generate
+            insights.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Author */}
-          <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <User className="h-4 w-4" />
-              Git Author Name
-            </Label>
-            <Input
-              placeholder="e.g. user (match your git config user.name)"
-              value={author}
-              onChange={(e) => setAuthor(e.target.value)}
-            />
-            <p className="text-xs text-muted-foreground">
-              Used to filter commits strictly authored by you.
-            </p>
-          </div>
-
-          {/* Date Range */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                From
-              </Label>
-              <Input
-                type="date"
-                value={since}
-                onChange={(e) => setSince(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Calendar className="h-4 w-4" />
-                To
-              </Label>
-              <Input
-                type="date"
-                value={until}
-                onChange={(e) => setUntil(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Repos */}
-          <div className="space-y-3">
-            <Label className="flex items-center gap-2">
-              <GitGraph className="h-4 w-4" />
-              Select Repositories ({selectedRepos.length})
-            </Label>
-            <div className="border rounded-md h-48 overflow-y-auto p-1 bg-slate-50">
-              {repos.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Loading repos...
+        <CardContent className="p-6 space-y-8">
+          {/* Steps */}
+          <div className="space-y-4">
+            {steps.map((step) => (
+              <div
+                key={step.id}
+                className={`flex items-start gap-4 p-3 rounded-lg transition-colors ${
+                  step.status === "running" ? "bg-indigo-50/50" : ""
+                }`}
+              >
+                <div className="mt-1">
+                  {step.status === "pending" && (
+                    <Circle className="h-5 w-5 text-slate-300" />
+                  )}
+                  {step.status === "running" && (
+                    <Loader2 className="h-5 w-5 text-indigo-500 animate-spin" />
+                  )}
+                  {step.status === "completed" && (
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  )}
+                  {step.status === "error" && (
+                    <AlertCircle className="h-5 w-5 text-red-500" />
+                  )}
                 </div>
+                <div className="flex-1">
+                  <h4
+                    className={`text-sm font-medium ${
+                      step.status === "running"
+                        ? "text-indigo-700"
+                        : step.status === "completed"
+                        ? "text-slate-700"
+                        : "text-slate-500"
+                    }`}
+                  >
+                    {step.title}
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {step.description}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <Separator />
+
+          {/* Logs */}
+          <div className="border rounded-md bg-slate-900 text-slate-200 font-mono text-xs overflow-hidden">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowLogs(!showLogs)}
+              className="w-full flex justify-between items-center px-4 hover:bg-slate-800 hover:text-white rounded-none"
+            >
+              <span className="flex items-center gap-2">
+                <Terminal className="h-4 w-4" />
+                Execution Logs
+              </span>
+              {showLogs ? (
+                <ChevronDown className="h-4 w-4" />
               ) : (
-                <div className="space-y-1">
-                  {repos.map((r) => (
-                    <label
-                      key={r.path}
-                      className="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer transition-colors text-sm"
-                    >
-                      <Checkbox
-                        checked={selectedRepos.includes(r.path)}
-                        onCheckedChange={() => toggleRepo(r.path)}
-                      />
-                      <span className="font-medium truncate" title={r.path}>
-                        {r.name}
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </Button>
+            {showLogs && (
+              <ScrollArea className="h-64 p-4 pt-0">
+                <div className="space-y-1.5 mt-2">
+                  {logs.map((log, i) => (
+                    <div key={i} className="flex gap-3">
+                      <span className="text-slate-500 shrink-0">
+                        {log.timestamp}
                       </span>
-                    </label>
+                      <span
+                        className={
+                          log.success ? "text-slate-300" : "text-red-400"
+                        }
+                      >
+                        {log.success ? "✓" : "✗"} [{log.step}] {log.message}
+                      </span>
+                    </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </div>
-
-          <Button
-            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
-            size="lg"
-            onClick={handleStart}
-            disabled={loading}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Analyzing {year} Data...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-2" />
-                Generate Year-End Summary
-              </>
+              </ScrollArea>
             )}
-          </Button>
-        </CardContent>
-      </Card>
-
-      {/* Progress & Logs */}
-      <Card className="border-2 border-slate-200 bg-slate-50/50">
-        <CardHeader>
-          <CardTitle className="text-base">Execution Status</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {loading ? (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm font-medium">
-                <span>{currentStep}</span>
-                <span>{progress}%</span>
-              </div>
-              <Progress value={progress} className="h-2" />
-            </div>
-          ) : logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-slate-400 text-sm border-2 border-dashed rounded-lg">
-              <Sparkles className="h-8 w-8 mb-2 opacity-50" />
-              Ready to start
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center p-4 bg-green-50 border border-green-100 rounded-lg text-green-700 mb-4">
-              <CheckCircle2 className="h-8 w-8 mb-2" />
-              <span className="font-medium">Analysis Complete</span>
-            </div>
-          )}
-
-          <div className="space-y-2">
-            <Label className="text-xs uppercase text-muted-foreground font-semibold tracking-wider">
-              Activity Log
-            </Label>
-            <div className="bg-white border rounded-md h-[400px] overflow-y-auto p-4 space-y-3 font-mono text-xs shadow-sm">
-              {logs.map((log, i) => (
-                <div
-                  key={i}
-                  className="flex gap-3 items-start border-b border-slate-50 last:border-0 pb-2 last:pb-0"
-                >
-                  <span className="text-slate-400 min-w-[60px]">
-                    {log.timestamp}
-                  </span>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 font-medium text-slate-700">
-                      {log.success ? (
-                        <CheckCircle2 className="h-3 w-3 text-green-500" />
-                      ) : (
-                        <AlertCircle className="h-3 w-3 text-red-500" />
-                      )}
-                      {log.step}
-                    </div>
-                    {log.message && (
-                      <p
-                        className={`mt-1 ${
-                          log.success ? "text-slate-500" : "text-red-500"
-                        }`}
-                      >
-                        {log.message}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-              {logs.length === 0 && !loading && (
-                <div className="text-slate-400 italic text-center pt-8">
-                  Log output will appear here...
-                </div>
-              )}
-            </div>
           </div>
         </CardContent>
       </Card>
-    </div>
+    );
+  }
+
+  return (
+    <Card className="max-w-4xl mx-auto border-2 border-slate-200 shadow-sm">
+      <CardHeader className="border-b bg-slate-50/50">
+        <CardTitle className="flex items-center gap-2 text-xl">
+          <Sparkles className="h-6 w-6 text-indigo-500" />
+          Start New Review
+        </CardTitle>
+        <CardDescription>
+          Configure how we should gather and analyze your work data for {year}.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x h-full">
+          {/* Main Config */}
+          <div className="col-span-2 p-6 space-y-8">
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-slate-900">
+                <User className="h-4 w-4" />
+                Identity & Scope
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2 space-y-2">
+                  <Label>Git Author Name</Label>
+                  <Input
+                    placeholder="e.g. user"
+                    value={author}
+                    onChange={(e) => setAuthor(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    We'll filter commits that match this author name.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>From Date</Label>
+                  <Input
+                    type="date"
+                    value={since}
+                    onChange={(e) => setSince(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>To Date</Label>
+                  <Input
+                    type="date"
+                    value={until}
+                    onChange={(e) => setUntil(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold flex items-center gap-2 text-slate-900">
+                <GitGraph className="h-4 w-4" />
+                Repositories
+              </h3>
+              <div className="border rounded-md h-64 overflow-hidden flex flex-col">
+                <div className="bg-slate-50 p-2 border-b flex justify-between items-center">
+                  <span className="text-xs font-medium text-slate-500">
+                    Available Repositories
+                  </span>
+                  <span className="text-xs text-slate-500">
+                    {selectedRepos.length} selected
+                  </span>
+                </div>
+                <ScrollArea className="flex-1 p-1">
+                  {repos.length === 0 ? (
+                    <div className="flex items-center justify-center h-full text-sm text-muted-foreground p-8">
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Loading repos...
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {repos.map((r) => (
+                        <label
+                          key={r.path}
+                          className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded cursor-pointer transition-colors text-sm"
+                        >
+                          <Checkbox
+                            checked={selectedRepos.includes(r.path)}
+                            onCheckedChange={() => toggleRepo(r.path)}
+                          />
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-medium truncate text-slate-700">
+                              {r.name}
+                            </span>
+                            <span
+                              className="text-xs text-slate-400 truncate"
+                              title={r.path}
+                            >
+                              {r.path}
+                            </span>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </ScrollArea>
+              </div>
+            </div>
+          </div>
+
+          {/* Sidebar Info */}
+          <div className="p-6 bg-slate-50/50 space-y-6">
+            <div>
+              <h4 className="font-medium text-sm text-slate-900 mb-2">
+                What happens next?
+              </h4>
+              <ul className="space-y-3">
+                {[
+                  {
+                    title: "1. Data Collection",
+                    desc: "We'll scan selected repos for your commits and active days.",
+                  },
+                  {
+                    title: "2. Daily Analysis",
+                    desc: "AI processes each active day to summarize your work.",
+                  },
+                  {
+                    title: "3. Monthly Rollup",
+                    desc: "Daily summaries are aggregated into high-level monthly visualizations.",
+                  },
+                  {
+                    title: "4. Annual Review",
+                    desc: "A final executive summary of your year's achievements.",
+                  },
+                ].map((item, i) => (
+                  <li key={i} className="flex gap-3 text-sm">
+                    <span className="flex-shrink-0 w-6 h-6 rounded-full bg-white border flex items-center justify-center text-xs font-medium text-slate-500 shadow-sm">
+                      {i + 1}
+                    </span>
+                    <div className="space-y-0.5">
+                      <span className="font-medium text-slate-700 block">
+                        {item.title}
+                      </span>
+                      <span className="text-slate-500 text-xs leading-relaxed block">
+                        {item.desc}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="pt-4 border-t">
+              <Button
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white shadow-md hover:shadow-lg transition-all"
+                size="lg"
+                onClick={handleStart}
+              >
+                Start Analysis
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
