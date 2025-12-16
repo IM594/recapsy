@@ -37,26 +37,21 @@ export function GenerationPreview({
     end: "",
   });
 
-  useEffect(() => {
-    if (open) {
-      calculateRange();
-      checkExistence();
-    }
-  }, [open, type]);
-
-  const calculateRange = () => {
+  // Calculate date range for the given type
+  const getDateRange = () => {
     const now = new Date();
     let start = "";
     let end = "";
 
     if (type === "daily") {
-      start = end = now.toLocaleDateString("en-CA"); // YYYY-MM-DD
+      start = end = now.toLocaleDateString("en-CA");
     } else if (type === "weekly") {
-      // Calculate start of week (Monday)
       const day = now.getDay();
       const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-      const monday = new Date(now.setDate(diff));
-      const sunday = new Date(now.setDate(diff + 6));
+      const monday = new Date(now);
+      monday.setDate(diff);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
       start = monday.toLocaleDateString("en-CA");
       end = sunday.toLocaleDateString("en-CA");
     } else if (type === "monthly") {
@@ -69,21 +64,21 @@ export function GenerationPreview({
       end = `${year}-12-31`;
     }
 
-    setDateRange({ start, end });
+    return { start, end };
   };
 
-  const checkExistence = async () => {
+  useEffect(() => {
+    if (open) {
+      const range = getDateRange();
+      setDateRange(range);
+      checkExistence(range.start);
+    }
+  }, [open, type, year]);
+
+  const checkExistence = async (rangeStart: string) => {
     setChecking(true);
     setExists(false);
     try {
-      // Fetch all data of this type to see if ours exists
-      // Optimization: Backend could support checking specific ID, but for now filtering client/server side is okay
-      // or we can just fetch all and check.
-      // For daily: check if today's date exists
-      // For weekly: check if weekStart exists
-      // For monthly: check if current month exists
-      // For yearly: check if year exists
-
       const res = await fetch(
         `http://localhost:3456/api/summary/data?type=${type}&year=${year}`
       );
@@ -95,19 +90,9 @@ export function GenerationPreview({
           const today = new Date().toLocaleDateString("en-CA");
           found = data.some((d: any) => d.date === today);
         } else if (type === "weekly") {
-          // We need to match the weekStart
-          // Re-calculate weekStart to match exactly what backend would use
-          const now = new Date();
-          const day = now.getDay();
-          const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-          const monday = new Date(now.setDate(diff));
-          const weekStart = monday.toLocaleDateString("en-CA");
-          found = data.some(
-            (d: any) =>
-              d.weekStart === weekStart || d.weekStart.startsWith(weekStart)
-          );
+          found = data.some((d: any) => d.weekStart === rangeStart);
         } else if (type === "monthly") {
-          const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+          const currentMonth = new Date().toISOString().substring(0, 7);
           found = data.some((d: any) => d.month === currentMonth);
         } else if (type === "yearly") {
           found = !!data.content;

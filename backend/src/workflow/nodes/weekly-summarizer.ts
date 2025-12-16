@@ -77,6 +77,13 @@ ${customPrompt ? `## 额外指令\n> ${customPrompt}\n` : ""}
 }
 
 /**
+ * Normalize date string to YYYY-MM-DD format
+ */
+function toDateString(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("en-CA");
+}
+
+/**
  * LangGraph node: Weekly Summarizer
  */
 export async function weeklySummarizerNode(
@@ -85,14 +92,18 @@ export async function weeklySummarizerNode(
   const { dailySummaries, since, until, year, selectedRepos, authorPattern } =
     state;
 
+  // Normalize dates to YYYY-MM-DD format for consistent storage
+  const weekStart = toDateString(since);
+  const weekEnd = toDateString(until);
+
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   // Check if already exists
-  if (checkpoint.hasWeeklySummary(since)) {
-    const existing = await checkpoint.loadWeeklySummary(since);
+  if (checkpoint.hasWeeklySummary(weekStart)) {
+    const existing = await checkpoint.loadWeeklySummary(weekStart);
     if (existing) {
-      logger.info(`Loaded existing weekly summary for ${since}`);
+      logger.info(`Loaded existing weekly summary for ${weekStart}`);
       return {
         weeklySummaries: [existing],
         progress: 80,
@@ -103,7 +114,7 @@ export async function weeklySummarizerNode(
 
   logger.step("📅", "Weekly Summary - Aggregating daily summaries", {
     dailies: (dailySummaries || []).length,
-    range: `${since} → ${until}`,
+    range: `${weekStart} → ${weekEnd}`,
   });
 
   if (!dailySummaries || dailySummaries.length === 0) {
@@ -116,8 +127,8 @@ export async function weeklySummarizerNode(
   }
 
   const weeklySummary = await processWeeklySummary(
-    since,
-    until,
+    weekStart,
+    weekEnd,
     dailySummaries
   );
 

@@ -185,7 +185,10 @@ function AppContent() {
         open={!!generationResult}
         onOpenChange={(open) => !open && setGenerationResult(null)}
       >
-        <DialogContent className="max-w-4xl max-h-[90vh] p-0 border-0 bg-transparent shadow-none [&>button]:bg-white/50 [&>button]:hover:bg-white [&>button]:text-slate-500 [&>button]:top-3 [&>button]:right-3">
+        <DialogContent
+          className="max-w-4xl max-h-[90vh] p-0 border-0 bg-transparent shadow-none [&>button]:bg-white/50 [&>button]:hover:bg-white [&>button]:text-slate-500 [&>button]:top-3 [&>button]:right-3"
+          aria-describedby={undefined}
+        >
           <DialogTitle className="sr-only">生成结果</DialogTitle>
           {generationResult && (
             <ResultCard
