@@ -1,105 +1,180 @@
 import { useState } from "react";
-import { InputForm } from "./components/InputForm";
 import { ResultCard } from "./components/ResultCard";
 import { YearEndContainer } from "./components/YearEndContainer";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Dashboard } from "./components/Dashboard";
+import { Sparkles, ArrowLeft, X } from "lucide-react";
 import { Toaster, toast } from "sonner";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
+import { SettingsProvider, useSettings } from "./hooks/useSettings";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 
-function App() {
-  return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="max-w-6xl mx-auto space-y-8">
-        <header className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center p-3 bg-white rounded-full shadow-sm mb-4">
-            <Sparkles className="h-6 w-6 text-primary mr-2" />
-            <span className="font-bold text-xl tracking-tight">
-              Daily Work Summarizer
-            </span>
-          </div>
-        </header>
+type ViewState = "dashboard" | "review";
 
-        <main className="space-y-8">
-          <Tabs defaultValue="generator" className="w-full">
-            <div className="flex justify-center mb-8">
-              <TabsList className="grid w-full max-w-md grid-cols-2">
-                <TabsTrigger value="generator">Daily/Weekly Tools</TabsTrigger>
-                <TabsTrigger value="review">Year-End Review</TabsTrigger>
-              </TabsList>
-            </div>
+function AppContent() {
+  const [view, setView] = useState<ViewState>("dashboard");
+  const [yearEndMode, setYearEndMode] = useState<"view" | "regenerate">("view");
 
-            <TabsContent value="generator" className="space-y-8">
-              <SummaryGenerator />
-            </TabsContent>
+  const [generationResult, setGenerationResult] = useState<any>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const { selectedRepos } = useSettings();
 
-            <TabsContent value="review">
-              <YearEndContainer />
-            </TabsContent>
-          </Tabs>
-        </main>
-      </div>
-      <Toaster />
-    </div>
-  );
-}
+  // Helper to format date
+  const formatLocal = (date: Date) => {
+    const pad = (n: number) => n.toString().padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+      date.getDate()
+    )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
+      date.getSeconds()
+    )}`;
+  };
 
-// Wrapper for the existing InputForm + Result part to keep App clean
-function SummaryGenerator() {
-  const [result, setResult] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
+  const getStartOfDay = (date: Date) => {
+    const newDate = new Date(date);
+    newDate.setHours(0, 0, 0, 0);
+    return newDate;
+  };
 
-  const handleSubmit = async (data: {
-    selectedRepos: string[];
-    since?: string;
-    until?: string;
-    summaryType?: "today" | "week" | "month";
-  }) => {
-    setLoading(true);
-    setResult(null);
+  const handleGenerate = async (type: "today" | "week" | "month") => {
+    setIsGenerating(true);
+    setGenerationResult(null);
+
+    // Calculate dates based on type
+    const now = new Date();
+    let since = "";
+    const endOfToday = new Date(now);
+    endOfToday.setHours(23, 59, 59, 999);
+    const until = formatLocal(endOfToday);
+
+    if (type === "today") {
+      since = formatLocal(getStartOfDay(now));
+    } else if (type === "week") {
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(now);
+      monday.setDate(diff);
+      since = formatLocal(getStartOfDay(monday));
+    } else if (type === "month") {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      since = formatLocal(getStartOfDay(firstDay));
+    }
 
     try {
       const response = await fetch("http://localhost:3456/api/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({
+          selectedRepos: selectedRepos, // Use global settings
+          since,
+          until,
+          summaryType: type,
+        }),
       });
 
-      if (!response.ok) {
-        throw new Error("工作流执行失败");
-      }
+      if (!response.ok) throw new Error("Generation failed");
 
       const resData = await response.json();
-
       if (resData.status === "completed") {
-        setResult({
+        setGenerationResult({
           summary: resData.summary,
           outputPath: resData.outputPath,
         });
-        toast.success("总结生成完成!");
+        toast.success("Summary generated!");
       } else {
-        toast.error("生成失败");
+        toast.error("Generation failed");
       }
     } catch (error: any) {
-      console.error("[App] 提交失败:", error);
-      toast.error(`提交失败: ${error.message}`);
+      console.error(error);
+      toast.error(`Error: ${error.message}`);
     } finally {
-      setLoading(false);
+      setIsGenerating(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
-      <InputForm onSubmit={handleSubmit} loading={loading} />
-      {loading && (
-        <div className="flex items-center justify-center p-8">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <span className="ml-2 text-primary font-medium">生成中...</span>
-        </div>
-      )}
-      {result && (
-        <ResultCard summary={result.summary} outputPath={result.outputPath} />
-      )}
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <header className="flex items-center justify-between">
+          <div
+            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity"
+            onClick={() => setView("dashboard")}
+          >
+            <div className="bg-slate-900 text-white p-2 rounded-lg">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <span className="font-bold text-xl tracking-tight text-slate-900">
+              Daily Work Summarizer
+            </span>
+          </div>
+
+          {view !== "dashboard" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setView("dashboard")}
+              className="text-slate-500 hover:text-slate-900"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          )}
+        </header>
+
+        <main className="min-h-[600px] relative">
+          {view === "dashboard" && (
+            <Dashboard
+              onGenerate={handleGenerate}
+              onViewYearReview={(mode) => {
+                setYearEndMode(mode);
+                setView("review");
+              }}
+              isGenerating={isGenerating}
+            />
+          )}
+
+          {view === "review" && (
+            <div className="animate-in fade-in slide-in-from-right-4 duration-300">
+              <YearEndContainer forcedMode={yearEndMode} />
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Result Overlay Dialog */}
+      <Dialog
+        open={!!generationResult}
+        onOpenChange={(open) => !open && setGenerationResult(null)}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <div className="absolute right-4 top-4">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setGenerationResult(null)}
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          {generationResult && (
+            <div className="mt-6">
+              <ResultCard
+                summary={generationResult.summary}
+                outputPath={generationResult.outputPath}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Toaster />
     </div>
+  );
+}
+
+function App() {
+  return (
+    <SettingsProvider>
+      <AppContent />
+    </SettingsProvider>
   );
 }
 

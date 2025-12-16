@@ -150,6 +150,11 @@ ${promptInstructions}
   return {
     processedContent: {
       markdownContent: markdownContent,
+      keyChanges: [], // Populate if we parse interesting changes
+      tokenUsage: {
+        totalTokens:
+          Math.ceil(prompt.length / 4) + Math.ceil(markdownContent.length / 4),
+      },
     },
   };
 }

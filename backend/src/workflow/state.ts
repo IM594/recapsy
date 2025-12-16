@@ -25,9 +25,10 @@ export const WorkflowStateAnnotation = Annotation.Root({
     reducer: (prev, next) => next || prev || "today",
   }),
 
-  // AI 处理后的内容
   processedContent: Annotation<{
     markdownContent?: string;
+    keyChanges?: string[];
+    tokenUsage?: { totalTokens: number };
   }>(),
 
   // 最终输出的文件路径
