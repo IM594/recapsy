@@ -86,14 +86,17 @@ export function GenerationPreview({
         const data = await res.json();
         let found = false;
 
+        // 统一使用 rangeStart 来匹配，保证与 dateRange 计算一致
         if (type === "daily") {
-          const today = new Date().toLocaleDateString("en-CA");
-          found = data.some((d: any) => d.date === today);
+          // rangeStart 就是目标日期 YYYY-MM-DD
+          found = data.some((d: { date: string }) => d.date === rangeStart);
         } else if (type === "weekly") {
-          found = data.some((d: any) => d.weekStart === rangeStart);
+          // rangeStart 是周一日期
+          found = data.some((d: { weekStart: string }) => d.weekStart === rangeStart);
         } else if (type === "monthly") {
-          const currentMonth = new Date().toISOString().substring(0, 7);
-          found = data.some((d: any) => d.month === currentMonth);
+          // 从 rangeStart (月初日期) 提取月份 YYYY-MM
+          const targetMonth = rangeStart.substring(0, 7);
+          found = data.some((d: { month: string }) => d.month === targetMonth);
         } else if (type === "yearly") {
           found = !!data.content;
         }
