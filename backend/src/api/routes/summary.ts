@@ -256,4 +256,21 @@ router.post("/regenerate", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/summary/reset
+ * Reset checkpoint status to idle (for regeneration)
+ */
+router.post("/reset", async (req, res) => {
+  const { year = new Date().getFullYear() } = req.body;
+  const checkpoint = getCheckpointManager(year);
+
+  try {
+    await checkpoint.initialize([], "");
+    await checkpoint.resetStatus();
+    res.json({ success: true, status: checkpoint.getStatus() });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

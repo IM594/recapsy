@@ -41,11 +41,22 @@ export function Dashboard({
 
   const [hasYearlyData, setHasYearlyData] = useState(false);
   const [loadingYearCheck, setLoadingYearCheck] = useState(true);
+  const [isYearlyTaskRunning, setIsYearlyTaskRunning] = useState(false);
 
-  // Check for year end data
+  // Check for year end data and running status
   useEffect(() => {
     const checkYearlyData = async () => {
       try {
+        // Check if task is running
+        const statusRes = await fetch(
+          `http://localhost:3456/api/summary/status?year=${year}`
+        );
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          setIsYearlyTaskRunning(status.isRunning);
+        }
+
+        // Check if data exists
         const res = await fetch(
           `http://localhost:3456/api/summary/data?type=yearly&year=${year}`
         );
@@ -63,6 +74,10 @@ export function Dashboard({
       }
     };
     checkYearlyData();
+
+    // Poll for status updates every 3 seconds
+    const interval = setInterval(checkYearlyData, 3000);
+    return () => clearInterval(interval);
   }, [year]);
 
   const handleAction = async (type: "today" | "week" | "month") => {
@@ -203,6 +218,22 @@ export function Dashboard({
           <CardContent className="flex-1 flex flex-col justify-end">
             {loadingYearCheck ? (
               <div className="h-12 bg-slate-100 animate-pulse rounded-lg" />
+            ) : isYearlyTaskRunning ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200">
+                  <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
+                  <span className="text-sm text-blue-900 font-medium">
+                    正在生成年度总结...
+                  </span>
+                </div>
+                <Button
+                  className="w-full h-12 bg-blue-500 hover:bg-blue-600 text-white"
+                  onClick={() => handleYearEndAction("view")}
+                >
+                  查看进度
+                  <ArrowRight className="ml-2 h-5 w-5" />
+                </Button>
+              </div>
             ) : hasYearlyData ? (
               <div className="grid grid-cols-2 gap-3">
                 <Button

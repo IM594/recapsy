@@ -208,6 +208,20 @@ export class CheckpointManager extends EventEmitter {
     }
   }
 
+  /**
+   * Reset status to idle (for regeneration)
+   * Keeps all data but clears running state
+   */
+  async resetStatus(): Promise<void> {
+    if (this.checkpoint) {
+      this.checkpoint.isRunning = false;
+      this.checkpoint.phase = "idle";
+      this.checkpoint.progress = 0;
+      this.checkpoint.currentStep = null;
+      await this.save();
+    }
+  }
+
   // ============ Raw Data ============
 
   /**

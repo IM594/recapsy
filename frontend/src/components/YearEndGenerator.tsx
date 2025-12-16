@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,6 +24,7 @@ import { useSummary } from "../hooks/useSummary";
 interface YearEndGeneratorProps {
   onComplete: () => void;
   year?: number;
+  shouldResetCheckpoint?: boolean;
 }
 
 type StepStatus = "pending" | "running" | "completed" | "error";
@@ -39,6 +40,7 @@ interface ProcessStep {
 export function YearEndGenerator({
   onComplete,
   year = 2025,
+  shouldResetCheckpoint = false,
 }: YearEndGeneratorProps) {
   const { selectedRepos, author } = useSettings();
   const { status, logs, startGeneration } = useSummary();
@@ -76,9 +78,22 @@ export function YearEndGenerator({
     },
   ]);
 
+  // Track if we've started a new task to prevent quick jump on mount
+  const hasStartedNewTask = useRef(false);
+
   // Sync hook status with UI steps
   useEffect(() => {
-    if (!status.isRunning && status.phase === "complete") {
+    // Mark that we've started when task begins running
+    if (status.isRunning) {
+      hasStartedNewTask.current = true;
+    }
+
+    // Only trigger completion if this is a NEW task we started
+    if (
+      !status.isRunning &&
+      status.phase === "complete" &&
+      hasStartedNewTask.current
+    ) {
       setSteps((s) => s.map((step) => ({ ...step, status: "completed" })));
       // Delay completion callback slightly
       const timer = setTimeout(() => {
@@ -128,6 +143,25 @@ export function YearEndGenerator({
       return;
     }
 
+    // If we need to reset checkpoint (regenerate mode)
+    if (shouldResetCheckpoint) {
+      try {
+        const res = await fetch(`http://localhost:3456/api/summary/reset`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ year }),
+        });
+        if (!res.ok) {
+          toast.error("Failed to reset status");
+          return;
+        }
+      } catch (error) {
+        toast.error("Failed to reset status");
+        return;
+      }
+    }
+
+    // Start generation
     startGeneration({
       selectedRepos,
       since,
@@ -136,6 +170,12 @@ export function YearEndGenerator({
       author,
     });
   };
+
+  // Auto-start on mount
+  useEffect(() => {
+    handleStart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (
     status.isRunning ||
