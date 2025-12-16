@@ -5,14 +5,18 @@ import {
   weeklySummarizerNode,
   persistNode,
 } from "./nodes/index";
-import { processDailySummary } from "./nodes/daily-summarizer";
-import { processMonthSummary } from "./nodes/monthly-summarizer";
+import { processDailySummariesBatch } from "./nodes/daily-summarizer";
+import {
+  processMonthSummary,
+  processAllMonthlySummaries,
+} from "./nodes/monthly-summarizer";
 import { processYearEndSummary } from "./nodes/year-end-summarizer";
 import { CheckpointManager } from "../lib/checkpoint";
 import type { DailySummary, MonthlySummary } from "../lib/types";
+import logger from "../lib/logger";
 
 /**
- * Daily Summarizer Node - Process all collected daily data
+ * Daily Summarizer Node - Process all collected daily data (concurrent)
  */
 async function dailySummarizerNode(
   state: WorkflowState
@@ -21,44 +25,66 @@ async function dailySummarizerNode(
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
-  const dailySummaries: DailySummary[] = [];
   const commits = rawCommits || [];
   const total = commits.length;
 
-  for (let i = 0; i < commits.length; i++) {
-    const dayData = commits[i];
-    const key = `${dayData.date}-${dayData.repo}`;
+  // 分离已缓存和需要处理的数据
+  const toProcess: typeof commits = [];
+  const cached: DailySummary[] = [];
 
-    // Skip if already processed
+  for (const dayData of commits) {
     if (checkpoint.hasDailySummary(dayData.date, dayData.repo)) {
       const existing = await checkpoint.loadDailySummary(
         dayData.date,
         dayData.repo
       );
       if (existing) {
-        dailySummaries.push(existing);
+        cached.push(existing);
         continue;
       }
     }
+    toProcess.push(dayData);
+  }
 
-    const summary = await processDailySummary(dayData);
+  logger.info(
+    `📦 缓存命中: ${cached.length}/${total}, 需处理: ${toProcess.length}`
+  );
+
+  // 并发处理所有未缓存的数据
+  let completed = cached.length;
+  const { summaries: newSummaries, errors } = await processDailySummariesBatch(
+    toProcess,
+    async (count, total, date) => {
+      completed++;
+      const progress = 20 + Math.round((completed / commits.length) * 40);
+      await checkpoint.updateProgress(
+        "daily_summarizer",
+        progress,
+        `Processed ${date} (${completed}/${commits.length})`
+      );
+    },
+    (date, error) => {
+      logger.error(`❌ Failed to process ${date}: ${error.message}`);
+    }
+  );
+
+  // 保存新生成的 summaries
+  for (const summary of newSummaries) {
     await checkpoint.saveDailySummary(summary);
-    dailySummaries.push(summary);
+  }
 
-    // Update progress (20-60%)
-    const progress = 20 + Math.round((i / total) * 40);
-    await checkpoint.updateProgress(
-      "daily_summarizer",
-      progress,
-      `Processed ${dayData.date} (${dayData.repo})`
-    );
+  // 合并缓存和新生成的结果
+  const dailySummaries = [...cached, ...newSummaries];
+
+  if (errors.length > 0) {
+    logger.warn(`⚠️  ${errors.length} days failed to process`);
   }
 
   return { dailySummaries, progress: 60, currentStep: "daily_summarizer" };
 }
 
 /**
- * Monthly Summarizer Node - Aggregate daily summaries into monthly reports
+ * Monthly Summarizer Node - Aggregate daily summaries into monthly reports (concurrent)
  */
 async function monthlySummarizerNode(
   state: WorkflowState
@@ -75,33 +101,76 @@ async function monthlySummarizerNode(
     monthsMap.get(month)!.push(daily);
   }
 
-  const monthlySummaries: MonthlySummary[] = [];
   const months = Array.from(monthsMap.keys()).sort();
 
-  for (let i = 0; i < months.length; i++) {
-    const month = months[i];
+  // 分离已缓存和需要处理的月份
+  const toProcess: Array<{ month: string; dailies: DailySummary[] }> = [];
+  const cached: MonthlySummary[] = [];
 
-    // Skip if already processed
+  for (const month of months) {
     if (checkpoint.hasMonthlySummary(month)) {
       const existing = await checkpoint.loadMonthlySummary(month);
       if (existing) {
-        monthlySummaries.push(existing);
+        cached.push(existing);
         continue;
       }
     }
+    toProcess.push({ month, dailies: monthsMap.get(month)! });
+  }
 
-    const monthDailies = monthsMap.get(month)!;
-    const summary = await processMonthSummary(month, monthDailies);
+  logger.info(
+    `📦 月度缓存命中: ${cached.length}/${months.length}, 需处理: ${toProcess.length}`
+  );
+
+  // 并发处理所有未缓存的月份
+  const newSummaries: MonthlySummary[] = [];
+  const errors: Array<{ month: string; error: string }> = [];
+  let completed = cached.length;
+
+  const results = await Promise.allSettled(
+    toProcess.map(async ({ month, dailies }) => {
+      try {
+        const summary = await processMonthSummary(month, dailies);
+        completed++;
+        const progress = 60 + Math.round((completed / months.length) * 25);
+        await checkpoint.updateProgress(
+          "monthly_summarizer",
+          progress,
+          `Processed ${month} (${completed}/${months.length})`
+        );
+        return { success: true as const, summary };
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        logger.error(`❌ Failed to process ${month}: ${errMsg}`);
+        return { success: false as const, month, error: errMsg };
+      }
+    })
+  );
+
+  // 收集结果
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      const data = result.value;
+      if (data.success) {
+        newSummaries.push(data.summary);
+      } else {
+        errors.push({ month: data.month, error: data.error });
+      }
+    }
+  }
+
+  // 保存新生成的 summaries
+  for (const summary of newSummaries) {
     await checkpoint.saveMonthlySummary(summary);
-    monthlySummaries.push(summary);
+  }
 
-    // Update progress (60-85%)
-    const progress = 60 + Math.round((i / months.length) * 25);
-    await checkpoint.updateProgress(
-      "monthly_summarizer",
-      progress,
-      `Processed ${month}`
-    );
+  // 合并缓存和新生成的结果，按月份排序
+  const monthlySummaries = [...cached, ...newSummaries].sort((a, b) =>
+    a.month.localeCompare(b.month)
+  );
+
+  if (errors.length > 0) {
+    logger.warn(`⚠️  ${errors.length} months failed to process`);
   }
 
   return { monthlySummaries, progress: 85, currentStep: "monthly_summarizer" };
