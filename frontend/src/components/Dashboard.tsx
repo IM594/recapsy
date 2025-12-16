@@ -47,11 +47,12 @@ export function Dashboard({
     const checkYearlyData = async () => {
       try {
         const res = await fetch(
-          `http://localhost:3456/api/year-end/structure?year=${year}`
+          `http://localhost:3456/api/summary/data?type=yearly&year=${year}`
         );
         if (res.ok) {
           const data = await res.json();
-          if (data.structure && data.structure.hasYearlySummary) {
+          // If content is present, we assume it exists
+          if (data.content) {
             setHasYearlyData(true);
           }
         }

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import { useSummary } from "../hooks/useSummary";
 
 interface Structure {
   year: number;
@@ -52,6 +53,9 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
   const [regenerating, setRegenerating] = useState(false);
   const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
 
+  const { getYearlySummary, getMonthlySummaries, getDailySummaries } =
+    useSummary();
+
   // Load structure
   useEffect(() => {
     fetchStructure();
@@ -60,30 +64,62 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
   // Load content when selection changes
   useEffect(() => {
     if (selectedNode) {
-      fetchContent(selectedNode.type, selectedNode.id);
+      loadContent(selectedNode.type, selectedNode.id);
     }
   }, [selectedNode]);
 
   const fetchStructure = async () => {
     try {
-      const res = await fetch(
-        `http://localhost:3456/api/year-end/structure?year=${year}`
-      );
-      const data = await res.json();
-      setStructure(data.structure);
+      const [yearlyData, monthlyData, dailyData] = await Promise.all([
+        getYearlySummary(year),
+        getMonthlySummaries(year),
+        getDailySummaries(year),
+      ]);
+
+      const hasYearlySummary = !!yearlyData?.content;
+
+      // Organize daily data by month
+      const monthMap = new Map<string, Set<string>>();
+      (dailyData || []).forEach((d: any) => {
+        const month = d.date.substring(0, 7);
+        if (!monthMap.has(month)) monthMap.set(month, new Set());
+        monthMap.get(month)!.add(d.date);
+      });
+
+      const structure: Structure = {
+        year,
+        hasYearlySummary,
+        months: (monthlyData || [])
+          .map((m: any) => ({
+            month: m.month,
+            hasSummary: !!m.summary,
+            days: Array.from(monthMap.get(m.month) || []).sort(),
+          }))
+          .sort((a: any, b: any) => a.month.localeCompare(b.month)),
+      };
+
+      setStructure(structure);
     } catch (error) {
+      console.error(error);
       toast.error("Failed to load year structure");
     }
   };
 
-  const fetchContent = async (type: NodeType, id: string) => {
+  const loadContent = async (type: NodeType, id: string) => {
     setLoadingContent(true);
     try {
-      const res = await fetch(
-        `http://localhost:3456/api/year-end/content?type=${type}&id=${id}&year=${year}`
-      );
-      const data = await res.json();
-      setContent(data.content || "");
+      if (type === "yearly") {
+        const data = await getYearlySummary(year);
+        setContent(data.content || "");
+      } else if (type === "monthly") {
+        const data = await getMonthlySummaries(year);
+        const monthData = data.find((m: any) => m.month === id);
+        setContent(monthData?.summary || "");
+      } else {
+        const data = await getDailySummaries(year);
+        const dayData = data.find((d: any) => d.date === id);
+        setContent(dayData?.summary || "");
+      }
     } catch (error) {
       toast.error("Failed to load content");
     } finally {
@@ -96,7 +132,7 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
 
     setRegenerating(true);
     try {
-      const res = await fetch("http://localhost:3456/api/year-end/regenerate", {
+      const res = await fetch("http://localhost:3456/api/summary/regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -104,16 +140,19 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
           id: selectedNode.id,
           year,
           customPrompt: customPrompt.trim() || undefined,
+          repo: "default",
         }),
       });
 
       const data = await res.json();
 
-      if (res.ok && data.success) {
+      if (res.ok) {
         toast.success("Regeneration successful!");
-        // Reload content
-        fetchContent(selectedNode.type, selectedNode.id);
-        // Reload structure in case status changed (unlikely for regeneration but good practice)
+        // Reload content locally since regenerate returns result
+        if (data.summary) setContent(data.summary);
+        else if (data.content) setContent(data.content);
+
+        // Reload structure if needed
         fetchStructure();
         setCustomPrompt("");
       } else {

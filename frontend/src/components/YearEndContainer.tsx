@@ -8,6 +8,8 @@ interface YearEndContainerProps {
   forcedMode?: "view" | "regenerate";
 }
 
+import { useSummary } from "../hooks/useSummary";
+
 export function YearEndContainer({
   initialYear = 2025,
   forcedMode = "view",
@@ -16,6 +18,7 @@ export function YearEndContainer({
     "loading"
   );
   const [year] = useState(initialYear);
+  const { getYearlySummary } = useSummary();
 
   // Check data on mount to decide view
   useEffect(() => {
@@ -28,16 +31,9 @@ export function YearEndContainer({
 
   const checkData = async () => {
     try {
-      const res = await fetch(
-        `http://localhost:3456/api/year-end/structure?year=${year}`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        if (data.structure && data.structure.hasYearlySummary) {
-          setView("review");
-        } else {
-          setView("generator");
-        }
+      const data = await getYearlySummary(year);
+      if (data && data.content) {
+        setView("review");
       } else {
         setView("generator");
       }

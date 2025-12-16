@@ -3,8 +3,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import summaryRouter from "./routes/summary";
 import reposRouter from "./routes/repos";
-import workflowRouter from "./routes/workflow";
-import regenerateRouter from "./routes/regenerate";
+// import workflowRouter from "./routes/workflow";
+// import regenerateRouter from "./routes/regenerate";
 
 dotenv.config();
 
@@ -34,10 +34,11 @@ app.use((req, res, next) => {
 });
 
 // 路由
-app.use("/api", summaryRouter);
+// 路由
+app.use("/api/summary", summaryRouter);
 app.use("/api", reposRouter);
-app.use("/api/workflow", workflowRouter);
-app.use("/api", regenerateRouter);
+// app.use("/api/workflow", workflowRouter); // Deprecated
+// app.use("/api", regenerateRouter); // Deprecated - merged into summary API
 
 // 健康检查
 app.get("/health", (req, res) => {

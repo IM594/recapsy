@@ -21,8 +21,8 @@ export interface FileChange {
 
 export interface DailyCommitData {
   date: string; // YYYY-MM-DD
+  repo: string; // Repository name (basename)
   commits: CommitInfo[];
-  repos: string[];
   stats: {
     totalCommits: number;
     totalAdditions: number;
@@ -34,9 +34,19 @@ export interface DailyCommitData {
 // ============ Summary Types ============
 
 export interface DailySummary {
-  date: string;
+  date: string; // YYYY-MM-DD
+  repo: string; // Repository name (basename)
   summary: string;
   keyChanges: string[];
+  tokensUsed?: number;
+}
+
+export interface WeeklySummary {
+  weekStart: string; // YYYY-MM-DD format (Monday)
+  weekEnd: string; // YYYY-MM-DD format (Sunday)
+  summary: string;
+  highlights: string[];
+  daysWithWork: number;
   tokensUsed?: number;
 }
 
@@ -65,19 +75,27 @@ export interface YearEndCheckpoint {
   createdAt: string;
   updatedAt: string;
 
+  // Runtime state (for SSE)
+  isRunning: boolean;
+  currentStep: string | null;
+  progress: number; // 0-100
+
   // Progress tracking
   phase:
+    | "idle"
     | "collecting"
     | "daily_summary"
     | "monthly_summary"
     | "yearly_summary"
-    | "complete";
+    | "complete"
+    | "error";
 
   // Data collection progress
   collectedDates: string[]; // Dates that have raw data collected
 
   // Summary progress
   dailySummariesCompleted: string[]; // Dates that have daily summaries
+  weeklySummariesCompleted: string[]; // Weeks that have summaries (YYYY-MM-DD format for start date)
   monthlySummariesCompleted: string[]; // Months that have summaries (YYYY-MM)
 
   // Error tracking

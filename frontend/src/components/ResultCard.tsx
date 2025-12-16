@@ -9,9 +9,30 @@ import { toast } from "sonner";
 interface ResultCardProps {
   summary: string;
   outputPath?: string;
+  onRegenerate?: (prompt: string) => Promise<void>;
+  isRegenerating?: boolean;
 }
 
-export function ResultCard({ summary, outputPath }: ResultCardProps) {
+import { useState } from "react";
+import { Textarea } from "@/components/ui/textarea";
+import { RefreshCw, Settings2 } from "lucide-react";
+
+export function ResultCard({
+  summary,
+  outputPath,
+  onRegenerate,
+  isRegenerating = false,
+}: ResultCardProps) {
+  const [showRegenerate, setShowRegenerate] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState("");
+
+  const handleRegenerate = async () => {
+    if (onRegenerate) {
+      await onRegenerate(customPrompt);
+      setCustomPrompt(""); // Clear after success
+      setShowRegenerate(false);
+    }
+  };
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(summary);
@@ -46,6 +67,16 @@ export function ResultCard({ summary, outputPath }: ResultCardProps) {
           </CardTitle>
 
           <div className="flex gap-2">
+            {onRegenerate && (
+              <Button
+                variant={showRegenerate ? "secondary" : "outline"}
+                size="sm"
+                onClick={() => setShowRegenerate(!showRegenerate)}
+              >
+                <Settings2 className="h-4 w-4 mr-2" />
+                Refine
+              </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleCopy}>
               <Copy className="h-4 w-4 mr-2" />
               复制内容
@@ -61,6 +92,34 @@ export function ResultCard({ summary, outputPath }: ResultCardProps) {
             </Button>
           </div>
         </div>
+
+        {showRegenerate && (
+          <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 animate-in slide-in-from-top-2">
+            <div className="space-y-3">
+              <Textarea
+                placeholder="输入额外指令（例如：'精简一些'、'重点关注 Bug 修复'...）"
+                value={customPrompt}
+                onChange={(e) => setCustomPrompt(e.target.value)}
+                className="bg-white resize-none text-sm"
+                rows={3}
+              />
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  onClick={handleRegenerate}
+                  disabled={isRegenerating}
+                >
+                  {isRegenerating ? (
+                    <RefreshCw className="h-3 w-3 mr-2 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-2" />
+                  )}
+                  {isRegenerating ? "重新生成中..." : "重新生成"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="p-0 bg-white">

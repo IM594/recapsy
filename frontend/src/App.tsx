@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ResultCard } from "./components/ResultCard";
 import { YearEndContainer } from "./components/YearEndContainer";
 import { Dashboard } from "./components/Dashboard";
@@ -6,7 +6,8 @@ import { Sparkles, ArrowLeft, X } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useSummary } from "./hooks/useSummary";
 
 type ViewState = "dashboard" | "review";
 
@@ -15,18 +16,8 @@ function AppContent() {
   const [yearEndMode, setYearEndMode] = useState<"view" | "regenerate">("view");
 
   const [generationResult, setGenerationResult] = useState<any>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const { selectedRepos } = useSettings();
-
-  // Helper to format date
-  const formatLocal = (date: Date) => {
-    const pad = (n: number) => n.toString().padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
-      date.getDate()
-    )} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(
-      date.getSeconds()
-    )}`;
-  };
+  const { selectedRepos, author } = useSettings();
+  const { status, startGeneration } = useSummary();
 
   const getStartOfDay = (date: Date) => {
     const newDate = new Date(date);
@@ -34,8 +25,74 @@ function AppContent() {
     return newDate;
   };
 
+  // Watch for completion
+  useEffect(() => {
+    if (!status.isRunning && status.phase === "complete" && status.result) {
+      console.log("Status result:", status.result);
+      let summaryContent = "";
+
+      // 根据 taskType 决定显示哪个摘要
+      const taskType = status.result.taskType;
+
+      if (taskType === "daily" && status.result.dailySummaries?.length > 0) {
+        summaryContent = status.result.dailySummaries[0].summary;
+      } else if (
+        taskType === "weekly" &&
+        status.result.weeklySummaries?.length > 0
+      ) {
+        summaryContent = status.result.weeklySummaries[0].summary;
+      } else if (
+        taskType === "monthly" &&
+        status.result.monthlySummaries?.length > 0
+      ) {
+        summaryContent = status.result.monthlySummaries[0].summary;
+      }
+      // 年度总结的特殊格式
+      else if (status.result.result?.content) {
+        summaryContent = status.result.result.content;
+      }
+      // 最后的 fallback
+      else if (status.result.content) {
+        summaryContent = status.result.content;
+      }
+
+      if (summaryContent) {
+        setGenerationResult({
+          summary: summaryContent,
+          outputPath: "",
+          context: {
+            type: taskType,
+            // Determine ID and Repo based on result structure
+            // For daily, id is date, repo is repo
+            // For weekly, id is weekStart
+            id:
+              taskType === "daily"
+                ? status.result.dailySummaries[0]?.date
+                : taskType === "weekly"
+                ? status.result.weeklySummaries[0]?.weekStart
+                : "",
+            repo:
+              taskType === "daily"
+                ? status.result.dailySummaries[0]?.repo
+                : "default",
+          },
+        });
+      } else {
+        // No data generated - show a friendly toast
+        toast.info(
+          `${
+            taskType === "daily"
+              ? "今天"
+              : taskType === "weekly"
+              ? "本周"
+              : "该时间段"
+          }没有提交记录，无法生成总结`
+        );
+      }
+    }
+  }, [status.phase, status.isRunning, status.result]);
+
   const handleGenerate = async (type: "today" | "week" | "month") => {
-    setIsGenerating(true);
     setGenerationResult(null);
 
     // Calculate dates based on type
@@ -43,51 +100,35 @@ function AppContent() {
     let since = "";
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
-    const until = formatLocal(endOfToday);
+    const until = endOfToday.toISOString();
 
     if (type === "today") {
-      since = formatLocal(getStartOfDay(now));
+      since = getStartOfDay(now).toISOString();
     } else if (type === "week") {
       const day = now.getDay();
       const diff = now.getDate() - day + (day === 0 ? -6 : 1);
       const monday = new Date(now);
       monday.setDate(diff);
-      since = formatLocal(getStartOfDay(monday));
+      since = getStartOfDay(monday).toISOString();
     } else if (type === "month") {
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      since = formatLocal(getStartOfDay(firstDay));
+      since = getStartOfDay(firstDay).toISOString();
     }
 
-    try {
-      const response = await fetch("http://localhost:3456/api/summarize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selectedRepos: selectedRepos, // Use global settings
-          since,
-          until,
-          summaryType: type,
-        }),
-      });
+    startGeneration({
+      selectedRepos,
+      since,
+      until,
+      summaryType: type,
+      author,
+    });
 
-      if (!response.ok) throw new Error("Generation failed");
-
-      const resData = await response.json();
-      if (resData.status === "completed") {
-        setGenerationResult({
-          summary: resData.summary,
-          outputPath: resData.outputPath,
-        });
-        toast.success("Summary generated!");
-      } else {
-        toast.error("Generation failed");
-      }
-    } catch (error: any) {
-      console.error(error);
-      toast.error(`Error: ${error.message}`);
-    } finally {
-      setIsGenerating(false);
-    }
+    // Store context for potential regeneration
+    // Note: We'll update the 'id' (date/weekStart) when we receive the result in useEffect
+    // But we can pre-set the type/repo here or derive it later.
+    // Actually, best to derive 'id' from the result or the request parameters.
+    // For 'today', id is 'since' (YYYY-MM-DD).
+    // For 'week', id is 'since' (Monday).
   };
 
   return (
@@ -127,7 +168,7 @@ function AppContent() {
                 setYearEndMode(mode);
                 setView("review");
               }}
-              isGenerating={isGenerating}
+              isGenerating={status.isRunning}
             />
           )}
 
@@ -139,28 +180,47 @@ function AppContent() {
         </main>
       </div>
 
-      {/* Result Overlay Dialog */}
       <Dialog
         open={!!generationResult}
         onOpenChange={(open) => !open && setGenerationResult(null)}
       >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <div className="absolute right-4 top-4">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setGenerationResult(null)}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+        <DialogContent className="max-w-4xl max-h-[90vh] p-0 border-0 bg-transparent shadow-none [&>button]:bg-white/50 [&>button]:hover:bg-white [&>button]:text-slate-500 [&>button]:top-3 [&>button]:right-3">
+          <DialogTitle className="sr-only">生成结果</DialogTitle>
           {generationResult && (
-            <div className="mt-6">
-              <ResultCard
-                summary={generationResult.summary}
-                outputPath={generationResult.outputPath}
-              />
-            </div>
+            <ResultCard
+              summary={generationResult.summary}
+              outputPath={generationResult.outputPath}
+              onRegenerate={async (prompt) => {
+                try {
+                  const res = await fetch(
+                    "http://localhost:3456/api/summary/regenerate",
+                    {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        type: generationResult.context?.type || "daily",
+                        id: generationResult.context?.id,
+                        repo: generationResult.context?.repo,
+                        customPrompt: prompt,
+                      }),
+                    }
+                  );
+                  if (!res.ok) throw new Error("Failed to regenerate");
+                  const data = await res.json();
+
+                  // Update local state with new summary
+                  setGenerationResult((prev: any) => ({
+                    ...prev,
+                    summary: data.summary,
+                  }));
+                  toast.success("重新生成成功！");
+                } catch (e) {
+                  console.error(e);
+                  toast.error("重新生成失败");
+                }
+              }}
+              isRegenerating={false} // Would need state for true async loading if we want spinner to persist longer than await
+            />
           )}
         </DialogContent>
       </Dialog>

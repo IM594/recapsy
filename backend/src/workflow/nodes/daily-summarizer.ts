@@ -16,7 +16,7 @@ export async function processDailySummary(
 
   logger.step("📝", `Daily Summary - ${dailyData.date}`, {
     commits: dailyData.stats.totalCommits,
-    repos: dailyData.repos.join(", "),
+    repo: dailyData.repo,
     changes: `+${dailyData.stats.totalAdditions} / -${dailyData.stats.totalDeletions}`,
   });
 
@@ -52,7 +52,7 @@ ${sampleDiffs}`;
 ${dailyData.date}
 
 ## 涉及仓库
-${dailyData.repos.join(", ")}
+${dailyData.repo}
 
 ## 提交记录
 ${commitSummaries.join("\n\n")}
@@ -117,6 +117,7 @@ ${
 
   const result: DailySummary = {
     date: dailyData.date,
+    repo: dailyData.repo,
     summary,
     keyChanges: keyChanges.length > 0 ? keyChanges : ["无明显变更"],
     tokensUsed: Math.ceil(prompt.length / 4) + Math.ceil(summary.length / 4),

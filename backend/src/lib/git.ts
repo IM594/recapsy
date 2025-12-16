@@ -376,7 +376,8 @@ export async function getRepoDiffs(
 import type { CommitInfo, DailyCommitData, FileChange } from "./types";
 
 /**
- * Get commits from multiple repos, grouped by date.
+ * Get commits from multiple repos, grouped by date AND repo.
+ * Each DailyCommitData represents one repo's commits for one day.
  * This is the primary data collection function for year-end summaries.
  */
 export async function getCommitsByDay(
@@ -396,7 +397,7 @@ export async function getCommitsByDay(
     maxFilesPerDay = 30,
   } = options;
 
-  // Map: date -> DailyCommitData
+  // Map: "date-repo" -> DailyCommitData (separate entry per repo per day)
   const dailyMap = new Map<string, DailyCommitData>();
 
   // 并发收集所有仓库的提交
@@ -537,18 +538,20 @@ export async function getCommitsByDay(
     })
   );
 
-  // 合并所有仓库的结果到 dailyMap
+  // 将每个仓库的结果分别存入 dailyMap（按 date-repo 分开）
   for (const result of results) {
     if (result.status === "fulfilled") {
       const { repoName, commits } = result.value;
 
       for (const { dateOnly, commitInfo } of commits) {
-        // Add to daily map
-        if (!dailyMap.has(dateOnly)) {
-          dailyMap.set(dateOnly, {
+        const key = `${dateOnly}-${repoName}`;
+
+        // Each date-repo combination gets its own entry
+        if (!dailyMap.has(key)) {
+          dailyMap.set(key, {
             date: dateOnly,
+            repo: repoName,
             commits: [],
-            repos: [],
             stats: {
               totalCommits: 0,
               totalAdditions: 0,
@@ -558,7 +561,7 @@ export async function getCommitsByDay(
           });
         }
 
-        const daily = dailyMap.get(dateOnly)!;
+        const daily = dailyMap.get(key)!;
         daily.commits.push(commitInfo);
         daily.stats.totalCommits++;
         daily.stats.totalAdditions += commitInfo.files.reduce(
@@ -570,19 +573,17 @@ export async function getCommitsByDay(
           0
         );
         daily.stats.filesChanged += commitInfo.files.length;
-
-        if (!daily.repos.includes(repoName)) {
-          daily.repos.push(repoName);
-        }
       }
     }
   }
 
-  // Convert to sorted array (ascending by date)
-  const result = Array.from(dailyMap.values()).sort((a, b) =>
-    a.date.localeCompare(b.date)
-  );
+  // Convert to sorted array (ascending by date, then by repo)
+  const resultArray = Array.from(dailyMap.values()).sort((a, b) => {
+    const dateCompare = a.date.localeCompare(b.date);
+    if (dateCompare !== 0) return dateCompare;
+    return a.repo.localeCompare(b.repo);
+  });
 
-  console.log(`[Git] Total: ${result.length} days with commits`);
-  return result;
+  console.log(`[Git] Total: ${resultArray.length} date-repo entries`);
+  return resultArray;
 }

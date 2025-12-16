@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,13 +19,7 @@ import {
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useSettings } from "../hooks/useSettings";
-
-interface StepResult {
-  step: string;
-  success: boolean;
-  message?: string;
-  timestamp: string;
-}
+import { useSummary } from "../hooks/useSummary";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -46,18 +40,11 @@ export function YearEndGenerator({
   onComplete,
   year = 2025,
 }: YearEndGeneratorProps) {
-  // Use global settings
   const { selectedRepos, author } = useSettings();
-
-  // Local config override (optional, but let's stick to global for now or allow local override)
-  // For V2, we assume global settings are the source of truth to reduce friction.
+  const { status, logs, startGeneration } = useSummary();
   const [since] = useState(`${year}-01-01`);
   const [until] = useState(`${year}-12-31`);
 
-  // Execution State
-  const [isExecuting, setIsExecuting] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [logs, setLogs] = useState<StepResult[]>([]);
   const [steps, setSteps] = useState<ProcessStep[]>([
     {
       id: "collect",
@@ -89,38 +76,51 @@ export function YearEndGenerator({
     },
   ]);
 
-  const updateStepStatus = (id: string, status: StepStatus) => {
-    setSteps((prev) =>
-      prev.map((step) => (step.id === id ? { ...step, status } : step))
-    );
+  // Sync hook status with UI steps
+  useEffect(() => {
+    if (!status.isRunning && status.phase === "complete") {
+      setSteps((s) => s.map((step) => ({ ...step, status: "completed" })));
+      // Delay completion callback slightly
+      const timer = setTimeout(() => {
+        onComplete();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
 
-    // Calculate progress
-    if (status === "completed") {
-      setSteps((currentSteps) => {
-        const completedWeight = currentSteps
-          .filter((s) => s.status === "completed" || s.id === id)
-          .reduce((acc, s) => acc + s.weight, 0);
-        setProgress(Math.min(completedWeight, 100));
-        return currentSteps;
+    if (status.currentStep) {
+      const stepMapping: Record<string, string> = {
+        collect_data: "collect",
+        daily_summarizer: "daily",
+        monthly_summarizer: "monthly",
+        yearly_summarizer: "yearly",
+        persist: "yearly", // persist is part of finalization
+      };
+
+      const activeStepId =
+        stepMapping[status.currentStep] || status.currentStep;
+
+      setSteps((prev) => {
+        // Mark previous steps as completed
+        const activeIndex = prev.findIndex((p) => p.id === activeStepId);
+        if (activeIndex === -1) return prev;
+
+        return prev.map((step, index) => {
+          if (index < activeIndex) return { ...step, status: "completed" };
+          if (step.id === activeStepId) return { ...step, status: "running" };
+          return { ...step, status: "pending" };
+        });
       });
     }
-  };
 
-  const addLog = (step: string, success: boolean, message?: string) => {
-    setLogs((prev) => [
-      { step, success, message, timestamp: new Date().toLocaleTimeString() },
-      ...prev,
-    ]);
-  };
-
-  const executeNode = async (nodeName: string, input: any) => {
-    const response = await fetch("http://localhost:3456/api/workflow/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nodeName, input }),
-    });
-    return response.json();
-  };
+    if (status.phase === "error") {
+      setSteps((prev) => {
+        // Find the running step and mark as error
+        return prev.map((step) =>
+          step.status === "running" ? { ...step, status: "error" } : step
+        );
+      });
+    }
+  }, [status, onComplete]);
 
   const handleStart = async () => {
     if (selectedRepos.length === 0) {
@@ -128,125 +128,44 @@ export function YearEndGenerator({
       return;
     }
 
-    setIsExecuting(true);
-    setLogs([]);
-    setSteps((s) => s.map((step) => ({ ...step, status: "pending" })));
-    setProgress(0);
-
-    try {
-      // Step 1: Data Collection
-      updateStepStatus("collect", "running");
-      addLog("Data Collection", true, "Starting commit collection...");
-
-      const collectResult = await executeNode("collect_data", {
-        repos: selectedRepos,
-        since,
-        until,
-        authorPattern: author,
-      });
-
-      if (!collectResult.success) {
-        throw new Error(collectResult.error || "Collection failed");
-      }
-
-      const dailyData = collectResult.output as any[];
-      if (!dailyData || dailyData.length === 0) {
-        updateStepStatus("collect", "error");
-        addLog("Data Collection", false, "No commits found");
-        toast.warning("No matching commits found");
-        setIsExecuting(false);
-        return;
-      }
-
-      updateStepStatus("collect", "completed");
-
-      // Step 2: Daily Summaries
-      updateStepStatus("daily", "running");
-      const dailySummaries: any[] = [];
-      const batchSize = 5;
-
-      for (let i = 0; i < dailyData.length; i += batchSize) {
-        const batch = dailyData.slice(i, i + batchSize);
-        await Promise.all(
-          batch.map(async (day) => {
-            try {
-              const res = await executeNode("daily_summarizer", day);
-              if (res.success) dailySummaries.push(res.output);
-            } catch (err) {
-              // ignore individual errors
-            }
-          })
-        );
-        // Micro progress update
-        const progressChunk = (batchSize / dailyData.length) * 40; // 40 is weight
-        setProgress((p) => Math.min(p + progressChunk, 60));
-      }
-
-      if (dailySummaries.length === 0) {
-        throw new Error("Failed to generate any daily summaries");
-      }
-      updateStepStatus("daily", "completed");
-
-      // Step 3: Monthly Summaries
-      updateStepStatus("monthly", "running");
-      const months = new Set(dailySummaries.map((d) => d.date.substring(0, 7)));
-      const monthlySummaries = [];
-
-      for (const month of Array.from(months)) {
-        const monthDailies = dailySummaries.filter((d) =>
-          d.date.startsWith(month as string)
-        );
-        const res = await executeNode("monthly_summarizer", {
-          month,
-          dailySummaries: monthDailies,
-        });
-        if (res.success) monthlySummaries.push(res.output);
-      }
-      updateStepStatus("monthly", "completed");
-
-      // Step 4: Annual Summary
-      updateStepStatus("yearly", "running");
-      const yearlyResult = await executeNode("yearly_summarizer", {
-        year,
-        monthlySummaries,
-      });
-
-      if (!yearlyResult.success) throw new Error(yearlyResult.error);
-      updateStepStatus("yearly", "completed");
-
-      toast.success("Review generated successfully!");
-      setTimeout(() => onComplete(), 1000);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      const currentStepIndex = steps.findIndex((s) => s.status === "running");
-      if (currentStepIndex !== -1) {
-        updateStepStatus(steps[currentStepIndex].id, "error");
-      }
-      addLog("Error", false, msg);
-      toast.error(msg);
-      setIsExecuting(false);
-    }
+    startGeneration({
+      selectedRepos,
+      since,
+      until,
+      summaryType: "year_end_Full", // Trigger yearly flow
+      author,
+    });
   };
 
-  if (isExecuting) {
+  if (
+    status.isRunning ||
+    status.phase === "complete" ||
+    status.phase === "error"
+  ) {
     return (
       <Card className="max-w-2xl mx-auto border-2 shadow-sm animate-in zoom-in-95 duration-700">
         <CardHeader className="text-center pb-2">
           <div className="mx-auto bg-indigo-100 p-3 rounded-full w-fit mb-4">
-            <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" />
+            <Loader2
+              className={`h-8 w-8 text-indigo-600 ${
+                status.isRunning ? "animate-spin" : ""
+              }`}
+            />
           </div>
           <CardTitle>Generating {year} Review</CardTitle>
           <CardDescription>
-            Hold tight, we're condensing a year of work into insights.
+            {status.phase === "error"
+              ? "An error occurred during generation."
+              : "Hold tight, we're condensing a year of work into insights."}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="space-y-2">
             <div className="flex justify-between text-xs font-medium text-slate-500 uppercase tracking-wider">
               <span>Progress</span>
-              <span>{Math.round(progress)}%</span>
+              <span>{Math.round(status.progress)}%</span>
             </div>
-            <Progress value={progress} className="h-2" />
+            <Progress value={status.progress} className="h-2" />
           </div>
 
           <div className="space-y-3">
@@ -300,7 +219,9 @@ export function YearEndGenerator({
                     </span>
                     <span
                       className={
-                        log.success ? "text-slate-300" : "text-red-400"
+                        log.type === "success" || log.type === "info"
+                          ? "text-slate-300"
+                          : "text-red-400"
                       }
                     >
                       {log.message}
