@@ -9,6 +9,7 @@ import { SettingsProvider, useSettings } from "./hooks/useSettings";
 import { SummaryProvider } from "./hooks/SummaryContext";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSummary } from "./hooks/useSummary";
+import { getDateRangeForType } from "./lib/date-utils";
 
 type ViewState = "dashboard" | "review";
 
@@ -20,11 +21,7 @@ function AppContent() {
   const { selectedRepos, author } = useSettings();
   const { status, startGeneration } = useSummary();
 
-  const getStartOfDay = (date: Date) => {
-    const newDate = new Date(date);
-    newDate.setHours(0, 0, 0, 0);
-    return newDate;
-  };
+
 
   // Watch for completion
   useEffect(() => {
@@ -42,7 +39,7 @@ function AppContent() {
         // 从 since 提取本地日期 YYYY-MM-DD
         const targetDate = new Date(since).toLocaleDateString("en-CA");
         const matched = status.result.dailySummaries.find(
-          (d: { date: string }) => d.date === targetDate
+          (d: { date: string; repo: string }) => d.date === targetDate
         );
         if (matched) {
           summaryContent = matched.summary;
@@ -116,36 +113,12 @@ function AppContent() {
   ) => {
     setGenerationResult(null);
 
-    // Calculate dates based on type
-    const now = new Date();
-    let since = "";
-    const endOfToday = new Date(now);
-    endOfToday.setHours(23, 59, 59, 999);
-    let until = endOfToday.toISOString();
-
-    if (type === "daily") {
-      since = getStartOfDay(now).toISOString();
-    } else if (type === "weekly") {
-      const day = now.getDay();
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-      const monday = new Date(now);
-      monday.setDate(diff);
-      since = getStartOfDay(monday).toISOString();
-    } else if (type === "monthly") {
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      since = getStartOfDay(firstDay).toISOString();
-    } else if (type === "yearly") {
-      const firstDay = new Date(now.getFullYear(), 0, 1);
-      since = getStartOfDay(firstDay).toISOString();
-      // For yearly, until is end of year
-      const lastDay = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
-      until = lastDay.toISOString();
-    }
+    const { start, end } = getDateRangeForType(type);
 
     startGeneration({
       selectedRepos,
-      since,
-      until,
+      since: start.toISOString(),
+      until: end.toISOString(),
       summaryType: type,
       author,
     });

@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertTriangle, Calendar, CheckCircle2 } from "lucide-react";
 import { useSettings } from "../hooks/useSettings";
+import { getDateRangeForType } from "../lib/date-utils";
 
 type GenerationType = "daily" | "weekly" | "monthly" | "yearly";
 
@@ -37,34 +38,10 @@ export function GenerationPreview({
     end: "",
   });
 
-  // Calculate date range for the given type
+  // Calculate date range using unified utility
   const getDateRange = () => {
-    const now = new Date();
-    let start = "";
-    let end = "";
-
-    if (type === "daily") {
-      start = end = now.toLocaleDateString("en-CA");
-    } else if (type === "weekly") {
-      const day = now.getDay();
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-      const monday = new Date(now);
-      monday.setDate(diff);
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      start = monday.toLocaleDateString("en-CA");
-      end = sunday.toLocaleDateString("en-CA");
-    } else if (type === "monthly") {
-      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      start = firstDay.toLocaleDateString("en-CA");
-      end = lastDay.toLocaleDateString("en-CA");
-    } else if (type === "yearly") {
-      start = `${year}-01-01`;
-      end = `${year}-12-31`;
-    }
-
-    return { start, end };
+    const { startStr, endStr } = getDateRangeForType(type, new Date(), year);
+    return { start: startStr, end: endStr };
   };
 
   useEffect(() => {

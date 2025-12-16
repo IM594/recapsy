@@ -26,13 +26,18 @@ import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
 import { useSummary } from "../hooks/useSummary";
 
+interface DailyInfo {
+  date: string;
+  repo: string;
+}
+
 interface Structure {
   year: number;
   hasYearlySummary: boolean;
   months: {
     month: string;
     hasSummary: boolean;
-    days: string[];
+    days: DailyInfo[];
   }[];
   weeks: {
     weekStart: string;
@@ -53,6 +58,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
   const [selectedNode, setSelectedNode] = useState<{
     type: NodeType;
     id: string;
+    repo?: string; // For daily type
   } | null>(null);
   const [content, setContent] = useState<string>("");
   const [loadingContent, setLoadingContent] = useState(false);
@@ -68,6 +74,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
     getMonthlySummaries,
     getDailySummaries,
     getWeeklySummaries,
+    refetchData,
   } = useSummary();
 
   // Load structure
@@ -94,32 +101,48 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
 
       const hasYearlySummary = !!yearlyData?.content;
 
-      // Organize daily data by month
-      const monthMap = new Map<string, Set<string>>();
-      (dailyData || []).forEach((d: any) => {
+      // Organize daily data by month (preserve repo info)
+      const monthMap = new Map<string, DailyInfo[]>();
+      (dailyData || []).forEach((d: { date: string; repo: string }) => {
         const month = d.date.substring(0, 7);
-        if (!monthMap.has(month)) monthMap.set(month, new Set());
-        monthMap.get(month)!.add(d.date);
+        if (!monthMap.has(month)) monthMap.set(month, []);
+        // Avoid duplicates
+        const existing = monthMap.get(month)!;
+        if (!existing.some((e) => e.date === d.date && e.repo === d.repo)) {
+          existing.push({ date: d.date, repo: d.repo });
+        }
       });
 
       const structure: Structure = {
         year,
         hasYearlySummary,
         months: (monthlyData || [])
-          .map((m: any) => ({
+          .map((m: { month: string; summary?: string }) => ({
             month: m.month,
             hasSummary: !!m.summary,
-            days: Array.from(monthMap.get(m.month) || []).sort(),
+            days: (monthMap.get(m.month) || []).sort((a: DailyInfo, b: DailyInfo) =>
+              a.date.localeCompare(b.date)
+            ),
           }))
-          .sort((a: any, b: any) => a.month.localeCompare(b.month)),
+          .sort(
+            (
+              a: { month: string; hasSummary: boolean; days: DailyInfo[] },
+              b: { month: string; hasSummary: boolean; days: DailyInfo[] }
+            ) => a.month.localeCompare(b.month)
+          ),
         weeks: (weeklyData || [])
-          .map((w: any) => ({
+          .map((w: { weekStart: string; weekEnd: string; summary?: string }) => ({
             weekStart: w.weekStart,
             weekEnd: w.weekEnd,
             hasSummary: !!w.summary,
             title: `Week of ${w.weekStart}`,
           }))
-          .sort((a: any, b: any) => a.weekStart.localeCompare(b.weekStart)),
+          .sort(
+            (
+              a: { weekStart: string; weekEnd: string; hasSummary: boolean; title: string },
+              b: { weekStart: string; weekEnd: string; hasSummary: boolean; title: string }
+            ) => a.weekStart.localeCompare(b.weekStart)
+          ),
       };
 
       setStructure(structure);
@@ -159,6 +182,12 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
   const handleRegenerate = async () => {
     if (!selectedNode) return;
 
+    // Daily type requires repo
+    if (selectedNode.type === "daily" && !selectedNode.repo) {
+      toast.error("Missing repo info for daily regeneration");
+      return;
+    }
+
     setRegenerating(true);
     try {
       const res = await fetch("http://localhost:3456/api/summary/regenerate", {
@@ -169,7 +198,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
           id: selectedNode.id,
           year,
           customPrompt: customPrompt.trim() || undefined,
-          repo: "default",
+          repo: selectedNode.repo, // Use actual repo from selectedNode
         }),
       });
 
@@ -177,12 +206,13 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
 
       if (res.ok) {
         toast.success("Regeneration successful!");
-        // Reload content locally since regenerate returns result
+        // Update local content
         if (data.summary) setContent(data.summary);
         else if (data.content) setContent(data.content);
 
-        // Reload structure if needed
+        // Reload structure and notify global state
         fetchStructure();
+        refetchData();
         setCustomPrompt("");
       } else {
         toast.error(`Failed: ${data.error}`);
@@ -339,19 +369,29 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
                       <div className="ml-9 border-l-2 pl-2 space-y-1 my-1">
                         {m.days.map((day) => (
                           <div
-                            key={day}
+                            key={`${day.date}-${day.repo}`}
                             className={`flex items-center gap-2 p-1.5 rounded-md cursor-pointer text-xs transition-colors ${
                               selectedNode?.type === "daily" &&
-                              selectedNode.id === day
+                              selectedNode.id === day.date &&
+                              selectedNode.repo === day.repo
                                 ? "bg-blue-50 text-blue-900 font-medium"
                                 : "hover:bg-slate-50 text-slate-600"
                             }`}
                             onClick={() =>
-                              setSelectedNode({ type: "daily", id: day })
+                              setSelectedNode({
+                                type: "daily",
+                                id: day.date,
+                                repo: day.repo,
+                              })
                             }
                           >
                             <CalendarDays className="h-3 w-3" />
-                            {day}
+                            {day.date}
+                            {day.repo && (
+                              <span className="text-slate-400 ml-1">
+                                ({day.repo})
+                              </span>
+                            )}
                           </div>
                         ))}
                         {m.days.length === 0 && (
