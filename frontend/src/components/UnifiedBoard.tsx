@@ -201,7 +201,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
   }
 
   return (
-    <div className="grid grid-cols-12 h-[calc(100vh-8rem)] bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <div className="grid grid-cols-12 h-[calc(100vh-10rem)] bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
       {/* Sidebar - Timeline Navigation */}
       <div className="col-span-3 h-full overflow-hidden border-r bg-slate-50">
         <JournalSidebar

@@ -81,7 +81,7 @@ export function JournalSidebar({
     structure.months.forEach((m) => {
       items.push({
         label: `${m.month} Monthly Report`,
-        value: `month ${m.month}`,
+        value: `month ${m.month} report`,
         node: { type: "monthly", id: m.month, label: `${m.month} Report` },
         icon: CalendarRange,
       });
@@ -89,10 +89,20 @@ export function JournalSidebar({
       m.days.forEach((d) => {
         items.push({
           label: `${d.date} (${d.repo})`,
-          value: `daily ${d.date} ${d.repo}`,
+          value: `daily ${d.date} ${d.repo} log`,
           node: { type: "daily", id: d.date, repo: d.repo, label: d.date },
           icon: CalendarIcon,
         });
+      });
+    });
+
+    // Weeks
+    structure.weeks.forEach((w) => {
+      items.push({
+        label: `${w.title} (${w.weekStart})`,
+        value: `week ${w.title} ${w.weekStart} report`,
+        node: { type: "weekly", id: w.weekStart, label: w.title },
+        icon: LayoutTemplate,
       });
     });
 
@@ -171,7 +181,7 @@ export function JournalSidebar({
           {/* Yearly Node */}
           <div
             className={cn(
-              "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors mb-4",
+              "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors mb-2",
               selectedNode?.type === "yearly"
                 ? "bg-amber-50 text-amber-900 border border-amber-200"
                 : "hover:bg-slate-100 text-slate-700"
@@ -198,11 +208,15 @@ export function JournalSidebar({
             .reverse()
             .map((m) => {
               const isExpanded = expandedMonths.includes(m.month);
-              // Check if selected node is inside this month
               // const formatMonth = format(parseISO(`${m.month}-01`), "MMMM");
               const formatMonth = m.month
                 ? format(parseISO(`${m.month}-01`), "MMMM")
                 : "";
+
+              // Find weeks that start in this month
+              const displayWeeks = structure.weeks.filter((w) =>
+                w.weekStart.startsWith(m.month)
+              );
 
               return (
                 <div key={m.month} className="mb-1">
@@ -247,8 +261,41 @@ export function JournalSidebar({
                     </span>
                   </div>
 
+                  {/* Sub-items: Weeks & Days */}
                   {isExpanded && (
                     <div className="ml-4 pl-3 border-l border-slate-200 mt-1 space-y-0.5">
+                      {/* Weeks in this month */}
+                      {displayWeeks.length > 0 && (
+                        <div className="mb-2 space-y-0.5">
+                          {displayWeeks.reverse().map((w) => (
+                            <div
+                              key={w.weekStart}
+                              className={cn(
+                                "flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors",
+                                selectedNode?.type === "weekly" &&
+                                  selectedNode.id === w.weekStart
+                                  ? "bg-purple-50 text-purple-900 font-medium"
+                                  : "hover:bg-slate-100 text-slate-600"
+                              )}
+                              onClick={() =>
+                                onSelect({
+                                  type: "weekly",
+                                  id: w.weekStart,
+                                  label: w.title,
+                                })
+                              }
+                            >
+                              <LayoutTemplate className="h-3 w-3 text-slate-400" />
+                              <span className="truncate flex-1">{w.title}</span>
+                              {w.hasSummary && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Days */}
                       {m.days
                         .slice()
                         .reverse()
@@ -272,11 +319,11 @@ export function JournalSidebar({
                               })
                             }
                           >
-                            <span className="w-1 h-1 rounded-full bg-slate-300" />
-                            <span className="font-mono">
+                            <span className="w-1 h-1 rounded-full bg-slate-300 shrink-0" />
+                            <span className="font-mono shrink-0">
                               {d.date.substring(8)}
                             </span>
-                            <span className="opacity-50 truncate max-w-[80px]">
+                            <span className="text-slate-500 truncate">
                               {d.repo}
                             </span>
                             {d.hasSummary && (

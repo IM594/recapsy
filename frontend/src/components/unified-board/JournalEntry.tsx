@@ -165,77 +165,79 @@ export function JournalEntry({
       </AnimatePresence>
 
       {/* Content Area */}
-      <ScrollArea className="flex-1 bg-white">
-        <div className="max-w-3xl mx-auto px-8 py-8 min-h-[600px]">
-          <AnimatePresence mode="wait">
-            {loading ? (
-              <motion.div
-                key="loading"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex flex-col items-center justify-center h-64 space-y-4"
-              >
-                <div className="relative">
-                  <div className="h-12 w-12 rounded-full border-4 border-slate-100 border-t-indigo-500 animate-spin" />
-                  <Bot className="h-5 w-5 absolute inset-0 m-auto text-slate-300" />
-                </div>
-                <p className="text-slate-400 text-sm animate-pulse">
-                  Consulting the archives...
-                </p>
-              </motion.div>
-            ) : tab === "read" ? (
-              <motion.article
-                key="content"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.3 }}
-                className="prose prose-slate prose-lg max-w-none
+      <ScrollArea className="flex-1 h-full bg-white">
+        <div className="max-w-4xl mx-auto pb-24">
+          <div className="px-8 py-8">
+            <AnimatePresence mode="wait">
+              {loading ? (
+                <motion.div
+                  key="loading"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col items-center justify-center h-64 space-y-4"
+                >
+                  <div className="relative">
+                    <div className="h-12 w-12 rounded-full border-4 border-slate-100 border-t-indigo-500 animate-spin" />
+                    <Bot className="h-5 w-5 absolute inset-0 m-auto text-slate-300" />
+                  </div>
+                  <p className="text-slate-400 text-sm animate-pulse">
+                    Consulting the archives...
+                  </p>
+                </motion.div>
+              ) : tab === "read" ? (
+                <motion.article
+                  key="content"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="prose prose-slate max-w-none
                  prose-headings:font-bold prose-headings:tracking-tight
-                 prose-h1:text-4xl prose-h2:text-2xl prose-h2:mt-8 prose-h2:mb-4
+                 prose-h1:text-3xl prose-h2:text-xl prose-h2:mt-8 prose-h2:mb-4
                  prose-p:leading-relaxed prose-p:text-slate-600
                  prose-li:text-slate-600
                  prose-strong:text-slate-800
                  prose-code:text-indigo-600 prose-code:bg-indigo-50 prose-code:px-1 prose-code:rounded-sm prose-code:before:content-none prose-code:after:content-none"
-              >
-                {!content ? (
-                  <div className="text-center py-20 text-slate-400 italic bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                    No journal entry for this date. <br />
-                    Click "Refine" to generate one.
+                >
+                  {!content ? (
+                    <div className="text-center py-20 text-slate-400 italic bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                      No journal entry for this date. <br />
+                      Click "Refine" to generate one.
+                    </div>
+                  ) : (
+                    <ReactMarkdown>{content}</ReactMarkdown>
+                  )}
+                </motion.article>
+              ) : (
+                <motion.div
+                  key="source"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  className="space-y-4"
+                >
+                  <div className="p-4 bg-slate-900 rounded-lg text-slate-200 font-mono text-sm overflow-x-auto">
+                    <div className="flex items-center gap-2 mb-4 text-slate-500 pb-2 border-b border-slate-800">
+                      <Code2 className="h-4 w-4" />
+                      Raw Context Data
+                    </div>
+                    <pre>
+                      {/* Placeholder for raw data - ideally this would be passed in props or fetched */}
+                      {JSON.stringify(
+                        {
+                          note: "Raw source view not yet implemented, showing node info",
+                          ...node,
+                        },
+                        null,
+                        2
+                      )}
+                    </pre>
                   </div>
-                ) : (
-                  <ReactMarkdown>{content}</ReactMarkdown>
-                )}
-              </motion.article>
-            ) : (
-              <motion.div
-                key="source"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                className="space-y-4"
-              >
-                <div className="p-4 bg-slate-900 rounded-lg text-slate-200 font-mono text-sm overflow-x-auto">
-                  <div className="flex items-center gap-2 mb-4 text-slate-500 pb-2 border-b border-slate-800">
-                    <Code2 className="h-4 w-4" />
-                    Raw Context Data
-                  </div>
-                  <pre>
-                    {/* Placeholder for raw data - ideally this would be passed in props or fetched */}
-                    {JSON.stringify(
-                      {
-                        note: "Raw source view not yet implemented, showing node info",
-                        ...node,
-                      },
-                      null,
-                      2
-                    )}
-                  </pre>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </ScrollArea>
     </div>
