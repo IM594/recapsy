@@ -2,7 +2,7 @@
  * Year-End Summarizer - Generate comprehensive year-end self-review
  */
 
-import { createLLM } from "../../lib/llm";
+import { createLLM, invokeWithRetry } from "../../lib/llm";
 import type { MonthlySummary, YearEndSummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
@@ -70,8 +70,7 @@ ${additionalInstructions ? `> ${additionalInstructions}` : "无"}
 （简短的总结和对未来的展望）`;
 
   const model = createLLM({ temperature: 0.6 });
-  const response = await model.invoke(prompt);
-  const overview = String(response.content);
+  const overview = await invokeWithRetry(model, prompt);
 
   // Parse achievements
   const achievements: string[] = [];

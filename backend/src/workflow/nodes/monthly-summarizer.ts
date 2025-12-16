@@ -2,7 +2,7 @@
  * Monthly Summarizer - Aggregate daily summaries into monthly report
  */
 
-import { createLLM } from "../../lib/llm";
+import { createLLM, invokeWithRetry } from "../../lib/llm";
 import type { DailySummary, MonthlySummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
@@ -57,8 +57,7 @@ ${additionalInstructions ? `> ${additionalInstructions}` : "无"}
 ...`;
 
   const model = createLLM({ temperature: 0.5 });
-  const response = await model.invoke(prompt);
-  const summary = String(response.content);
+  const summary = await invokeWithRetry(model, prompt);
 
   // Extract highlights
   const highlights: string[] = [];

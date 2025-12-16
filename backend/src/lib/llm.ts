@@ -39,10 +39,7 @@ export function getLLM(config: LLMConfig = {}): ChatOpenAI {
   const mergedConfig = { ...DEFAULT_CONFIG, ...config };
 
   // For different temperatures, create a new instance
-  if (
-    cachedModel &&
-    mergedConfig.temperature === DEFAULT_CONFIG.temperature
-  ) {
+  if (cachedModel && mergedConfig.temperature === DEFAULT_CONFIG.temperature) {
     return cachedModel;
   }
 
@@ -84,9 +81,48 @@ export function createLLM(config: LLMConfig = {}): ChatOpenAI {
   });
 }
 
-/**
- * Clear the cached LLM instance (useful for testing or config changes)
- */
 export function clearLLMCache(): void {
   cachedModel = null;
+}
+
+import logger from "./logger";
+
+/**
+ * Invoke model with retry logic for robust API calls
+ */
+export async function invokeWithRetry(
+  model: ChatOpenAI,
+  prompt: string,
+  retries = 3,
+  initialDelay = 2000
+): Promise<string> {
+  let lastError;
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await model.invoke(prompt);
+      return String(response.content);
+    } catch (error) {
+      lastError = error;
+      const errMsg = error instanceof Error ? error.message : String(error);
+
+      // Check if it's a 401 error (Authentication) - sometimes transient, sometimes fatal
+      // If it's 401, we might want to retry if it's due to concurrency/rate limiting masquerading as 401
+      // But usually 401 is invalid token.
+      // However, user specifically asked for retry mechanism for "401 Invalid Token".
+      // So we will retry it.
+
+      if (i < retries - 1) {
+        const waitTime = initialDelay * Math.pow(2, i);
+        logger.warn(
+          `Model invocation failed (Attempt ${i + 1}/${retries}): ${errMsg}`
+        );
+        logger.warn(`Retrying in ${waitTime}ms...`);
+
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+
+  throw lastError;
 }

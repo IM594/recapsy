@@ -2,7 +2,7 @@
  * Weekly Summarizer Node - Aggregate daily summaries into weekly report
  */
 
-import { createLLM } from "../../lib/llm";
+import { createLLM, invokeWithRetry } from "../../lib/llm";
 import { WorkflowState } from "../state";
 import { CheckpointManager } from "../../lib/checkpoint";
 import type { WeeklySummary, DailySummary } from "../../lib/types";
@@ -51,8 +51,7 @@ ${customPrompt ? `## 额外指令\n> ${customPrompt}\n` : ""}
 - 成果3：具体描述
 ...`;
 
-  const response = await model.invoke(prompt);
-  const summaryText = response.content as string;
+  const summaryText = await invokeWithRetry(model, prompt);
 
   return {
     weekStart,

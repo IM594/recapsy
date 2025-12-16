@@ -2,7 +2,7 @@
  * Daily Summarizer - Process a single day's commits and generate summary
  */
 
-import { createLLM } from "../../lib/llm";
+import { createLLM, invokeWithRetry } from "../../lib/llm";
 import type { DailyCommitData, DailySummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
@@ -82,8 +82,7 @@ ${
 
   const model = createLLM({ temperature: 0.5 });
 
-  const response = await model.invoke(prompt);
-  const summary = String(response.content);
+  const summary = await invokeWithRetry(model, prompt);
 
   // Extract key changes from the summary (simple parsing)
   const keyChanges: string[] = [];
@@ -131,28 +130,50 @@ export async function processDailySummariesBatch(
   const errors: Array<{ date: string; error: string }> = [];
   const total = dailyDataList.length;
 
-  // 并发执行所有 daily summaries
-  const results = await Promise.allSettled(
-    dailyDataList.map(
-      async (
-        dailyData
-      ): Promise<
-        | { success: true; summary: DailySummary; date: string }
-        | { success: false; error: string; date: string }
-      > => {
-        try {
-          const summary = await processDailySummary(dailyData);
-          onProgress?.(summaries.length + 1, total, dailyData.date);
-          return { success: true, summary, date: dailyData.date };
-        } catch (error) {
-          const errMsg = error instanceof Error ? error.message : String(error);
-          onError?.(dailyData.date, error as Error);
-          logger.error(`Failed to process ${dailyData.date}: ${errMsg}`);
-          return { success: false, error: errMsg, date: dailyData.date };
+  // Process in chunks to limit concurrency
+  const CONCURRENCY_LIMIT = 5;
+  const results: PromiseSettledResult<
+    | { success: true; summary: DailySummary; date: string }
+    | { success: false; error: string; date: string }
+  >[] = [];
+
+  for (let i = 0; i < dailyDataList.length; i += CONCURRENCY_LIMIT) {
+    const chunk = dailyDataList.slice(i, i + CONCURRENCY_LIMIT);
+
+    const chunkResults = await Promise.allSettled(
+      chunk.map(
+        async (
+          dailyData
+        ): Promise<
+          | { success: true; summary: DailySummary; date: string }
+          | { success: false; error: string; date: string }
+        > => {
+          try {
+            const summary = await processDailySummary(dailyData);
+            onProgress?.(
+              summaries.length + results.length + 1,
+              total,
+              dailyData.date
+            ); // Approximate progress
+            return { success: true, summary, date: dailyData.date };
+          } catch (error) {
+            const errMsg =
+              error instanceof Error ? error.message : String(error);
+            onError?.(dailyData.date, error as Error);
+            logger.error(`Failed to process ${dailyData.date}: ${errMsg}`);
+            return { success: false, error: errMsg, date: dailyData.date };
+          }
         }
-      }
-    )
-  );
+      )
+    );
+
+    results.push(...chunkResults);
+
+    // Optional: Small delay between chunks to be nicer to the API
+    if (i + CONCURRENCY_LIMIT < dailyDataList.length) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
 
   // 收集结果
   for (const result of results) {
