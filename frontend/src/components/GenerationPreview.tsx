@@ -1,211 +1,248 @@
+import { useState, useEffect } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Sparkles,
-  CalendarRange,
-  FolderGit2,
-  User,
-  ArrowRight,
-  Clock,
-  CheckCircle2,
-} from "lucide-react";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { Loader2, AlertTriangle, Calendar, CheckCircle2 } from "lucide-react";
+import { useSettings } from "../hooks/useSettings";
+
+type GenerationType = "daily" | "weekly" | "monthly" | "yearly";
 
 interface GenerationPreviewProps {
-  mode: "generate" | "regenerate";
-  year: number;
-  since: string;
-  until: string;
-  repos: string[];
-  author: string;
-  onConfirm: () => void;
-  onCancel: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  type: GenerationType;
+  year?: number;
+  onGenerateStart: () => void; // Callback when generation actually starts
 }
 
 export function GenerationPreview({
-  mode,
-  year,
-  since,
-  until,
-  repos,
-  author,
-  onConfirm,
-  onCancel,
+  open,
+  onOpenChange,
+  type,
+  year = new Date().getFullYear(),
+  onGenerateStart,
 }: GenerationPreviewProps) {
-  const steps = [
-    {
-      id: "collect",
-      title: "Collecting Data",
-      description: "Scanning git history across all repositories",
-    },
-    {
-      id: "daily",
-      title: "Analyzing Days",
-      description: "Generating daily summaries with AI",
-    },
-    {
-      id: "monthly",
-      title: "Structuring Months",
-      description: "Aggregating monthly reports",
-    },
-    {
-      id: "yearly",
-      title: "Finalizing Review",
-      description: "Writing executive summary",
-    },
-  ];
+  const { selectedRepos, author } = useSettings();
+  const [checking, setChecking] = useState(true);
+  const [exists, setExists] = useState(false);
+  const [dateRange, setDateRange] = useState<{ start: string; end: string }>({
+    start: "",
+    end: "",
+  });
+
+  useEffect(() => {
+    if (open) {
+      calculateRange();
+      checkExistence();
+    }
+  }, [open, type]);
+
+  const calculateRange = () => {
+    const now = new Date();
+    let start = "";
+    let end = "";
+
+    if (type === "daily") {
+      start = end = now.toLocaleDateString("en-CA"); // YYYY-MM-DD
+    } else if (type === "weekly") {
+      // Calculate start of week (Monday)
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(now.setDate(diff));
+      const sunday = new Date(now.setDate(diff + 6));
+      start = monday.toLocaleDateString("en-CA");
+      end = sunday.toLocaleDateString("en-CA");
+    } else if (type === "monthly") {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      start = firstDay.toLocaleDateString("en-CA");
+      end = lastDay.toLocaleDateString("en-CA");
+    } else if (type === "yearly") {
+      start = `${year}-01-01`;
+      end = `${year}-12-31`;
+    }
+
+    setDateRange({ start, end });
+  };
+
+  const checkExistence = async () => {
+    setChecking(true);
+    setExists(false);
+    try {
+      // Fetch all data of this type to see if ours exists
+      // Optimization: Backend could support checking specific ID, but for now filtering client/server side is okay
+      // or we can just fetch all and check.
+      // For daily: check if today's date exists
+      // For weekly: check if weekStart exists
+      // For monthly: check if current month exists
+      // For yearly: check if year exists
+
+      const res = await fetch(
+        `http://localhost:3456/api/summary/data?type=${type}&year=${year}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        let found = false;
+
+        if (type === "daily") {
+          const today = new Date().toLocaleDateString("en-CA");
+          found = data.some((d: any) => d.date === today);
+        } else if (type === "weekly") {
+          // We need to match the weekStart
+          // Re-calculate weekStart to match exactly what backend would use
+          const now = new Date();
+          const day = now.getDay();
+          const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+          const monday = new Date(now.setDate(diff));
+          const weekStart = monday.toLocaleDateString("en-CA");
+          found = data.some(
+            (d: any) =>
+              d.weekStart === weekStart || d.weekStart.startsWith(weekStart)
+          );
+        } else if (type === "monthly") {
+          const currentMonth = new Date().toISOString().substring(0, 7); // YYYY-MM
+          found = data.some((d: any) => d.month === currentMonth);
+        } else if (type === "yearly") {
+          found = !!data.content;
+        }
+
+        setExists(found);
+      }
+    } catch (error) {
+      console.error("Failed to check existence", error);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const handleGenerate = async () => {
+    onOpenChange(false);
+
+    // Trigger the actual generation via parent or direct API call?
+    // The Dashboard usually handles "onGenerate".
+    // But here we need to call the API.
+    // Actually, Dashboard passes 'onGenerate' which triggers the process.
+    // So let's just Close and call a prop 'onConfirm'.
+    // Wait, the plan says "Handle the API call to /api/summary/generate" HERE or in the parent?
+    // "Dashboard.tsx -> Each button opens the GenerationPreview dialog."
+    // "GenerationPreview -> Handle the API call... Show real-time progress..."
+
+    // If I handle it here, I need to replicate the progress UI in this dialog OR
+    // I can stick to the plan: "Show real-time progress using the existing SSE connection logic."
+    // The existing logic is in Dashboard/App ?
+    // Dashboard receives `onGenerate`. `App.tsx` likely handles the SSE and Global Loading state.
+    // If checking `Dashboard.tsx` (lines 27, 89), `onGenerate` is passed from parent.
+    // So better to delegate back to parent to start generation, referencing the logic in `App.tsx`.
+
+    // However, the prompt says "GenerationPreview... Handle the API call".
+    // Let's compromise: GenerationPreview confirms the intent, then calls a prop `onConfirm` which triggers `onGenerate` in parent.
+    // This keeps the SSE/Progress logic centralized in App if that's where it resides.
+
+    // But wait, user wants to see "progress bar/steps appear in the modal" (Verification Plan).
+    // The current App logic might be global overlay or toast.
+    // Let's look at `App.tsx` or `Dashboard.tsx` again to see how `onGenerate` works.
+    // `Dashboard.tsx` checks `isGenerating` prop.
+
+    onGenerateStart(); // This will trigger the parent's logic
+  };
+
+  const getTitle = () => {
+    switch (type) {
+      case "daily":
+        return "Daily Brief";
+      case "weekly":
+        return "Weekly Report";
+      case "monthly":
+        return "Monthly Summary";
+      case "yearly":
+        return `Yearly Review (${year})`;
+    }
+  };
 
   return (
-    <Card className="max-w-2xl mx-auto border-2 shadow-lg animate-in zoom-in-95 duration-500">
-      <CardHeader className="text-center pb-4 border-b bg-gradient-to-br from-indigo-50 to-purple-50">
-        <div className="mx-auto bg-white p-3 rounded-full w-fit mb-4 shadow-sm ring-2 ring-indigo-100">
-          <Sparkles className="h-8 w-8 text-indigo-600" />
-        </div>
-        <CardTitle className="text-2xl">
-          {mode === "regenerate" ? "重新生成" : "生成"} {year} 年度总结
-        </CardTitle>
-        <CardDescription className="text-base mt-2">
-          {mode === "regenerate"
-            ? "将重新生成整个年度总结,现有数据将被覆盖"
-            : "即将开始分析您的年度工作成果"}
-        </CardDescription>
-      </CardHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Calendar className="h-5 w-5 text-blue-500" />
+            Generate {getTitle()}
+          </DialogTitle>
+          <DialogDescription>
+            Review the scope before generating your summary.
+          </DialogDescription>
+        </DialogHeader>
 
-      <CardContent className="space-y-6 pt-6">
-        {/* Scope Information */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">
-            任务范围
-          </h3>
-
-          <div className="grid gap-3">
-            {/* Date Range */}
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
-              <CalendarRange className="h-5 w-5 text-slate-600 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-900">
-                  时间范围
-                </div>
-                <div className="text-sm text-slate-600 mt-1">
-                  {since} 至 {until}
-                </div>
-              </div>
-            </div>
-
-            {/* Repositories */}
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
-              <FolderGit2 className="h-5 w-5 text-slate-600 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-900">
-                  代码仓库
-                </div>
-                <div className="text-sm text-slate-600 mt-1">
-                  {repos.length} 个仓库
-                </div>
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {repos.slice(0, 3).map((repo) => (
-                    <Badge
-                      key={repo}
-                      variant="secondary"
-                      className="text-xs font-mono"
-                    >
-                      {repo}
-                    </Badge>
-                  ))}
-                  {repos.length > 3 && (
-                    <Badge variant="outline" className="text-xs">
-                      +{repos.length - 3} 更多
-                    </Badge>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Author */}
-            <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200">
-              <User className="h-5 w-5 text-slate-600 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-900">作者</div>
-                <div className="text-sm text-slate-600 mt-1">
-                  {author || "所有提交者"}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Process Steps */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">
-            执行步骤
-          </h3>
-
+        <div className="space-y-4 py-4">
           <div className="space-y-2">
-            {steps.map((step, index) => (
-              <div
-                key={step.id}
-                className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 bg-white"
-              >
-                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-semibold shrink-0 mt-0.5">
-                  {index + 1}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-slate-900">
-                    {step.title}
-                  </div>
-                  <div className="text-xs text-slate-500 mt-0.5">
-                    {step.description}
-                  </div>
-                </div>
-                {index < steps.length - 1 && (
-                  <ArrowRight className="h-4 w-4 text-slate-300 mt-1.5" />
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Estimated Time */}
-        <div className="flex items-center gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
-          <Clock className="h-4 w-4 text-amber-600" />
-          <span className="text-sm text-amber-900">
-            预计耗时: 根据数据量,可能需要几分钟到十几分钟
-          </span>
-        </div>
-
-        {/* Warning for Regenerate */}
-        {mode === "regenerate" && (
-          <div className="flex items-start gap-2 p-3 rounded-lg bg-orange-50 border border-orange-200">
-            <div className="text-orange-600 mt-0.5">⚠️</div>
-            <div className="text-sm text-orange-900">
-              <strong>注意:</strong>{" "}
-              重新生成将覆盖现有的年度总结数据。此操作不可撤销。
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Time Range:</span>
+              <span className="font-medium font-mono bg-slate-100 px-2 py-0.5 rounded">
+                {dateRange.start} → {dateRange.end}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Repositories:</span>
+              <span className="font-medium">
+                {selectedRepos.length} selected
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Author:</span>
+              <span className="font-medium">{author}</span>
             </div>
           </div>
-        )}
 
-        {/* Action Buttons */}
-        <div className="flex gap-3 pt-4">
-          <Button
-            variant="outline"
-            onClick={onCancel}
-            className="flex-1"
-            size="lg"
-          >
-            取消
-          </Button>
-          <Button onClick={onConfirm} className="flex-1" size="lg">
-            <CheckCircle2 className="h-4 w-4 mr-2" />
-            确认{mode === "regenerate" ? "重新生成" : "开始生成"}
-          </Button>
+          {checking ? (
+            <div className="flex items-center justify-center py-4 text-muted-foreground gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Checking existing data...
+            </div>
+          ) : exists ? (
+            <Alert
+              variant="destructive"
+              className="bg-amber-50 border-amber-200 text-amber-800"
+            >
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertTitle>Summary Already Exists</AlertTitle>
+              <AlertDescription>
+                A summary for this period already exists. Generating will{" "}
+                <strong>overwrite</strong> the existing data.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <Alert className="bg-blue-50 border-blue-200 text-blue-800">
+              <CheckCircle2 className="h-4 w-4 text-blue-600" />
+              <AlertTitle>Ready to Generate</AlertTitle>
+              <AlertDescription>
+                No existing data found. You are good to go.
+              </AlertDescription>
+            </Alert>
+          )}
         </div>
-      </CardContent>
-    </Card>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleGenerate}
+            className={
+              exists
+                ? "bg-amber-600 hover:bg-amber-700"
+                : "bg-blue-600 hover:bg-blue-700"
+            }
+          >
+            {exists ? "Overwrite & Generate" : "Generate Summary"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

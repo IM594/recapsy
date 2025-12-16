@@ -26,15 +26,12 @@ router.post("/generate", async (req, res) => {
     year = new Date().getFullYear(),
   } = req.body;
 
-  // Map old summaryType to new taskType
-  const taskTypeMap: Record<string, "daily" | "weekly" | "monthly" | "yearly"> =
-    {
-      today: "daily",
-      week: "weekly",
-      month: "monthly",
-      year_end_Full: "yearly",
-    };
-  const taskType = taskTypeMap[summaryType] || "daily";
+  // Validate taskType
+  const validTaskTypes = ["daily", "weekly", "monthly", "yearly"] as const;
+  type TaskType = (typeof validTaskTypes)[number];
+  const taskType: TaskType = validTaskTypes.includes(summaryType)
+    ? summaryType
+    : "daily";
 
   const checkpoint = getCheckpointManager(year);
 
@@ -157,6 +154,11 @@ router.get("/data", async (req, res) => {
         ? allDailies.filter((d) => d.repo === repo)
         : allDailies;
       return res.json(filtered);
+    }
+
+    if (type === "weekly") {
+      const weeklies = await checkpoint.loadAllWeeklySummaries();
+      return res.json(weeklies);
     }
 
     if (type === "monthly") {

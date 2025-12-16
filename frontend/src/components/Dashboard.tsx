@@ -1,30 +1,30 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
-  Sparkles,
   CalendarDays,
   Calendar,
   Trophy,
   ArrowRight,
   Clock,
   Settings,
-  Loader2,
-  RefreshCw,
+  LayoutTemplate,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
-  CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
+  CardDescription,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useSettings } from "../hooks/useSettings";
 import { SettingsDialog } from "./SettingsDialog";
+import { GenerationPreview } from "./GenerationPreview";
 import { toast } from "sonner";
 
+// Updated signature to match App.tsx
 interface DashboardProps {
-  onGenerate: (type: "today" | "week" | "month") => Promise<void>;
+  onGenerate: (
+    type: "daily" | "weekly" | "monthly" | "yearly"
+  ) => Promise<void>;
   onViewYearReview: (mode: "view" | "regenerate") => void;
   year?: number;
   isGenerating?: boolean;
@@ -33,69 +33,26 @@ interface DashboardProps {
 export function Dashboard({
   onGenerate,
   onViewYearReview,
-  year = 2025,
+  year = new Date().getFullYear(),
   isGenerating = false,
 }: DashboardProps) {
   const { isConfigured } = useSettings();
   const [showSettings, setShowSettings] = useState(false);
+  const [previewType, setPreviewType] = useState<
+    "daily" | "weekly" | "monthly" | "yearly" | null
+  >(null);
 
-  const [hasYearlyData, setHasYearlyData] = useState(false);
-  const [loadingYearCheck, setLoadingYearCheck] = useState(true);
-  const [isYearlyTaskRunning, setIsYearlyTaskRunning] = useState(false);
-
-  // Check for year end data and running status
-  useEffect(() => {
-    const checkYearlyData = async () => {
-      try {
-        // Check if task is running
-        const statusRes = await fetch(
-          `http://localhost:3456/api/summary/status?year=${year}`
-        );
-        if (statusRes.ok) {
-          const status = await statusRes.json();
-          setIsYearlyTaskRunning(status.isRunning);
-        }
-
-        // Check if data exists
-        const res = await fetch(
-          `http://localhost:3456/api/summary/data?type=yearly&year=${year}`
-        );
-        if (res.ok) {
-          const data = await res.json();
-          // If content is present, we assume it exists
-          if (data.content) {
-            setHasYearlyData(true);
-          }
-        }
-      } catch (error) {
-        console.error("Failed to check yearly data", error);
-      } finally {
-        setLoadingYearCheck(false);
-      }
-    };
-    checkYearlyData();
-
-    // Poll for status updates every 3 seconds
-    const interval = setInterval(checkYearlyData, 3000);
-    return () => clearInterval(interval);
-  }, [year]);
-
-  const handleAction = async (type: "today" | "week" | "month") => {
+  const handleAction = (type: "daily" | "weekly" | "monthly" | "yearly") => {
     if (!isConfigured) {
       toast.info("Please configure your repositories first");
       setShowSettings(true);
       return;
     }
-    await onGenerate(type);
+    setPreviewType(type);
   };
 
-  const handleYearEndAction = (mode: "view" | "regenerate") => {
-    if (!isConfigured) {
-      toast.info("Please configure your repositories first");
-      setShowSettings(true);
-      return;
-    }
-    onViewYearReview(mode);
+  const handleEnterBoard = () => {
+    onViewYearReview("view");
   };
 
   return (
@@ -107,7 +64,7 @@ export function Dashboard({
           </h2>
           <p className="text-muted-foreground mt-1">
             {isConfigured
-              ? "Ready to generate summaries from your connected repos."
+              ? "Generate summaries or view your progress."
               : "Connect your repositories to get started."}
           </p>
         </div>
@@ -127,146 +84,118 @@ export function Dashboard({
         </div>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
-        {/* Quick Actions - "Make it Happen" Cards */}
-        <Card className="col-span-4 border shadow-sm bg-gradient-to-br from-white to-blue-50/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Sparkles className="h-5 w-5 text-blue-500" />
-              Quick Generate
-            </CardTitle>
-            <CardDescription>
-              One-click summaries based on configured repos.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <Button
-                variant="outline"
-                className="h-32 flex flex-col items-center justify-center gap-3 hover:border-blue-300 hover:bg-blue-50/50 transition-all border-2 group relative overflow-hidden"
-                onClick={() => handleAction("today")}
-                disabled={isGenerating}
-              >
-                {isGenerating ? (
-                  <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10 backdrop-blur-[1px]">
-                    <Loader2 className="h-8 w-8 text-blue-500 animate-spin" />
-                  </div>
-                ) : null}
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+        {/* Daily */}
+        <Button
+          variant="outline"
+          className="h-40 flex flex-col items-center justify-center gap-4 hover:border-blue-300 hover:bg-blue-50/50 transition-all border-2 group"
+          onClick={() => handleAction("daily")}
+          disabled={isGenerating}
+        >
+          <div className="p-4 bg-blue-100 text-blue-600 rounded-full group-hover:scale-110 transition-transform">
+            <CalendarDays className="h-6 w-6" />
+          </div>
+          <div className="text-center">
+            <span className="font-semibold text-lg block text-slate-700 group-hover:text-blue-700">
+              Daily Brief
+            </span>
+            <span className="text-xs text-muted-foreground group-hover:text-blue-600">
+              Summarize today's work
+            </span>
+          </div>
+        </Button>
 
-                <div className="p-3 bg-blue-100/50 text-blue-600 rounded-full group-hover:scale-110 transition-transform duration-300">
-                  <CalendarDays className="h-6 w-6" />
-                </div>
-                <div className="text-center">
-                  <span className="font-semibold text-lg block text-slate-700">
-                    Daily Brief
-                  </span>
-                  <span className="text-xs text-slate-500 group-hover:text-blue-600 transition-colors">
-                    Summarize today's work
-                  </span>
-                </div>
-              </Button>
+        {/* Weekly */}
+        <Button
+          variant="outline"
+          className="h-40 flex flex-col items-center justify-center gap-4 hover:border-purple-300 hover:bg-purple-50/50 transition-all border-2 group"
+          onClick={() => handleAction("weekly")}
+          disabled={isGenerating}
+        >
+          <div className="p-4 bg-purple-100 text-purple-600 rounded-full group-hover:scale-110 transition-transform">
+            <Calendar className="h-6 w-6" />
+          </div>
+          <div className="text-center">
+            <span className="font-semibold text-lg block text-slate-700 group-hover:text-purple-700">
+              Weekly Report
+            </span>
+            <span className="text-xs text-muted-foreground group-hover:text-purple-600">
+              Review this week
+            </span>
+          </div>
+        </Button>
 
-              <Button
-                variant="outline"
-                className="h-32 flex flex-col items-center justify-center gap-3 hover:border-purple-300 hover:bg-purple-50/50 transition-all border-2 group relative overflow-hidden"
-                onClick={() => handleAction("week")}
-                disabled={isGenerating}
-              >
-                {isGenerating ? (
-                  <div className="absolute inset-0 bg-white/50 flex items-center justify-center z-10 backdrop-blur-[1px]">
-                    <Loader2 className="h-8 w-8 text-purple-500 animate-spin" />
-                  </div>
-                ) : null}
+        {/* Monthly */}
+        <Button
+          variant="outline"
+          className="h-40 flex flex-col items-center justify-center gap-4 hover:border-indigo-300 hover:bg-indigo-50/50 transition-all border-2 group"
+          onClick={() => handleAction("monthly")}
+          disabled={isGenerating}
+        >
+          <div className="p-4 bg-indigo-100 text-indigo-600 rounded-full group-hover:scale-110 transition-transform">
+            <LayoutTemplate className="h-6 w-6" />
+          </div>
+          <div className="text-center">
+            <span className="font-semibold text-lg block text-slate-700 group-hover:text-indigo-700">
+              Monthly Summary
+            </span>
+            <span className="text-xs text-muted-foreground group-hover:text-indigo-600">
+              Wrap up the month
+            </span>
+          </div>
+        </Button>
 
-                <div className="p-3 bg-purple-100/50 text-purple-600 rounded-full group-hover:scale-110 transition-transform duration-300">
-                  <Calendar className="h-6 w-6" />
-                </div>
-                <div className="text-center">
-                  <span className="font-semibold text-lg block text-slate-700">
-                    Weekly Report
-                  </span>
-                  <span className="text-xs text-slate-500 group-hover:text-purple-600 transition-colors">
-                    Review this week's progress
-                  </span>
-                </div>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Year End Review Status */}
-        <Card className="col-span-3 border border-slate-200 flex flex-col shadow-sm bg-gradient-to-br from-white to-amber-50/30">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Trophy className="h-5 w-5 text-amber-500" />
-                {year} Review
-              </CardTitle>
-              {hasYearlyData && (
-                <Badge
-                  variant="secondary"
-                  className="bg-green-100 text-green-700 hover:bg-green-100 border-green-200"
-                >
-                  Ready
-                </Badge>
-              )}
-            </div>
-            <CardDescription>
-              A deep dive into your year's contributions.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex-1 flex flex-col justify-end">
-            {loadingYearCheck ? (
-              <div className="h-12 bg-slate-100 animate-pulse rounded-lg" />
-            ) : isYearlyTaskRunning ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200">
-                  <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
-                  <span className="text-sm text-blue-900 font-medium">
-                    正在生成年度总结...
-                  </span>
-                </div>
-                <Button
-                  className="w-full h-12 bg-blue-500 hover:bg-blue-600 text-white"
-                  onClick={() => handleYearEndAction("view")}
-                >
-                  查看进度
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </div>
-            ) : hasYearlyData ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant="outline"
-                  className="h-12 border-amber-200 hover:bg-amber-50 text-amber-700"
-                  onClick={() => handleYearEndAction("regenerate")}
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Regenerate
-                </Button>
-                <Button
-                  className="h-12 bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200/50 shadow-lg"
-                  onClick={() => handleYearEndAction("view")}
-                >
-                  View Report
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </div>
-            ) : (
-              <Button
-                className="w-full h-12 text-lg border-2 border-dashed border-slate-300 bg-transparent text-slate-500 hover:border-amber-500 hover:text-amber-600 hover:bg-amber-50/50 transition-all"
-                onClick={() => handleYearEndAction("regenerate")}
-              >
-                Start {year} Review
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+        {/* Yearly */}
+        <Button
+          variant="outline"
+          className="h-40 flex flex-col items-center justify-center gap-4 hover:border-amber-300 hover:bg-amber-50/50 transition-all border-2 group"
+          onClick={() => handleAction("yearly")}
+          disabled={isGenerating}
+        >
+          <div className="p-4 bg-amber-100 text-amber-600 rounded-full group-hover:scale-110 transition-transform">
+            <Trophy className="h-6 w-6" />
+          </div>
+          <div className="text-center">
+            <span className="font-semibold text-lg block text-slate-700 group-hover:text-amber-700">
+              Yearly Review
+            </span>
+            <span className="text-xs text-muted-foreground group-hover:text-amber-600">
+              {year} Retrospective
+            </span>
+          </div>
+        </Button>
       </div>
 
-      {/* Removed "Recent Activity" as per user request */}
+      {/* Unified Board Access */}
+      <Card className="border-2 border-slate-200 bg-slate-50/50">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Unified Board</CardTitle>
+            <CardDescription>
+              Access all your generated summaries in one place.
+            </CardDescription>
+          </div>
+          <Button onClick={handleEnterBoard} className="gap-2">
+            Enter Board
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        </CardHeader>
+      </Card>
 
       <SettingsDialog open={showSettings} onOpenChange={setShowSettings} />
+
+      {previewType && (
+        <GenerationPreview
+          open={!!previewType}
+          onOpenChange={(open) => !open && setPreviewType(null)}
+          type={previewType}
+          year={year}
+          onGenerateStart={() => {
+            onGenerate(previewType);
+            setPreviewType(null);
+          }}
+        />
+      )}
     </div>
   );
 }

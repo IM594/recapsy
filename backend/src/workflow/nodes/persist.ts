@@ -44,8 +44,6 @@ export async function persistNode(
     await checkpoint.saveYearEndSummary(result.content);
   }
 
-  await checkpoint.markComplete(result);
-
   logger.stepDone("All data persisted", 0);
 
   return {

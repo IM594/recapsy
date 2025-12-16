@@ -172,6 +172,14 @@ export const useSummary = () => {
     return res.json();
   };
 
+  const getWeeklySummaries = async (year?: number) => {
+    const y = year || new Date().getFullYear();
+    const res = await fetch(
+      `http://localhost:3456/api/summary/data?type=weekly&year=${y}`
+    );
+    return res.json();
+  };
+
   return {
     status,
     logs,
@@ -179,6 +187,7 @@ export const useSummary = () => {
     startGeneration,
     getYearlySummary,
     getDailySummaries,
+    getWeeklySummaries,
     getMonthlySummaries,
   };
 };

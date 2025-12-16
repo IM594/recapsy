@@ -166,7 +166,7 @@ export function YearEndGenerator({
       selectedRepos,
       since,
       until,
-      summaryType: "year_end_Full", // Trigger yearly flow
+      summaryType: "yearly",
       author,
     });
   };

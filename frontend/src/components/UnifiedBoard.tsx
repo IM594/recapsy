@@ -20,6 +20,7 @@ import {
   CalendarDays,
   CalendarRange,
   LayoutTemplate,
+  Calendar,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
@@ -33,15 +34,21 @@ interface Structure {
     hasSummary: boolean;
     days: string[];
   }[];
+  weeks: {
+    weekStart: string;
+    weekEnd: string;
+    hasSummary: boolean;
+    title: string;
+  }[];
 }
 
-interface YearEndReviewProps {
+interface UnifiedBoardProps {
   year?: number;
 }
 
-type NodeType = "daily" | "monthly" | "yearly";
+type NodeType = "daily" | "weekly" | "monthly" | "yearly";
 
-export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
+export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
   const [structure, setStructure] = useState<Structure | null>(null);
   const [selectedNode, setSelectedNode] = useState<{
     type: NodeType;
@@ -51,10 +58,17 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
   const [loadingContent, setLoadingContent] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
   const [regenerating, setRegenerating] = useState(false);
-  const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
 
-  const { getYearlySummary, getMonthlySummaries, getDailySummaries } =
-    useSummary();
+  // Folders expansion state
+  const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
+  const [weeksExpanded, setWeeksExpanded] = useState(false);
+
+  const {
+    getYearlySummary,
+    getMonthlySummaries,
+    getDailySummaries,
+    getWeeklySummaries,
+  } = useSummary();
 
   // Load structure
   useEffect(() => {
@@ -70,11 +84,13 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
 
   const fetchStructure = async () => {
     try {
-      const [yearlyData, monthlyData, dailyData] = await Promise.all([
-        getYearlySummary(year),
-        getMonthlySummaries(year),
-        getDailySummaries(year),
-      ]);
+      const [yearlyData, monthlyData, dailyData, weeklyData] =
+        await Promise.all([
+          getYearlySummary(year),
+          getMonthlySummaries(year),
+          getDailySummaries(year),
+          getWeeklySummaries(year),
+        ]);
 
       const hasYearlySummary = !!yearlyData?.content;
 
@@ -96,12 +112,20 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
             days: Array.from(monthMap.get(m.month) || []).sort(),
           }))
           .sort((a: any, b: any) => a.month.localeCompare(b.month)),
+        weeks: (weeklyData || [])
+          .map((w: any) => ({
+            weekStart: w.weekStart,
+            weekEnd: w.weekEnd,
+            hasSummary: !!w.summary,
+            title: `Week of ${w.weekStart}`,
+          }))
+          .sort((a: any, b: any) => a.weekStart.localeCompare(b.weekStart)),
       };
 
       setStructure(structure);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to load year structure");
+      toast.error("Failed to load board structure");
     }
   };
 
@@ -115,6 +139,11 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
         const data = await getMonthlySummaries(year);
         const monthData = data.find((m: any) => m.month === id);
         setContent(monthData?.summary || "");
+      } else if (type === "weekly") {
+        const data = await getWeeklySummaries(year);
+        // id is weekStart
+        const weekData = data.find((w: any) => w.weekStart === id);
+        setContent(weekData?.summary || "");
       } else {
         const data = await getDailySummaries(year);
         const dayData = data.find((d: any) => d.date === id);
@@ -174,7 +203,7 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
   if (!structure) {
     return (
       <div className="p-8 text-center text-muted-foreground">
-        Loading structure...
+        Loading board...
       </div>
     );
   }
@@ -186,7 +215,7 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
         <CardHeader className="py-4 px-4 bg-slate-50 border-b">
           <CardTitle className="text-sm font-medium flex items-center gap-2">
             <LayoutTemplate className="h-4 w-4" />
-            Year Structure ({year})
+            Unified Board ({year})
           </CardTitle>
         </CardHeader>
         <CardContent className="flex-1 p-2 overflow-hidden">
@@ -196,82 +225,145 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
               <div
                 className={`flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm font-medium transition-colors ${
                   selectedNode?.type === "yearly"
-                    ? "bg-primary/10 text-primary"
+                    ? "bg-amber-50 text-amber-900 border border-amber-200"
                     : "hover:bg-slate-100"
                 }`}
                 onClick={() =>
                   setSelectedNode({ type: "yearly", id: String(year) })
                 }
               >
-                <FileText className="h-4 w-4" />
+                <FileText className="h-4 w-4 text-amber-500" />
                 Yearly Summary
                 {structure.hasYearlySummary && (
                   <span className="ml-auto w-2 h-2 rounded-full bg-green-500" />
                 )}
               </div>
 
-              {/* Monthly & Daily Nodes */}
-              {structure.months.map((m) => (
-                <div key={m.month} className="space-y-1">
-                  <div
-                    className={`flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm transition-colors ${
-                      selectedNode?.type === "monthly" &&
-                      selectedNode.id === m.month
-                        ? "bg-primary/10 text-primary font-medium"
-                        : "hover:bg-slate-100"
-                    }`}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleMonth(m.month);
-                      }}
-                      className="p-1 hover:bg-slate-200 rounded"
-                    >
-                      {expandedMonths.includes(m.month) ? (
-                        <ChevronDown className="h-3 w-3" />
-                      ) : (
-                        <ChevronRight className="h-3 w-3" />
-                      )}
-                    </button>
-                    <span
-                      className="flex-1 flex items-center gap-2"
-                      onClick={() =>
-                        setSelectedNode({ type: "monthly", id: m.month })
-                      }
-                    >
-                      <CalendarRange className="h-4 w-4 text-slate-500" />
-                      {m.month}
-                      {m.hasSummary && (
-                        <span className="ml-auto w-2 h-2 rounded-full bg-green-500" />
-                      )}
-                    </span>
-                  </div>
-
-                  {/* Daily Nodes (nested) */}
-                  {expandedMonths.includes(m.month) && (
-                    <div className="ml-9 border-l-2 pl-2 space-y-1 my-1">
-                      {m.days.map((day) => (
-                        <div
-                          key={day}
-                          className={`flex items-center gap-2 p-1.5 rounded-md cursor-pointer text-xs transition-colors ${
-                            selectedNode?.type === "daily" &&
-                            selectedNode.id === day
-                              ? "bg-primary/5 text-primary font-medium"
-                              : "hover:bg-slate-50 text-slate-600"
-                          }`}
-                          onClick={() =>
-                            setSelectedNode({ type: "daily", id: day })
-                          }
-                        >
-                          <CalendarDays className="h-3 w-3" />
-                          {day}
-                        </div>
-                      ))}
-                    </div>
+              {/* Weekly Folder */}
+              <div className="space-y-1 pt-2">
+                <div
+                  className="flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm font-medium hover:bg-slate-100"
+                  onClick={() => setWeeksExpanded(!weeksExpanded)}
+                >
+                  {weeksExpanded ? (
+                    <ChevronDown className="h-4 w-4" />
+                  ) : (
+                    <ChevronRight className="h-4 w-4" />
                   )}
+                  <Calendar className="h-4 w-4 text-purple-500" />
+                  Weekly Reports
+                  <Badge
+                    variant="secondary"
+                    className="ml-auto text-xs h-5 px-1.5"
+                  >
+                    {structure.weeks.length}
+                  </Badge>
                 </div>
-              ))}
+
+                {weeksExpanded && (
+                  <div className="ml-6 border-l-2 pl-2 space-y-1">
+                    {structure.weeks.map((w) => (
+                      <div
+                        key={w.weekStart}
+                        className={`flex items-center gap-2 p-1.5 rounded-md cursor-pointer text-xs transition-colors ${
+                          selectedNode?.type === "weekly" &&
+                          selectedNode.id === w.weekStart
+                            ? "bg-purple-50 text-purple-900 font-medium"
+                            : "hover:bg-slate-50 text-slate-600"
+                        }`}
+                        onClick={() =>
+                          setSelectedNode({ type: "weekly", id: w.weekStart })
+                        }
+                      >
+                        <span className="truncate">
+                          {w.weekStart} - {w.weekEnd}
+                        </span>
+                        {w.hasSummary && (
+                          <span className="ml-auto w-1.5 h-1.5 rounded-full bg-green-500" />
+                        )}
+                      </div>
+                    ))}
+                    {structure.weeks.length === 0 && (
+                      <div className="text-xs text-muted-foreground p-2">
+                        No weekly reports yet
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Monthly Folder / List */}
+              <div className="pt-2">
+                <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider px-2 mb-2">
+                  Months
+                </div>
+                {structure.months.map((m) => (
+                  <div key={m.month} className="space-y-1">
+                    <div
+                      className={`flex items-center gap-2 p-2 rounded-md cursor-pointer text-sm transition-colors ${
+                        selectedNode?.type === "monthly" &&
+                        selectedNode.id === m.month
+                          ? "bg-indigo-50 text-indigo-900 font-medium"
+                          : "hover:bg-slate-100"
+                      }`}
+                    >
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleMonth(m.month);
+                        }}
+                        className="p-1 hover:bg-slate-200 rounded"
+                      >
+                        {expandedMonths.includes(m.month) ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                      </button>
+                      <span
+                        className="flex-1 flex items-center gap-2"
+                        onClick={() =>
+                          setSelectedNode({ type: "monthly", id: m.month })
+                        }
+                      >
+                        <CalendarRange className="h-4 w-4 text-indigo-500" />
+                        {m.month}
+                        {m.hasSummary && (
+                          <span className="ml-auto w-2 h-2 rounded-full bg-green-500" />
+                        )}
+                      </span>
+                    </div>
+
+                    {/* Daily Nodes (nested) */}
+                    {expandedMonths.includes(m.month) && (
+                      <div className="ml-9 border-l-2 pl-2 space-y-1 my-1">
+                        {m.days.map((day) => (
+                          <div
+                            key={day}
+                            className={`flex items-center gap-2 p-1.5 rounded-md cursor-pointer text-xs transition-colors ${
+                              selectedNode?.type === "daily" &&
+                              selectedNode.id === day
+                                ? "bg-blue-50 text-blue-900 font-medium"
+                                : "hover:bg-slate-50 text-slate-600"
+                            }`}
+                            onClick={() =>
+                              setSelectedNode({ type: "daily", id: day })
+                            }
+                          >
+                            <CalendarDays className="h-3 w-3" />
+                            {day}
+                          </div>
+                        ))}
+                        {m.days.length === 0 && (
+                          <div className="text-xs text-muted-foreground p-2">
+                            No daily logs
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           </ScrollArea>
         </CardContent>
@@ -286,13 +378,14 @@ export function YearEndReview({ year = 2025 }: YearEndReviewProps) {
                 <div>
                   <CardTitle className="text-base flex items-center gap-2">
                     {selectedNode.type === "yearly" && "🏆 Annual Self-Review"}
-                    {selectedNode.type === "monthly" && "📅 Monthly Report"}
+                    {selectedNode.type === "weekly" && "📅 Weekly Report"}
+                    {selectedNode.type === "monthly" && "🗓️ Monthly Report"}
                     {selectedNode.type === "daily" && "📝 Daily Summary"}
                   </CardTitle>
                   <CardDescription>{selectedNode.id}</CardDescription>
                 </div>
-                <Badge variant="outline" className="font-mono">
-                  {selectedNode.type.toUpperCase()}
+                <Badge variant="outline" className="font-mono uppercase">
+                  {selectedNode.type}
                 </Badge>
               </CardHeader>
               <CardContent className="flex-1 p-6 overflow-hidden">

@@ -384,6 +384,27 @@ export class CheckpointManager extends EventEmitter {
     );
   }
 
+  /**
+   * Get all completed weekly summaries
+   */
+  async loadAllWeeklySummaries(): Promise<any[]> {
+    const summaries: any[] = [];
+    const keys = this.checkpoint?.weeklySummariesCompleted ?? [];
+
+    for (const key of keys) {
+      try {
+        const safeKey = encodeURIComponent(key);
+        const jsonPath = path.join(this.outputDir, "weekly", `${safeKey}.json`);
+        const data = await fs.readFile(jsonPath, "utf-8");
+        summaries.push(JSON.parse(data));
+      } catch {
+        // Skip missing files
+      }
+    }
+
+    return summaries.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
+  }
+
   // ============ Monthly Summaries ============
 
   /**

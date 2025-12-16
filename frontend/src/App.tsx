@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { ResultCard } from "./components/ResultCard";
 import { YearEndContainer } from "./components/YearEndContainer";
 import { Dashboard } from "./components/Dashboard";
-import { Sparkles, ArrowLeft, X } from "lucide-react";
+import { Sparkles, ArrowLeft } from "lucide-react";
 import { Toaster, toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SettingsProvider, useSettings } from "./hooks/useSettings";
@@ -92,7 +92,9 @@ function AppContent() {
     }
   }, [status.phase, status.isRunning, status.result]);
 
-  const handleGenerate = async (type: "today" | "week" | "month") => {
+  const handleGenerate = async (
+    type: "daily" | "weekly" | "monthly" | "yearly"
+  ) => {
     setGenerationResult(null);
 
     // Calculate dates based on type
@@ -100,19 +102,25 @@ function AppContent() {
     let since = "";
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
-    const until = endOfToday.toISOString();
+    let until = endOfToday.toISOString();
 
-    if (type === "today") {
+    if (type === "daily") {
       since = getStartOfDay(now).toISOString();
-    } else if (type === "week") {
+    } else if (type === "weekly") {
       const day = now.getDay();
       const diff = now.getDate() - day + (day === 0 ? -6 : 1);
       const monday = new Date(now);
       monday.setDate(diff);
       since = getStartOfDay(monday).toISOString();
-    } else if (type === "month") {
+    } else if (type === "monthly") {
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
       since = getStartOfDay(firstDay).toISOString();
+    } else if (type === "yearly") {
+      const firstDay = new Date(now.getFullYear(), 0, 1);
+      since = getStartOfDay(firstDay).toISOString();
+      // For yearly, until is end of year
+      const lastDay = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      until = lastDay.toISOString();
     }
 
     startGeneration({
@@ -122,13 +130,6 @@ function AppContent() {
       summaryType: type,
       author,
     });
-
-    // Store context for potential regeneration
-    // Note: We'll update the 'id' (date/weekStart) when we receive the result in useEffect
-    // But we can pre-set the type/repo here or derive it later.
-    // Actually, best to derive 'id' from the result or the request parameters.
-    // For 'today', id is 'since' (YYYY-MM-DD).
-    // For 'week', id is 'since' (Monday).
   };
 
   return (
