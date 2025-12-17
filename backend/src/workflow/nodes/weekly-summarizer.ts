@@ -9,6 +9,27 @@ import type { WeeklySummary, DailySummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
 /**
+ * Get the Monday of the week for a given date
+ */
+function getWeekStart(dateStr: string): string {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  // If Sunday (0), subtract 6 days. Else subtract day-1
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().slice(0, 10);
+}
+
+/**
+ * Get the Sunday of the week for a given start date
+ */
+function getWeekEnd(weekStart: string): string {
+  const d = new Date(weekStart);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
  * Process weekly summary from daily summaries
  */
 export async function processWeeklySummary(
@@ -63,10 +84,79 @@ ${customPrompt ? `## 额外指令\n> ${customPrompt}\n` : ""}
 }
 
 /**
- * Normalize date string to YYYY-MM-DD format
+ * Process all weekly summaries for the given daily summaries
  */
-function toDateString(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("en-CA");
+export async function processAllWeeklySummaries(
+  dailySummaries: DailySummary[],
+  onProgress?: (completed: number, total: number, week: string) => void
+): Promise<{
+  summaries: WeeklySummary[];
+  errors: Array<{ week: string; error: string }>;
+}> {
+  // Group by week
+  const weeklyGroups = new Map<string, DailySummary[]>();
+
+  for (const daily of dailySummaries) {
+    const weekStart = getWeekStart(daily.date);
+    if (!weeklyGroups.has(weekStart)) {
+      weeklyGroups.set(weekStart, []);
+    }
+    weeklyGroups.get(weekStart)!.push(daily);
+  }
+
+  const weeks = Array.from(weeklyGroups.keys()).sort();
+  const summaries: WeeklySummary[] = [];
+  const errors: Array<{ week: string; error: string }> = [];
+
+  // Same concurrency limit as other batch processors
+  const CONCURRENCY_LIMIT = 5;
+
+  for (let i = 0; i < weeks.length; i += CONCURRENCY_LIMIT) {
+    const chunk = weeks.slice(i, i + CONCURRENCY_LIMIT);
+
+    const chunkResults = await Promise.allSettled(
+      chunk.map(async (weekStart) => {
+        const dailies = weeklyGroups.get(weekStart)!;
+        const weekEnd = getWeekEnd(weekStart);
+
+        try {
+          // Sort dailies by date just in case
+          dailies.sort((a, b) => a.date.localeCompare(b.date));
+
+          const summary = await processWeeklySummary(
+            weekStart,
+            weekEnd,
+            dailies
+          );
+          onProgress?.(summaries.length + 1, weeks.length, weekStart);
+          return { success: true as const, summary };
+        } catch (error) {
+          const errMsg = error instanceof Error ? error.message : String(error);
+          logger.error(`Failed to process week ${weekStart}: ${errMsg}`);
+          return { success: false as const, week: weekStart, error: errMsg };
+        }
+      })
+    );
+
+    // Collect results
+    for (const result of chunkResults) {
+      if (result.status === "fulfilled") {
+        const data = result.value;
+        if (data.success) {
+          summaries.push(data.summary);
+        } else {
+          errors.push({ week: data.week, error: data.error });
+        }
+      }
+    }
+
+    // Small delay between chunks
+    if (i + CONCURRENCY_LIMIT < weeks.length) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  return { summaries, errors };
 }
 
 /**
@@ -75,59 +165,102 @@ function toDateString(dateStr: string): string {
 export async function weeklySummarizerNode(
   state: WorkflowState
 ): Promise<Partial<WorkflowState>> {
-  const { dailySummaries, since, until, year, selectedRepos, authorPattern } =
-    state;
-
-  // Normalize dates to YYYY-MM-DD format for consistent storage
-  const weekStart = toDateString(since);
-  const weekEnd = toDateString(until);
+  const { dailySummaries, year, selectedRepos, authorPattern } = state;
 
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
-  // Check if already exists
-  if (checkpoint.hasWeeklySummary(weekStart)) {
-    const existing = await checkpoint.loadWeeklySummary(weekStart);
-    if (existing) {
-      logger.info(`Loaded existing weekly summary for ${weekStart}`);
-      return {
-        weeklySummaries: [existing],
-        progress: 80,
-        currentStep: "weekly_summarizer",
-      };
-    }
-  }
-
-  logger.step("📅", "Weekly Summary - Aggregating daily summaries", {
-    dailies: (dailySummaries || []).length,
-    range: `${weekStart} → ${weekEnd}`,
-  });
+  // Detect available daily summaries and process them all
+  // This handles both "single week" and "yearly" scenarios by just looking at the data
 
   if (!dailySummaries || dailySummaries.length === 0) {
     logger.warn("No daily summaries to aggregate for weekly");
     return {
       weeklySummaries: [],
-      progress: 80,
+      progress: state.taskType === "yearly" ? 70 : 80, // Different progress if intermediate
       currentStep: "weekly_summarizer",
     };
   }
 
-  const weeklySummary = await processWeeklySummary(
-    weekStart,
-    weekEnd,
-    dailySummaries
+  // Check which weeks we already have
+  const weeklyGroups = new Map<string, DailySummary[]>();
+  for (const daily of dailySummaries) {
+    const weekStart = getWeekStart(daily.date);
+    if (!weeklyGroups.has(weekStart)) weeklyGroups.set(weekStart, []);
+    weeklyGroups.get(weekStart)!.push(daily);
+  }
+
+  const weeks = Array.from(weeklyGroups.keys()).sort();
+
+  // Filter out cached ones
+  const toProcess: DailySummary[] = [];
+  const cached: WeeklySummary[] = [];
+
+  for (const weekStart of weeks) {
+    if (checkpoint.hasWeeklySummary(weekStart)) {
+      const existing = await checkpoint.loadWeeklySummary(weekStart);
+      if (existing) {
+        cached.push(existing);
+        continue;
+      }
+    }
+    // Add all dailies for this week to toProcess
+    toProcess.push(...weeklyGroups.get(weekStart)!);
+  }
+
+  logger.info(
+    `📦 Weekly cache hit: ${cached.length}/${weeks.length}, Weeks to process: ${
+      weeks.length - cached.length
+    }`
   );
 
-  await checkpoint.saveWeeklySummary(weeklySummary);
+  let completed = cached.length;
+
+  const { summaries: newSummaries, errors } = await processAllWeeklySummaries(
+    toProcess,
+    async (count, total, week) => {
+      // In batch tracking, count is local to toProcess... wait, processAllWeeklySummaries counts from 0 to local total
+      // We need to map it to global progress
+      // But processAllWeeklySummaries is stateless about total including cached.
+      // So let's just use simple approximate logging or update progress
+      completed++;
+      // Calculate progress based on phase
+      const baseProgress = 60; // After daily
+      const endProgress = 80; // Before monthly/end
+      const currentProgress =
+        baseProgress +
+        Math.round((completed / weeks.length) * (endProgress - baseProgress));
+
+      await checkpoint.updateProgress(
+        "weekly_summarizer",
+        currentProgress,
+        `Processed week ${week}`
+      );
+    }
+  );
+
+  // Save new summaries
+  for (const summary of newSummaries) {
+    await checkpoint.saveWeeklySummary(summary);
+  }
+
+  if (errors.length > 0) {
+    logger.warn(`⚠️  ${errors.length} weeks failed to process`);
+  }
+
+  // Merge and sort
+  const allWeeklySummaries = [...cached, ...newSummaries].sort((a, b) =>
+    a.weekStart.localeCompare(b.weekStart)
+  );
 
   logger.stepDone(
-    `Weekly summary generated (${dailySummaries.length} days)`,
+    `Weekly summaries generated (${allWeeklySummaries.length} weeks)`,
     0
   );
 
   return {
-    weeklySummaries: [weeklySummary],
-    progress: 80,
+    weeklySummaries: allWeeklySummaries,
+    progress: state.taskType === "yearly" ? 80 : 90,
     currentStep: "weekly_summarizer",
   };
 }

@@ -216,13 +216,16 @@ async function yearlySummarizerNode(
 function routeAfterDaily(state: WorkflowState): string {
   // daily tasks stop here
   if (state.taskType === "daily") return "persist";
-  // weekly goes to weekly_summarizer
-  if (state.taskType === "weekly") return "weekly_summarizer";
-  // monthly and yearly continue to monthly_summarizer
+  // weekly and yearly go to weekly_summarizer (year-end needs weekly data too)
+  if (state.taskType === "weekly" || state.taskType === "yearly")
+    return "weekly_summarizer";
+  // only monthly continues directly to monthly_summarizer (skips weekly)
   return "monthly_summarizer";
 }
 
 function routeAfterWeekly(state: WorkflowState): string {
+  // If yearly, continue to monthly_summarizer
+  if (state.taskType === "yearly") return "monthly_summarizer";
   return "persist"; // Weekly always ends after weekly_summarizer
 }
 
