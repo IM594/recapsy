@@ -1,4 +1,4 @@
-# Daily Work Summarizer
+# Recaply
 
 基于 LangGraph + React + TypeScript 的智能每日工作总结工具。
 
@@ -24,7 +24,7 @@
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd daily-work-summarizer
+cd recaply
 
 # 安装依赖
 pnpm install
@@ -61,7 +61,7 @@ pnpm dev:frontend
 ## 📁 项目结构
 
 ```
-daily-work-summarizer/
+recaply/
 ├── backend/                    # 后端服务
 │   ├── src/
 │   │   ├── api/               # Express API
@@ -145,7 +145,7 @@ pnpm build            # 构建所有项目
 pnpm clean            # 清理构建产物和临时文件
 
 # 代码检查（frontend）
-pnpm --filter daily-work-summarizer-frontend lint
+pnpm --filter recaply-frontend lint
 ```
 
 ### 工作流架构

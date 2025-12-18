@@ -1,4 +1,4 @@
-# Daily Work Summarizer - 简化架构
+# Recaply - 简化架构
 
 > **目标**: 使用 LangGraph 1.0 + TypeScript 构建一个简单的每日工作总结工具  
 > **技术栈**: LangGraph + React + TypeScript
@@ -64,7 +64,7 @@ graph TB
 ## 📁 项目结构
 
 ```
-daily-work-summarizer/
+recaply/
 ├── backend/                    # 后端服务
 │   ├── src/
 │   │   ├── workflow/          # LangGraph 工作流
@@ -176,7 +176,7 @@ interface WorkflowState {
 
 ```
 ┌─────────────────────────────────────────┐
-│  📝 Daily Work Summarizer               │
+│  📝 Recaply                             │
 ├─────────────────────────────────────────┤
 │                                         │
 │  输入今天的工作内容:                      │

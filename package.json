@@ -1,11 +1,11 @@
 {
-  "name": "daily-work-summarizer",
+  "name": "recaply",
   "version": "0.0.1",
   "private": true,
-  "description": "基于 LangGraph 的每日工作总结工具",
+  "description": "Recaply：基于 LangGraph 的每日工作总结工具",
   "scripts": {
-    "dev:backend": "pnpm --filter daily-work-summarizer-backend dev",
-    "dev:frontend": "pnpm --filter daily-work-summarizer-frontend dev",
+    "dev:backend": "pnpm --filter recaply-backend dev",
+    "dev:frontend": "pnpm --filter recaply-frontend dev",
     "build": "pnpm -r build",
     "clean": "pnpm -r clean && find . -name '.DS_Store' -delete"
   },

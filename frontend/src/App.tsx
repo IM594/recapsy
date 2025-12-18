@@ -136,7 +136,7 @@ function AppContent() {
               <Sparkles className="h-5 w-5" />
             </div>
             <span className="font-bold text-xl tracking-tight text-slate-900">
-              Daily Work Summarizer
+              Recaply
             </span>
           </div>
 

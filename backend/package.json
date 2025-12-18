@@ -1,7 +1,7 @@
 {
-  "name": "daily-work-summarizer-backend",
+  "name": "recaply-backend",
   "version": "0.0.1",
-  "description": "Backend for Daily Work Summarizer",
+  "description": "Backend for Recaply",
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch src/api/server.ts",
