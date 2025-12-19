@@ -126,6 +126,8 @@ router.post("/generate", async (req, res) => {
 /**
  * GET /api/summary/events
  * Server-Sent Events for progress updates
+ *
+ * New event format: { nodeId, state: { progress, currentStep }, timestamp }
  */
 router.get("/events", async (req, res) => {
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
@@ -139,15 +141,53 @@ router.get("/events", async (req, res) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
-  // Send initial status
+  // Send initial status with new format
   const currentStatus = checkpoint.getStatus();
-  sendEvent("status", currentStatus);
+  sendEvent("status", {
+    nodeId: currentStatus.currentStep || "idle",
+    state: {
+      progress: currentStatus.progress,
+      currentStep: currentStatus.currentStep,
+      phase: currentStatus.phase,
+      isRunning: currentStatus.isRunning,
+    },
+    timestamp: Date.now(),
+  });
 
-  // Event handlers
-  // Use "workflow_error" to avoid conflict with EventSource built-in "error" event
-  const onProgress = (data: any) => sendEvent("progress", data);
-  const onComplete = (data: any) => sendEvent("complete", data);
-  const onError = (err: any) => sendEvent("workflow_error", { message: err });
+  // Event handlers with new format
+  const onProgress = (data: any) => {
+    sendEvent("progress", {
+      nodeId: data.step,
+      state: {
+        progress: data.progress,
+        currentStep: data.step,
+        message: data.message,
+      },
+      timestamp: Date.now(),
+    });
+  };
+
+  const onComplete = (data: any) => {
+    sendEvent("complete", {
+      nodeId: "persist",
+      state: {
+        progress: 100,
+        currentStep: "complete",
+        result: data?.result,
+      },
+      timestamp: Date.now(),
+    });
+  };
+
+  const onError = (err: any) => {
+    sendEvent("workflow_error", {
+      nodeId: "error",
+      state: {
+        error: typeof err === "string" ? err : err?.message || "Unknown error",
+      },
+      timestamp: Date.now(),
+    });
+  };
 
   checkpoint.on("progress", onProgress);
   checkpoint.on("complete", onComplete);

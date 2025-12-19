@@ -21,6 +21,30 @@ import type {
 import logger from "../lib/logger";
 
 /**
+ * Setup Node: Unified initialization for the workflow
+ * Initializes CheckpointManager and sets initial progress
+ *
+ * Pure function: Only modifies state, no side effects
+ */
+async function setupNode(
+  state: WorkflowState
+): Promise<Partial<WorkflowState>> {
+  const { year, selectedRepos, authorPattern } = state;
+
+  logger.info("🚀 Initializing workflow...");
+
+  // Initialize CheckpointManager once for the entire workflow
+  const checkpoint = CheckpointManager.getInstance(year);
+  await checkpoint.initialize(selectedRepos || [], authorPattern || "");
+
+  return {
+    status: "running",
+    progress: 5,
+    currentStep: "setup",
+  };
+}
+
+/**
  * Fan-out node: Prepares data for parallel processing
  * Separates cached and uncached commits, stores pending ones in state
  *
@@ -252,6 +276,7 @@ async function yearlySummarizerNode(
 
 // Node name type for type-safe graph construction
 type NodeName =
+  | "setup"
   | "collect_data"
   | "fan_out_daily"
   | "process_single_daily"
@@ -295,6 +320,7 @@ export async function createSummaryWorkflow(
   const workflow = new StateGraph(WorkflowStateAnnotation);
 
   // Add nodes
+  workflow.addNode("setup", setupNode);
   workflow.addNode("collect_data", collectDataNode);
   workflow.addNode("fan_out_daily", fanOutDailyNode);
   workflow.addNode("process_single_daily", processSingleDailyNode);
@@ -312,8 +338,9 @@ export async function createSummaryWorkflow(
   };
 
   // Define edges
-  // START -> collect_data -> fan_out_daily
-  addEdge(START, "collect_data");
+  // START -> setup -> collect_data -> fan_out_daily
+  addEdge(START, "setup");
+  addEdge("setup", "collect_data");
   addEdge("collect_data", "fan_out_daily");
 
   // fan_out_daily -> routeFanOutDaily returns Send[] or next node
