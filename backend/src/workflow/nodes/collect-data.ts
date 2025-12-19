@@ -1,5 +1,7 @@
 /**
  * Collect Data Node - Fetch commits from git repos
+ *
+ * Pure function: Only modifies state, no side effects (SSE events)
  */
 
 import { WorkflowState } from "../state";
@@ -31,7 +33,7 @@ export async function collectDataNode(
     }
   );
 
-  // Save to checkpoint
+  // Save to checkpoint for data persistence (not SSE)
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
@@ -39,14 +41,9 @@ export async function collectDataNode(
     await checkpoint.saveRawData(day.date, day.repo, day);
   }
 
-  await checkpoint.updateProgress(
-    "collect_data",
-    20,
-    `Collected ${data.length} date-repo entries`
-  );
-
   logger.stepDone(`Collected ${data.length} date-repo entries`, 0);
 
+  // Pure state update - progress tracking via state, not side effects
   return {
     rawCommits: data,
     currentStep: "collect_data",

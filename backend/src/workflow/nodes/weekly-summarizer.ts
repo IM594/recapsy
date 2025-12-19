@@ -161,6 +161,8 @@ export async function processAllWeeklySummaries(
 
 /**
  * LangGraph node: Weekly Summarizer
+ *
+ * Pure function: Only modifies state, no side effects
  */
 export async function weeklySummarizerNode(
   state: WorkflowState
@@ -170,14 +172,11 @@ export async function weeklySummarizerNode(
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
-  // Detect available daily summaries and process them all
-  // This handles both "single week" and "yearly" scenarios by just looking at the data
-
   if (!dailySummaries || dailySummaries.length === 0) {
     logger.warn("No daily summaries to aggregate for weekly");
     return {
       weeklySummaries: [],
-      progress: state.taskType === "yearly" ? 70 : 80, // Different progress if intermediate
+      progress: state.taskType === "yearly" ? 70 : 80,
       currentStep: "weekly_summarizer",
     };
   }
@@ -214,29 +213,9 @@ export async function weeklySummarizerNode(
     }`
   );
 
-  let completed = cached.length;
-
+  // Process without progress callback (pure function)
   const { summaries: newSummaries, errors } = await processAllWeeklySummaries(
-    toProcess,
-    async (count, total, week) => {
-      // In batch tracking, count is local to toProcess... wait, processAllWeeklySummaries counts from 0 to local total
-      // We need to map it to global progress
-      // But processAllWeeklySummaries is stateless about total including cached.
-      // So let's just use simple approximate logging or update progress
-      completed++;
-      // Calculate progress based on phase
-      const baseProgress = 60; // After daily
-      const endProgress = 80; // Before monthly/end
-      const currentProgress =
-        baseProgress +
-        Math.round((completed / weeks.length) * (endProgress - baseProgress));
-
-      await checkpoint.updateProgress(
-        "weekly_summarizer",
-        currentProgress,
-        `Processed week ${week}`
-      );
-    }
+    toProcess
   );
 
   // Save new summaries

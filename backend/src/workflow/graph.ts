@@ -23,6 +23,8 @@ import logger from "../lib/logger";
 /**
  * Fan-out node: Dispatches each daily commit to parallel processing via Send API
  * Returns cached summaries directly, and Send objects for uncached ones
+ *
+ * Pure function: Only modifies state, no side effects
  */
 async function fanOutDailyNode(
   state: WorkflowState
@@ -59,16 +61,9 @@ async function fanOutDailyNode(
     return {
       dailySummaries: cached,
       progress: 60,
-      currentStep: "daily_summarizer",
+      currentStep: "fan_out_daily",
     };
   }
-
-  // Update progress for cached items
-  await checkpoint.updateProgress(
-    "fan_out_daily",
-    20,
-    `Found ${cached.length} cached, dispatching ${toProcess.length} for processing`
-  );
 
   // Return Send objects to fan-out to parallel processing
   // Each Send carries the commit data and metadata needed for processing
@@ -85,7 +80,10 @@ async function fanOutDailyNode(
 
 /**
  * Process a single daily commit - called in parallel via Send API
+ *
+ * Pure function: Only modifies state, no side effects
  */
+
 async function processSingleDailyNode(
   state: WorkflowState
 ): Promise<Partial<WorkflowState>> {
@@ -122,6 +120,8 @@ async function processSingleDailyNode(
 
 /**
  * Monthly Summarizer Node - Aggregate daily summaries into monthly reports (concurrent)
+ *
+ * Pure function: Only modifies state, no side effects
  */
 async function monthlySummarizerNode(
   state: WorkflowState
@@ -162,19 +162,11 @@ async function monthlySummarizerNode(
   // 并发处理所有未缓存的月份
   const newSummaries: MonthlySummary[] = [];
   const errors: Array<{ month: string; error: string }> = [];
-  let completed = cached.length;
 
   const results = await Promise.allSettled(
     toProcess.map(async ({ month, dailies }) => {
       try {
         const summary = await processMonthSummary(month, dailies);
-        completed++;
-        const progress = 60 + Math.round((completed / months.length) * 25);
-        await checkpoint.updateProgress(
-          "monthly_summarizer",
-          progress,
-          `Processed ${month} (${completed}/${months.length})`
-        );
         return { success: true as const, summary };
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -215,6 +207,8 @@ async function monthlySummarizerNode(
 
 /**
  * Yearly Summarizer Node - Generate final year-end summary
+ *
+ * Pure function: Only modifies state, no side effects
  */
 async function yearlySummarizerNode(
   state: WorkflowState
@@ -223,19 +217,11 @@ async function yearlySummarizerNode(
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
-  await checkpoint.updateProgress(
-    "yearly_summarizer",
-    90,
-    "Generating year-end summary..."
-  );
+  logger.info("🎄 Generating year-end summary...");
 
   const result = await processYearEndSummary(year, monthlySummaries);
 
-  await checkpoint.updateProgress(
-    "yearly_summarizer",
-    95,
-    "Year-end summary complete"
-  );
+  logger.info("✅ Year-end summary complete");
 
   return {
     result: {
