@@ -31,6 +31,23 @@ export interface LogEntry {
   type: "info" | "error" | "success";
 }
 
+/**
+ * New SSE event format from LangGraph streaming
+ */
+export interface SSEEvent {
+  nodeId: string;
+  state: {
+    progress?: number;
+    currentStep?: string;
+    phase?: string;
+    isRunning?: boolean;
+    message?: string;
+    result?: any;
+    error?: string;
+  };
+  timestamp: number;
+}
+
 interface SummaryContextType {
   status: SummaryStatus;
   logs: LogEntry[];
@@ -101,43 +118,69 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
       }
     };
 
+    // Handle status event with new format: { nodeId, state, timestamp }
     es.addEventListener("status", (e: MessageEvent) => {
       const data = JSON.parse(e.data);
-      setStatus(data);
+      // New format: { nodeId, state: { progress, currentStep, phase, isRunning }, timestamp }
+      if (data.state) {
+        setStatus({
+          isRunning: data.state.isRunning ?? false,
+          phase: data.state.phase ?? "idle",
+          progress: data.state.progress ?? 0,
+          currentStep: data.state.currentStep ?? null,
+        });
+      } else {
+        // Fallback for old format
+        setStatus(data);
+      }
     });
 
+    // Handle progress event with new format
     es.addEventListener("progress", (e: MessageEvent) => {
       const data = JSON.parse(e.data);
+      // New format: { nodeId, state: { progress, currentStep, message }, timestamp }
+      const nodeId = data.nodeId;
+      const state = data.state || data; // Fallback for old format
+
       setStatus((prev) => ({
         ...prev,
-        currentStep: data.step,
-        progress: data.progress,
+        currentStep: state.currentStep || nodeId || prev.currentStep,
+        progress: state.progress ?? prev.progress,
         isRunning: true,
-        phase: data.phase || prev.phase,
+        phase: state.phase || prev.phase,
       }));
-      if (data.message) addLog(data.message, "info");
+
+      const message = state.message || `Completed: ${nodeId}`;
+      addLog(message, "info");
     });
 
+    // Handle complete event with new format
     es.addEventListener("complete", (e: MessageEvent) => {
       const data = JSON.parse(e.data);
+      // New format: { nodeId, state: { progress, currentStep, result }, timestamp }
+      const state = data.state || data;
+
       setStatus((prev) => ({
         ...prev,
         isRunning: false,
         phase: "complete",
         progress: 100,
         currentStep: null,
-        result: data,
+        result: state.result || data,
       }));
       addLog("Summary generation completed!", "success");
       toast.success("Summary generation completed!");
       setDataVersion((v) => v + 1);
     });
 
-    // Use "workflow_error" to avoid conflict with EventSource built-in "error" event
+    // Handle workflow_error event with new format
     es.addEventListener("workflow_error", (e: MessageEvent) => {
       const data = JSON.parse(e.data);
-      toast.error(`Error: ${data.message}`);
-      addLog(`Error: ${data.message}`, "error");
+      // New format: { nodeId, state: { error }, timestamp }
+      const errorMessage = data.state?.error || data.message || "Unknown error";
+
+      toast.error(`Error: ${errorMessage}`);
+      addLog(`Error: ${errorMessage}`, "error");
       setStatus((prev) => ({ ...prev, isRunning: false, phase: "error" }));
     });
 
