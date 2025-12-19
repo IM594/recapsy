@@ -3,8 +3,6 @@ import cors from "cors";
 import dotenv from "dotenv";
 import summaryRouter from "./routes/summary";
 import reposRouter from "./routes/repos";
-// import workflowRouter from "./routes/workflow";
-// import regenerateRouter from "./routes/regenerate";
 
 dotenv.config();
 
@@ -25,7 +23,7 @@ const PORT = process.env.PORT || 3456;
 
 // 中间件
 app.use(cors());
-app.use(express.json({ limit: "50mb" })); // 增加请求体大小限制以支持大量数据
+app.use(express.json({ limit: "50mb" }));
 
 // 简单日志
 app.use((req, res, next) => {
@@ -34,11 +32,8 @@ app.use((req, res, next) => {
 });
 
 // 路由
-// 路由
 app.use("/api/summary", summaryRouter);
 app.use("/api", reposRouter);
-// app.use("/api/workflow", workflowRouter); // Deprecated
-// app.use("/api", regenerateRouter); // Deprecated - merged into summary API
 
 // 健康检查
 app.get("/health", (req, res) => {

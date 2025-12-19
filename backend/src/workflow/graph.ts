@@ -7,11 +7,9 @@ import {
   persistNode,
 } from "./nodes/index";
 import { processDailySummary } from "./nodes/daily-summarizer";
-import {
-  processMonthSummary,
-  processAllMonthlySummaries,
-} from "./nodes/monthly-summarizer";
+import { processMonthSummary } from "./nodes/monthly-summarizer";
 import { processYearEndSummary } from "./nodes/year-end-summarizer";
+
 import { CheckpointManager } from "../lib/checkpoint";
 import type {
   DailySummary,
