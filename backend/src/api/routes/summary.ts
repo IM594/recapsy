@@ -2,6 +2,11 @@ import { Router, Response } from "express";
 import { createSummaryWorkflow } from "../../workflow/graph";
 import logger from "../../lib/logger";
 import { CheckpointManager } from "../../lib/checkpoint";
+import {
+  getCheckpointer,
+  generateThreadId,
+  createThreadConfig,
+} from "../../lib/saver";
 import { processDailySummary } from "../../workflow/nodes/daily-summarizer";
 import { processWeeklySummary } from "../../workflow/nodes/weekly-summarizer";
 import { processMonthSummary } from "../../workflow/nodes/monthly-summarizer";
@@ -50,25 +55,36 @@ router.post("/generate", async (req, res) => {
   // Atomically set running state with phase
   await checkpoint.setRunningWithPhase(true, "starting");
 
+  // Generate thread ID for this workflow execution (enables resume capability)
+  const threadId = generateThreadId(taskType, year, selectedRepos || []);
+  const threadConfig = createThreadConfig(threadId);
+
   // Start background task
   setImmediate(async () => {
     try {
       logger.taskStart("Workflow Execution", {
         type: taskType,
         range: `${since} -> ${until}`,
+        threadId,
       });
 
       await checkpoint.updateProgress("init", 0, "Initializing workflow...");
 
-      const workflow = createSummaryWorkflow();
-      const result = await workflow.invoke({
-        taskType,
-        year,
-        selectedRepos: selectedRepos || [],
-        authorPattern: author || "",
-        since: since || "",
-        until: until || "",
-      });
+      // Get native checkpointer and create workflow with it
+      const checkpointer = await getCheckpointer();
+      const workflow = await createSummaryWorkflow(checkpointer);
+
+      const result = await workflow.invoke(
+        {
+          taskType,
+          year,
+          selectedRepos: selectedRepos || [],
+          authorPattern: author || "",
+          since: since || "",
+          until: until || "",
+        },
+        threadConfig
+      );
 
       await checkpoint.markComplete(result);
       logger.taskEnd("Workflow Execution", 0, "completed");
@@ -78,7 +94,11 @@ router.post("/generate", async (req, res) => {
     }
   });
 
-  res.json({ status: "started", message: "Task started in background" });
+  res.json({
+    status: "started",
+    message: "Task started in background",
+    threadId,
+  });
 });
 
 /**
@@ -237,15 +257,17 @@ router.post("/regenerate", async (req, res) => {
     if (type === "monthly") {
       // id is month in YYYY-MM format
       const allDailies = await checkpoint.loadAllDailySummaries();
-      const relevantDailies = allDailies.filter((d) =>
-        d.date.startsWith(id)
-      );
+      const relevantDailies = allDailies.filter((d) => d.date.startsWith(id));
 
       if (relevantDailies.length === 0) {
         throw new Error(`No daily summaries found for month ${id}`);
       }
 
-      const result = await processMonthSummary(id, relevantDailies, customPrompt);
+      const result = await processMonthSummary(
+        id,
+        relevantDailies,
+        customPrompt
+      );
       await checkpoint.saveMonthlySummary(result);
       return res.json(result);
     }
@@ -258,7 +280,11 @@ router.post("/regenerate", async (req, res) => {
         throw new Error(`No monthly summaries found for year ${year}`);
       }
 
-      const result = await processYearEndSummary(year, monthlySummaries, customPrompt);
+      const result = await processYearEndSummary(
+        year,
+        monthlySummaries,
+        customPrompt
+      );
       await checkpoint.saveYearEndSummary(result.overview);
       return res.json({ summary: result.overview, ...result });
     }

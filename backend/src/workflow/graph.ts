@@ -1,4 +1,5 @@
 import { StateGraph, END, START } from "@langchain/langgraph";
+import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { WorkflowStateAnnotation, WorkflowState } from "./state";
 import {
   collectDataNode,
@@ -238,8 +239,12 @@ function routeAfterMonthly(state: WorkflowState): string {
 /**
  * Create the unified summary workflow graph
  * Supports: daily, weekly, monthly, yearly task types
+ *
+ * @param checkpointer - Optional LangGraph checkpointer for state persistence and resume
  */
-export function createSummaryWorkflow() {
+export async function createSummaryWorkflow(
+  checkpointer?: BaseCheckpointSaver
+) {
   const workflow = new StateGraph(WorkflowStateAnnotation);
 
   // Add nodes
@@ -271,7 +276,8 @@ export function createSummaryWorkflow() {
   workflow.addEdge("yearly_summarizer" as any, "persist" as any);
   workflow.addEdge("persist" as any, END);
 
-  return workflow.compile();
+  // Compile with optional checkpointer for state persistence
+  return workflow.compile(checkpointer ? { checkpointer } : undefined);
 }
 
 // Keep backward compatibility with old name
