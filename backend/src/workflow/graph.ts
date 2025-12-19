@@ -21,14 +21,14 @@ import type {
 import logger from "../lib/logger";
 
 /**
- * Fan-out node: Dispatches each daily commit to parallel processing via Send API
- * Returns cached summaries directly, and Send objects for uncached ones
+ * Fan-out node: Prepares data for parallel processing
+ * Separates cached and uncached commits, stores pending ones in state
  *
  * Pure function: Only modifies state, no side effects
  */
 async function fanOutDailyNode(
   state: WorkflowState
-): Promise<Partial<WorkflowState> | Send[]> {
+): Promise<Partial<WorkflowState>> {
   const { rawCommits, year, selectedRepos, authorPattern } = state;
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
@@ -56,24 +56,41 @@ async function fanOutDailyNode(
     `📦 缓存命中: ${cached.length}/${commits.length}, 需处理: ${toProcess.length}`
   );
 
-  // If nothing to process, just return cached results
-  if (toProcess.length === 0) {
-    return {
-      dailySummaries: cached,
-      progress: 60,
-      currentStep: "fan_out_daily",
-    };
+  // Store pending commits in rawCommits for the router to pick up
+  // and cached summaries in dailySummaries
+  return {
+    rawCommits: toProcess, // Override with only pending ones
+    dailySummaries: cached, // Add cached ones
+    progress: 30,
+    currentStep: "fan_out_daily",
+  };
+}
+
+/**
+ * Router function for conditional edge after fan_out_daily
+ * Returns Send[] to process each pending commit in parallel, or routes to next step
+ */
+function routeFanOutDaily(
+  state: WorkflowState
+): NodeName | Send<"process_single_daily", Partial<WorkflowState>>[] {
+  const { rawCommits, taskType } = state;
+  const pendingCommits = rawCommits || [];
+
+  // If no pending commits, route based on task type
+  if (pendingCommits.length === 0) {
+    if (taskType === "daily") return "persist";
+    if (taskType === "weekly" || taskType === "yearly")
+      return "weekly_summarizer";
+    return "monthly_summarizer";
   }
 
-  // Return Send objects to fan-out to parallel processing
-  // Each Send carries the commit data and metadata needed for processing
-  return toProcess.map(
+  // Fan-out: return Send[] for parallel processing
+  return pendingCommits.map(
     (commit) =>
       new Send("process_single_daily", {
         ...state,
         currentDailyCommit: commit,
-        // Also include cached so they can be merged later
-        dailySummaries: cached,
+        rawCommits: [], // Clear to avoid confusion
       })
   );
 }
@@ -294,43 +311,41 @@ export async function createSummaryWorkflow(
     (workflow.addEdge as Function)(from, to);
   };
 
-  const addConditionalEdges = (
-    source: NodeName,
-    router: (state: WorkflowState) => string,
-    destinations: NodeName[]
-  ) => {
-    (workflow.addConditionalEdges as Function)(source, router, destinations);
-  };
-
   // Define edges
   // START -> collect_data -> fan_out_daily
   addEdge(START, "collect_data");
   addEdge("collect_data", "fan_out_daily");
 
-  // fan_out_daily returns either:
-  // - Partial<WorkflowState> if all cached (goes to routing)
-  // - Send[] to dispatch to multiple process_single_daily nodes
-  addConditionalEdges("fan_out_daily", routeAfterSingleDaily, [
-    "persist",
-    "weekly_summarizer",
-    "monthly_summarizer",
-  ]);
+  // fan_out_daily -> routeFanOutDaily returns Send[] or next node
+  // This is where the parallel fan-out happens
+  (workflow.addConditionalEdges as Function)(
+    "fan_out_daily",
+    routeFanOutDaily,
+    [
+      "process_single_daily",
+      "persist",
+      "weekly_summarizer",
+      "monthly_summarizer",
+    ]
+  );
 
   // process_single_daily -> routing based on task type
-  addConditionalEdges("process_single_daily", routeAfterSingleDaily, [
-    "persist",
-    "weekly_summarizer",
-    "monthly_summarizer",
-  ]);
+  (workflow.addConditionalEdges as Function)(
+    "process_single_daily",
+    routeAfterSingleDaily,
+    ["persist", "weekly_summarizer", "monthly_summarizer"]
+  );
 
-  addConditionalEdges("weekly_summarizer", routeAfterWeekly, [
-    "persist",
+  (workflow.addConditionalEdges as Function)(
+    "weekly_summarizer",
+    routeAfterWeekly,
+    ["persist", "monthly_summarizer"]
+  );
+  (workflow.addConditionalEdges as Function)(
     "monthly_summarizer",
-  ]);
-  addConditionalEdges("monthly_summarizer", routeAfterMonthly, [
-    "persist",
-    "yearly_summarizer",
-  ]);
+    routeAfterMonthly,
+    ["persist", "yearly_summarizer"]
+  );
 
   addEdge("yearly_summarizer", "persist");
   addEdge("persist", END);
