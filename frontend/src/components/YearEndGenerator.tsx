@@ -171,8 +171,14 @@ export function YearEndGenerator({
     });
   };
 
-  // Auto-start on mount
+  // Auto-start on mount (with protection against duplicate triggers)
+  const hasAutoStartedRef = useRef(false);
   useEffect(() => {
+    // Prevent double-execution in React StrictMode
+    if (hasAutoStartedRef.current) return;
+    // Don't auto-start if task is already running
+    if (status.isRunning) return;
+    hasAutoStartedRef.current = true;
     handleStart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
