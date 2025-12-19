@@ -57,9 +57,14 @@ export const WorkflowStateAnnotation = Annotation.Root({
     reducer: (prev, next) => next || prev || [],
   }),
 
-  // Generated daily summaries
+  // Current daily commit being processed (for Send API parallel execution)
+  currentDailyCommit: Annotation<DailyCommitData | null>({
+    reducer: (prev, next) => next ?? prev ?? null,
+  }),
+
+  // Generated daily summaries (aggregated from parallel Send executions)
   dailySummaries: Annotation<DailySummary[]>({
-    reducer: (prev, next) => next || prev || [],
+    reducer: (prev, next) => [...(prev || []), ...(next || [])],
   }),
 
   // Generated weekly summaries

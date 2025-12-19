@@ -1,4 +1,4 @@
-import { StateGraph, END, START } from "@langchain/langgraph";
+import { StateGraph, END, START, Send } from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { WorkflowStateAnnotation, WorkflowState } from "./state";
 import {
@@ -6,33 +6,36 @@ import {
   weeklySummarizerNode,
   persistNode,
 } from "./nodes/index";
-import { processDailySummariesBatch } from "./nodes/daily-summarizer";
+import { processDailySummary } from "./nodes/daily-summarizer";
 import {
   processMonthSummary,
   processAllMonthlySummaries,
 } from "./nodes/monthly-summarizer";
 import { processYearEndSummary } from "./nodes/year-end-summarizer";
 import { CheckpointManager } from "../lib/checkpoint";
-import type { DailySummary, MonthlySummary } from "../lib/types";
+import type {
+  DailySummary,
+  MonthlySummary,
+  DailyCommitData,
+} from "../lib/types";
 import logger from "../lib/logger";
 
 /**
- * Daily Summarizer Node - Process all collected daily data (concurrent)
+ * Fan-out node: Dispatches each daily commit to parallel processing via Send API
+ * Returns cached summaries directly, and Send objects for uncached ones
  */
-async function dailySummarizerNode(
+async function fanOutDailyNode(
   state: WorkflowState
-): Promise<Partial<WorkflowState>> {
+): Promise<Partial<WorkflowState> | Send[]> {
   const { rawCommits, year, selectedRepos, authorPattern } = state;
   const checkpoint = CheckpointManager.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   const commits = rawCommits || [];
-  const total = commits.length;
-
-  // 分离已缓存和需要处理的数据
-  const toProcess: typeof commits = [];
   const cached: DailySummary[] = [];
+  const toProcess: DailyCommitData[] = [];
 
+  // Separate cached and uncached
   for (const dayData of commits) {
     if (checkpoint.hasDailySummary(dayData.date, dayData.repo)) {
       const existing = await checkpoint.loadDailySummary(
@@ -48,40 +51,73 @@ async function dailySummarizerNode(
   }
 
   logger.info(
-    `📦 缓存命中: ${cached.length}/${total}, 需处理: ${toProcess.length}`
+    `📦 缓存命中: ${cached.length}/${commits.length}, 需处理: ${toProcess.length}`
   );
 
-  // 并发处理所有未缓存的数据
-  let completed = cached.length;
-  const { summaries: newSummaries, errors } = await processDailySummariesBatch(
-    toProcess,
-    async (count, total, date) => {
-      completed++;
-      const progress = 20 + Math.round((completed / commits.length) * 40);
-      await checkpoint.updateProgress(
-        "daily_summarizer",
-        progress,
-        `Processed ${date} (${completed}/${commits.length})`
-      );
-    },
-    (date, error) => {
-      logger.error(`❌ Failed to process ${date}: ${error.message}`);
-    }
+  // If nothing to process, just return cached results
+  if (toProcess.length === 0) {
+    return {
+      dailySummaries: cached,
+      progress: 60,
+      currentStep: "daily_summarizer",
+    };
+  }
+
+  // Update progress for cached items
+  await checkpoint.updateProgress(
+    "fan_out_daily",
+    20,
+    `Found ${cached.length} cached, dispatching ${toProcess.length} for processing`
   );
 
-  // 保存新生成的 summaries
-  for (const summary of newSummaries) {
+  // Return Send objects to fan-out to parallel processing
+  // Each Send carries the commit data and metadata needed for processing
+  return toProcess.map(
+    (commit) =>
+      new Send("process_single_daily", {
+        ...state,
+        currentDailyCommit: commit,
+        // Also include cached so they can be merged later
+        dailySummaries: cached,
+      })
+  );
+}
+
+/**
+ * Process a single daily commit - called in parallel via Send API
+ */
+async function processSingleDailyNode(
+  state: WorkflowState
+): Promise<Partial<WorkflowState>> {
+  const { currentDailyCommit, year, selectedRepos, authorPattern } = state;
+
+  if (!currentDailyCommit) {
+    logger.warn("processSingleDailyNode called without currentDailyCommit");
+    return {};
+  }
+
+  const checkpoint = CheckpointManager.getInstance(year);
+  await checkpoint.initialize(selectedRepos || [], authorPattern || "");
+
+  try {
+    const summary = await processDailySummary(currentDailyCommit);
     await checkpoint.saveDailySummary(summary);
+
+    logger.info(
+      `✅ Processed ${currentDailyCommit.date} - ${currentDailyCommit.repo}`
+    );
+
+    // Return single summary - will be aggregated by reducer
+    return {
+      dailySummaries: [summary],
+      progress: 60,
+      currentStep: "process_single_daily",
+    };
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error(`❌ Failed to process ${currentDailyCommit.date}: ${errMsg}`);
+    return {};
   }
-
-  // 合并缓存和新生成的结果
-  const dailySummaries = [...cached, ...newSummaries];
-
-  if (errors.length > 0) {
-    logger.warn(`⚠️  ${errors.length} days failed to process`);
-  }
-
-  return { dailySummaries, progress: 60, currentStep: "daily_summarizer" };
 }
 
 /**
@@ -214,7 +250,8 @@ async function yearlySummarizerNode(
 // Node name type for type-safe graph construction
 type NodeName =
   | "collect_data"
-  | "daily_summarizer"
+  | "fan_out_daily"
+  | "process_single_daily"
   | "weekly_summarizer"
   | "monthly_summarizer"
   | "yearly_summarizer"
@@ -223,31 +260,29 @@ type NodeName =
 /**
  * Routing functions for conditional edges
  */
-function routeAfterDaily(state: WorkflowState): NodeName {
-  // daily tasks stop here
+function routeAfterSingleDaily(state: WorkflowState): NodeName {
+  // After processing single daily, route based on task type
   if (state.taskType === "daily") return "persist";
-  // weekly and yearly go to weekly_summarizer (year-end needs weekly data too)
   if (state.taskType === "weekly" || state.taskType === "yearly")
     return "weekly_summarizer";
-  // only monthly continues directly to monthly_summarizer (skips weekly)
   return "monthly_summarizer";
 }
 
 function routeAfterWeekly(state: WorkflowState): NodeName {
-  // If yearly, continue to monthly_summarizer
   if (state.taskType === "yearly") return "monthly_summarizer";
-  return "persist"; // Weekly always ends after weekly_summarizer
+  return "persist";
 }
 
 function routeAfterMonthly(state: WorkflowState): NodeName {
   if (state.taskType === "monthly") return "persist";
-  // Only yearly continues to yearly_summarizer
   return "yearly_summarizer";
 }
 
 /**
  * Create the unified summary workflow graph
  * Supports: daily, weekly, monthly, yearly task types
+ *
+ * Uses Send API for parallel daily processing (fan-out/fan-in pattern)
  *
  * @param checkpointer - Optional LangGraph checkpointer for state persistence and resume
  */
@@ -258,14 +293,14 @@ export async function createSummaryWorkflow(
 
   // Add nodes
   workflow.addNode("collect_data", collectDataNode);
-  workflow.addNode("daily_summarizer", dailySummarizerNode);
+  workflow.addNode("fan_out_daily", fanOutDailyNode);
+  workflow.addNode("process_single_daily", processSingleDailyNode);
   workflow.addNode("weekly_summarizer", weeklySummarizerNode);
   workflow.addNode("monthly_summarizer", monthlySummarizerNode);
   workflow.addNode("yearly_summarizer", yearlySummarizerNode);
   workflow.addNode("persist", persistNode);
 
   // Type-safe edge helper to work around LangGraph's type inference limitations
-  // LangGraph's StateGraph types don't track dynamically added nodes
   const addEdge = (
     from: typeof START | NodeName,
     to: typeof END | NodeName
@@ -282,15 +317,26 @@ export async function createSummaryWorkflow(
   };
 
   // Define edges
+  // START -> collect_data -> fan_out_daily
   addEdge(START, "collect_data");
-  addEdge("collect_data", "daily_summarizer");
+  addEdge("collect_data", "fan_out_daily");
 
-  // Conditional routing based on task type
-  addConditionalEdges("daily_summarizer", routeAfterDaily, [
+  // fan_out_daily returns either:
+  // - Partial<WorkflowState> if all cached (goes to routing)
+  // - Send[] to dispatch to multiple process_single_daily nodes
+  addConditionalEdges("fan_out_daily", routeAfterSingleDaily, [
     "persist",
     "weekly_summarizer",
     "monthly_summarizer",
   ]);
+
+  // process_single_daily -> routing based on task type
+  addConditionalEdges("process_single_daily", routeAfterSingleDaily, [
+    "persist",
+    "weekly_summarizer",
+    "monthly_summarizer",
+  ]);
+
   addConditionalEdges("weekly_summarizer", routeAfterWeekly, [
     "persist",
     "monthly_summarizer",
