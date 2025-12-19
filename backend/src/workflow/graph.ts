@@ -211,10 +211,19 @@ async function yearlySummarizerNode(
   };
 }
 
+// Node name type for type-safe graph construction
+type NodeName =
+  | "collect_data"
+  | "daily_summarizer"
+  | "weekly_summarizer"
+  | "monthly_summarizer"
+  | "yearly_summarizer"
+  | "persist";
+
 /**
  * Routing functions for conditional edges
  */
-function routeAfterDaily(state: WorkflowState): string {
+function routeAfterDaily(state: WorkflowState): NodeName {
   // daily tasks stop here
   if (state.taskType === "daily") return "persist";
   // weekly and yearly go to weekly_summarizer (year-end needs weekly data too)
@@ -224,13 +233,13 @@ function routeAfterDaily(state: WorkflowState): string {
   return "monthly_summarizer";
 }
 
-function routeAfterWeekly(state: WorkflowState): string {
+function routeAfterWeekly(state: WorkflowState): NodeName {
   // If yearly, continue to monthly_summarizer
   if (state.taskType === "yearly") return "monthly_summarizer";
   return "persist"; // Weekly always ends after weekly_summarizer
 }
 
-function routeAfterMonthly(state: WorkflowState): string {
+function routeAfterMonthly(state: WorkflowState): NodeName {
   if (state.taskType === "monthly") return "persist";
   // Only yearly continues to yearly_summarizer
   return "yearly_summarizer";
@@ -255,26 +264,44 @@ export async function createSummaryWorkflow(
   workflow.addNode("yearly_summarizer", yearlySummarizerNode);
   workflow.addNode("persist", persistNode);
 
-  // Define edges (use type assertions to bypass LangGraph's strict typing)
-  workflow.addEdge(START, "collect_data" as any);
-  workflow.addEdge("collect_data" as any, "daily_summarizer" as any);
+  // Type-safe edge helper to work around LangGraph's type inference limitations
+  // LangGraph's StateGraph types don't track dynamically added nodes
+  const addEdge = (
+    from: typeof START | NodeName,
+    to: typeof END | NodeName
+  ) => {
+    (workflow.addEdge as Function)(from, to);
+  };
+
+  const addConditionalEdges = (
+    source: NodeName,
+    router: (state: WorkflowState) => string,
+    destinations: NodeName[]
+  ) => {
+    (workflow.addConditionalEdges as Function)(source, router, destinations);
+  };
+
+  // Define edges
+  addEdge(START, "collect_data");
+  addEdge("collect_data", "daily_summarizer");
 
   // Conditional routing based on task type
-  workflow.addConditionalEdges(
-    "daily_summarizer" as any,
-    routeAfterDaily as any
-  );
-  workflow.addConditionalEdges(
-    "weekly_summarizer" as any,
-    routeAfterWeekly as any
-  );
-  workflow.addConditionalEdges(
-    "monthly_summarizer" as any,
-    routeAfterMonthly as any
-  );
+  addConditionalEdges("daily_summarizer", routeAfterDaily, [
+    "persist",
+    "weekly_summarizer",
+    "monthly_summarizer",
+  ]);
+  addConditionalEdges("weekly_summarizer", routeAfterWeekly, [
+    "persist",
+    "monthly_summarizer",
+  ]);
+  addConditionalEdges("monthly_summarizer", routeAfterMonthly, [
+    "persist",
+    "yearly_summarizer",
+  ]);
 
-  workflow.addEdge("yearly_summarizer" as any, "persist" as any);
-  workflow.addEdge("persist" as any, END);
+  addEdge("yearly_summarizer", "persist");
+  addEdge("persist", END);
 
   // Compile with optional checkpointer for state persistence
   return workflow.compile(checkpointer ? { checkpointer } : undefined);
