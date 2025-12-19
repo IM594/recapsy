@@ -21,7 +21,7 @@ function getCheckpointManager(year: number): CheckpointManager {
 
 /**
  * POST /api/summary/generate
- * Trigger background summarization task
+ * Trigger background summarization task with streaming progress
  */
 router.post("/generate", async (req, res) => {
   const {
@@ -59,7 +59,7 @@ router.post("/generate", async (req, res) => {
   const threadId = generateThreadId(taskType, year, selectedRepos || []);
   const threadConfig = createThreadConfig(threadId);
 
-  // Start background task
+  // Start background task with streaming
   setImmediate(async () => {
     try {
       logger.taskStart("Workflow Execution", {
@@ -68,25 +68,47 @@ router.post("/generate", async (req, res) => {
         threadId,
       });
 
-      await checkpoint.updateProgress("init", 0, "Initializing workflow...");
-
       // Get native checkpointer and create workflow with it
       const checkpointer = await getCheckpointer();
       const workflow = await createSummaryWorkflow(checkpointer);
 
-      const result = await workflow.invoke(
-        {
-          taskType,
-          year,
-          selectedRepos: selectedRepos || [],
-          authorPattern: author || "",
-          since: since || "",
-          until: until || "",
-        },
-        threadConfig
-      );
+      const input = {
+        taskType,
+        year,
+        selectedRepos: selectedRepos || [],
+        authorPattern: author || "",
+        since: since || "",
+        until: until || "",
+      };
 
-      await checkpoint.markComplete(result);
+      // Use stream() instead of invoke() for progress updates
+      // streamMode: "updates" gives us state changes after each node
+      const stream = await workflow.stream(input, {
+        ...threadConfig,
+        streamMode: "updates",
+      });
+
+      let lastState: any = null;
+      for await (const chunk of stream) {
+        // chunk is { [nodeName]: stateUpdate }
+        const chunkData = chunk as Record<string, any>;
+        const nodeNames = Object.keys(chunkData);
+        for (const nodeName of nodeNames) {
+          const stateUpdate = chunkData[nodeName];
+          lastState = { ...lastState, ...stateUpdate };
+
+          // Emit progress event via checkpoint EventEmitter
+          if (stateUpdate?.progress !== undefined) {
+            checkpoint.emit("progress", {
+              step: stateUpdate.currentStep || nodeName,
+              progress: stateUpdate.progress,
+              message: `Completed: ${nodeName}`,
+            });
+          }
+        }
+      }
+
+      await checkpoint.markComplete(lastState);
       logger.taskEnd("Workflow Execution", 0, "completed");
     } catch (error: any) {
       logger.error(`Workflow failed: ${error.message}`);
@@ -96,7 +118,7 @@ router.post("/generate", async (req, res) => {
 
   res.json({
     status: "started",
-    message: "Task started in background",
+    message: "Task started in background with streaming",
     threadId,
   });
 });
