@@ -12,11 +12,6 @@ import { createSummaryWorkflow } from "../../workflow/graph";
 import logger from "../../lib/logger";
 import { SummaryStore } from "../../lib/summary-store";
 import { WorkflowRunner } from "../../lib/workflow-runner";
-import {
-  getCheckpointer,
-  generateThreadId,
-  createThreadConfig,
-} from "../../lib/saver";
 
 const router = Router();
 
@@ -55,21 +50,15 @@ router.post("/generate", async (req, res) => {
   await store.initialize(selectedRepos || [], author || "");
   runner.start();
 
-  // Generate thread ID for LangGraph checkpointing
-  const threadId = generateThreadId(taskType, year, selectedRepos || []);
-  const threadConfig = createThreadConfig(threadId);
-
   // Execute workflow in background
   setImmediate(async () => {
     try {
       logger.taskStart("Workflow Execution", {
         type: taskType,
         range: `${since} -> ${until}`,
-        threadId,
       });
 
-      const checkpointer = await getCheckpointer();
-      const workflow = await createSummaryWorkflow(checkpointer);
+      const workflow = await createSummaryWorkflow();
 
       const input = {
         taskType,
@@ -82,7 +71,6 @@ router.post("/generate", async (req, res) => {
 
       // Stream workflow execution for real-time progress
       const stream = await workflow.stream(input, {
-        ...threadConfig,
         streamMode: "updates",
       });
 
@@ -115,7 +103,6 @@ router.post("/generate", async (req, res) => {
   res.json({
     status: "started",
     message: "Workflow started in background",
-    threadId,
   });
 });
 
@@ -219,5 +206,153 @@ router.get("/data", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+/**
+ * POST /api/summary/regenerate
+ * Regenerate a specific summary with optional custom prompt
+ */
+router.post("/regenerate", async (req, res) => {
+  const {
+    type,
+    id,
+    year = new Date().getFullYear(),
+    customPrompt,
+    repo,
+  } = req.body;
+
+  if (!type || !id) {
+    return res.status(400).json({ error: "Missing type or id" });
+  }
+
+  const store = SummaryStore.getInstance(Number(year));
+  await store.loadIfExists();
+
+  try {
+    if (type === "daily") {
+      // Load raw data for the day
+      if (!repo) {
+        return res
+          .status(400)
+          .json({ error: "Missing repo for daily regeneration" });
+      }
+
+      const rawData = await store.loadRawData(id, repo);
+      if (!rawData) {
+        return res
+          .status(404)
+          .json({ error: "Raw data not found for this date" });
+      }
+
+      // Import and call processDailySummary
+      const { processDailySummary } = await import(
+        "../../workflow/nodes/daily-summarizer.js"
+      );
+      const newSummary = await processDailySummary({
+        ...rawData,
+        additionalInstructions: customPrompt,
+      });
+
+      // Save and return
+      await store.saveDailySummary(newSummary);
+      return res.json({ summary: newSummary.summary });
+    }
+
+    if (type === "weekly") {
+      // id is weekStart
+      const allDailies = await store.loadAllDailySummaries();
+      const weekDailies = allDailies.filter((d) => {
+        const weekStart = getWeekStart(d.date);
+        return weekStart === id;
+      });
+
+      if (weekDailies.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "No daily summaries found for this week" });
+      }
+
+      const weekEnd = getWeekEnd(id);
+      const { processWeeklySummary } = await import(
+        "../../workflow/nodes/weekly-summarizer.js"
+      );
+      const newSummary = await processWeeklySummary(
+        id,
+        weekEnd,
+        weekDailies,
+        customPrompt
+      );
+
+      await store.saveWeeklySummary(newSummary);
+      return res.json({ summary: newSummary.summary });
+    }
+
+    if (type === "monthly") {
+      // id is month (YYYY-MM)
+      const allDailies = await store.loadAllDailySummaries();
+      const monthDailies = allDailies.filter((d) => d.date.startsWith(id));
+
+      if (monthDailies.length === 0) {
+        return res
+          .status(404)
+          .json({ error: "No daily summaries found for this month" });
+      }
+
+      const { processMonthSummary } = await import(
+        "../../workflow/nodes/monthly-summarizer.js"
+      );
+      const newSummary = await processMonthSummary(
+        id,
+        monthDailies,
+        customPrompt
+      );
+
+      await store.saveMonthlySummary(newSummary);
+      return res.json({ summary: newSummary.summary });
+    }
+
+    if (type === "yearly") {
+      const allMonthly = await store.loadAllMonthlySummaries();
+      const allWeekly = await store.loadAllWeeklySummaries();
+
+      if (allMonthly.length === 0) {
+        return res.status(404).json({ error: "No monthly summaries found" });
+      }
+
+      const { processYearEndSummary } = await import(
+        "../../workflow/nodes/year-end-summarizer.js"
+      );
+      // New signature: (year, monthly, weekly, customPrompt)
+      const newSummary = await processYearEndSummary(
+        Number(year),
+        allMonthly,
+        allWeekly,
+        customPrompt
+      );
+
+      await store.saveYearEndSummary(newSummary.overview);
+      return res.json({ content: newSummary.overview });
+    }
+
+    res.status(400).json({ error: "Invalid type parameter" });
+  } catch (error: any) {
+    logger.error(`Regeneration failed: ${error.message}`);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Helper functions for week calculation
+function getWeekStart(dateStr: string): string {
+  const d = new Date(dateStr);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  return monday.toISOString().slice(0, 10);
+}
+
+function getWeekEnd(weekStart: string): string {
+  const d = new Date(weekStart);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
 
 export default router;

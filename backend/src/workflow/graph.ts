@@ -1,5 +1,4 @@
 import { StateGraph, END, START, Send } from "@langchain/langgraph";
-import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import { WorkflowStateAnnotation, WorkflowState } from "./state";
 import {
   collectDataNode,
@@ -252,13 +251,24 @@ async function monthlySummarizerNode(
 async function yearlySummarizerNode(
   state: WorkflowState
 ): Promise<Partial<WorkflowState>> {
-  const { year, monthlySummaries, selectedRepos, authorPattern } = state;
+  const {
+    year,
+    monthlySummaries,
+    weeklySummaries,
+    selectedRepos,
+    authorPattern,
+  } = state;
   const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   logger.info("🎄 Generating year-end summary...");
 
-  const result = await processYearEndSummary(year, monthlySummaries);
+  // Pass both monthly and weekly summaries for richer context
+  const result = await processYearEndSummary(
+    year,
+    monthlySummaries,
+    weeklySummaries
+  );
 
   logger.info("✅ Year-end summary complete");
 
@@ -309,12 +319,8 @@ function routeAfterMonthly(state: WorkflowState): NodeName {
  * Supports: daily, weekly, monthly, yearly task types
  *
  * Uses Send API for parallel daily processing (fan-out/fan-in pattern)
- *
- * @param checkpointer - Optional LangGraph checkpointer for state persistence and resume
  */
-export async function createSummaryWorkflow(
-  checkpointer?: BaseCheckpointSaver
-) {
+export async function createSummaryWorkflow() {
   const workflow = new StateGraph(WorkflowStateAnnotation);
 
   // Add nodes
@@ -375,8 +381,7 @@ export async function createSummaryWorkflow(
   addEdge("yearly_summarizer", "persist");
   addEdge("persist", END);
 
-  // Compile with optional checkpointer for state persistence
-  return workflow.compile(checkpointer ? { checkpointer } : undefined);
+  return workflow.compile();
 }
 
 // Keep backward compatibility with old name

@@ -25,7 +25,7 @@ export async function processMonthSummary(
     return `### ${d.date}\n${d.summary}`;
   });
 
-  const prompt = `你是一个工作总结助手。请根据以下每日工作总结，生成一份月度工作报告。
+  const prompt = `你是一个工作整理助手。请根据以下每日工作记录，生成一份月度工作报告。直接输出结果，请勿输出类似于“好的”、“好的，我明白了”等类似内容。
 
 ## 月份
 ${month}
@@ -38,25 +38,28 @@ ${additionalInstructions ? `> ${additionalInstructions}` : "无"}
 
 ## 要求
 1. 归纳本月的主要工作成果，而不是简单罗列每天的工作
-2. 提取 3-5 个本月亮点
-3. 用自然语言描述，适合汇报给管理者
-4. 总计不超过 500 字
+2. 识别并列出使用或学习的技术
+3. 如有协作记录，简要归纳
+4. 用事实陈述，适度提炼但不过度夸大
+5. **保留专有名词**（项目名、技术名、模块名），不要翻译成中文
+6. **不要使用表格格式**，只使用列表和段落
+7. 总计不超过 600 字
 
 ## 输出格式
 ### 本月概述
 （一段话概述本月工作）
 
 ### 主要成果
-1. 成果1
-2. 成果2
-...
+1. 成果1：具体描述
+2. 成果2：...
 
-### 月度亮点
-- 亮点1
-- 亮点2
-...`;
+### 技术实践
+- 使用/学习了哪些技术？
 
-  const model = createLLM({ temperature: 0.5 });
+### 协作概况（如有）
+- 与哪些团队协作？参与了哪些跨部门工作？`;
+
+  const model = createLLM({ temperature: 1.0, tier: "quality" });
   const summary = await invokeWithRetry(model, prompt);
 
   // Extract highlights

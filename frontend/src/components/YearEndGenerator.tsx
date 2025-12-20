@@ -104,11 +104,14 @@ export function YearEndGenerator({
 
     if (status.currentStep) {
       const stepMapping: Record<string, string> = {
+        setup: "collect",
         collect_data: "collect",
-        daily_summarizer: "daily",
+        fan_out_daily: "daily",
+        process_single_daily: "daily",
+        weekly_summarizer: "monthly", // weekly is part of monthly phase
         monthly_summarizer: "monthly",
         yearly_summarizer: "yearly",
-        persist: "yearly", // persist is part of finalization
+        persist: "yearly",
       };
 
       const activeStepId =

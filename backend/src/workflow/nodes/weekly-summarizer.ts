@@ -39,14 +39,14 @@ export async function processWeeklySummary(
   customPrompt?: string
 ): Promise<WeeklySummary> {
   const totalDays = dailySummaries.length;
-  const model = createLLM({ temperature: 0.3 });
+  const model = createLLM({ temperature: 1.0, tier: "balanced" });
 
   // Build context for AI
   const dailyDetails = dailySummaries
     .map((d) => `**${d.date}** (${d.repo}):\n${d.summary}`)
     .join("\n\n");
 
-  const prompt = `你是一个工作总结助手。请根据以下每日工作总结，生成一份结构化的周报。
+  const prompt = `你是一个工作整理助手。请根据以下每日工作记录，生成一份结构化的周报。直接输出结果，请勿输出类似于“好的”、“好的，我明白了”等类似内容。
 
 ## 时间范围
 ${weekStart} 至 ${weekEnd}
@@ -57,20 +57,25 @@ ${dailyDetails}
 ${customPrompt ? `## 额外指令\n> ${customPrompt}\n` : ""}
 
 ## 要求
-1. 用自然语言描述本周完成的主要工作，整合相关的日常工作
-2. 提取 3-5 个关键成果或亮点
-3. 使用中文输出
-4. 总计不超过 500 字
+1. 将碎片化的日常工作**归纳整合**为完整的工作项
+2. 保留关键技术细节，但不要逐天罗列
+3. 如有跨天的协作或帮助他人的记录，归纳到协作部分
+4. 用事实陈述，不过度夸大成果
+5. **保留专有名词**（项目名、技术名、模块名），不要翻译成中文
+6. **不要使用表格格式**，只使用列表和段落
+7. 总计不超过 600 字
 
 ## 输出格式（严格使用 Markdown）
 ### 本周工作
-（一段话总结本周的整体工作内容，突出主要成就和进展）
+（一段话总结本周的整体工作内容）
 
-### 关键成果
-- 成果1：具体描述
-- 成果2：具体描述
-- 成果3：具体描述
-...`;
+### 完成的工作项
+1. **工作项1**：具体描述，包含关键技术细节
+2. **工作项2**：具体描述
+...
+
+### 协作记录（如有）
+- 与谁协作了什么？帮助解决了什么问题？`;
 
   const summaryText = await invokeWithRetry(model, prompt);
 
