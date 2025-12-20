@@ -4,7 +4,7 @@
 
 import { createLLM, invokeWithRetry } from "../../lib/llm";
 import { WorkflowState } from "../state";
-import { CheckpointManager } from "../../lib/checkpoint";
+import { SummaryStore } from "../../lib/summary-store";
 import type { WeeklySummary, DailySummary } from "../../lib/types";
 import logger from "../../lib/logger";
 
@@ -169,7 +169,7 @@ export async function weeklySummarizerNode(
 ): Promise<Partial<WorkflowState>> {
   const { dailySummaries, year, selectedRepos, authorPattern } = state;
 
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   if (!dailySummaries || dailySummaries.length === 0) {

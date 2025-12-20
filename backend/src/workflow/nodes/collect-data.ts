@@ -6,7 +6,7 @@
 
 import { WorkflowState } from "../state";
 import { getCommitsByDay } from "../../lib/git";
-import { CheckpointManager } from "../../lib/checkpoint";
+import { SummaryStore } from "../../lib/summary-store";
 import logger from "../../lib/logger";
 
 /**
@@ -34,7 +34,7 @@ export async function collectDataNode(
   );
 
   // Save to checkpoint for data persistence (not SSE)
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   for (const day of data) {

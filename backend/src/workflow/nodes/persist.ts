@@ -3,7 +3,7 @@
  */
 
 import { WorkflowState } from "../state";
-import { CheckpointManager } from "../../lib/checkpoint";
+import { SummaryStore } from "../../lib/summary-store";
 import logger from "../../lib/logger";
 
 /**
@@ -26,7 +26,7 @@ export async function persistNode(
     monthlies: (monthlySummaries || []).length,
   });
 
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   // Save all daily summaries

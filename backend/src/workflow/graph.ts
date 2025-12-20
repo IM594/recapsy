@@ -10,7 +10,7 @@ import { processDailySummary } from "./nodes/daily-summarizer";
 import { processMonthSummary } from "./nodes/monthly-summarizer";
 import { processYearEndSummary } from "./nodes/year-end-summarizer";
 
-import { CheckpointManager } from "../lib/checkpoint";
+import { SummaryStore } from "../lib/summary-store";
 import type {
   DailySummary,
   MonthlySummary,
@@ -20,7 +20,7 @@ import logger from "../lib/logger";
 
 /**
  * Setup Node: Unified initialization for the workflow
- * Initializes CheckpointManager and sets initial progress
+ * Initializes SummaryStore and sets initial progress
  *
  * Pure function: Only modifies state, no side effects
  */
@@ -31,8 +31,8 @@ async function setupNode(
 
   logger.info("🚀 Initializing workflow...");
 
-  // Initialize CheckpointManager once for the entire workflow
-  const checkpoint = CheckpointManager.getInstance(year);
+  // Initialize SummaryStore once for the entire workflow
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   return {
@@ -52,7 +52,7 @@ async function fanOutDailyNode(
   state: WorkflowState
 ): Promise<Partial<WorkflowState>> {
   const { rawCommits, year, selectedRepos, authorPattern } = state;
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   const commits = rawCommits || [];
@@ -133,7 +133,7 @@ async function processSingleDailyNode(
     return {};
   }
 
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   try {
@@ -166,7 +166,7 @@ async function monthlySummarizerNode(
   state: WorkflowState
 ): Promise<Partial<WorkflowState>> {
   const { dailySummaries, year, selectedRepos, authorPattern } = state;
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   // Group by month
@@ -253,7 +253,7 @@ async function yearlySummarizerNode(
   state: WorkflowState
 ): Promise<Partial<WorkflowState>> {
   const { year, monthlySummaries, selectedRepos, authorPattern } = state;
-  const checkpoint = CheckpointManager.getInstance(year);
+  const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   logger.info("🎄 Generating year-end summary...");
