@@ -51,7 +51,10 @@ app.use(express.json({ limit: "50mb" }));
 
 // 简单日志
 app.use((req, res, next) => {
-  console.log(`[HTTP] ${req.method} ${req.originalUrl}`);
+  // SSE 连接保持长连接，打印日志太频繁，忽略
+  if (!req.originalUrl.includes("/api/summary/events")) {
+    console.log(`[HTTP] ${req.method} ${req.originalUrl}`);
+  }
   next();
 });
 

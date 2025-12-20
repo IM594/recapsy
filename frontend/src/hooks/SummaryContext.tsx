@@ -120,6 +120,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
 
     // Handle status event with new format: { nodeId, state, timestamp }
     es.addEventListener("status", (e: MessageEvent) => {
+      console.log("[SSE] status event:", e.data);
       const data = JSON.parse(e.data);
       // New format: { nodeId, state: { progress, currentStep, phase, isRunning }, timestamp }
       if (data.state) {
@@ -137,6 +138,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
 
     // Handle progress event with new format
     es.addEventListener("progress", (e: MessageEvent) => {
+      console.log("[SSE] progress event:", e.data);
       const data = JSON.parse(e.data);
       // New format: { nodeId, state: { progress, currentStep, message }, timestamp }
       const nodeId = data.nodeId;
@@ -156,6 +158,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
 
     // Handle complete event with new format
     es.addEventListener("complete", (e: MessageEvent) => {
+      console.log("[SSE] complete event:", e.data);
       const data = JSON.parse(e.data);
       // New format: { nodeId, state: { progress, currentStep, result }, timestamp }
       const state = data.state || data;
@@ -175,6 +178,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
 
     // Handle workflow_error event with new format
     es.addEventListener("workflow_error", (e: MessageEvent) => {
+      console.error("[SSE] workflow_error event:", e.data);
       const data = JSON.parse(e.data);
       // New format: { nodeId, state: { error }, timestamp }
       const errorMessage = data.state?.error || data.message || "Unknown error";

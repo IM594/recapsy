@@ -7,7 +7,6 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import {
   Loader2,
   CheckCircle2,
@@ -63,6 +62,13 @@ export function YearEndGenerator({
       weight: 40,
     },
     {
+      id: "weekly",
+      title: "Structuring Weeks",
+      description: "Aggregating weekly reports",
+      status: "pending",
+      weight: 20,
+    },
+    {
       id: "monthly",
       title: "Structuring Months",
       description: "Aggregating monthly reports",
@@ -106,10 +112,18 @@ export function YearEndGenerator({
       const stepMapping: Record<string, string> = {
         setup: "collect",
         collect_data: "collect",
+        // Subgraph Phase Nodes
+        daily_phase: "daily",
+        weekly_phase: "weekly",
+        monthly_phase: "monthly",
+        // Internal Subgraph Nodes (keep for safety/granularity)
         fan_out_daily: "daily",
         process_single_daily: "daily",
-        weekly_summarizer: "monthly", // weekly is part of monthly phase
-        monthly_summarizer: "monthly",
+        // Map new weekly/monthly nodes to the "monthly" (Aggregation) step
+        fan_out_weekly: "weekly",
+        process_single_week: "weekly",
+        fan_out_monthly: "monthly",
+        process_single_month: "monthly",
         yearly_summarizer: "yearly",
         persist: "yearly",
       };
@@ -209,13 +223,7 @@ export function YearEndGenerator({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <div className="flex justify-between text-xs font-medium text-slate-500 uppercase tracking-wider">
-              <span>Progress</span>
-              <span>{Math.round(status.progress)}%</span>
-            </div>
-            <Progress value={status.progress} className="h-2" />
-          </div>
+          {/* Global progress removed as per user request */}
 
           <div className="space-y-3">
             {steps.map((step) => (
@@ -241,8 +249,8 @@ export function YearEndGenerator({
                   {step.title}
                 </span>
                 {step.status === "running" && (
-                  <span className="text-xs text-muted-foreground ml-auto">
-                    Processing...
+                  <span className="text-xs font-mono text-indigo-600 font-medium ml-auto">
+                    {Math.round(status.progress)}%
                   </span>
                 )}
                 {step.status === "completed" && (

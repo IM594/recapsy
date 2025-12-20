@@ -389,21 +389,27 @@ export async function getCommitsByDay(
     includeDiffs?: boolean;
     maxDiffLinesPerFile?: number;
     maxFilesPerDay?: number;
+    onProgress?: (repoName: string, current: number, total: number) => void;
   } = {}
 ): Promise<DailyCommitData[]> {
   const {
     includeDiffs = true,
     maxDiffLinesPerFile = 100,
     maxFilesPerDay = 30,
+    onProgress,
   } = options;
 
   // Map: "date-repo" -> DailyCommitData (separate entry per repo per day)
   const dailyMap = new Map<string, DailyCommitData>();
 
   // 并发收集所有仓库的提交
+  let completedCount = 0;
+  const totalRepos = repoPaths.length;
+
   const results = await Promise.allSettled(
     repoPaths.map(async (repoPath) => {
       const repoName = path.basename(repoPath);
+      onProgress?.(repoName, completedCount, totalRepos);
       console.log(`[Git] Collecting commits from ${repoName}...`);
 
       try {
@@ -530,9 +536,13 @@ export async function getCommitsByDay(
         }
 
         console.log(`[Git] ${repoName}: collected ${lines.length} commits`);
+        completedCount++;
+        onProgress?.(repoName, completedCount, totalRepos);
         return { repoName, commits: repoCommits };
       } catch (error) {
         console.warn(`[Git] Error collecting from ${repoName}:`, error);
+        completedCount++;
+        onProgress?.(repoName, completedCount, totalRepos);
         return { repoName, commits: [] };
       }
     })

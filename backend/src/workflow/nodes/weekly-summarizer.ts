@@ -115,6 +115,7 @@ export async function processAllWeeklySummaries(
 
   // Same concurrency limit as other batch processors
   const CONCURRENCY_LIMIT = 5;
+  let processingIndex = 0; // Track the absolute index of item being processed
 
   for (let i = 0; i < weeks.length; i += CONCURRENCY_LIMIT) {
     const chunk = weeks.slice(i, i + CONCURRENCY_LIMIT);
@@ -124,16 +125,20 @@ export async function processAllWeeklySummaries(
         const dailies = weeklyGroups.get(weekStart)!;
         const weekEnd = getWeekEnd(weekStart);
 
+        processingIndex++; // Increment for each item as we schedule it
+        const currentIndex = processingIndex;
+
         try {
           // Sort dailies by date just in case
           dailies.sort((a, b) => a.date.localeCompare(b.date));
+
+          onProgress?.(currentIndex, weeks.length, weekStart);
 
           const summary = await processWeeklySummary(
             weekStart,
             weekEnd,
             dailies
           );
-          onProgress?.(summaries.length + 1, weeks.length, weekStart);
           return { success: true as const, summary };
         } catch (error) {
           const errMsg = error instanceof Error ? error.message : String(error);
@@ -164,6 +169,8 @@ export async function processAllWeeklySummaries(
   return { summaries, errors };
 }
 
+import { WorkflowRunner } from "../../lib/workflow-runner";
+
 /**
  * LangGraph node: Weekly Summarizer
  *
@@ -175,6 +182,8 @@ export async function weeklySummarizerNode(
   const { dailySummaries, year, selectedRepos, authorPattern } = state;
 
   const checkpoint = SummaryStore.getInstance(year);
+  const runner = WorkflowRunner.getInstance(year); // Get runner for progress updates
+
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
 
   if (!dailySummaries || dailySummaries.length === 0) {
@@ -218,9 +227,19 @@ export async function weeklySummarizerNode(
     }`
   );
 
-  // Process without progress callback (pure function)
+  // Process with progress callback
   const { summaries: newSummaries, errors } = await processAllWeeklySummaries(
-    toProcess
+    toProcess,
+    (completed, total, weekStart) => {
+      // Phase range: 0% -> 100%
+      const percent = Math.floor((completed / total) * 100);
+
+      runner.updateProgress(
+        "weekly_summarizer",
+        percent,
+        `Processing Week ${weekStart} (${completed}/${total})...`
+      );
+    }
   );
 
   // Save new summaries

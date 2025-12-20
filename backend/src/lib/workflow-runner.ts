@@ -12,6 +12,8 @@
  */
 
 import { EventEmitter } from "events";
+import * as fs from "fs";
+import * as path from "path";
 
 export interface RuntimeStatus {
   isRunning: boolean;
@@ -36,6 +38,7 @@ const runnersByYear = new Map<number, WorkflowRunner>();
 
 export class WorkflowRunner extends EventEmitter {
   private year: number;
+  private logFilePath: string;
   private status: RuntimeStatus = {
     isRunning: false,
     progress: 0,
@@ -53,6 +56,18 @@ export class WorkflowRunner extends EventEmitter {
   constructor(year: number) {
     super();
     this.year = year;
+    this.logFilePath = path.join(process.cwd(), "workflow-debug.log");
+    this.logToFile(
+      `\n=== New WorkflowRunner Instance (Year: ${year}) - ${new Date().toISOString()} ===\n`
+    );
+  }
+
+  private logToFile(message: string) {
+    try {
+      fs.appendFileSync(this.logFilePath, message + "\n");
+    } catch (err) {
+      console.error("Failed to write to log file:", err);
+    }
   }
 
   // ============ Runtime State ============
@@ -66,6 +81,8 @@ export class WorkflowRunner extends EventEmitter {
   }
 
   start(): void {
+    // Clear all progress counters from previous runs
+    this.progressCounters.clear();
     this.status = {
       isRunning: true,
       progress: 0,
@@ -74,7 +91,32 @@ export class WorkflowRunner extends EventEmitter {
     };
   }
 
+  // Atomic counters for parallel progress tracking
+  private progressCounters = new Map<
+    string,
+    { current: number; total: number }
+  >();
+
+  /**
+   * Reset a specific progress counter (for new phase)
+   */
+  resetProgressCounter(nodeId: string): void {
+    this.progressCounters.delete(nodeId);
+  }
+
   // ============ Progress Updates ============
+
+  /**
+   * Atomically increment progress for a step (handles parallel execution)
+   */
+  incrementProgress(nodeId: string, total: number, message?: string): void {
+    const info = this.progressCounters.get(nodeId) || { current: 0, total };
+    info.current += 1;
+    this.progressCounters.set(nodeId, info);
+
+    const percent = Math.floor((info.current / total) * 100);
+    this.updateProgress(nodeId, percent, message);
+  }
 
   /**
    * Update progress and emit SSE event
@@ -93,6 +135,12 @@ export class WorkflowRunner extends EventEmitter {
       timestamp: Date.now(),
     };
 
+    // Log sparingly to avoid flooding (only every 10% or on complete)
+    // But for now detailed log is requested
+    const logMsg = `[WorkflowRunner] Emitting progress: ${nodeId} (${progress}%) - ${message}`;
+    console.log(logMsg);
+    this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
+
     this.emit("progress", event);
   }
 
@@ -106,6 +154,10 @@ export class WorkflowRunner extends EventEmitter {
       currentStep: null,
       phase: "complete",
     };
+
+    const logMsg = "[WorkflowRunner] Emitting complete";
+    console.log(logMsg);
+    this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
     this.emit("complete", {
       nodeId: "complete",
@@ -129,6 +181,10 @@ export class WorkflowRunner extends EventEmitter {
       phase: "error",
       error: errorMessage,
     };
+
+    const logMsg = `[WorkflowRunner] Emitting error: ${errorMessage}`;
+    console.error(logMsg);
+    this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
     this.emit("workflow_error", {
       nodeId: "error",

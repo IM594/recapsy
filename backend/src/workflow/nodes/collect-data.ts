@@ -7,6 +7,7 @@
 import { WorkflowState } from "../state";
 import { getCommitsByDay } from "../../lib/git";
 import { SummaryStore } from "../../lib/summary-store";
+import { WorkflowRunner } from "../../lib/workflow-runner";
 import logger from "../../lib/logger";
 
 /**
@@ -22,6 +23,8 @@ export async function collectDataNode(
     range: `${since} → ${until}`,
   });
 
+  const runner = WorkflowRunner.getInstance(year);
+
   const data = await getCommitsByDay(
     selectedRepos || [],
     authorPattern || "",
@@ -30,6 +33,13 @@ export async function collectDataNode(
     {
       includeDiffs: true,
       maxDiffLinesPerFile: 100,
+      onProgress: (repoName, current, total) => {
+        runner.updateProgress(
+          "collect_data",
+          Math.floor(((current + 1) / total) * 100),
+          `Scanning ${repoName} (${current + 1}/${total})...`
+        );
+      },
     }
   );
 
@@ -43,10 +53,16 @@ export async function collectDataNode(
 
   logger.stepDone(`Collected ${data.length} date-repo entries`, 0);
 
-  // Pure state update - progress tracking via state, not side effects
+  // Mark collect phase as 100% complete
+  runner.updateProgress(
+    "collect_data",
+    100,
+    `Completed: ${data.length} entries`
+  );
+
+  // Pure state update
   return {
     rawCommits: data,
     currentStep: "collect_data",
-    progress: 20,
   };
 }
