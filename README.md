@@ -17,12 +17,16 @@
 
 ## 快速开始
 
-### 1. 克隆模板
+### 1. 克隆模板并初始化
 
 ```bash
-# 复制此模板到你的项目目录
-cp -r electron-demo my-app
+git clone https://github.com/IM594/electron-vite-react-shadcn-ui-starterkit.git my-app
 cd my-app
+
+rm -rf .git
+git init
+git add .
+git commit -m "chore: init project based on electron-vite-react-shadcn-ui-starterkit"
 ```
 
 ### 2. 安装依赖
@@ -30,7 +34,15 @@ cd my-app
 ```bash
 pnpm install
 
-# 如果 Electron 报错，运行：
+# pnpm 会忽略 build scripts，需要批准 Electron
+pnpm approve-builds electron
+```
+
+按空格键选择 `electron`，回车确认，然后输入 `true` 批准执行。
+
+如果忘记批准，也可以手动安装：
+
+```bash
 node node_modules/electron/install.js
 ```
 

@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "profiles": {
+    "default": {
+      "name": "默认配置",
+      "git": {
+        "rootPaths": [],
+        "defaultRepos": [],
+        "authorPattern": "",
+        "timeMode": "relative",
+        "since": "yesterday",
+        "until": "",
+        "absoluteSince": "",
+        "absoluteUntil": "",
+        "maxCommits": 20,
+        "includeStat": true,
+        "sinceFallback": "30 days ago"
+      },
+      "output": {
+        "directory": "./outputs",
+        "format": "markdown"
+      },
+      "schedule": {
+        "enabled": false,
+        "cron": "0 18 * * *",
+        "timezone": "Asia/Shanghai"
+      }
+    }
+  },
+  "activeProfile": "default"
+}
