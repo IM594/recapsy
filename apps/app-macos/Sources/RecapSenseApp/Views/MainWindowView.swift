@@ -6,6 +6,9 @@ struct MainWindowView: View {
       SearchView()
         .tabItem { Label("搜索", systemImage: "magnifyingglass") }
 
+      DailySummaryView()
+        .tabItem { Label("日总结", systemImage: "calendar") }
+
       LogsView()
         .tabItem { Label("日志", systemImage: "doc.text") }
 

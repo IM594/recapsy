@@ -77,6 +77,8 @@
   - [x] 自动启动：应用启动后默认启动 Agent + MCP（SSE）+ Collector
   - [x] 主窗口：搜索（调用 Agent `GET /v1/search`）+ 日志（展示 logs tail）
   - [x] 主窗口：设置页（调用 Agent `/v1/settings`；设置存 SQLite `settings` 表）
+  - [x] 主窗口：chunk 详情（点击搜索结果，调用 Agent `GET /v1/chunks/:id` 展示全文）
+  - [x] 主窗口：日总结（调用 Agent `GET /v1/summaries/daily`）
   - [x] 聊天入口占位（不实现交互）
   - 菜单栏（Menu bar）职责（先做功能，样式后置）：
     - 状态：采集中/暂停/错误（状态灯 + 简要文字）

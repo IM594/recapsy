@@ -62,6 +62,52 @@ struct AgentHttpClient {
     return try JSONDecoder().decode(Payload.self, from: data).settings
   }
 
+  func getChunk(id: String) async throws -> ChunkItem {
+    let url = baseURL.appendingPathComponent("/v1/chunks/\(id)")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    struct Payload: Decodable { let chunk: ChunkItem }
+    return try JSONDecoder().decode(Payload.self, from: data).chunk
+  }
+
+  /// 获取（并尽力生成）日总结；如果当天没有 chunks，Agent 会返回 `summary: null`。
+  func getDailySummary(date: String) async throws -> DailySummaryItem? {
+    var url = baseURL.appendingPathComponent("/v1/summaries/daily")
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
+    components?.queryItems = [
+      URLQueryItem(name: "date", value: date),
+    ]
+    url = components?.url ?? url
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    struct Payload: Decodable { let summary: DailySummaryItem? }
+    return try JSONDecoder().decode(Payload.self, from: data).summary
+  }
+
   func search(query: String, limit: Int) async throws -> [SearchResultItem] {
     var url = baseURL.appendingPathComponent("/v1/search")
     var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
