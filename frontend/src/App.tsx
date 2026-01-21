@@ -4,7 +4,7 @@ import { ArrowLeft, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { toDateString, toMonthString } from "@/lib/date-utils";
+import { buildGenerationResultFromWorkflowResult } from "@/lib/workflow-result";
 import { regenerateSummary } from "@/services/summary";
 
 import { Dashboard } from "@/components/Dashboard";
@@ -15,60 +15,15 @@ import { SummaryProvider } from "@/hooks/SummaryContext";
 import { SettingsProvider, useSettings } from "@/hooks/useSettings";
 import { useSummary } from "@/hooks/useSummary";
 import { YearProvider, useYear } from "@/hooks/YearContext";
-import type { SummaryType } from "@/types/summary";
+import type { GenerationConfig } from "@/types/summary";
+import type { GenerationResultState } from "@/types/generation";
 
 type ViewState = "dashboard" | "review";
 
-interface GenerationRequest {
-  summaryType: SummaryType;
-  year: number;
-  since: string;
-  until: string;
-}
-
-type SummaryWorkflowResult = {
-  taskType?: SummaryType;
-  since?: string;
-  year?: number;
-  dailySummaries?: Array<{ date: string; repo: string; summary: string }>;
-  weeklySummaries?: Array<{ weekStart: string; summary: string }>;
-  monthlySummaries?: Array<{ month: string; summary: string }>;
-  content?: string;
-  result?: { content?: string };
-};
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-type GenerationContext =
-  | {
-      type: "daily";
-      id: string; // YYYY-MM-DD
-      repo: string;
-      repoOptions?: string[];
-      summariesByRepo?: Record<string, string>;
-    }
-  | {
-      type: "weekly";
-      id: string; // weekStart YYYY-MM-DD
-    }
-  | {
-      type: "monthly";
-      id: string; // YYYY-MM
-    }
-  | {
-      type: "yearly";
-      id: string; // YYYY
-    };
-
-interface GenerationResultState {
-  year: number;
-  title: string;
-  summary: string;
-  outputPath: string;
-  context: GenerationContext;
-}
+type GenerationRequest = Pick<
+  GenerationConfig,
+  "summaryType" | "year" | "since" | "until"
+>;
 
 function AppContent() {
   const [view, setView] = useState<ViewState>("dashboard");
@@ -83,139 +38,12 @@ function AppContent() {
   // Watch for completion
   useEffect(() => {
     if (!status.isRunning && status.phase === "complete" && status.result) {
-      if (!isRecord(status.result)) return;
-      const result = status.result as SummaryWorkflowResult;
-      const taskType = result.taskType;
-      const since = result.since;
-      const dailySummaries = result.dailySummaries;
-      const weeklySummaries = result.weeklySummaries;
-      const monthlySummaries = result.monthlySummaries;
-
-      if (!taskType) return;
-
-      // Find the most relevant summary based on the original selection.
-      if (taskType === "daily" && dailySummaries && dailySummaries.length > 0) {
-        const targetDate = since ? toDateString(new Date(since)) : undefined;
-        if (!targetDate) return;
-
-        const matches = dailySummaries.filter((d) => d.date === targetDate);
-
-        if (matches.length === 0) return;
-
-        const summariesByRepo = Object.fromEntries(
-          matches.map((m) => [m.repo, m.summary])
-        );
-        const repoOptions = matches
-          .map((m) => m.repo)
-          .slice()
-          .sort((a, b) => a.localeCompare(b));
-
-        const defaultRepo = repoOptions[0];
-        const defaultSummary = summariesByRepo[defaultRepo] ?? "";
-
-        if (!defaultSummary) return;
-
-        setGenerationResult({
-          year: result.year ?? activeYear,
-          title: `Daily Brief (${targetDate})`,
-          summary: defaultSummary,
-          outputPath: "",
-          context: {
-            type: "daily",
-            id: targetDate,
-            repo: defaultRepo,
-            repoOptions,
-            summariesByRepo,
-          },
-        });
-        return;
-      } else if (
-        taskType === "weekly" &&
-        weeklySummaries &&
-        weeklySummaries.length > 0
-      ) {
-        const targetWeekStart = since ? toDateString(new Date(since)) : undefined;
-        if (!targetWeekStart) return;
-
-        const matched = weeklySummaries.find(
-          (w) => w.weekStart === targetWeekStart
-        );
-
-        if (!matched?.summary) return;
-
-        setGenerationResult({
-          year: result.year ?? activeYear,
-          title: `Weekly Report (${targetWeekStart})`,
-          summary: matched.summary,
-          outputPath: "",
-          context: {
-            type: "weekly",
-            id: matched.weekStart,
-          },
-        });
-        return;
-      } else if (
-        taskType === "monthly" &&
-        monthlySummaries &&
-        monthlySummaries.length > 0
-      ) {
-        const targetMonth = since ? toMonthString(new Date(since)) : undefined;
-        if (!targetMonth) return;
-
-        const matched = monthlySummaries.find(
-          (m) => m.month === targetMonth
-        );
-
-        if (!matched?.summary) return;
-
-        setGenerationResult({
-          year: result.year ?? activeYear,
-          title: `Monthly Summary (${targetMonth})`,
-          summary: matched.summary,
-          outputPath: "",
-          context: {
-            type: "monthly",
-            id: matched.month,
-          },
-        });
-        return;
+      const next = buildGenerationResultFromWorkflowResult(status.result, activeYear);
+      if (next) {
+        setGenerationResult(next);
+      } else {
+        toast.info("No commits found for the selected period.");
       }
-      // Year-end workflow has a different nested payload shape.
-      else if (result.result?.content) {
-        const content = String(result.result.content);
-        if (!content) return;
-
-        const y = String(result.year ?? activeYear);
-        setGenerationResult({
-          year: result.year ?? activeYear,
-          title: `Yearly Review (${y})`,
-          summary: content,
-          outputPath: "",
-          context: {
-            type: "yearly",
-            id: y,
-          },
-        });
-        return;
-      }
-      // Final fallback: some workflows return `{ content }` directly.
-      else if (result.content) {
-        const content = String(result.content);
-        if (!content) return;
-        setGenerationResult({
-          year: result.year ?? activeYear,
-          title: "Generation Complete",
-          summary: content,
-          outputPath: "",
-          context: {
-            type: "yearly",
-            id: String(result.year ?? activeYear),
-          },
-        });
-        return;
-      }
-
-      toast.info("No commits found for the selected period.");
     }
   }, [activeYear, status.phase, status.isRunning, status.result]);
 

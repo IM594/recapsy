@@ -32,6 +32,23 @@ import type {
 
 export type { GenerationConfig, LogEntry, SSEEvent, SummaryStatus, SummaryType };
 
+const DEBUG_SSE = (() => {
+  const value = import.meta.env.VITE_DEBUG_SSE;
+  return value === "1" || value === "true";
+})();
+
+function debugSse(...args: unknown[]) {
+  if (DEBUG_SSE) console.log(...args);
+}
+
+function safeJsonParse(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
 interface SummaryContextType {
   status: SummaryStatus;
   logs: LogEntry[];
@@ -107,29 +124,31 @@ export function SummaryProvider({
 
     // Handle status event with new format: { nodeId, state, timestamp }
     es.addEventListener("status", (e: MessageEvent) => {
-      console.log("[SSE] status event:", e.data);
-      const data = JSON.parse(e.data);
+      debugSse("[SSE] status event:", e.data);
+      const data = safeJsonParse(e.data);
+      if (!data) return;
       // New format: { nodeId, state: { progress, currentStep, phase, isRunning }, timestamp }
-      if (data.state) {
+      if ((data as any).state) {
         setStatus({
-          isRunning: data.state.isRunning ?? false,
-          phase: data.state.phase ?? "idle",
-          progress: data.state.progress ?? 0,
-          currentStep: data.state.currentStep ?? null,
+          isRunning: (data as any).state.isRunning ?? false,
+          phase: (data as any).state.phase ?? "idle",
+          progress: (data as any).state.progress ?? 0,
+          currentStep: (data as any).state.currentStep ?? null,
         });
       } else {
         // Fallback for old format
-        setStatus(data);
+        setStatus(data as any);
       }
     });
 
     // Handle progress event with new format
     es.addEventListener("progress", (e: MessageEvent) => {
-      console.log("[SSE] progress event:", e.data);
-      const data = JSON.parse(e.data);
+      debugSse("[SSE] progress event:", e.data);
+      const data = safeJsonParse(e.data);
+      if (!data) return;
       // New format: { nodeId, state: { progress, currentStep, message }, timestamp }
-      const nodeId = data.nodeId;
-      const state = data.state || data; // Fallback for old format
+      const nodeId = (data as any).nodeId;
+      const state = (data as any).state || data; // Fallback for old format
 
       setStatus((prev) => ({
         ...prev,
@@ -145,10 +164,11 @@ export function SummaryProvider({
 
     // Handle complete event with new format
     es.addEventListener("complete", (e: MessageEvent) => {
-      console.log("[SSE] complete event:", e.data);
-      const data = JSON.parse(e.data);
+      debugSse("[SSE] complete event:", e.data);
+      const data = safeJsonParse(e.data);
+      if (!data) return;
       // New format: { nodeId, state: { progress, currentStep, result }, timestamp }
-      const state = data.state || data;
+      const state = (data as any).state || data;
 
       setStatus((prev) => ({
         ...prev,
@@ -165,10 +185,12 @@ export function SummaryProvider({
 
     // Handle workflow_error event with new format
     es.addEventListener("workflow_error", (e: MessageEvent) => {
-      console.error("[SSE] workflow_error event:", e.data);
-      const data = JSON.parse(e.data);
+      debugSse("[SSE] workflow_error event:", e.data);
+      const data = safeJsonParse(e.data);
+      if (!data) return;
       // New format: { nodeId, state: { error }, timestamp }
-      const errorMessage = data.state?.error || data.message || "Unknown error";
+      const errorMessage =
+        (data as any).state?.error || (data as any).message || "Unknown error";
 
       toast.error(`Error: ${errorMessage}`);
       addLog(`Error: ${errorMessage}`, "error");

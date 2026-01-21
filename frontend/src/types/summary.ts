@@ -1,5 +1,12 @@
 export type SummaryType = "daily" | "weekly" | "monthly" | "yearly";
 
+export type SummaryPhase =
+  | "idle"
+  | "starting"
+  | "running"
+  | "complete"
+  | "error";
+
 export interface GenerationConfig {
   selectedRepos: string[];
   since: string;
@@ -17,7 +24,7 @@ export interface LogEntry {
 
 export interface SummaryStatus {
   isRunning: boolean;
-  phase: string;
+  phase: SummaryPhase;
   progress: number;
   currentStep: string | null;
   result?: unknown;
@@ -63,3 +70,13 @@ export interface MonthlySummaryData {
 
 export type YearlySummaryData = { content: string } | null;
 
+export interface SummaryWorkflowResult {
+  taskType?: SummaryType;
+  since?: string;
+  year?: number;
+  dailySummaries?: Array<{ date: string; repo: string; summary: string }>;
+  weeklySummaries?: Array<{ weekStart: string; summary: string }>;
+  monthlySummaries?: Array<{ month: string; summary: string }>;
+  content?: string;
+  result?: { content?: string };
+}
