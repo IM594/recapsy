@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { findRepositories } from "../../lib/git";
+import logger from "../../lib/logger";
 
 const router = Router();
 
@@ -12,13 +13,14 @@ router.get("/repos", async (req, res) => {
       return res.status(400).json({ error: "Root path is required" });
     }
 
-    console.log(`[Repos] 开始扫描根目录: ${rootDir}`);
+    logger.step("🔎", "Scanning repositories", { rootDir });
+    const startedAt = Date.now();
     const repos = await findRepositories(rootDir);
-    console.log(`[Repos] 扫描完成，发现仓库数量: ${repos.length}`);
+    logger.stepDone(`Found ${repos.length} repositories`, Date.now() - startedAt);
     res.json({ repos });
   } catch (error: any) {
-    console.error("[Repos] 扫描失败:", error);
-    res.status(500).json({ error: error.message });
+    logger.error("Repository scan failed", error);
+    res.status(500).json({ error: error.message ?? "Failed to scan repositories" });
   }
 });
 
