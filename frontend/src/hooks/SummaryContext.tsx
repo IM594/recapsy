@@ -8,6 +8,7 @@ import {
   ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { getSummaryApiUrl } from "@/lib/api";
 
 export interface SummaryStatus {
   isRunning: boolean;
@@ -17,11 +18,14 @@ export interface SummaryStatus {
   result?: any;
 }
 
+export type SummaryType = "daily" | "weekly" | "monthly" | "yearly";
+
 export interface GenerationConfig {
   selectedRepos: string[];
   since: string;
   until: string;
-  summaryType: string;
+  summaryType: SummaryType;
+  year: number;
   author?: string;
 }
 
@@ -64,9 +68,13 @@ interface SummaryContextType {
 
 const SummaryContext = createContext<SummaryContextType | null>(null);
 
-const API_BASE = "http://localhost:3456/api/summary";
-
-export function SummaryProvider({ children }: { children: ReactNode }) {
+export function SummaryProvider({
+  children,
+  year,
+}: {
+  children: ReactNode;
+  year: number;
+}) {
   const [status, setStatus] = useState<SummaryStatus>({
     isRunning: false,
     phase: "idle",
@@ -93,8 +101,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
   const connect = useCallback(() => {
     if (eventSourceRef.current) return;
 
-    const year = new Date().getFullYear();
-    const es = new EventSource(`${API_BASE}/events?year=${year}`);
+    const es = new EventSource(getSummaryApiUrl(`/events?year=${year}`));
 
     es.onopen = () => {
       setIsConnected(true);
@@ -189,7 +196,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
     });
 
     eventSourceRef.current = es;
-  }, [addLog]);
+  }, [addLog, year]);
 
   const disconnect = useCallback(() => {
     if (eventSourceRef.current) {
@@ -208,10 +215,21 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
     return () => disconnect();
   }, [connect, disconnect]);
 
+  // When switching years, clear UI state to avoid mixing years.
+  useEffect(() => {
+    setLogs([]);
+    setStatus({
+      isRunning: false,
+      phase: "idle",
+      progress: 0,
+      currentStep: null,
+    });
+  }, [year]);
+
   const startGeneration = useCallback(
     async (config: GenerationConfig) => {
       try {
-        const res = await fetch(`${API_BASE}/generate`, {
+        const res = await fetch(getSummaryApiUrl("/generate"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -241,33 +259,33 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
     [addLog]
   );
 
-  const getYearlySummary = useCallback(async (year?: number) => {
-    const y = year || new Date().getFullYear();
-    const res = await fetch(`${API_BASE}/data?type=yearly&year=${y}`);
+  const getYearlySummary = useCallback(async (requestedYear?: number) => {
+    const y = requestedYear ?? year;
+    const res = await fetch(getSummaryApiUrl(`/data?type=yearly&year=${y}`));
     return res.json();
-  }, []);
+  }, [year]);
 
-  const getDailySummaries = useCallback(async (year?: number) => {
-    const y = year || new Date().getFullYear();
-    const res = await fetch(`${API_BASE}/data?type=daily&year=${y}`);
+  const getDailySummaries = useCallback(async (requestedYear?: number) => {
+    const y = requestedYear ?? year;
+    const res = await fetch(getSummaryApiUrl(`/data?type=daily&year=${y}`));
     return res.json();
-  }, []);
+  }, [year]);
 
-  const getMonthlySummaries = useCallback(async (year?: number) => {
-    const y = year || new Date().getFullYear();
-    const res = await fetch(`${API_BASE}/data?type=monthly&year=${y}`);
+  const getMonthlySummaries = useCallback(async (requestedYear?: number) => {
+    const y = requestedYear ?? year;
+    const res = await fetch(getSummaryApiUrl(`/data?type=monthly&year=${y}`));
     return res.json();
-  }, []);
+  }, [year]);
 
-  const getWeeklySummaries = useCallback(async (year?: number) => {
-    const y = year || new Date().getFullYear();
-    const res = await fetch(`${API_BASE}/data?type=weekly&year=${y}`);
+  const getWeeklySummaries = useCallback(async (requestedYear?: number) => {
+    const y = requestedYear ?? year;
+    const res = await fetch(getSummaryApiUrl(`/data?type=weekly&year=${y}`));
     return res.json();
-  }, []);
+  }, [year]);
 
-  const resetStatus = useCallback(async (year?: number) => {
-    const y = year || new Date().getFullYear();
-    const res = await fetch(`${API_BASE}/reset`, {
+  const resetStatus = useCallback(async (requestedYear?: number) => {
+    const y = requestedYear ?? year;
+    const res = await fetch(getSummaryApiUrl("/reset"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ year: y }),
@@ -276,7 +294,7 @@ export function SummaryProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
       setStatus(data.status);
     }
-  }, []);
+  }, [year]);
 
   const refetchData = useCallback(() => {
     setDataVersion((v) => v + 1);

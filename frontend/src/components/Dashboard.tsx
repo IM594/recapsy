@@ -15,16 +15,20 @@ import {
   CardTitle,
   CardDescription,
 } from "@/components/ui/card";
-import { useSettings } from "../hooks/useSettings";
+import { useSettings } from "@/hooks/useSettings";
 import { SettingsDialog } from "./SettingsDialog";
 import { GenerationPreview } from "./GenerationPreview";
 import { toast } from "sonner";
+import type { GenerationConfig, SummaryType } from "@/hooks/useSummary";
 
 // Updated signature to match App.tsx
+type GenerationRequest = Pick<
+  GenerationConfig,
+  "summaryType" | "year" | "since" | "until"
+>;
+
 interface DashboardProps {
-  onGenerate: (
-    type: "daily" | "weekly" | "monthly" | "yearly"
-  ) => Promise<void>;
+  onGenerate: (req: GenerationRequest) => Promise<void>;
   onViewYearReview: (mode: "view" | "regenerate") => void;
   year?: number;
   isGenerating?: boolean;
@@ -38,11 +42,9 @@ export function Dashboard({
 }: DashboardProps) {
   const { isConfigured } = useSettings();
   const [showSettings, setShowSettings] = useState(false);
-  const [previewType, setPreviewType] = useState<
-    "daily" | "weekly" | "monthly" | "yearly" | null
-  >(null);
+  const [previewType, setPreviewType] = useState<SummaryType | null>(null);
 
-  const handleAction = (type: "daily" | "weekly" | "monthly" | "yearly") => {
+  const handleAction = (type: SummaryType) => {
     if (!isConfigured) {
       toast.info("Please configure your repositories first");
       setShowSettings(true);
@@ -190,8 +192,8 @@ export function Dashboard({
           onOpenChange={(open) => !open && setPreviewType(null)}
           type={previewType}
           year={year}
-          onGenerateStart={() => {
-            onGenerate(previewType);
+          onGenerateStart={(req) => {
+            onGenerate(req);
             setPreviewType(null);
           }}
         />

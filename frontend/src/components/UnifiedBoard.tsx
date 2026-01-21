@@ -1,26 +1,50 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { useSummary } from "../hooks/useSummary";
+import { getSummaryApiUrl } from "@/lib/api";
 
+import { useSummary } from "@/hooks/useSummary";
 import { JournalSidebar } from "./unified-board/JournalSidebar";
 import { JournalEntry } from "./unified-board/JournalEntry";
 import {
   Structure,
   NavigationNode,
   DailyInfo,
-  NodeType,
 } from "./unified-board/types";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface UnifiedBoardProps {
   year?: number;
 }
 
-export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
+export function UnifiedBoard({
+  year = new Date().getFullYear(),
+}: UnifiedBoardProps) {
   const [structure, setStructure] = useState<Structure | null>(null);
   const [selectedNode, setSelectedNode] = useState<NavigationNode | null>(null);
   const [content, setContent] = useState<string>("");
   const [loadingContent, setLoadingContent] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const [repoPicker, setRepoPicker] = useState<{
+    open: boolean;
+    date: string;
+    options: string[];
+    repo: string;
+  }>({ open: false, date: "", options: [], repo: "" });
 
   const {
     getYearlySummary,
@@ -38,7 +62,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
   // Load content when selection changes
   useEffect(() => {
     if (selectedNode) {
-      loadContent(selectedNode.type, selectedNode.id);
+      loadContent(selectedNode);
     }
   }, [selectedNode]);
 
@@ -70,23 +94,32 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
         }
       });
 
+      const monthlyByMonth = new Map<string, { month: string; summary?: string }>(
+        (monthlyData || []).map((m: { month: string; summary?: string }) => [
+          m.month,
+          m,
+        ])
+      );
+
+      const monthsSet = new Set<string>([
+        ...monthlyByMonth.keys(),
+        ...monthMap.keys(),
+      ]);
+
+      const months = Array.from(monthsSet).sort((a, b) => a.localeCompare(b));
+
       const structure: Structure = {
         year,
         hasYearlySummary,
-        months: (monthlyData || [])
-          .map((m: { month: string; summary?: string }) => ({
-            month: m.month,
-            hasSummary: !!m.summary,
-            days: (monthMap.get(m.month) || []).sort(
-              (a: DailyInfo, b: DailyInfo) => a.date.localeCompare(b.date)
-            ),
-          }))
-          .sort(
-            (
-              a: { month: string; hasSummary: boolean; days: DailyInfo[] },
-              b: { month: string; hasSummary: boolean; days: DailyInfo[] }
-            ) => a.month.localeCompare(b.month)
-          ),
+        months: months.map((month) => ({
+          month,
+          hasSummary: !!monthlyByMonth.get(month)?.summary,
+          days: (monthMap.get(month) || []).sort((a, b) => {
+            const dateCompare = a.date.localeCompare(b.date);
+            if (dateCompare !== 0) return dateCompare;
+            return a.repo.localeCompare(b.repo);
+          }),
+        })),
         weeks: (weeklyData || [])
           .map(
             (w: { weekStart: string; weekEnd: string; summary?: string }) => ({
@@ -121,27 +154,56 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
     }
   };
 
-  const loadContent = async (type: NodeType, id: string) => {
+  const loadContent = async (node: NavigationNode) => {
     setLoadingContent(true);
     try {
-      if (type === "yearly") {
+      if (node.type === "yearly") {
         const data = await getYearlySummary(year);
         setContent(data.content || "");
-      } else if (type === "monthly") {
+      } else if (node.type === "monthly") {
         const data = await getMonthlySummaries(year);
-        const monthData = data.find((m: any) => m.month === id);
+        const monthData = data.find((m: any) => m.month === node.id);
         setContent(monthData?.summary || "");
-      } else if (type === "weekly") {
+      } else if (node.type === "weekly") {
         const data = await getWeeklySummaries(year);
         // id is weekStart
-        const weekData = data.find((w: any) => w.weekStart === id);
+        const weekData = data.find((w: any) => w.weekStart === node.id);
         setContent(weekData?.summary || "");
       } else {
         const data = await getDailySummaries(year);
-        const dayData = data.find((d: any) => d.date === id);
-        setContent(dayData?.summary || "");
+        const matches = (data || []).filter((d: any) => d.date === node.id);
+        if (matches.length === 0) {
+          setContent("");
+          return;
+        }
+
+        if (node.repo) {
+          const exact = matches.find((d: any) => d.repo === node.repo);
+          setContent(exact?.summary || "");
+          return;
+        }
+
+        if (matches.length === 1) {
+          setSelectedNode((prev) => (prev ? { ...prev, repo: matches[0].repo } : prev));
+          setContent(matches[0].summary || "");
+          return;
+        }
+
+        const options = matches
+          .map((d: any) => d.repo)
+          .filter(Boolean)
+          .slice()
+          .sort((a: string, b: string) => a.localeCompare(b));
+
+        setRepoPicker({
+          open: true,
+          date: node.id,
+          options,
+          repo: options[0] || "",
+        });
+        setContent("");
       }
-    } catch (error) {
+    } catch {
       toast.error("Failed to load content");
     } finally {
       setLoadingContent(false);
@@ -159,7 +221,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
 
     setRegenerating(true);
     try {
-      const res = await fetch("http://localhost:3456/api/summary/regenerate", {
+      const res = await fetch(getSummaryApiUrl("/regenerate"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -185,7 +247,7 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
       } else {
         toast.error(`Failed: ${data.error}`);
       }
-    } catch (error) {
+    } catch {
       toast.error("Network error during regeneration");
     } finally {
       setRegenerating(false);
@@ -201,7 +263,68 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
   }
 
   return (
-    <div className="grid grid-cols-12 h-[calc(100vh-10rem)] bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+    <>
+      <Dialog
+        open={repoPicker.open}
+        onOpenChange={(open) =>
+          setRepoPicker((prev) => ({ ...prev, open }))
+        }
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select repository</DialogTitle>
+            <DialogDescription>
+              Multiple repositories have daily summaries for {repoPicker.date}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label>Repository</Label>
+            <Select
+              value={repoPicker.repo}
+              onValueChange={(repo) => setRepoPicker((prev) => ({ ...prev, repo }))}
+            >
+              <SelectTrigger aria-label="Select repository" className="bg-white">
+                <SelectValue placeholder="Select repository" />
+              </SelectTrigger>
+              <SelectContent>
+                {repoPicker.options.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setRepoPicker((prev) => ({ ...prev, open: false }))}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const repo = repoPicker.repo;
+                if (!repo) return;
+                setSelectedNode((prev) => {
+                  if (!prev || prev.type !== "daily" || prev.id !== repoPicker.date) {
+                    return prev;
+                  }
+                  return { ...prev, repo };
+                });
+                setRepoPicker((prev) => ({ ...prev, open: false }));
+              }}
+              disabled={!repoPicker.repo}
+            >
+              Open
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <div className="grid grid-cols-12 h-[calc(100vh-10rem)] bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
       {/* Sidebar - Timeline Navigation */}
       <div className="col-span-3 h-full overflow-hidden border-r bg-slate-50">
         <JournalSidebar
@@ -237,16 +360,14 @@ export function UnifiedBoard({ year = 2025 }: UnifiedBoardProps) {
         )}
       </div>
     </div>
+    </>
   );
 }
 
 // Utility to get week number
-function getWeekNumber(d: Date) {
-  d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+function getWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  var weekNo = Math.ceil(
-    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7
-  );
-  return weekNo;
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
 }

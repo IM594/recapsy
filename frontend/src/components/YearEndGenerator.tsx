@@ -17,8 +17,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useSettings } from "../hooks/useSettings";
-import { useSummary } from "../hooks/useSummary";
+import { getSummaryApiUrl } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { useSettings } from "@/hooks/useSettings";
+import { useSummary } from "@/hooks/useSummary";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -38,13 +40,13 @@ interface ProcessStep {
 
 export function YearEndGenerator({
   onComplete,
-  year = 2025,
+  year = new Date().getFullYear(),
   shouldResetCheckpoint = false,
 }: YearEndGeneratorProps) {
   const { selectedRepos, author } = useSettings();
   const { status, logs, startGeneration } = useSummary();
-  const [since] = useState(`${year}-01-01`);
-  const [until] = useState(`${year}-12-31`);
+  const since = `${year}-01-01`;
+  const until = `${year}-12-31`;
 
   const [steps, setSteps] = useState<ProcessStep[]>([
     {
@@ -163,7 +165,7 @@ export function YearEndGenerator({
     // If we need to reset checkpoint (regenerate mode)
     if (shouldResetCheckpoint) {
       try {
-        const res = await fetch(`http://localhost:3456/api/summary/reset`, {
+        const res = await fetch(getSummaryApiUrl("/reset"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ year }),
@@ -172,7 +174,7 @@ export function YearEndGenerator({
           toast.error("Failed to reset status");
           return;
         }
-      } catch (error) {
+      } catch {
         toast.error("Failed to reset status");
         return;
       }
@@ -185,6 +187,7 @@ export function YearEndGenerator({
       until,
       summaryType: "yearly",
       author,
+      year,
     });
   };
 
@@ -197,7 +200,6 @@ export function YearEndGenerator({
     if (status.isRunning) return;
     hasAutoStartedRef.current = true;
     handleStart();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (
@@ -210,9 +212,10 @@ export function YearEndGenerator({
         <CardHeader className="text-center pb-2">
           <div className="mx-auto bg-indigo-100 p-3 rounded-full w-fit mb-4">
             <Loader2
-              className={`h-8 w-8 text-indigo-600 ${
-                status.isRunning ? "animate-spin" : ""
-              }`}
+              className={cn(
+                "h-8 w-8 text-indigo-600",
+                status.isRunning && "animate-spin"
+              )}
             />
           </div>
           <CardTitle>Generating {year} Review</CardTitle>
@@ -229,22 +232,20 @@ export function YearEndGenerator({
             {steps.map((step) => (
               <div key={step.id} className="flex items-center gap-3 text-sm">
                 <div
-                  className={`w-2 h-2 rounded-full ${
-                    step.status === "completed"
-                      ? "bg-green-500"
-                      : step.status === "running"
-                      ? "bg-indigo-500 animate-pulse"
-                      : step.status === "error"
-                      ? "bg-red-500"
-                      : "bg-slate-200"
-                  }`}
+                  className={cn(
+                    "w-2 h-2 rounded-full",
+                    step.status === "completed" && "bg-green-500",
+                    step.status === "running" && "bg-indigo-500 animate-pulse",
+                    step.status === "error" && "bg-red-500",
+                    step.status === "pending" && "bg-slate-200"
+                  )}
                 />
                 <span
-                  className={`${
+                  className={cn(
                     step.status === "running"
                       ? "font-medium text-slate-900"
                       : "text-slate-500"
-                  }`}
+                  )}
                 >
                   {step.title}
                 </span>

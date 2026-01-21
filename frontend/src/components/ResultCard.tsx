@@ -1,25 +1,46 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, Copy, Download, FileText } from "lucide-react";
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import {
+  CheckCircle2,
+  Copy,
+  Download,
+  FileText,
+  RefreshCw,
+  Settings2,
+} from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 
 interface ResultCardProps {
   summary: string;
   outputPath?: string;
+  title?: string;
+  repo?: string;
+  repoOptions?: string[];
+  onRepoChange?: (repo: string) => void;
   onRegenerate?: (prompt: string) => Promise<void>;
   isRegenerating?: boolean;
 }
 
-import { useState } from "react";
-import { Textarea } from "@/components/ui/textarea";
-import { RefreshCw, Settings2 } from "lucide-react";
-
 export function ResultCard({
   summary,
   outputPath,
+  title = "Generation Complete",
+  repo,
+  repoOptions,
+  onRepoChange,
   onRegenerate,
   isRegenerating = false,
 }: ResultCardProps) {
@@ -36,9 +57,9 @@ export function ResultCard({
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(summary);
-      toast.success("内容已复制到剪贴板");
-    } catch (err) {
-      toast.error("复制失败");
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Copy failed");
     }
   };
 
@@ -51,9 +72,9 @@ export function ResultCard({
       a.download = `summary-${new Date().toISOString().slice(0, 10)}.md`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success("开始下载 Markdown 文件");
-    } catch (err) {
-      toast.error("下载失败");
+      toast.success("Downloading markdown file...");
+    } catch {
+      toast.error("Download failed");
     }
   };
 
@@ -63,10 +84,27 @@ export function ResultCard({
         <div className="flex items-center justify-between flex-wrap gap-4">
           <CardTitle className="flex items-center gap-2 text-slate-800">
             <CheckCircle2 className="h-5 w-5 text-green-500" />
-            生成完成
+            {title}
           </CardTitle>
 
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center flex-wrap">
+            {repoOptions && repoOptions.length > 1 && onRepoChange && (
+              <Select value={repo} onValueChange={onRepoChange}>
+                <SelectTrigger
+                  aria-label="Select repository"
+                  className="h-9 w-[200px] bg-white"
+                >
+                  <SelectValue placeholder="Repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  {repoOptions.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {onRegenerate && (
               <Button
                 variant={showRegenerate ? "secondary" : "outline"}
@@ -79,7 +117,7 @@ export function ResultCard({
             )}
             <Button variant="outline" size="sm" onClick={handleCopy}>
               <Copy className="h-4 w-4 mr-2" />
-              复制内容
+              Copy
             </Button>
             <Button
               variant="outline"
@@ -88,7 +126,7 @@ export function ResultCard({
               className="text-slate-600"
             >
               <Download className="h-4 w-4 mr-2" />
-              下载
+              Download
             </Button>
           </div>
         </div>
@@ -97,7 +135,7 @@ export function ResultCard({
           <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 animate-in slide-in-from-top-2">
             <div className="space-y-3">
               <Textarea
-                placeholder="输入额外指令（例如：'精简一些'、'重点关注 Bug 修复'...）"
+                placeholder="Add extra instructions (e.g., 'Make it more concise', 'Focus on bug fixes')"
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
                 className="bg-white resize-none text-sm"
@@ -114,7 +152,7 @@ export function ResultCard({
                   ) : (
                     <RefreshCw className="h-3 w-3 mr-2" />
                   )}
-                  {isRegenerating ? "重新生成中..." : "重新生成"}
+                  {isRegenerating ? "Regenerating..." : "Regenerate"}
                 </Button>
               </div>
             </div>

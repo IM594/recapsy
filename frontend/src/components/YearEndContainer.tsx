@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { YearEndGenerator } from "./YearEndGenerator";
 import { UnifiedBoard } from "./UnifiedBoard";
 import { Loader2 } from "lucide-react";
+import { getSummaryApiUrl } from "@/lib/api";
 
 interface YearEndContainerProps {
   initialYear?: number;
@@ -10,8 +11,9 @@ interface YearEndContainerProps {
 
 export function YearEndContainer({
   initialYear = new Date().getFullYear(),
+  forcedMode = "view",
 }: YearEndContainerProps) {
-  const [year] = useState(initialYear);
+  const year = initialYear;
   const [isRunning, setIsRunning] = useState(false);
   const [checking, setChecking] = useState(true);
 
@@ -20,7 +22,7 @@ export function YearEndContainer({
     const checkStatus = async () => {
       try {
         const statusRes = await fetch(
-          `http://localhost:3456/api/summary/status?year=${year}`
+          getSummaryApiUrl(`/status?year=${year}`)
         );
         if (statusRes.ok) {
           const status = await statusRes.json();
@@ -57,6 +59,18 @@ export function YearEndContainer({
           onComplete={handleGenerationComplete}
           year={year}
           shouldResetCheckpoint={false}
+        />
+      </div>
+    );
+  }
+
+  if (forcedMode === "regenerate") {
+    return (
+      <div className="animate-in fade-in duration-300">
+        <YearEndGenerator
+          onComplete={handleGenerationComplete}
+          year={year}
+          shouldResetCheckpoint={true}
         />
       </div>
     );

@@ -43,7 +43,10 @@ console.log(
 console.log("══════════════════════════════════════");
 
 const app = express();
-const PORT = process.env.PORT || 3456;
+const PORT = (() => {
+  const parsed = Number.parseInt(process.env.PORT || "", 10);
+  return Number.isFinite(parsed) ? parsed : 3456;
+})();
 
 // 中间件
 app.use(cors());

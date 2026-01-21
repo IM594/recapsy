@@ -23,7 +23,14 @@ interface LLMConfig {
 const DEFAULT_CONFIG: Required<Omit<LLMConfig, "tier">> = {
   temperature: 1.0,
   maxRetries: 3,
-  timeout: 60000,
+  timeout: 120000, // Default 2 minutes
+};
+
+// Tier-specific timeout configuration
+const TIER_TIMEOUTS: Record<ModelTier, number> = {
+  fast: 60000, // 1 minute - for quick, simple tasks
+  balanced: 120000, // 2 minutes - for medium complexity
+  quality: 300000, // 5 minutes - for complex, long-running tasks (e.g., year-end summaries)
 };
 
 // Cache by tier + temperature combination
@@ -73,7 +80,12 @@ function getTierConfig(tier: ModelTier): TierConfig {
 export function getLLM(config: LLMConfig = {}): ChatOpenAI {
   const tier = config.tier || "balanced";
   const envConfig = getTierConfig(tier);
-  const mergedConfig = { ...DEFAULT_CONFIG, ...config };
+  const mergedConfig = {
+    ...DEFAULT_CONFIG,
+    ...config,
+    // Use tier-specific timeout if not explicitly provided
+    timeout: config.timeout ?? TIER_TIMEOUTS[tier],
+  };
   const cacheKey = `${tier}-${mergedConfig.temperature}`;
 
   // Check cache
@@ -102,7 +114,12 @@ export function getLLM(config: LLMConfig = {}): ChatOpenAI {
 export function createLLM(config: LLMConfig = {}): ChatOpenAI {
   const tier = config.tier || "balanced";
   const envConfig = getTierConfig(tier);
-  const mergedConfig = { ...DEFAULT_CONFIG, ...config };
+  const mergedConfig = {
+    ...DEFAULT_CONFIG,
+    ...config,
+    // Use tier-specific timeout if not explicitly provided
+    timeout: config.timeout ?? TIER_TIMEOUTS[tier],
+  };
 
   return new ChatOpenAI({
     modelName: envConfig.modelName,
@@ -121,6 +138,11 @@ export function clearLLMCache(): void {
 }
 
 import logger from "./logger";
+
+function shouldLogPromptPreview(): boolean {
+  const value = process.env.DEBUG_LLM_PROMPT_PREVIEW;
+  return value === "1" || value === "true";
+}
 
 /**
  * Invoke model with retry logic for robust API calls
@@ -144,6 +166,11 @@ export async function invokeWithRetry(
       const responseTime = new Date().toISOString();
       logger.info(`📥 LLM response received at ${responseTime}`);
 
+      // 添加响应对象的详细日志
+      logger.info(`📦 Response object type: ${typeof response}`);
+      logger.info(`📦 Response keys: ${Object.keys(response).join(", ")}`);
+      logger.info(`📦 Response content type: ${typeof response.content}`);
+
       const content = String(response.content);
       logger.info(
         `✅ LLM invoke completed in ${((Date.now() - callStart) / 1000).toFixed(
@@ -155,6 +182,15 @@ export async function invokeWithRetry(
     } catch (error) {
       lastError = error;
       const errMsg = error instanceof Error ? error.message : String(error);
+      const errStack = error instanceof Error ? error.stack : "";
+
+      // 添加更详细的错误信息
+      logger.error(`❌ Error details:`);
+      logger.error(`   Message: ${errMsg}`);
+      logger.error(`   Type: ${error?.constructor?.name || typeof error}`);
+      if (errStack) {
+        logger.error(`   Stack: ${errStack}`);
+      }
 
       // Log prompt preview for debugging sensitive word / content filter errors
       const isSensitiveError =
@@ -163,10 +199,16 @@ export async function invokeWithRetry(
         errMsg.includes("400");
 
       if (isSensitiveError && i === 0) {
-        // Only log on first attempt to avoid spam
-        logger.warn(`📝 Prompt preview (first 500 chars):`);
-        logger.warn(`   ${prompt.substring(0, 500).replace(/\n/g, " ")}...`);
-        logger.warn(`📝 Prompt length: ${prompt.length} chars`);
+        if (shouldLogPromptPreview()) {
+          // Only log on first attempt to avoid spam
+          logger.warn(`📝 Prompt preview (first 500 chars):`);
+          logger.warn(`   ${prompt.substring(0, 500).replace(/\n/g, " ")}...`);
+          logger.warn(`📝 Prompt length: ${prompt.length} chars`);
+        } else {
+          logger.warn(
+            `📝 Prompt preview disabled (set DEBUG_LLM_PROMPT_PREVIEW=true to enable). Prompt length: ${prompt.length} chars`
+          );
+        }
       }
 
       if (i < retries - 1) {
@@ -177,6 +219,10 @@ export async function invokeWithRetry(
         logger.warn(`Retrying in ${waitTime}ms...`);
 
         await new Promise((resolve) => setTimeout(resolve, waitTime));
+      } else {
+        // 最后一次重试失败时，记录完整的错误信息
+        logger.error(`💥 All ${retries} attempts failed. Final error:`);
+        logger.error(`   ${errMsg}`);
       }
     }
   }

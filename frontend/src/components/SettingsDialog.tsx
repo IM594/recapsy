@@ -13,8 +13,9 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { FolderSearch, Loader2, Save } from "lucide-react";
-import { useSettings } from "../hooks/useSettings";
+import { useSettings } from "@/hooks/useSettings";
 import { toast } from "sonner";
+import { getApiUrl } from "@/lib/api";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -26,7 +27,15 @@ interface Repo {
   path: string;
 }
 
-const DEFAULT_SCAN_PATH = "/Users/user/Downloads/projects";
+const STORAGE_KEY_SCAN_ROOT = "recaply_scan_root_path";
+
+function getDefaultScanRootPath(): string {
+  const home = (globalThis as any).process?.env?.HOME;
+  if (typeof home === "string" && home.trim()) {
+    return `${home.replace(/\/$/, "")}/Downloads/projects`;
+  }
+  return "/Users";
+}
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const {
@@ -39,6 +48,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [author, setAuthor] = useState(savedAuthor);
   const [availableRepos, setAvailableRepos] = useState<Repo[]>([]);
   const [scanning, setScanning] = useState(false);
+  const [scanRootPath, setScanRootPath] = useState<string>(() => {
+    return localStorage.getItem(STORAGE_KEY_SCAN_ROOT) || getDefaultScanRootPath();
+  });
 
   // Load available repos when dialog opens
   useEffect(() => {
@@ -53,10 +65,9 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const scanRepos = async () => {
     setScanning(true);
     try {
+      localStorage.setItem(STORAGE_KEY_SCAN_ROOT, scanRootPath);
       const response = await fetch(
-        `http://localhost:3456/api/repos?rootPath=${encodeURIComponent(
-          DEFAULT_SCAN_PATH
-        )}`
+        getApiUrl(`/repos?rootPath=${encodeURIComponent(scanRootPath)}`)
       );
       if (response.ok) {
         const data = await response.json();
@@ -127,6 +138,18 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 )}
                 Rescan
               </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Scan Root Path</Label>
+              <Input
+                value={scanRootPath}
+                onChange={(e) => setScanRootPath(e.target.value)}
+                placeholder="e.g. /Users/you/projects"
+              />
+              <p className="text-xs text-muted-foreground">
+                Used to discover git repositories for selection.
+              </p>
             </div>
 
             <div className="border rounded-md h-60 overflow-hidden relative">

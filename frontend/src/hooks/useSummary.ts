@@ -7,5 +7,6 @@ export type {
   SummaryStatus,
   GenerationConfig,
   LogEntry,
+  SummaryType,
 } from "./SummaryContext";
 export { useSummaryContext as useSummary } from "./SummaryContext";

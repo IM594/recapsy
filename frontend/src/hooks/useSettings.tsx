@@ -11,26 +11,53 @@ const SettingsContext = createContext<SettingsContextType | undefined>(
   undefined
 );
 
+const STORAGE_KEYS = {
+  repos: "recaply_selected_repos",
+  author: "recaply_author",
+} as const;
+
+const LEGACY_STORAGE_KEYS = {
+  repos: "ye_selected_repos",
+  author: "ye_author",
+} as const;
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [selectedRepos, setSelectedRepos] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem("ye_selected_repos");
-      return saved ? JSON.parse(saved) : [];
+      const saved = localStorage.getItem(STORAGE_KEYS.repos);
+      if (saved) return JSON.parse(saved);
+
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEYS.repos);
+      if (legacy) {
+        localStorage.setItem(STORAGE_KEYS.repos, legacy);
+        return JSON.parse(legacy);
+      }
+
+      return [];
     } catch {
       return [];
     }
   });
 
   const [author, setAuthor] = useState(() => {
-    return localStorage.getItem("ye_author") || "";
+    const saved = localStorage.getItem(STORAGE_KEYS.author);
+    if (saved) return saved;
+
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEYS.author);
+    if (legacy) {
+      localStorage.setItem(STORAGE_KEYS.author, legacy);
+      return legacy;
+    }
+
+    return "";
   });
 
   const updateSettings = (repos: string[], newAuthor: string) => {
     setSelectedRepos(repos);
     setAuthor(newAuthor);
 
-    localStorage.setItem("ye_selected_repos", JSON.stringify(repos));
-    localStorage.setItem("ye_author", newAuthor);
+    localStorage.setItem(STORAGE_KEYS.repos, JSON.stringify(repos));
+    localStorage.setItem(STORAGE_KEYS.author, newAuthor);
   };
 
   const isConfigured = selectedRepos.length > 0;

@@ -96,11 +96,12 @@ export function getDateRangeForType(
       start = getMonthStart(referenceDate);
       end = getMonthEnd(referenceDate);
       break;
-    case "yearly":
+    case "yearly": {
       const y = year || referenceDate.getFullYear();
       start = new Date(y, 0, 1);
       end = new Date(y, 11, 31, 23, 59, 59, 999);
       break;
+    }
   }
 
   return {

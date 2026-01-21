@@ -12,8 +12,41 @@ import { createSummaryWorkflow } from "../../workflow/graph";
 import logger from "../../lib/logger";
 import { SummaryStore } from "../../lib/summary-store";
 import { WorkflowRunner } from "../../lib/workflow-runner";
+import fs from "fs/promises";
+import path from "path";
 
 const router = Router();
+
+/**
+ * GET /api/summary/years
+ * Return years that have existing persisted data + current year.
+ *
+ * This powers the year switcher in the UI.
+ */
+router.get("/years", async (_req, res) => {
+  const currentYear = new Date().getFullYear();
+  const years = new Set<number>([currentYear]);
+
+  try {
+    // SummaryStore defaults to "./outputs" relative to backend cwd.
+    const baseDir = path.resolve("./outputs");
+    const entries = await fs.readdir(baseDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (!entry.name.startsWith("year-end-")) continue;
+      const yearStr = entry.name.replace("year-end-", "");
+      const yearNum = Number.parseInt(yearStr, 10);
+      if (Number.isFinite(yearNum)) years.add(yearNum);
+    }
+  } catch {
+    // Ignore missing directories / read errors and still return currentYear.
+  }
+
+  res.json({
+    years: Array.from(years).sort((a, b) => b - a), // newest first
+  });
+});
 
 /**
  * POST /api/summary/generate

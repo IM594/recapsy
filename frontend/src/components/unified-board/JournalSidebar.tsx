@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import {
   Calendar as CalendarIcon,
@@ -9,9 +9,19 @@ import {
   ChevronRight,
   ChevronDown,
 } from "lucide-react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Calendar as DateCalendar } from "@/components/ui/calendar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   CommandDialog,
@@ -21,6 +31,15 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { getWeekMonday, toDateString } from "@/lib/date-utils";
 
 import { Structure, NavigationNode } from "./types";
 import { ContributionGraph } from "./ContributionGraph";
@@ -40,6 +59,18 @@ export function JournalSidebar({
 }: JournalSidebarProps) {
   const [openCommand, setOpenCommand] = useState(false);
   const [expandedMonths, setExpandedMonths] = useState<string[]>([]);
+  const [jumpOpen, setJumpOpen] = useState(false);
+  const [jumpTab, setJumpTab] = useState<"daily" | "weekly" | "monthly">(
+    "daily"
+  );
+  const [jumpDate, setJumpDate] = useState<Date | undefined>(undefined);
+  const [jumpMonth, setJumpMonth] = useState<string>("01");
+  const [repoPicker, setRepoPicker] = useState<{
+    open: boolean;
+    date: string;
+    repos: string[];
+    repo: string;
+  }>({ open: false, date: "", repos: [], repo: "" });
 
   // Calculate days that have summaries for the heatmap
   const summaryDays = useMemo(() => {
@@ -115,30 +146,93 @@ export function JournalSidebar({
     );
   };
 
-  const handleHeatmapSelect = (date: Date) => {
-    const dateStr = format(date, "yyyy-MM-dd");
-    // Try to find exact match
-    let found = false;
+  const ensureMonthExpanded = (month: string) => {
+    if (!month) return;
+    setExpandedMonths((prev) => (prev.includes(month) ? prev : [...prev, month]));
+  };
+
+  const getDailyReposForDate = (dateStr: string): string[] => {
+    const repos = new Set<string>();
     for (const m of structure.months) {
-      const day = m.days.find((d) => d.date === dateStr);
-      if (day) {
-        onSelect({
-          type: "daily",
-          id: day.date,
-          repo: day.repo,
-          label: day.date,
-        });
-        // Also expand that month
-        if (!expandedMonths.includes(m.month)) {
-          setExpandedMonths((prev) => [...prev, m.month]);
-        }
-        found = true;
-        break;
+      for (const d of m.days) {
+        if (d.date === dateStr) repos.add(d.repo);
       }
     }
-    if (!found) {
-      onSelect({ type: "daily", id: dateStr, label: dateStr });
+    return Array.from(repos).sort((a, b) => a.localeCompare(b));
+  };
+
+  const selectDaily = (dateStr: string) => {
+    const repos = getDailyReposForDate(dateStr);
+    const month = dateStr.substring(0, 7);
+
+    if (repos.length === 0) {
+      toast.info(`No daily summaries for ${dateStr}.`);
+      return;
     }
+
+    if (repos.length === 1) {
+      ensureMonthExpanded(month);
+      onSelect({ type: "daily", id: dateStr, repo: repos[0], label: dateStr });
+      return;
+    }
+
+    setRepoPicker({
+      open: true,
+      date: dateStr,
+      repos,
+      repo: repos[0],
+    });
+  };
+
+  const handleHeatmapSelect = (date: Date) => {
+    const dateStr = format(date, "yyyy-MM-dd");
+    selectDaily(dateStr);
+  };
+
+  useEffect(() => {
+    if (!jumpOpen) return;
+    const today = new Date();
+    const defaultDate =
+      structure.year === today.getFullYear()
+        ? today
+        : new Date(structure.year, 0, 1);
+
+    setJumpDate(defaultDate);
+    setJumpMonth(
+      structure.year === today.getFullYear()
+        ? String(today.getMonth() + 1).padStart(2, "0")
+        : "01"
+    );
+    setJumpTab("daily");
+  }, [jumpOpen, structure.year]);
+
+  const handleJumpConfirm = () => {
+    if (jumpTab === "monthly") {
+      const month = `${structure.year}-${jumpMonth}`;
+      ensureMonthExpanded(month);
+      onSelect({ type: "monthly", id: month, label: `${month} Report` });
+      setJumpOpen(false);
+      return;
+    }
+
+    if (!jumpDate) return;
+
+    if (jumpTab === "weekly") {
+      const weekStart = toDateString(getWeekMonday(jumpDate));
+      const week = structure.weeks.find((w) => w.weekStart === weekStart);
+      ensureMonthExpanded(weekStart.substring(0, 7));
+      onSelect({
+        type: "weekly",
+        id: weekStart,
+        label: week?.title ?? `Week of ${weekStart}`,
+      });
+      setJumpOpen(false);
+      return;
+    }
+
+    const dateStr = toDateString(jumpDate);
+    selectDaily(dateStr);
+    setJumpOpen(false);
   };
 
   return (
@@ -160,6 +254,15 @@ export function JournalSidebar({
           <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
             <span className="text-xs">⌘</span>K
           </kbd>
+        </Button>
+
+        <Button
+          variant="outline"
+          className="w-full justify-start text-slate-500 bg-slate-50 border-slate-200 h-9 px-3 mb-4"
+          onClick={() => setJumpOpen(true)}
+        >
+          <CalendarRange className="mr-2 h-4 w-4" />
+          <span className="text-xs">Jump to date/month...</span>
         </Button>
 
         <div className="mb-1 pl-1">
@@ -345,6 +448,152 @@ export function JournalSidebar({
             })}
         </div>
       </ScrollArea>
+
+      {/* Jump Dialog */}
+      <Dialog open={jumpOpen} onOpenChange={setJumpOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Jump to entry</DialogTitle>
+            <DialogDescription>
+              Select a date or month to navigate within {structure.year}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <Tabs value={jumpTab} onValueChange={(v) => setJumpTab(v as any)}>
+              <TabsList className="w-full">
+                <TabsTrigger value="daily" className="flex-1 text-xs">
+                  Day
+                </TabsTrigger>
+                <TabsTrigger value="weekly" className="flex-1 text-xs">
+                  Week
+                </TabsTrigger>
+                <TabsTrigger value="monthly" className="flex-1 text-xs">
+                  Month
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {(jumpTab === "daily" || jumpTab === "weekly") && (
+              <div className="space-y-2">
+                <Label>Pick a date</Label>
+                <div className="rounded-md border bg-white p-2">
+                  <DateCalendar
+                    mode="single"
+                    selected={jumpDate}
+                    onSelect={setJumpDate}
+                    fromDate={new Date(structure.year, 0, 1)}
+                    toDate={new Date(structure.year, 11, 31)}
+                    captionLayout="dropdown"
+                  />
+                </div>
+                {jumpTab === "daily" &&
+                  jumpDate &&
+                  getDailyReposForDate(toDateString(jumpDate)).length > 1 && (
+                    <p className="text-xs text-muted-foreground">
+                      Multiple repositories found for this day — you will be
+                      asked to choose one.
+                    </p>
+                  )}
+              </div>
+            )}
+
+            {jumpTab === "monthly" && (
+              <div className="space-y-2">
+                <Label>Pick a month</Label>
+                <Select value={jumpMonth} onValueChange={setJumpMonth}>
+                  <SelectTrigger aria-label="Select month" className="bg-white">
+                    <SelectValue placeholder="Select month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }).map((_, i) => {
+                      const monthIndex = i;
+                      const value = String(monthIndex + 1).padStart(2, "0");
+                      const label = format(
+                        new Date(structure.year, monthIndex, 1),
+                        "MMMM"
+                      );
+                      return (
+                        <SelectItem key={value} value={value}>
+                          {label}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setJumpOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleJumpConfirm} disabled={jumpTab !== "monthly" && !jumpDate}>
+              Jump
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Repo Picker Dialog (daily only) */}
+      <Dialog
+        open={repoPicker.open}
+        onOpenChange={(open) => setRepoPicker((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select repository</DialogTitle>
+            <DialogDescription>
+              Multiple repositories have daily summaries for {repoPicker.date}.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label>Repository</Label>
+            <Select
+              value={repoPicker.repo}
+              onValueChange={(repo) => setRepoPicker((prev) => ({ ...prev, repo }))}
+            >
+              <SelectTrigger aria-label="Select repository" className="bg-white">
+                <SelectValue placeholder="Select repository" />
+              </SelectTrigger>
+              <SelectContent>
+                {repoPicker.repos.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setRepoPicker((prev) => ({ ...prev, open: false }))}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                const month = repoPicker.date.substring(0, 7);
+                ensureMonthExpanded(month);
+                onSelect({
+                  type: "daily",
+                  id: repoPicker.date,
+                  repo: repoPicker.repo,
+                  label: repoPicker.date,
+                });
+                setRepoPicker((prev) => ({ ...prev, open: false }));
+              }}
+              disabled={!repoPicker.repo}
+            >
+              Open
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Command Palette */}
       <CommandDialog open={openCommand} onOpenChange={setOpenCommand}>
