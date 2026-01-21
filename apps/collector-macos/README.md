@@ -30,6 +30,12 @@ swift build -c release
 npm run dev:agent
 ```
 
+如果你想更省事，也可以直接：
+
+```bash
+npm run dev
+```
+
 2）设置环境变量（建议使用**绝对路径**，避免相对路径不一致）：
 
 ```bash
@@ -47,6 +53,12 @@ export RECAPSENSE_API_TOKEN="你的 token（一般由 Agent 生成）"
 
 ```bash
 ./.build/release/recapsense-collector
+```
+
+你也可以在仓库根目录直接用 npm 启动（会自动编译一次，或复用已有二进制）：
+
+```bash
+npm run dev:collector -- --interval 5
 ```
 
 可选参数示例：

@@ -5,10 +5,12 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "dev:agent": "node apps/agent/src/server.mjs",
     "dev:mcp": "node apps/mcp/src/server.mjs",
+    "dev:mcp:sse": "node apps/mcp/src/server-sse.mjs",
+    "dev:collector": "node scripts/collector.mjs",
     "seed": "node apps/agent/src/seed.mjs",
     "test": "node --test"
   }
 }
-

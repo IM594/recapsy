@@ -4,10 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "node src/server.mjs",
+    "dev:sse": "node src/server-sse.mjs",
     "test": "node --test"
   },
   "engines": {
     "node": ">=22"
   }
 }
-

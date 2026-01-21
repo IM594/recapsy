@@ -39,6 +39,10 @@
   - 已实现：Agent 支持 Unix Domain Socket（UDS），并可选择禁用 TCP 端口监听
   - 配置：`RECAPSENSE_AGENT_SOCKET`（默认 `${RECAPSENSE_DATA_DIR}/run/agent.sock`），`RECAPSENSE_AGENT_DISABLE_TCP=1`
   - MCP：支持通过 UDS 调用 Agent（设置同名环境变量即可）
+- [x] MCP 支持 SSE（HTTP）传输（本机）
+  - 用途：让 MCP 不依赖 stdio 进程管道，便于后续 UI/服务化（例如由菜单栏应用启动/托管）
+  - 已实现：`apps/mcp/src/server-sse.mjs`（默认 `http://127.0.0.1:4833/sse`）
+  - 安全性：要求 token（支持 `Authorization: Bearer ...` 或 `?token=...`）
 
 ## P1（长期记忆可用：压实、迁移、可控）
 
@@ -62,6 +66,29 @@
 - [ ] 数据目录约定与 macOS 推荐路径落地
   - 默认开发：`./.recapsense/`
   - 发布形态：`~/Library/Application Support/RecapSense/`
+- [ ] macOS App（SwiftUI，菜单栏开关 + 主窗口：搜索/日志；UI 设计后置）
+  - 目标：面向非开发用户使用时 **不需要跑命令行**；安装后打开应用即可控制采集与 MCP
+  - 菜单栏（Menu bar）职责（先做功能，样式后置）：
+    - 状态：采集中/暂停/错误（状态灯 + 简要文字）
+    - 开关：开始/暂停采集（collector）
+    - 开关：启动/停止 MCP（SSE）
+    - 操作：打开主窗口（搜索/日志）
+    - 操作：打开设置/权限指引/数据目录（后置逐步补齐）
+  - 主窗口职责（先做功能，样式后置）：
+    - 搜索：直接调用 Agent `GET /v1/search`
+    - 日志：展示最近的 Agent/Collector/MCP 输出（最小可用即可）
+    - 预留：聊天入口（先占位，不实现聊天交互）
+  - 工程解耦建议（先堆好骨架，后续迭代）：
+    - `apps/app-macos`：SwiftUI UI 壳（Menu bar + 主窗口）
+    - `Supervisor`（UI 内部模块或独立组件）：统一管理子进程生命周期（Agent/MCP/Collector），并把日志落到 `${RECAPSENSE_DATA_DIR}/logs/`
+  - 验收：首次安装后 3 分钟内可用（授权后），点击“开始采集”即可写入数据；主窗口能搜到内容；MCP SSE 可被本机客户端连接
+- [ ] 发布与安装形态（面向非开发用户）
+  - 目标：不要求用户预装 Node/Swift；不要求手动配置环境变量
+  - 方向：notarized DMG/PKG +（可选）Sparkle 自动更新 + Launch at login
+  - 技术路线候选：
+    - 方案 A：逐步把 Agent/MCP 收敛到原生（Swift/Rust）以便单一二进制
+    - 方案 B：继续用 Node 但打包为 app 内置 runtime（或改用 Electron/Tauri）
+  - 验收：新用户安装后 3 分钟内可用（权限授权后自动开始采集）
 
 ## P2（RAG：混合检索与引用）
 

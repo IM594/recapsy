@@ -22,6 +22,21 @@
 
 ## 快速开始（开发环境）
 
+### 最简单：一条命令启动后端（Agent + MCP SSE）
+
+```bash
+npm run dev
+```
+
+它会同时启动：
+
+- Agent（默认 `http://127.0.0.1:4832`）
+- MCP（SSE，默认 `http://127.0.0.1:4833/sse`）
+
+并且会默认开启 Agent 的 UDS（只作为“备用通道”，你不需要理解它）。
+
+### 分步方式（更可控）
+
 1）启动 agent：
 
 ```bash
@@ -58,6 +73,30 @@ node apps/mcp/src/server.mjs
 MCP server 会读取 `./.recapsense/secret/token`，并调用本地 agent：`http://127.0.0.1:4832`。
 
 如果你需要在更受限的环境运行（例如端口监听被限制），Agent 也支持 Unix Domain Socket（UDS），MCP 会在设置 `RECAPSENSE_AGENT_SOCKET` 后优先走 socket。
+
+### 可选：以 SSE（HTTP）方式运行 MCP
+
+如果你的 MCP 客户端/代理更适合走本机 HTTP（SSE），可以运行：
+
+```bash
+npm run dev:mcp:sse
+```
+
+默认监听：`http://127.0.0.1:4833/sse`
+
+### 启动 macOS 采集端（开发）
+
+推荐直接用一条命令（会自动编译一次，或复用已有二进制）：
+
+```bash
+npm run dev:collector -- --interval 5
+```
+
+只采集一次（用于验证权限/OCR）：
+
+```bash
+npm run dev:collector -- --once
+```
 
 ### Claude Desktop 配置示例（仅本机）
 

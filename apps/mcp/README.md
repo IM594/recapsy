@@ -1,6 +1,11 @@
 # RecapSense MCP Server（本机工具入口）
 
-这是一个最小可用的 MCP server（stdio 传输），用于把 RecapSense 的只读能力暴露给 MCP 客户端（Claude Desktop 等）。
+这是一个最小可用的 MCP server，用于把 RecapSense 的只读能力暴露给 MCP 客户端（Claude Desktop 等）。
+
+支持两种传输方式：
+
+- **stdio（默认）**：适合 Claude Desktop 这类“进程型”集成
+- **SSE（HTTP）**：适合本机 HTTP 方式集成（例如自建 MCP 客户端/代理）
 
 ## 工具（MVP）
 
@@ -18,6 +23,29 @@
 
 ## 运行
 
+### stdio（默认）
+
 ```bash
 node src/server.mjs
 ```
+
+### SSE（HTTP，本机）
+
+默认监听：`http://127.0.0.1:4833`
+
+```bash
+node src/server-sse.mjs
+```
+
+可配置环境变量：
+
+- `RECAPSENSE_MCP_HOST`（默认 `127.0.0.1`）
+- `RECAPSENSE_MCP_PORT`（默认 `4833`）
+- `RECAPSENSE_MCP_SSE_KEEPALIVE_SECONDS`（默认 `15`，仅用于避免连接空闲超时）
+
+SSE endpoint：
+
+- `GET /sse`：建立 SSE 连接（需要 token）
+- `POST /message?sessionId=...`：发送 JSON-RPC 消息（需要 token）
+
+说明：SSE 连接建立后，服务端会先发一个 `event: endpoint`，告诉客户端应该往哪个 `/message` endpoint 发消息。
