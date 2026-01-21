@@ -1,4 +1,5 @@
 import { toDateString, toMonthString } from "@/lib/date-utils";
+import { COPY } from "@/constants/copy";
 import type { GenerationResultState } from "@/types/generation";
 import type { SummaryType, SummaryWorkflowResult } from "@/types/summary";
 
@@ -73,7 +74,7 @@ export function buildGenerationResultFromWorkflowResult(
 
     return {
       year,
-      title: `Daily Brief (${targetDate})`,
+      title: `${COPY.summaryTypes.label("daily")} (${targetDate})`,
       summary: defaultSummary,
       outputPath: "",
       context: {
@@ -97,7 +98,7 @@ export function buildGenerationResultFromWorkflowResult(
 
     return {
       year,
-      title: `Weekly Report (${targetWeekStart})`,
+      title: `${COPY.summaryTypes.label("weekly")} (${targetWeekStart})`,
       summary: matched.summary,
       outputPath: "",
       context: {
@@ -118,7 +119,7 @@ export function buildGenerationResultFromWorkflowResult(
 
     return {
       year,
-      title: `Monthly Summary (${targetMonth})`,
+      title: `${COPY.summaryTypes.label("monthly")} (${targetMonth})`,
       summary: matched.summary,
       outputPath: "",
       context: {
@@ -133,7 +134,7 @@ export function buildGenerationResultFromWorkflowResult(
 
   return {
     year,
-    title: `Yearly Review (${year})`,
+    title: COPY.summaryTypes.generationPreviewTitle("yearly", year),
     summary: String(content),
     outputPath: "",
     context: {
@@ -142,4 +143,3 @@ export function buildGenerationResultFromWorkflowResult(
     },
   };
 }
-

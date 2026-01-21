@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { COPY } from "@/constants/copy";
 
 interface ResultCardProps {
   summary: string;
@@ -37,7 +38,7 @@ interface ResultCardProps {
 export function ResultCard({
   summary,
   outputPath,
-  title = "Generation Complete",
+  title = COPY.resultCard.defaultTitle,
   repo,
   repoOptions,
   onRepoChange,
@@ -57,9 +58,9 @@ export function ResultCard({
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(summary);
-      toast.success("Copied to clipboard");
+      toast.success(COPY.toasts.copiedToClipboard);
     } catch {
-      toast.error("Copy failed");
+      toast.error(COPY.toasts.copyFailed);
     }
   };
 
@@ -72,9 +73,9 @@ export function ResultCard({
       a.download = `summary-${new Date().toISOString().slice(0, 10)}.md`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success("Downloading markdown file...");
+      toast.success(COPY.toasts.downloadingMarkdown);
     } catch {
-      toast.error("Download failed");
+      toast.error(COPY.toasts.downloadFailed);
     }
   };
 
@@ -91,10 +92,10 @@ export function ResultCard({
             {repoOptions && repoOptions.length > 1 && onRepoChange && (
               <Select value={repo} onValueChange={onRepoChange}>
                 <SelectTrigger
-                  aria-label="Select repository"
+                  aria-label={COPY.common.aria.selectRepository}
                   className="h-9 w-[200px] bg-white"
                 >
-                  <SelectValue placeholder="Repository" />
+                  <SelectValue placeholder={COPY.common.placeholders.repository} />
                 </SelectTrigger>
                 <SelectContent>
                   {repoOptions.map((r) => (
@@ -112,12 +113,12 @@ export function ResultCard({
                 onClick={() => setShowRegenerate(!showRegenerate)}
               >
                 <Settings2 className="h-4 w-4 mr-2" />
-                Refine
+                {COPY.common.buttons.refine}
               </Button>
             )}
             <Button variant="outline" size="sm" onClick={handleCopy}>
               <Copy className="h-4 w-4 mr-2" />
-              Copy
+              {COPY.common.buttons.copy}
             </Button>
             <Button
               variant="outline"
@@ -126,7 +127,7 @@ export function ResultCard({
               className="text-slate-600"
             >
               <Download className="h-4 w-4 mr-2" />
-              Download
+              {COPY.common.buttons.download}
             </Button>
           </div>
         </div>
@@ -135,7 +136,7 @@ export function ResultCard({
           <div className="mt-4 p-4 bg-slate-50 rounded-lg border border-slate-200 animate-in slide-in-from-top-2">
             <div className="space-y-3">
               <Textarea
-                placeholder="Add extra instructions (e.g., 'Make it more concise', 'Focus on bug fixes')"
+                placeholder={COPY.resultCard.refinePlaceholder}
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
                 className="bg-white resize-none text-sm"
@@ -152,7 +153,9 @@ export function ResultCard({
                   ) : (
                     <RefreshCw className="h-3 w-3 mr-2" />
                   )}
-                  {isRegenerating ? "Regenerating..." : "Regenerate"}
+                  {isRegenerating
+                    ? COPY.resultCard.regeneratingButtonLabel
+                    : COPY.common.buttons.regenerate}
                 </Button>
               </div>
             </div>

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import { useSummary } from "@/hooks/useSummary";
 import { regenerateSummary } from "@/services/summary";
+import { COPY } from "@/constants/copy";
 import { JournalSidebar } from "./unified-board/JournalSidebar";
 import { JournalEntry } from "./unified-board/JournalEntry";
 import { RepoPickerDialog } from "@/components/RepoPickerDialog";
@@ -107,7 +108,7 @@ export function UnifiedBoard({
             weekStart: w.weekStart,
             weekEnd: w.weekEnd,
             hasSummary: !!w.summary,
-            title: `Week ${getWeekNumber(new Date(w.weekStart))}`,
+            title: COPY.unifiedBoard.weekTitle(getWeekNumber(new Date(w.weekStart))),
           }))
           .sort(
             (
@@ -130,7 +131,7 @@ export function UnifiedBoard({
       setStructure(structure);
     } catch (error) {
       console.error(error);
-      toast.error("Failed to load board structure");
+      toast.error(COPY.toasts.boardStructureFailed);
     }
   };
 
@@ -183,7 +184,7 @@ export function UnifiedBoard({
         setContent("");
       }
     } catch {
-      toast.error("Failed to load content");
+      toast.error(COPY.toasts.boardContentFailed);
     } finally {
       setLoadingContent(false);
     }
@@ -194,7 +195,7 @@ export function UnifiedBoard({
 
     // Daily type requires repo
     if (selectedNode.type === "daily" && !selectedNode.repo) {
-      toast.error("Missing repo info for daily regeneration");
+      toast.error(COPY.toasts.missingDailyRepoForRegeneration);
       return;
     }
 
@@ -208,7 +209,7 @@ export function UnifiedBoard({
         customPrompt,
       });
 
-      toast.success("Regeneration successful!");
+      toast.success(COPY.toasts.regenerationSuccessful);
       setContent(updated);
       fetchStructure();
       refetchData();
@@ -216,7 +217,7 @@ export function UnifiedBoard({
       const message =
         error instanceof Error
           ? error.message
-          : "Network error during regeneration";
+          : COPY.toasts.networkErrorDuringRegeneration;
       toast.error(message);
     } finally {
       setRegenerating(false);
@@ -226,7 +227,7 @@ export function UnifiedBoard({
   if (!structure) {
     return (
       <div className="p-8 text-center text-muted-foreground animate-pulse">
-        Loading board...
+        {COPY.unifiedBoard.loading}
       </div>
     );
   }
@@ -280,10 +281,10 @@ export function UnifiedBoard({
               <span className="text-2xl">📓</span>
             </div>
             <p className="text-lg font-medium text-slate-500">
-              Select an entry to view details
+              {COPY.unifiedBoard.empty.title}
             </p>
             <p className="text-sm">
-              Explore your work history using the heatmap or timeline
+              {COPY.unifiedBoard.empty.description}
             </p>
           </div>
         )}

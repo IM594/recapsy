@@ -15,6 +15,7 @@ import { getDateRangeForType } from "@/lib/date-utils";
 import { Label } from "@/components/ui/label";
 import { YearCalendar } from "@/components/YearCalendar";
 import { MonthSelect } from "@/components/MonthSelect";
+import { COPY } from "@/constants/copy";
 import {
   fetchDailySummaries,
   fetchMonthlySummaries,
@@ -143,76 +144,63 @@ export function GenerationPreview({
     });
   };
 
-  const getTitle = () => {
-    switch (type) {
-      case "daily":
-        return "Daily Brief";
-      case "weekly":
-        return "Weekly Report";
-      case "monthly":
-        return "Monthly Summary";
-      case "yearly":
-        return `Yearly Review (${year})`;
-    }
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-blue-500" />
-            Generate {getTitle()}
+            {COPY.generationPreview.title(type, year)}
           </DialogTitle>
           <DialogDescription>
-            Review the scope before generating your summary.
+            {COPY.generationPreview.description}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {(type === "daily" || type === "weekly") && (
             <div className="space-y-2">
-              <Label>Pick a date</Label>
+              <Label>{COPY.common.labels.pickDate}</Label>
               <YearCalendar
                 year={year}
                 selected={selectedDate}
                 onSelect={setSelectedDate}
               />
               <p className="text-xs text-muted-foreground">
-                We will generate a {type} summary for the selected period.
+                {COPY.generationPreview.help.dailyOrWeekly(type)}
               </p>
             </div>
           )}
 
           {type === "monthly" && (
             <div className="space-y-2">
-              <Label>Pick a month</Label>
+              <Label>{COPY.common.labels.pickMonth}</Label>
               <MonthSelect
                 year={year}
                 value={selectedMonth}
                 onValueChange={setSelectedMonth}
               />
               <p className="text-xs text-muted-foreground">
-                We will generate a monthly summary for {year}.
+                {COPY.generationPreview.help.monthly(year)}
               </p>
             </div>
           )}
 
           <div className="space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Time Range:</span>
+              <span className="text-muted-foreground">{COPY.common.labels.timeRange}</span>
               <span className="font-medium font-mono bg-slate-100 px-2 py-0.5 rounded">
                 {dateRange.start} → {dateRange.end}
               </span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Repositories:</span>
+              <span className="text-muted-foreground">{COPY.common.labels.repositories}</span>
               <span className="font-medium">
                 {selectedRepos.length} selected
               </span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">Author:</span>
+              <span className="text-muted-foreground">{COPY.common.labels.author}</span>
               <span className="font-medium">{author}</span>
             </div>
           </div>
@@ -220,7 +208,7 @@ export function GenerationPreview({
           {checking ? (
             <div className="flex items-center justify-center py-4 text-muted-foreground gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Checking existing data...
+              {COPY.generationPreview.checkingExistingData}
             </div>
           ) : exists ? (
             <Alert
@@ -228,18 +216,17 @@ export function GenerationPreview({
               className="bg-amber-50 border-amber-200 text-amber-800"
             >
               <AlertTriangle className="h-4 w-4 text-amber-600" />
-              <AlertTitle>Summary Already Exists</AlertTitle>
+              <AlertTitle>{COPY.generationPreview.alreadyExists.title}</AlertTitle>
               <AlertDescription>
-                Existing summaries were found for this period. Generation will{" "}
-                <strong>reuse cached results</strong> where available.
+                {COPY.generationPreview.alreadyExists.description}
               </AlertDescription>
             </Alert>
           ) : (
             <Alert className="bg-blue-50 border-blue-200 text-blue-800">
               <CheckCircle2 className="h-4 w-4 text-blue-600" />
-              <AlertTitle>Ready to Generate</AlertTitle>
+              <AlertTitle>{COPY.generationPreview.ready.title}</AlertTitle>
               <AlertDescription>
-                No existing data found. You are good to go.
+                {COPY.generationPreview.ready.description}
               </AlertDescription>
             </Alert>
           )}
@@ -247,7 +234,7 @@ export function GenerationPreview({
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {COPY.common.buttons.cancel}
           </Button>
           <Button
             onClick={handleGenerate}
@@ -257,7 +244,9 @@ export function GenerationPreview({
                 : "bg-blue-600 hover:bg-blue-700"
             }
           >
-            {exists ? "Overwrite & Generate" : "Generate Summary"}
+            {exists
+              ? COPY.generationPreview.buttons.overwriteGenerate
+              : COPY.generationPreview.buttons.generateSummary}
           </Button>
         </DialogFooter>
       </DialogContent>

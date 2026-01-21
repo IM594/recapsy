@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useSettings } from "@/hooks/useSettings";
 import { useSummary } from "@/hooks/useSummary";
 import { resetSummaryStatus } from "@/services/summary";
+import { COPY } from "@/constants/copy";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -51,36 +52,36 @@ export function YearEndGenerator({
   const [steps, setSteps] = useState<ProcessStep[]>([
     {
       id: "collect",
-      title: "Collecting Data",
-      description: "Scanning git history",
+      title: COPY.yearEnd.steps.collect.title,
+      description: COPY.yearEnd.steps.collect.description,
       status: "pending",
       weight: 20,
     },
     {
       id: "daily",
-      title: "Analyzing Days",
-      description: "Generating daily summaries",
+      title: COPY.yearEnd.steps.daily.title,
+      description: COPY.yearEnd.steps.daily.description,
       status: "pending",
       weight: 40,
     },
     {
       id: "weekly",
-      title: "Structuring Weeks",
-      description: "Aggregating weekly reports",
+      title: COPY.yearEnd.steps.weekly.title,
+      description: COPY.yearEnd.steps.weekly.description,
       status: "pending",
       weight: 20,
     },
     {
       id: "monthly",
-      title: "Structuring Months",
-      description: "Aggregating monthly reports",
+      title: COPY.yearEnd.steps.monthly.title,
+      description: COPY.yearEnd.steps.monthly.description,
       status: "pending",
       weight: 20,
     },
     {
       id: "yearly",
-      title: "Finalizing Review",
-      description: "Writing executive summary",
+      title: COPY.yearEnd.steps.yearly.title,
+      description: COPY.yearEnd.steps.yearly.description,
       status: "pending",
       weight: 20,
     },
@@ -158,7 +159,7 @@ export function YearEndGenerator({
 
   const handleStart = async () => {
     if (selectedRepos.length === 0) {
-      toast.error("Please configure repositories in settings first");
+      toast.error(COPY.toasts.configureReposFirst);
       return;
     }
 
@@ -167,7 +168,7 @@ export function YearEndGenerator({
       try {
         await resetSummaryStatus(year);
       } catch {
-        toast.error("Failed to reset status");
+        toast.error(COPY.toasts.resetStatusFailed);
         return;
       }
     }
@@ -210,11 +211,11 @@ export function YearEndGenerator({
               )}
             />
           </div>
-          <CardTitle>Generating {year} Review</CardTitle>
+          <CardTitle>{COPY.yearEnd.generatingTitle(year)}</CardTitle>
           <CardDescription>
             {status.phase === "error"
-              ? "An error occurred during generation."
-              : "Hold tight, we're condensing a year of work into insights."}
+              ? COPY.yearEnd.generatingDescription.error
+              : COPY.yearEnd.generatingDescription.running}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -287,25 +288,20 @@ export function YearEndGenerator({
   }
 
   return (
-    <Card className="max-w-2xl mx-auto border-dashed border-2 bg-slate-50/50 shadow-none">
+      <Card className="max-w-2xl mx-auto border-dashed border-2 bg-slate-50/50 shadow-none">
       <CardContent className="flex flex-col items-center justify-center p-12 text-center space-y-6">
         <div className="bg-white p-4 rounded-full shadow-sm ring-1 ring-slate-100">
           <Sparkles className="h-8 w-8 text-indigo-500" />
         </div>
         <div className="space-y-2 max-w-md">
           <h3 className="text-xl font-bold text-slate-900">
-            Ready for {year} Review?
+            {COPY.yearEnd.readyTitle(year)}
           </h3>
           <p className="text-slate-500">
-            We will analyze your git history from{" "}
-            <span className="font-medium text-slate-900">
-              {selectedRepos.length} repositories
-            </span>{" "}
-            acting as{" "}
-            <span className="font-medium text-slate-900">
-              {author || "you"}
-            </span>
-            .
+            {COPY.yearEnd.readyDescription(
+              selectedRepos.length,
+              author || COPY.common.words.you
+            )}
           </p>
         </div>
 
@@ -315,7 +311,7 @@ export function YearEndGenerator({
           className="w-full max-w-sm h-12 text-base"
         >
           <Play className="h-4 w-4 mr-2" />
-          Start Generation
+          {COPY.common.buttons.startGeneration}
         </Button>
       </CardContent>
     </Card>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { buildGenerationResultFromWorkflowResult } from "@/lib/workflow-result";
 import { regenerateSummary } from "@/services/summary";
+import { COPY } from "@/constants/copy";
 
 import { Dashboard } from "@/components/Dashboard";
 import { ResultCard } from "@/components/ResultCard";
@@ -42,7 +43,7 @@ function AppContent() {
       if (next) {
         setGenerationResult(next);
       } else {
-        toast.info("No commits found for the selected period.");
+        toast.info(COPY.toasts.noCommitsFound);
       }
     }
   }, [activeYear, status.phase, status.isRunning, status.result]);
@@ -81,7 +82,7 @@ function AppContent() {
               <Sparkles className="h-5 w-5" />
             </div>
             <span className="font-bold text-xl tracking-tight text-slate-900">
-              Recaply
+              {COPY.appName}
             </span>
           </div>
 
@@ -95,7 +96,7 @@ function AppContent() {
                 className="text-slate-500 hover:text-slate-900"
               >
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
+                {COPY.common.buttons.backToDashboard}
               </Button>
             )}
           </div>
@@ -130,7 +131,9 @@ function AppContent() {
           className="max-w-4xl max-h-[90vh] p-0 border-0 bg-transparent shadow-none [&>button]:bg-white/50 [&>button]:hover:bg-white [&>button]:text-slate-500 [&>button]:top-3 [&>button]:right-3"
           aria-describedby={undefined}
         >
-          <DialogTitle className="sr-only">Generated Summary</DialogTitle>
+          <DialogTitle className="sr-only">
+            {COPY.app.generatedSummaryDialogTitle}
+          </DialogTitle>
           {generationResult && (
             <ResultCard
               title={generationResult.title}
@@ -190,11 +193,11 @@ function AppContent() {
                       summary: updated,
                     };
                   });
-                  toast.success("Regeneration successful!");
+                  toast.success(COPY.toasts.regenerationSuccessful);
                 } catch (e) {
                   console.error(e);
                   const message =
-                    e instanceof Error ? e.message : "Regeneration failed";
+                    e instanceof Error ? e.message : COPY.toasts.regenerationFailedFallback;
                   toast.error(message);
                 }
               }}

@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { COPY } from "@/constants/copy";
 
 interface RepoPickerDialogProps {
   open: boolean;
@@ -37,13 +38,13 @@ export function RepoPickerDialog({
   repo,
   onRepoChange,
   onConfirm,
-  title = "Select repository",
+  title = COPY.repoPicker.title,
   description,
-  confirmLabel = "Open",
-  cancelLabel = "Cancel",
+  confirmLabel = COPY.common.buttons.open,
+  cancelLabel = COPY.common.buttons.cancel,
 }: RepoPickerDialogProps) {
   const resolvedDescription =
-    description || `Multiple repositories have daily summaries for ${date}.`;
+    description || COPY.repoPicker.description(date);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -54,10 +55,13 @@ export function RepoPickerDialog({
         </DialogHeader>
 
         <div className="space-y-2 py-2">
-          <Label>Repository</Label>
+          <Label>{COPY.common.labels.repository}</Label>
           <Select value={repo} onValueChange={onRepoChange}>
-            <SelectTrigger aria-label="Select repository" className="bg-white">
-              <SelectValue placeholder="Select repository" />
+            <SelectTrigger
+              aria-label={COPY.common.aria.selectRepository}
+              className="bg-white"
+            >
+              <SelectValue placeholder={COPY.common.placeholders.selectRepository} />
             </SelectTrigger>
             <SelectContent>
               {repos.map((r) => (
@@ -81,4 +85,3 @@ export function RepoPickerDialog({
     </Dialog>
   );
 }
-

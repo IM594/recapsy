@@ -8,6 +8,7 @@ import {
   ReactNode,
 } from "react";
 import { toast } from "sonner";
+import { COPY } from "@/constants/copy";
 import { getSummaryApiUrl } from "@/lib/api";
 import {
   fetchDailySummaries,
@@ -254,8 +255,8 @@ export function SummaryProvider({
         currentStep: null,
         result: event.state.result ?? data,
       }));
-      addLog("Summary generation completed!", "success");
-      toast.success("Summary generation completed!");
+      addLog(COPY.toasts.generationCompleted, "success");
+      toast.success(COPY.toasts.generationCompleted);
       setDataVersion((v) => v + 1);
     });
 
@@ -270,8 +271,8 @@ export function SummaryProvider({
 
       const errorMessage = event.state.error || "Unknown error";
 
-      toast.error(`Error: ${errorMessage}`);
-      addLog(`Error: ${errorMessage}`, "error");
+      toast.error(`${COPY.toasts.workflowErrorPrefix} ${errorMessage}`);
+      addLog(`${COPY.toasts.workflowErrorPrefix} ${errorMessage}`, "error");
       setStatus((prev) => ({ ...prev, isRunning: false, phase: "error" }));
     });
 
@@ -311,15 +312,15 @@ export function SummaryProvider({
       try {
         const result = await startSummaryGeneration(config);
         if (result.kind === "already_running") {
-          toast.warning("A task is already running.");
+          toast.warning(COPY.toasts.taskAlreadyRunning);
           setStatus(result.status);
           return;
         }
 
         setStatus((prev) => ({ ...prev, isRunning: true, phase: "starting" }));
         setLogs([]);
-        addLog("Started background generation task...", "info");
-        toast.info("Started background generation task...");
+        addLog(COPY.toasts.startedGenerationTask, "info");
+        toast.info(COPY.toasts.startedGenerationTask);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to start generation";

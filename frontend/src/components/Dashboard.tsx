@@ -19,6 +19,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { SettingsDialog } from "./SettingsDialog";
 import { GenerationPreview } from "./GenerationPreview";
 import { toast } from "sonner";
+import { COPY } from "@/constants/copy";
 import type { GenerationConfig, SummaryType } from "@/types/summary";
 
 // Updated signature to match App.tsx
@@ -46,7 +47,7 @@ export function Dashboard({
 
   const handleAction = (type: SummaryType) => {
     if (!isConfigured) {
-      toast.info("Please configure your repositories first");
+      toast.info(COPY.toasts.configureReposFirst);
       setShowSettings(true);
       return;
     }
@@ -62,12 +63,12 @@ export function Dashboard({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
-            Work Dashboard
+            {COPY.dashboard.title}
           </h2>
           <p className="text-muted-foreground mt-1">
             {isConfigured
-              ? "Generate summaries or view your progress."
-              : "Connect your repositories to get started."}
+              ? COPY.dashboard.subtitle.configured
+              : COPY.dashboard.subtitle.notConfigured}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -79,7 +80,7 @@ export function Dashboard({
             variant="ghost"
             size="icon"
             onClick={() => setShowSettings(true)}
-            title="Settings"
+            title={COPY.dashboard.settingsButtonTitle}
           >
             <Settings className="h-5 w-5 text-slate-500 hover:text-slate-900 transition-colors" />
           </Button>
@@ -99,10 +100,10 @@ export function Dashboard({
           </div>
           <div className="text-center">
             <span className="font-semibold text-lg block text-slate-700 group-hover:text-blue-700">
-              Daily Brief
+              {COPY.summaryTypes.label("daily")}
             </span>
             <span className="text-xs text-muted-foreground group-hover:text-blue-600">
-              Summarize today's work
+              {COPY.dashboard.cards.daily.description}
             </span>
           </div>
         </Button>
@@ -119,10 +120,10 @@ export function Dashboard({
           </div>
           <div className="text-center">
             <span className="font-semibold text-lg block text-slate-700 group-hover:text-purple-700">
-              Weekly Report
+              {COPY.summaryTypes.label("weekly")}
             </span>
             <span className="text-xs text-muted-foreground group-hover:text-purple-600">
-              Review this week
+              {COPY.dashboard.cards.weekly.description}
             </span>
           </div>
         </Button>
@@ -139,10 +140,10 @@ export function Dashboard({
           </div>
           <div className="text-center">
             <span className="font-semibold text-lg block text-slate-700 group-hover:text-indigo-700">
-              Monthly Summary
+              {COPY.summaryTypes.label("monthly")}
             </span>
             <span className="text-xs text-muted-foreground group-hover:text-indigo-600">
-              Wrap up the month
+              {COPY.dashboard.cards.monthly.description}
             </span>
           </div>
         </Button>
@@ -159,10 +160,10 @@ export function Dashboard({
           </div>
           <div className="text-center">
             <span className="font-semibold text-lg block text-slate-700 group-hover:text-amber-700">
-              Yearly Review
+              {COPY.summaryTypes.label("yearly")}
             </span>
             <span className="text-xs text-muted-foreground group-hover:text-amber-600">
-              {year} Retrospective
+              {COPY.dashboard.cards.yearly.description(year)}
             </span>
           </div>
         </Button>
@@ -172,13 +173,13 @@ export function Dashboard({
       <Card className="border-2 border-slate-200 bg-slate-50/50">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>Unified Board</CardTitle>
+            <CardTitle>{COPY.dashboard.unifiedBoard.title}</CardTitle>
             <CardDescription>
-              Access all your generated summaries in one place.
+              {COPY.dashboard.unifiedBoard.description}
             </CardDescription>
           </div>
           <Button onClick={handleEnterBoard} className="gap-2">
-            Enter Board
+            {COPY.common.buttons.enterBoard}
             <ArrowRight className="h-4 w-4" />
           </Button>
         </CardHeader>

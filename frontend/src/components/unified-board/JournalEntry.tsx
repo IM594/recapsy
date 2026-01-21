@@ -20,6 +20,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { NavigationNode } from "./types";
 import { cn } from "@/lib/utils";
+import { COPY } from "@/constants/copy";
 
 interface JournalEntryProps {
   node: NavigationNode;
@@ -42,7 +43,7 @@ export function JournalEntry({
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(content);
-    toast.success("Copied to clipboard");
+    toast.success(COPY.toasts.copiedToClipboard);
   };
 
   const handleRunRegenerate = async () => {
@@ -84,7 +85,7 @@ export function JournalEntry({
             </span>
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
-              {(content.length / 500).toFixed(0)} min read
+              {COPY.journalEntry.minRead((content.length / 500).toFixed(0))}
             </span>
           </div>
         </div>
@@ -97,10 +98,10 @@ export function JournalEntry({
           >
             <TabsList className="h-8">
               <TabsTrigger value="read" className="text-xs px-3">
-                Read
+                {COPY.common.tabs.read}
               </TabsTrigger>
               <TabsTrigger value="source" className="text-xs px-3">
-                Source
+                {COPY.common.tabs.source}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -109,7 +110,7 @@ export function JournalEntry({
             variant="ghost"
             size="icon"
             onClick={() => setShowRefine(!showRefine)}
-            title="Refine with AI"
+            title={COPY.journalEntry.refineTitle}
           >
             <Sparkles
               className={cn(
@@ -120,7 +121,12 @@ export function JournalEntry({
               )}
             />
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleCopy} title="Copy">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleCopy}
+            title={COPY.common.buttons.copy}
+          >
             <Copy className="h-4 w-4 text-slate-500" />
           </Button>
         </div>
@@ -139,7 +145,7 @@ export function JournalEntry({
               <Bot className="h-5 w-5 text-indigo-600 mt-2" />
               <div className="flex-1 space-y-2">
                 <Textarea
-                  placeholder="Tell AI how to improve this summary... (e.g., 'Make it more concise', 'Focus on the bug fix')"
+                  placeholder={COPY.journalEntry.refinePlaceholder}
                   value={customPrompt}
                   onChange={(e) => setCustomPrompt(e.target.value)}
                   className="bg-white/80 min-h-[80px] text-sm"
@@ -155,7 +161,7 @@ export function JournalEntry({
                     ) : (
                       <Sparkles className="h-3 w-3 mr-2" />
                     )}
-                    Regenerate
+                    {COPY.common.buttons.regenerate}
                   </Button>
                 </div>
               </div>
@@ -182,7 +188,7 @@ export function JournalEntry({
                     <Bot className="h-5 w-5 absolute inset-0 m-auto text-slate-300" />
                   </div>
                   <p className="text-slate-400 text-sm animate-pulse">
-                    Consulting the archives...
+                    {COPY.journalEntry.loading}
                   </p>
                 </motion.div>
               ) : tab === "read" ? (
@@ -202,8 +208,8 @@ export function JournalEntry({
                 >
                   {!content ? (
                     <div className="text-center py-20 text-slate-400 italic bg-slate-50 rounded-lg border border-dashed border-slate-200">
-                      No journal entry for this date. <br />
-                      Click "Refine" to generate one.
+                      {COPY.journalEntry.noEntry.line1} <br />
+                      {COPY.journalEntry.noEntry.line2}
                     </div>
                   ) : (
                     <ReactMarkdown>{content}</ReactMarkdown>
@@ -220,13 +226,13 @@ export function JournalEntry({
                   <div className="p-4 bg-slate-900 rounded-lg text-slate-200 font-mono text-sm overflow-x-auto">
                     <div className="flex items-center gap-2 mb-4 text-slate-500 pb-2 border-b border-slate-800">
                       <Code2 className="h-4 w-4" />
-                      Raw Context Data
+                      {COPY.journalEntry.rawContextTitle}
                     </div>
                     <pre>
                       {/* Placeholder for raw data - ideally this would be passed in props or fetched */}
                       {JSON.stringify(
                         {
-                          note: "Raw source view not yet implemented, showing node info",
+                          note: COPY.journalEntry.rawContextPlaceholderNote,
                           ...node,
                         },
                         null,

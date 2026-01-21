@@ -35,6 +35,7 @@ import { getWeekMonday, toDateString } from "@/lib/date-utils";
 import { RepoPickerDialog } from "@/components/RepoPickerDialog";
 import { YearCalendar } from "@/components/YearCalendar";
 import { MonthSelect } from "@/components/MonthSelect";
+import { COPY } from "@/constants/copy";
 
 import { Structure, NavigationNode } from "./types";
 import { ContributionGraph } from "./ContributionGraph";
@@ -92,12 +93,12 @@ export function JournalSidebar({
     // Year
     if (structure.hasYearlySummary) {
       items.push({
-        label: `${structure.year} Annual Review`,
+        label: `${structure.year} ${COPY.journalSidebar.annualReview}`,
         value: `year ${structure.year}`,
         node: {
           type: "yearly",
           id: String(structure.year),
-          label: "Annual Review",
+          label: COPY.journalSidebar.annualReview,
         },
         icon: Trophy,
       });
@@ -105,10 +106,11 @@ export function JournalSidebar({
 
     // Months & Days
     structure.months.forEach((m) => {
+      const monthlyLabel = `${COPY.summaryTypes.label("monthly")} (${m.month})`;
       items.push({
-        label: `${m.month} Monthly Report`,
-        value: `month ${m.month} report`,
-        node: { type: "monthly", id: m.month, label: `${m.month} Report` },
+        label: monthlyLabel,
+        value: `month ${m.month} summary`,
+        node: { type: "monthly", id: m.month, label: monthlyLabel },
         icon: CalendarRange,
       });
 
@@ -161,7 +163,7 @@ export function JournalSidebar({
     const month = dateStr.substring(0, 7);
 
     if (repos.length === 0) {
-      toast.info(`No daily summaries for ${dateStr}.`);
+      toast.info(COPY.toasts.noDailySummariesForDate(dateStr));
       return;
     }
 
@@ -205,7 +207,11 @@ export function JournalSidebar({
     if (jumpTab === "monthly") {
       const month = `${structure.year}-${jumpMonth}`;
       ensureMonthExpanded(month);
-      onSelect({ type: "monthly", id: month, label: `${month} Report` });
+      onSelect({
+        type: "monthly",
+        id: month,
+        label: `${COPY.summaryTypes.label("monthly")} (${month})`,
+      });
       setJumpOpen(false);
       return;
     }
@@ -219,7 +225,7 @@ export function JournalSidebar({
       onSelect({
         type: "weekly",
         id: weekStart,
-        label: week?.title ?? `Week of ${weekStart}`,
+        label: week?.title ?? COPY.journalSidebar.weekOf(weekStart),
       });
       setJumpOpen(false);
       return;
@@ -245,7 +251,7 @@ export function JournalSidebar({
           onClick={() => setOpenCommand(true)}
         >
           <Search className="mr-2 h-4 w-4" />
-          <span className="text-xs">Search logs...</span>
+          <span className="text-xs">{COPY.journalSidebar.searchButton}</span>
           <kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground opacity-100">
             <span className="text-xs">⌘</span>K
           </kbd>
@@ -257,13 +263,13 @@ export function JournalSidebar({
           onClick={() => setJumpOpen(true)}
         >
           <CalendarRange className="mr-2 h-4 w-4" />
-          <span className="text-xs">Jump to date/month...</span>
+          <span className="text-xs">{COPY.journalSidebar.jumpButton}</span>
         </Button>
 
         <div className="mb-1 pl-1">
           <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
             <LayoutTemplate className="h-3 w-3" />
-            {structure.year} Activity
+            {COPY.journalSidebar.activityTitle(structure.year)}
           </div>
           <ContributionGraph
             data={summaryDays}
@@ -288,16 +294,16 @@ export function JournalSidebar({
               onSelect({
                 type: "yearly",
                 id: String(structure.year),
-                label: `Annual Review`,
+                label: COPY.journalSidebar.annualReview,
               })
             }
           >
             <Trophy className="h-4 w-4 text-amber-500" />
-            {structure.year} Annual Review
+            {structure.year} {COPY.journalSidebar.annualReview}
           </div>
 
           <div className="px-2 pb-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-            Timeline
+            {COPY.journalSidebar.timelineHeading}
           </div>
 
           {/* Month Folders */}
@@ -347,7 +353,7 @@ export function JournalSidebar({
                         onSelect({
                           type: "monthly",
                           id: m.month,
-                          label: `${m.month} Report`,
+                          label: `${COPY.summaryTypes.label("monthly")} (${m.month})`,
                         })
                       }
                     >
@@ -433,7 +439,7 @@ export function JournalSidebar({
                         ))}
                       {m.days.length === 0 && (
                         <div className="px-2 py-1 text-xs text-slate-400 italic">
-                          No logs
+                          {COPY.journalSidebar.noLogs}
                         </div>
                       )}
                     </div>
@@ -448,9 +454,9 @@ export function JournalSidebar({
       <Dialog open={jumpOpen} onOpenChange={setJumpOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Jump to entry</DialogTitle>
+            <DialogTitle>{COPY.journalSidebar.jumpDialog.title}</DialogTitle>
             <DialogDescription>
-              Select a date or month to navigate within {structure.year}.
+              {COPY.journalSidebar.jumpDialog.description(structure.year)}
             </DialogDescription>
           </DialogHeader>
 
@@ -458,20 +464,20 @@ export function JournalSidebar({
             <Tabs value={jumpTab} onValueChange={(v) => setJumpTab(v as any)}>
               <TabsList className="w-full">
                 <TabsTrigger value="daily" className="flex-1 text-xs">
-                  Day
+                  {COPY.journalSidebar.jumpDialog.tabs.day}
                 </TabsTrigger>
                 <TabsTrigger value="weekly" className="flex-1 text-xs">
-                  Week
+                  {COPY.journalSidebar.jumpDialog.tabs.week}
                 </TabsTrigger>
                 <TabsTrigger value="monthly" className="flex-1 text-xs">
-                  Month
+                  {COPY.journalSidebar.jumpDialog.tabs.month}
                 </TabsTrigger>
               </TabsList>
             </Tabs>
 
             {(jumpTab === "daily" || jumpTab === "weekly") && (
               <div className="space-y-2">
-                <Label>Pick a date</Label>
+                <Label>{COPY.common.labels.pickDate}</Label>
                 <YearCalendar
                   year={structure.year}
                   selected={jumpDate}
@@ -481,8 +487,7 @@ export function JournalSidebar({
                   jumpDate &&
                   getDailyReposForDate(toDateString(jumpDate)).length > 1 && (
                     <p className="text-xs text-muted-foreground">
-                      Multiple repositories found for this day — you will be
-                      asked to choose one.
+                      {COPY.journalSidebar.jumpDialog.multiRepoHint}
                     </p>
                   )}
               </div>
@@ -490,7 +495,7 @@ export function JournalSidebar({
 
             {jumpTab === "monthly" && (
               <div className="space-y-2">
-                <Label>Pick a month</Label>
+                <Label>{COPY.common.labels.pickMonth}</Label>
                 <MonthSelect
                   year={structure.year}
                   value={jumpMonth}
@@ -502,10 +507,13 @@ export function JournalSidebar({
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setJumpOpen(false)}>
-              Cancel
+              {COPY.common.buttons.cancel}
             </Button>
-            <Button onClick={handleJumpConfirm} disabled={jumpTab !== "monthly" && !jumpDate}>
-              Jump
+            <Button
+              onClick={handleJumpConfirm}
+              disabled={jumpTab !== "monthly" && !jumpDate}
+            >
+              {COPY.common.buttons.jump}
             </Button>
           </div>
         </DialogContent>
@@ -534,10 +542,10 @@ export function JournalSidebar({
 
       {/* Command Palette */}
       <CommandDialog open={openCommand} onOpenChange={setOpenCommand}>
-        <CommandInput placeholder="Type a command or search..." />
+        <CommandInput placeholder={COPY.journalSidebar.commandPalette.inputPlaceholder} />
         <CommandList>
-          <CommandEmpty>No results found.</CommandEmpty>
-          <CommandGroup heading="Recent">
+          <CommandEmpty>{COPY.journalSidebar.commandPalette.empty}</CommandEmpty>
+          <CommandGroup heading={COPY.journalSidebar.commandPalette.recentHeading}>
             {searchItems.slice(0, 5).map((item) => (
               <CommandItem
                 key={item.value}
@@ -551,7 +559,7 @@ export function JournalSidebar({
               </CommandItem>
             ))}
           </CommandGroup>
-          <CommandGroup heading="All Entries">
+          <CommandGroup heading={COPY.journalSidebar.commandPalette.allEntriesHeading}>
             {searchItems.slice(5).map((item) => (
               <CommandItem
                 key={item.value}

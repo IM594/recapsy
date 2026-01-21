@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { COPY } from "@/constants/copy";
 
 interface MonthSelectProps {
   year: number;
@@ -23,8 +24,8 @@ export function MonthSelect({
   value,
   onValueChange,
   triggerClassName,
-  ariaLabel = "Select month",
-  placeholder = "Select month",
+  ariaLabel = COPY.common.aria.selectMonth,
+  placeholder = COPY.common.placeholders.selectMonth,
 }: MonthSelectProps) {
   return (
     <Select value={value} onValueChange={onValueChange}>
@@ -49,4 +50,3 @@ export function MonthSelect({
     </Select>
   );
 }
-

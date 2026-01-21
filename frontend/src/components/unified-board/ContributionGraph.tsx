@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
 import { format, eachDayOfInterval, startOfWeek, endOfWeek } from "date-fns";
+import { COPY } from "@/constants/copy";
 
 interface ContributionGraphProps {
   data: Date[];
@@ -63,7 +64,7 @@ export function ContributionGraph({
                 <button
                   key={dateStr}
                   onClick={() => isTargetYear && onSelectDate?.(day)}
-                  title={`${dateStr} ${hasActivity ? "✅" : ""}`}
+                  title={`${dateStr} ${hasActivity ? COPY.contributionGraph.activityMark : ""}`}
                   className={cn(
                     "w-2.5 h-2.5 rounded-[2px] transition-all",
                     !isTargetYear
@@ -80,9 +81,9 @@ export function ContributionGraph({
         ))}
       </div>
       <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-        <span>Jan</span>
-        <span>Jun</span>
-        <span>Dec</span>
+        <span>{COPY.contributionGraph.monthLabels.jan}</span>
+        <span>{COPY.contributionGraph.monthLabels.jun}</span>
+        <span>{COPY.contributionGraph.monthLabels.dec}</span>
       </div>
     </div>
   );

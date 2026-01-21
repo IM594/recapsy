@@ -16,6 +16,7 @@ import { FolderSearch, Loader2, Save } from "lucide-react";
 import { useSettings } from "@/hooks/useSettings";
 import { toast } from "sonner";
 import { scanRepos as scanReposService } from "@/services/repos";
+import { COPY } from "@/constants/copy";
 import type { RepoInfo } from "@/types/repos";
 
 interface SettingsDialogProps {
@@ -66,7 +67,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setAvailableRepos(repos);
     } catch (error) {
       console.error("Scan failed", error);
-      toast.error("Failed to scan repositories");
+      toast.error(COPY.toasts.scanReposFailed);
     } finally {
       setScanning(false);
     }
@@ -80,11 +81,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const handleSave = () => {
     if (selectedRepos.length === 0) {
-      toast.error("Please select at least one repository");
+      toast.error(COPY.toasts.selectAtLeastOneRepo);
       return;
     }
     updateSettings(selectedRepos, author);
-    toast.success("Settings saved");
+    toast.success(COPY.toasts.settingsSaved);
     onOpenChange(false);
   };
 
@@ -92,30 +93,32 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Configure Work Context</DialogTitle>
+          <DialogTitle>{COPY.settings.title}</DialogTitle>
           <DialogDescription>
-            Select the repositories you work on and your git author name.
+            {COPY.settings.description}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto py-4 space-y-6">
           {/* Identity Section */}
           <div className="space-y-3">
-            <Label>Git Author Name</Label>
+            <Label>{COPY.common.labels.gitAuthorName}</Label>
             <Input
               value={author}
               onChange={(e) => setAuthor(e.target.value)}
-              placeholder="e.g. user"
+              placeholder={COPY.common.placeholders.authorExample}
             />
             <p className="text-xs text-muted-foreground">
-              Used to filter commits that belong to you.
+              {COPY.settings.gitAuthorHelp}
             </p>
           </div>
 
           {/* Repos Section */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Repositories ({selectedRepos.length} selected)</Label>
+              <Label>
+                {COPY.settings.repositoriesSelectedLabel(selectedRepos.length)}
+              </Label>
               <Button
                 variant="outline"
                 size="sm"
@@ -127,19 +130,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 ) : (
                   <FolderSearch className="h-3 w-3 mr-1" />
                 )}
-                Rescan
+                {COPY.common.buttons.rescan}
               </Button>
             </div>
 
             <div className="space-y-2">
-              <Label>Scan Root Path</Label>
+              <Label>{COPY.common.labels.scanRootPath}</Label>
               <Input
                 value={scanRootPath}
                 onChange={(e) => setScanRootPath(e.target.value)}
-                placeholder="e.g. /Users/you/projects"
+                placeholder={COPY.common.placeholders.scanRootExample}
               />
               <p className="text-xs text-muted-foreground">
-                Used to discover git repositories for selection.
+                {COPY.settings.scanRootHelp}
               </p>
             </div>
 
@@ -149,7 +152,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   <div className="flex flex-col items-center gap-2">
                     <Loader2 className="h-6 w-6 animate-spin text-primary" />
                     <span className="text-xs text-muted-foreground">
-                      Scanning directories...
+                      {COPY.settings.scanningDirectories}
                     </span>
                   </div>
                 </div>
@@ -157,7 +160,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <ScrollArea className="h-full p-2">
                 {availableRepos.length === 0 && !scanning ? (
                   <div className="text-center p-8 text-muted-foreground text-sm">
-                    No git repositories found in default path.
+                    {COPY.settings.emptyRepos}
                   </div>
                 ) : (
                   <div className="space-y-1">
@@ -190,7 +193,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <DialogFooter>
           <Button onClick={handleSave} className="w-full sm:w-auto">
             <Save className="h-4 w-4 mr-2" />
-            Save Configuration
+            {COPY.common.buttons.saveConfiguration}
           </Button>
         </DialogFooter>
       </DialogContent>
