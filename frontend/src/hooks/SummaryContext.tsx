@@ -26,6 +26,7 @@ import type {
   SSEEvent,
   SummaryStatus,
   SummaryType,
+  SummaryPhase,
   WeeklySummaryData,
   YearlySummaryData,
 } from "@/types/summary";
@@ -47,6 +48,78 @@ function safeJsonParse(raw: string): unknown | null {
   } catch {
     return null;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isSummaryPhase(value: unknown): value is SummaryPhase {
+  return (
+    value === "idle" ||
+    value === "starting" ||
+    value === "running" ||
+    value === "complete" ||
+    value === "error"
+  );
+}
+
+function parseSseEvent(value: unknown): SSEEvent | null {
+  if (!isRecord(value)) return null;
+
+  const nodeId = value.nodeId;
+  const timestamp = value.timestamp;
+  const state = value.state;
+
+  if (typeof nodeId !== "string" || !nodeId.trim()) return null;
+  if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return null;
+  if (!isRecord(state)) return null;
+
+  const parsed: SSEEvent = {
+    nodeId,
+    timestamp,
+    state: {},
+  };
+
+  if (typeof state.progress === "number" && Number.isFinite(state.progress)) {
+    parsed.state.progress = state.progress;
+  }
+  if (typeof state.currentStep === "string" && state.currentStep.trim()) {
+    parsed.state.currentStep = state.currentStep;
+  }
+  if (isSummaryPhase(state.phase)) parsed.state.phase = state.phase;
+  if (typeof state.isRunning === "boolean") parsed.state.isRunning = state.isRunning;
+  if (typeof state.message === "string" && state.message.trim()) {
+    parsed.state.message = state.message;
+  }
+  if (typeof state.error === "string" && state.error.trim()) {
+    parsed.state.error = state.error;
+  }
+  if (state.result !== undefined) parsed.state.result = state.result;
+
+  return parsed;
+}
+
+function parseSummaryStatus(value: unknown): SummaryStatus | null {
+  if (!isRecord(value)) return null;
+
+  const isRunning = value.isRunning;
+  const phase = value.phase;
+  const progress = value.progress;
+  const currentStep = value.currentStep;
+
+  if (typeof isRunning !== "boolean") return null;
+  if (!isSummaryPhase(phase)) return null;
+  if (typeof progress !== "number" || !Number.isFinite(progress)) return null;
+  if (!(typeof currentStep === "string" || currentStep === null)) return null;
+
+  return {
+    isRunning,
+    phase,
+    progress,
+    currentStep,
+    result: value.result,
+  };
 }
 
 interface SummaryContextType {
@@ -127,18 +200,20 @@ export function SummaryProvider({
       debugSse("[SSE] status event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
-      // New format: { nodeId, state: { progress, currentStep, phase, isRunning }, timestamp }
-      if ((data as any).state) {
+
+      const event = parseSseEvent(data);
+      if (event) {
         setStatus({
-          isRunning: (data as any).state.isRunning ?? false,
-          phase: (data as any).state.phase ?? "idle",
-          progress: (data as any).state.progress ?? 0,
-          currentStep: (data as any).state.currentStep ?? null,
+          isRunning: event.state.isRunning ?? false,
+          phase: event.state.phase ?? "idle",
+          progress: event.state.progress ?? 0,
+          currentStep: event.state.currentStep ?? null,
         });
-      } else {
-        // Fallback for old format
-        setStatus(data as any);
+        return;
       }
+
+      const fallback = parseSummaryStatus(data);
+      if (fallback) setStatus(fallback);
     });
 
     // Handle progress event with new format
@@ -146,19 +221,19 @@ export function SummaryProvider({
       debugSse("[SSE] progress event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
-      // New format: { nodeId, state: { progress, currentStep, message }, timestamp }
-      const nodeId = (data as any).nodeId;
-      const state = (data as any).state || data; // Fallback for old format
+
+      const event = parseSseEvent(data);
+      if (!event) return;
 
       setStatus((prev) => ({
         ...prev,
-        currentStep: state.currentStep || nodeId || prev.currentStep,
-        progress: state.progress ?? prev.progress,
+        currentStep: event.state.currentStep || event.nodeId || prev.currentStep,
+        progress: event.state.progress ?? prev.progress,
         isRunning: true,
-        phase: state.phase || prev.phase,
+        phase: event.state.phase || prev.phase,
       }));
 
-      const message = state.message || `Completed: ${nodeId}`;
+      const message = event.state.message || `Completed: ${event.nodeId}`;
       addLog(message, "info");
     });
 
@@ -167,8 +242,9 @@ export function SummaryProvider({
       debugSse("[SSE] complete event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
-      // New format: { nodeId, state: { progress, currentStep, result }, timestamp }
-      const state = (data as any).state || data;
+
+      const event = parseSseEvent(data);
+      if (!event) return;
 
       setStatus((prev) => ({
         ...prev,
@@ -176,7 +252,7 @@ export function SummaryProvider({
         phase: "complete",
         progress: 100,
         currentStep: null,
-        result: state.result || data,
+        result: event.state.result ?? data,
       }));
       addLog("Summary generation completed!", "success");
       toast.success("Summary generation completed!");
@@ -188,9 +264,11 @@ export function SummaryProvider({
       debugSse("[SSE] workflow_error event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
-      // New format: { nodeId, state: { error }, timestamp }
-      const errorMessage =
-        (data as any).state?.error || (data as any).message || "Unknown error";
+
+      const event = parseSseEvent(data);
+      if (!event) return;
+
+      const errorMessage = event.state.error || "Unknown error";
 
       toast.error(`Error: ${errorMessage}`);
       addLog(`Error: ${errorMessage}`, "error");

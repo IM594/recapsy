@@ -35,7 +35,7 @@ export interface SSEEvent {
   state: {
     progress?: number;
     currentStep?: string;
-    phase?: string;
+    phase?: SummaryPhase;
     isRunning?: boolean;
     message?: string;
     result?: unknown;
