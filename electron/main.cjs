@@ -3,27 +3,41 @@ const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
 
-// 开发模式：加载 Vite 服务器
+// Electron main process entry (CommonJS).
+// This repo uses `electron/main.cjs` as the single source of truth.
 const isDev = !app.isPackaged;
 
-// ========== 日志过滤配置 ==========
-// 设置 Chromium 日志级别（只显示致命错误）
-// 级别: 0=INFO, 1=WARNING, 2=ERROR, 3=FATAL_ERROR, 4=DISABLED
-app.commandLine.appendSwitch('log-level', '3');  // 只显示 FATAL 错误
+function log(...args) {
+  console.log("[Electron]", ...args);
+}
 
-// 启用硬件加速以提升动画性能
-app.commandLine.appendSwitch('enable-gpu-rasterization');
-app.commandLine.appendSwitch('enable-zero-copy');
+function warn(...args) {
+  console.warn("[Electron]", ...args);
+}
 
-// 只在开发环境过滤日志
+function error(...args) {
+  console.error("[Electron]", ...args);
+}
+
+// ---- Log noise filtering (dev only) ----
+// Chromium log levels:
+// 0=INFO, 1=WARNING, 2=ERROR, 3=FATAL_ERROR, 4=DISABLED
+app.commandLine.appendSwitch("log-level", "3");
+
+// Enable HW acceleration for smoother UI.
+app.commandLine.appendSwitch("enable-gpu-rasterization");
+app.commandLine.appendSwitch("enable-zero-copy");
+
 if (isDev) {
-  // 拦截 stderr，只保留自己代码的日志
+  // Intercept stderr to reduce framework noise while developing.
   const originalWrite = process.stderr.write.bind(process.stderr);
-  process.stderr.write = function(chunk, encoding, callback) {
+  process.stderr.write = function (chunk, encoding, callback) {
     const msg = String(chunk);
 
-    // 只显示非框架来源的日志（排除 devtools://, chrome://, electron 等前缀）
-    const isFrameworkNoise = /^(\[.*?\])?\s*(\d{4}-\d{2}-\d{2}.*Electron\[|.*ERROR:CONSOLE.*source: devtools:)/.test(msg);
+    const isFrameworkNoise =
+      /^(\[.*?\])?\s*(\d{4}-\d{2}-\d{2}.*Electron\[|.*ERROR:CONSOLE.*source: devtools:)/.test(
+        msg
+      );
 
     if (!isFrameworkNoise) {
       return originalWrite(chunk, encoding, callback);
@@ -32,39 +46,32 @@ if (isDev) {
     return true;
   };
 }
-// ========== 日志过滤配置结束 ==========
 
-// 后端服务器进程
+// Backend server process
 let backendProcess = null;
-let backendPort = 3456;
+const backendPort = 3456;
 
-// 启动后端服务器
 function startBackend() {
   return new Promise((resolve, reject) => {
-    // 后端服务器路径
     const backendPath = isDev
       ? path.join(__dirname, "../backend/src/api/server.ts")
       : path.join(process.resourcesPath, "backend/dist/api/server.js");
 
-    // 后端目录（用于设置工作目录和查找 .env）
     const backendDir = isDev
       ? path.join(__dirname, "../backend")
       : path.join(process.resourcesPath, "backend");
 
-    // .env 文件路径
     const envPath = path.join(backendDir, ".env");
 
-    // 检查 .env 文件是否存在
     if (!fs.existsSync(envPath)) {
-      console.warn("⚠️  警告: .env 文件不存在，后端可能无法正常工作");
+      warn("Backend .env not found; the backend may not work correctly.");
     } else {
-      console.log("✅ 找到 .env 文件:", envPath);
+      log("Backend .env found:", envPath);
     }
 
-    console.log("🔧 启动后端服务器...");
-    console.log("   工作目录:", backendDir);
+    log("Starting backend server...");
+    log("Backend cwd:", backendDir);
 
-    // 使用 tsx 启动（开发模式）或直接运行编译后的代码（生产模式）
     const command = isDev ? "npx" : "node";
     const args = isDev ? ["tsx", backendPath] : [backendPath];
 
@@ -82,8 +89,8 @@ function startBackend() {
       const output = data.toString().trim();
       if (output) {
         console.log(`[Backend] ${output}`);
-        // 检测服务器启动成功
-        if (output.includes("服务器运行在")) {
+        // Resolve when backend prints its listen URL.
+        if (output.includes(`http://localhost:${backendPort}`)) {
           resolve();
         }
       }
@@ -97,26 +104,25 @@ function startBackend() {
     });
 
     backendProcess.on("error", (err) => {
-      console.error("❌ 后端启动失败:", err);
+      error("Backend failed to start:", err);
       reject(err);
     });
 
     backendProcess.on("exit", (code) => {
-      console.log(`🛑 后端进程退出，代码: ${code}`);
+      log(`Backend process exited (code: ${code})`);
       backendProcess = null;
     });
 
-    // 超时处理
+    // Fallback: resolve after a short delay (backend might already be running).
     setTimeout(() => {
       if (backendProcess) {
-        console.log("✅ 后端启动超时（可能已成功）");
+        log("Backend startup check timed out; continuing anyway.");
         resolve();
       }
     }, 5000);
   });
 }
 
-// 停止后端服务器
 function stopBackend() {
   if (backendProcess) {
     backendProcess.kill();
@@ -145,30 +151,26 @@ function createWindow() {
 
   if (isDev) {
     win.loadURL("http://localhost:5173");
-    // 开发模式下打开 DevTools
+    // DevTools (optional)
     // win.webContents.openDevTools();
   } else {
     win.loadFile(path.join(__dirname, "../frontend/dist/index.html"));
   }
 }
 
-// App 事件
 app.whenReady().then(async () => {
   try {
-    // 先启动后端服务器
     await startBackend();
-    console.log("✅ 后端服务器已就绪");
+    log("Backend server is ready.");
 
-    // 再创建窗口
     createWindow();
   } catch (err) {
-    console.error("❌ 应用启动失败:", err);
+    error("App startup failed:", err);
   }
 });
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    // 停止后端服务器
     stopBackend();
     app.quit();
   }
@@ -181,6 +183,5 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
-  // 应用退出前停止后端
   stopBackend();
 });
