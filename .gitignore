@@ -1,39 +1,23 @@
-# Dependencies
+# RecapSense（本地数据目录）
+.recapsense/
+
+# Node 依赖与日志
 node_modules/
-.pnp
-.pnp.js
-
-# Build output
-dist/
-out/
-
-# Backend outputs
-backend/outputs/
-backend/src/api/outputs/
-
-# Electron
-*.log
-.DS_Store
-
-# IDE
-.idea/
-.vscode/
-.claude/
-*.swp
-*.swo
-*~
-
-# Environment
-.env
-.env.local
-.env.*.local
-
-# Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# OS
-Thumbs.db
+# macOS
 .DS_Store
+
+# VSCode（本机开发配置）
+.vscode/
+
+# 构建产物
+dist/
+build/
+
+# SwiftPM / Xcode
+.build/
+.swiftpm/

@@ -1,57 +1,14 @@
 {
-  "name": "recaply-electron",
-  "version": "0.0.1",
+  "name": "recapsense",
   "private": true,
-  "description": "Recaply：基于 LangGraph 的每日工作总结工具 (Electron 版)",
-  "type": "module",
-  "main": "electron/main.cjs",
-  "scripts": {
-    "dev": "concurrently \"pnpm --filter recaply-frontend dev\" \"wait-on http://localhost:5173 && electron .\"",
-    "dev:backend": "pnpm --filter recaply-backend dev",
-    "dev:frontend": "pnpm --filter recaply-frontend dev",
-    "build": "pnpm -r build",
-    "build:backend": "pnpm --filter recaply-backend build",
-    "build:frontend": "pnpm --filter recaply-frontend build",
-    "build:app": "pnpm build && electron-builder --mac",
-    "preview": "pnpm --filter recaply-frontend preview",
-    "lint": "pnpm -r lint",
-    "check:electron": "node --check electron/main.cjs && node --check electron/backend.cjs && node --check electron/window.cjs && node --check electron/preload.cjs && node --check electron/config.cjs && node --check electron/logger.cjs",
-    "migrate:outputs": "node scripts/migrate-outputs.cjs",
-    "clean": "pnpm -r clean && find . -name '.DS_Store' -delete"
-  },
-  "keywords": [
-    "langgraph",
-    "ai",
-    "work-summary",
-    "typescript",
-    "electron"
+  "workspaces": [
+    "apps/*"
   ],
-  "devDependencies": {
-    "concurrently": "^9.1.2",
-    "electron": "^39.2.7",
-    "electron-builder": "^25.1.8",
-    "wait-on": "^8.0.1"
-  },
-  "build": {
-    "appId": "com.recaply.app",
-    "productName": "Recaply",
-    "files": [
-      "frontend/dist/**/*",
-      "electron/**/*",
-      "backend/dist/**/*",
-      "backend/.env"
-    ],
-    "extraResources": [
-      {
-        "from": "backend/config.json",
-        "to": "config.json"
-      }
-    ],
-    "mac": {
-      "category": "public.app-category.productivity",
-      "target": [
-        "dmg"
-      ]
-    }
+  "scripts": {
+    "dev:agent": "node apps/agent/src/server.mjs",
+    "dev:mcp": "node apps/mcp/src/server.mjs",
+    "seed": "node apps/agent/src/seed.mjs",
+    "test": "node --test"
   }
 }
+

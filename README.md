@@ -1,194 +1,116 @@
-# Electron 桌面应用模板
+# RecapSense（MVP 骨架）
 
-一个开箱即用的 Electron 桌面应用开发模板，集成现代化前端技术栈。
+目标：做一个本地、全天候运行的「记忆」管线（屏幕 → OCR → 长期 chunks → 搜索/RAG），同时提供本地 HTTP API 和 MCP server（stdio）供外部工具/LLM 调用。
 
-## 技术栈
+当前仓库是一个 MVP 骨架，重点在：
 
-| 技术 | 说明 |
-|------|------|
-| [Electron](https://www.electronjs.org/) | 跨平台桌面应用框架 |
-| [Vite](https://vitejs.dev/) | 下一代前端构建工具 |
-| [React 19](https://react.dev/) | UI 框架 |
-| [TypeScript](https://www.typescriptlang.org/) | 类型安全 |
-| [Tailwind CSS 4](https://tailwindcss.com/) | 原子化 CSS |
-| [shadcn/ui](https://ui.shadcn.com/) | 高质量组件库 |
-| [Jotai](https://jotai.org/) | 原子化状态管理 |
-| [pnpm](https://pnpm.io/) | 快速的包管理器 |
+- `apps/agent`：本地 Node.js Agent（HTTP + SQLite/FTS）  
+- `apps/mcp`：MCP server（stdio），提供只读工具（先从 `recapsense_search` 开始）  
+- `apps/collector-macos`：macOS 原生采集端（最小可用：截图 → dHash 去重 → Vision OCR → 写入 frames）
 
-## 快速开始
+## 兼容性提示：SQLite FTS
 
-### 1. 克隆模板并初始化
+如果你启动 Agent 时遇到 `no such module: fts5`，说明当前环境的 SQLite 构建缺少 FTS 模块。
 
-```bash
-git clone https://github.com/IM594/electron-vite-react-shadcn-ui-starterkit.git my-app
-cd my-app
+本项目会在启动时尽力创建全文索引（优先 fts5，其次 fts4）；如果无法创建，会自动降级为 `LIKE` 搜索（能跑通闭环，但长远性能会差）。
 
-rm -rf .git
-git init
-git add .
-git commit -m "chore: init project based on electron-vite-react-shadcn-ui-starterkit"
-```
+## 约定
 
-### 2. 安装依赖
+- 仓库内的**注释**与**文档**统一使用中文。
+- 代码标识符、API 路径、工具名保持英文（便于兼容与跨端集成）。
+- 全部待办事项统一写在 `TODO.md`，并要求每次提交前维护更新。
+
+## 快速开始（开发环境）
+
+1）启动 agent：
 
 ```bash
-pnpm install
-
-# pnpm 会忽略 build scripts，需要批准 Electron
-pnpm approve-builds electron
+npm run dev:agent
 ```
 
-按空格键选择 `electron`，回车确认，然后输入 `true` 批准执行。
+它会在 `./.recapsense/`（开发默认）创建本地数据目录，并在 `./.recapsense/secret/token` 生成访问 token。
 
-如果忘记批准，也可以手动安装：
+2）插入一些 demo chunks：
 
 ```bash
-node node_modules/electron/install.js
+npm run seed
 ```
 
-### 3. 启动开发
+3）调用本地 HTTP API：
 
 ```bash
-pnpm dev
+TOKEN="$(cat .recapsense/secret/token)"
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:4832/v1/search?q=demo&limit=5"
 ```
 
-## 命令
-
-| 命令 | 说明 |
-|------|------|
-| `pnpm dev` | 启动开发模式（热重载） |
-| `pnpm run build` | 构建 React 应用 |
-| `pnpm run build:app` | 打包成 `.dmg` 安装包 |
-
-## 项目结构
-
-```
-electron-demo/
-├── electron/
-│   └── main.cjs           # Electron 主进程
-├── src/
-│   ├── components/ui/     # shadcn 组件
-│   ├── lib/               # 工具函数
-│   ├── App.tsx            # 主应用组件
-│   ├── main.tsx           # React 入口
-│   └── index.css          # 全局样式
-├── components.json        # shadcn 配置
-├── vite.config.ts         # Vite 配置
-├── tailwind.config.js     # Tailwind 配置
-└── package.json
-```
-
-## 开发指南
-
-### 添加 shadcn 组件
+4）启动 MCP server（stdio）：
 
 ```bash
-# 查看可用组件
-npx shadcn@latest add
-
-# 添加指定组件
-npx shadcn@latest add button
-npx shadcn@latest add input
-npx shadcn@latest add dialog
+npm run dev:mcp
 ```
 
-### 修改应用名称
+如果你要从 MCP 客户端连接，配置它启动这个命令即可：
 
-编辑 `package.json`：
+```bash
+node apps/mcp/src/server.mjs
+```
 
-```json
+MCP server 会读取 `./.recapsense/secret/token`，并调用本地 agent：`http://127.0.0.1:4832`。
+
+如果你需要在更受限的环境运行（例如端口监听被限制），Agent 也支持 Unix Domain Socket（UDS），MCP 会在设置 `RECAPSENSE_AGENT_SOCKET` 后优先走 socket。
+
+### Claude Desktop 配置示例（仅本机）
+
+示例片段（路径请按你的机器实际情况修改）：
+
+```jsonc
 {
-  "name": "your-app-name",
-  "build": {
-    "productName": "你的应用名称"
+  "mcpServers": {
+    "recapsense": {
+      "command": "node",
+      "args": ["apps/mcp/src/server.mjs"],
+      "env": {
+        "RECAPSENSE_AGENT_URL": "http://127.0.0.1:4832",
+        "RECAPSENSE_DATA_DIR": "/absolute/path/to/recapsense/.recapsense"
+      }
+    }
   }
 }
 ```
 
-### 修改窗口设置
+如果你不想传 `RECAPSENSE_DATA_DIR`，也可以直接传 `RECAPSENSE_API_TOKEN`。
 
-编辑 `electron/main.cjs`：
+## 数据目录与迁移（换电脑）
 
-```javascript
-const win = new BrowserWindow({
-  width: 1200,
-  height: 800,
-  titleBarStyle: "hiddenInset",  // macOS 风格
-  ...
-})
-```
+- 开发默认数据目录：`./.recapsense/`
+- 推荐 macOS app 数据目录：`~/Library/Application Support/RecapSense/`
 
-### 状态管理
+针对 “B 模式”（长期保存文本记忆；截图/音频只保留热窗口，比如 30 天），迁移很简单：
 
-使用 Jotai：
+- 把 `db/` 目录下的数据库文件（例如 `db/recapsense.db`）复制到新机器的数据目录。
+- `media/`（如果有）属于热证据数据，可选迁移。
+- `secret/token` 属于本机访问 token，不建议跨机复用；在新机器重新生成即可。
 
-```typescript
-import { atom, useAtom } from 'jotai'
+## 数据模型（高层）
 
-// 创建原子
-const countAtom = atom(0)
+我们采用 “B 模式”留存模型：
 
-// 使用
-function Counter() {
-  const [count, setCount] = useAtom(countAtom)
-  return <button onClick={() => setCount(c => c + 1)}>{count}</button>
-}
-```
+- **长期**：只保存文本型 `chunks` 与 `daily summaries`（几十年可用）。
+- **热窗口**：可选“证据”（截图/音频），只保留有限时间（默认 30 天）。
+- **派生索引**：全文索引（FTS）以及后续 embeddings/向量索引都应可重建。
 
-## 打包分发
+## 下一步里程碑
 
-### macOS
+- 继续完善 macOS 采集端（多屏、ScreenCaptureKit、去重/黑名单策略等）。
+- 补齐“frames → chunks”压实任务（定时、可恢复）。
+- 加 embeddings + 混合检索（FTS + 向量）。
+- 增加更多 MCP 工具（get_chunk / get_daily_summary / ask）。
 
-```bash
-pnpm run build:app
-```
+## 预留：LLM 视觉增强
 
-生成的 `dist/ElectronDemo.dmg` 可直接分发。
+我们已经在数据库层预留了 “视觉增强（vision enrichment）” 的任务与产物结构：
 
-### Windows / Linux
+- `vision_jobs`：用于任务调度/重试/预算控制（未来会在 Agent 中异步跑）
+- `vision_extractions`：用于存储 LLM 视觉抽取出来的文本与结构化信息（长期保存，参与检索/RAG）
 
-修改 `package.json` 的 build 配置添加对应平台：
-
-```json
-{
-  "build": {
-    "mac": { "target": ["dmg"] },
-    "win": { "target": ["nsis"] },
-    "linux": { "target": ["AppImage"] }
-  }
-}
-```
-
-## 常见问题
-
-### Electron 启动报错
-
-```bash
-node node_modules/electron/install.js
-```
-
-### 白屏问题
-
-确保 `electron/main.cjs` 中：
-
-- `backgroundColor` 与应用背景色一致
-- 使用 `show: false` + `ready-to-show` 事件
-
-### pnpm 构建脚本被阻止
-
-在 `.npmrc` 中已配置：
-```
-enable-pre-post-scripts=true
-```
-
-## 支持平台
-
-- macOS (Intel + Apple Silicon)
-- Windows (x64 + ARM)
-- Linux
-
-## 资源
-
-- [Electron 文档](https://www.electronjs.org/docs)
-- [shadcn/ui 组件](https://ui.shadcn.com/docs/components)
-- [Vite 文档](https://vitejs.dev/)
+当前阶段暂不启用，先保证“截图 + OCR + 压实 + 搜索 + MCP”闭环跑通。

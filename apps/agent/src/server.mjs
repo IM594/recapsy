@@ -1,0 +1,314 @@
+import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+import { resolveDataDir } from "./paths.mjs";
+import { loadOrCreateApiToken } from "./secrets.mjs";
+import { openDatabase } from "./db.mjs";
+import { createStore } from "./store.mjs";
+import { readJson, requireAuth, sendJson } from "./http.mjs";
+
+const DEFAULT_HOST = "127.0.0.1";
+const DEFAULT_PORT = 4832;
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed;
+}
+
+function resolveSocketPath(dataDir) {
+  const raw = process.env.RECAPSENSE_AGENT_SOCKET;
+  if (!raw || raw.trim() === "") return null;
+
+  const trimmed = raw.trim();
+  if (trimmed === "1" || trimmed.toLowerCase() === "true") {
+    return path.join(dataDir, "run", "agent.sock");
+  }
+
+  if (path.isAbsolute(trimmed)) return trimmed;
+  return path.join(dataDir, trimmed);
+}
+
+async function removeFileIfExists(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ENOENT") return;
+    throw error;
+  }
+}
+
+function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseLimit(value, fallback = 20) {
+  if (value == null) return fallback;
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(1, Math.min(100, parsed));
+}
+
+async function main() {
+  const dataDir = resolveDataDir();
+  const token = await loadOrCreateApiToken(dataDir);
+  const { db, withTransaction } = await openDatabase(dataDir);
+  const store = createStore(db, { withTransaction });
+
+  const host = process.env.RECAPSENSE_AGENT_HOST ?? DEFAULT_HOST;
+  const disableTcp = process.env.RECAPSENSE_AGENT_DISABLE_TCP === "1";
+  const port = Number.parseInt(
+    process.env.RECAPSENSE_AGENT_PORT ?? String(DEFAULT_PORT),
+    10
+  );
+  const socketPath = resolveSocketPath(dataDir);
+
+  const evidenceRetentionDays = parsePositiveInt(
+    process.env.RECAPSENSE_EVIDENCE_RETENTION_DAYS,
+    30
+  );
+  const evidenceCleanupIntervalMinutes = parsePositiveInt(
+    process.env.RECAPSENSE_EVIDENCE_CLEANUP_INTERVAL_MINUTES,
+    60
+  );
+
+  // 尽力而为的后台压实任务（frames → chunks），失败不影响主流程。
+  const compactionIntervalMs = 30_000;
+  const compactionTimer = setInterval(() => {
+    try {
+      const { createdChunks } = store.compactFramesToChunks();
+      if (createdChunks > 0) {
+        console.log(`[agent] compacted frames -> ${createdChunks} chunks`);
+      }
+    } catch (error) {
+      console.warn("[agent] compaction error:", error);
+    }
+  }, compactionIntervalMs);
+  compactionTimer.unref();
+
+  // 尽力而为的日总结生成（纯文本 heuristic），失败不影响主流程。
+  const dailySummaryIntervalMs = 10 * 60_000;
+  const dailySummaryTimer = setInterval(() => {
+    try {
+      const today = formatLocalDate(new Date());
+      const yesterday = formatLocalDate(new Date(Date.now() - 24 * 60 * 60_000));
+      store.ensureDailySummary(today);
+      store.ensureDailySummary(yesterday);
+    } catch (error) {
+      console.warn("[agent] daily summary error:", error);
+    }
+  }, dailySummaryIntervalMs);
+  dailySummaryTimer.unref();
+
+  function resolveSafePath(maybeRelativePath) {
+    const raw = String(maybeRelativePath ?? "").trim();
+    if (!raw) return null;
+    if (path.isAbsolute(raw)) return null;
+
+    const absolute = path.resolve(dataDir, raw);
+    const root = path.resolve(dataDir);
+    if (!absolute.startsWith(root + path.sep)) {
+      return null;
+    }
+    return absolute;
+  }
+
+  async function cleanupEvidence({
+    retentionDays = evidenceRetentionDays,
+    maxFramesPerRun = 5000,
+  } = {}) {
+    const retentionMs = Number(retentionDays) * 24 * 60 * 60_000;
+    const cutoffTs = Date.now() - retentionMs;
+
+    const deleted = store.deleteExpiredEvidenceFrames({
+      cutoffTs,
+      maxFramesPerRun,
+    });
+
+    let deletedFiles = 0;
+    let skippedPaths = 0;
+    let fileErrors = 0;
+
+    for (const filePath of deleted.filePaths) {
+      const absolute = resolveSafePath(filePath);
+      if (!absolute) {
+        skippedPaths += 1;
+        continue;
+      }
+      try {
+        await fs.unlink(absolute);
+        deletedFiles += 1;
+      } catch (error) {
+        if (error && typeof error === "object" && error.code === "ENOENT") {
+          continue;
+        }
+        fileErrors += 1;
+        console.warn("[agent] cleanup file error:", absolute, error);
+      }
+    }
+
+    return {
+      retentionDays: Number(retentionDays),
+      cutoffTs,
+      deletedFrames: deleted.deletedFrames,
+      deletedFiles,
+      skippedPaths,
+      fileErrors,
+    };
+  }
+
+  const evidenceCleanupTimer = setInterval(() => {
+    cleanupEvidence()
+      .then((result) => {
+        if (result.deletedFrames > 0 || result.deletedFiles > 0) {
+          console.log(
+            `[agent] cleanup evidence: frames=${result.deletedFrames} files=${result.deletedFiles} (retentionDays=${result.retentionDays})`
+          );
+        }
+        if (result.fileErrors > 0) {
+          console.warn(
+            `[agent] cleanup evidence had fileErrors=${result.fileErrors}`
+          );
+        }
+      })
+      .catch((error) => {
+        console.warn("[agent] cleanup evidence error:", error);
+      });
+  }, evidenceCleanupIntervalMinutes * 60_000);
+  evidenceCleanupTimer.unref();
+
+  console.log(`[agent] dataDir: ${dataDir}`);
+  console.log(`[agent] tokenFile: ${dataDir}/secret/token`);
+  console.log(`[agent] tokenHint: ****${token.slice(-6)}`);
+
+  const handler = async (req, res) => {
+    try {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
+
+      if (url.pathname === "/health") {
+        return sendJson(res, 200, { ok: true });
+      }
+
+      if (!url.pathname.startsWith("/v1/")) {
+        return sendJson(res, 404, { error: "Not found" });
+      }
+
+      requireAuth(req, token);
+
+      if (req.method === "GET" && url.pathname === "/v1/search") {
+        const query = url.searchParams.get("q") ?? "";
+        const limit = parseLimit(url.searchParams.get("limit"), 20);
+        const results = store.searchChunks({ query, limit });
+        return sendJson(res, 200, { results });
+      }
+
+      if (req.method === "GET" && url.pathname.startsWith("/v1/chunks/")) {
+        const chunkId = url.pathname.slice("/v1/chunks/".length);
+        const chunk = store.getChunk(chunkId);
+        if (!chunk) {
+          return sendJson(res, 404, { error: "Chunk not found" });
+        }
+        return sendJson(res, 200, { chunk });
+      }
+
+      if (req.method === "GET" && url.pathname === "/v1/summaries/daily") {
+        const date = url.searchParams.get("date") ?? formatLocalDate(new Date());
+        const summary = store.ensureDailySummary(date);
+        return sendJson(res, 200, { summary });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/ingest/frame") {
+        const body = await readJson(req);
+        const result = store.ingestFrame(body ?? {});
+        return sendJson(res, 200, { frame: result });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/ingest/chunk") {
+        const body = await readJson(req);
+        const result = store.upsertChunk(body ?? {});
+        return sendJson(res, 200, { chunk: result });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/maintenance/cleanup") {
+        const body = await readJson(req);
+        const retentionDays = parsePositiveInt(
+          body?.retentionDays,
+          evidenceRetentionDays
+        );
+        const maxFramesPerRun = parsePositiveInt(body?.maxFramesPerRun, 5000);
+        const result = await cleanupEvidence({ retentionDays, maxFramesPerRun });
+        return sendJson(res, 200, { result });
+      }
+
+      return sendJson(res, 404, { error: "Not found" });
+    } catch (error) {
+      const statusCode = Number(error?.statusCode ?? 500);
+      const message = error instanceof Error ? error.message : String(error);
+      return sendJson(res, statusCode, { error: message });
+    }
+  };
+
+  async function listenTcp() {
+    if (disableTcp) return false;
+
+    const server = http.createServer(handler);
+    return new Promise((resolve) => {
+      const onError = (error) => {
+        console.error("[agent] tcp listen error:", error);
+        resolve(false);
+      };
+
+      server.once("error", onError);
+      server.listen(port, host, () => {
+        server.off("error", onError);
+        server.on("error", (error) => {
+          console.error("[agent] tcp server error:", error);
+        });
+
+        console.log(`[agent] listening: http://${host}:${port}`);
+
+        resolve(true);
+      });
+    });
+  }
+
+  async function listenSocket() {
+    if (!socketPath) return false;
+
+    await fs.mkdir(path.dirname(socketPath), { recursive: true });
+    await removeFileIfExists(socketPath);
+
+    const server = http.createServer(handler);
+    return new Promise((resolve) => {
+      const onError = (error) => {
+        console.error("[agent] socket listen error:", error);
+        resolve(false);
+      };
+
+      server.once("error", onError);
+      server.listen(socketPath, () => {
+        server.off("error", onError);
+        server.on("error", (error) => {
+          console.error("[agent] socket server error:", error);
+        });
+
+        console.log(`[agent] listening (unix socket): ${socketPath}`);
+        resolve(true);
+      });
+    });
+  }
+
+  const [tcpOk, socketOk] = await Promise.all([listenTcp(), listenSocket()]);
+  if (!tcpOk && !socketOk) {
+    throw new Error("No listeners started (tcp + unix socket both failed)");
+  }
+}
+
+main().catch((error) => {
+  console.error("[agent] fatal:", error);
+  process.exitCode = 1;
+});

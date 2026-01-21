@@ -1,61 +1,102 @@
-# TODO
+# TODO / 路线图（需维护）
 
-> Last updated: 2026-01-23 02:40
->
-> 使用规则：
-> - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
-> - 所有重构/改动都必须符合下面的“一致性执行口径”（DRY、常量集中、生命周期对称、错误不吞、架构边界）。
+## 维护规则（重要）
 
-## 一致性执行口径（必须遵守）
-- **DRY（唯一来源）**：同一业务逻辑/规则只能有一个实现与一个入口；复用必须通过公共函数、hook、service 或共享模块完成；禁止复制粘贴形成“多份真相”。
-- **命名与常量**：命名必须表达意图、可检索；禁止 magic number / magic string；常量、枚举、配置、key、事件名必须集中定义；业务逻辑不得散落在 UI/各处。
-- **状态对称与资源生命周期**：任何“开启”必须有对应“关闭”；订阅/定时器/连接/监听必须 cleanup；副作用要成对出现且创建点与销毁点可追踪。
-- **错误不吞**：所有 `catch` 必须处理或记录日志（带上下文）；禁止空 `catch`、禁止忽略 Promise rejection；降级/重试/上报必须显式实现。
-- **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
+- 本文件用于记录 **RecapSense 的全部待办事项（TODO）**，包含技术债、功能计划、已知风险与阻塞项。
+- **每次提交（commit）之前必须更新本文件**：
+  - 把本次提交完成的事项勾选为 `- [x]`
+  - 新增的 TODO 要补充背景/原因（为什么做）与最小验收标准（怎么算完成）
+  - 如调整优先级，请在对应条目里注明原因（性能/隐私/成本/依赖变化等）
 
-## In Progress（P0，一致性优先）
-- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes、HTTP/query/body keys、summary types、workflow step/phase、date/week utils（ISO week）、ErrorResponse 结构；继续清理散落 magic string（尤其是 query keys / event names / config keys）
+## 当前状态（截至本次）
 
-## Next（P0）
-- [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
-- [ ] C-004 生命周期审计：梳理全局订阅/轮询/SSE/进程/窗口事件，确保创建与销毁成对且可追踪
-- [ ] B-003 继续下沉业务逻辑：把组件内的数据拼装/筛选/判定抽到 hook/service（优先：UnifiedBoard 以外的生成/预览/侧栏）
+- 已有最小骨架：
+  - Node.js Agent（HTTP + SQLite/FTS）：`apps/agent/src/server.mjs`
+  - MCP Server（stdio，工具：`recapsense_search`）：`apps/mcp/src/server.mjs`
+  - 数据库迁移框架（v1 schema + v2 视觉增强预留表）：`apps/agent/src/db.mjs`
+- 视觉增强（LLM Vision）已做数据库与协议占位，尚未实现 worker：`apps/agent/src/migrations/0002_vision.sql`
+- 日总结默认“无声自动生成”（启发式文本摘要，后续可替换为 LLM 总结）：`apps/agent/src/store.mjs`
 
-## Deferred（按你要求：语言相关暂缓）
-- [ ] L-001 增加回归检查：避免新增硬编码 UI 文案（可选）
-- [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
+## P0（必须先跑通的最小闭环：截图→OCR→入库→搜索→MCP）
 
-## Done (recent)
-- [x] Backend patterns 对齐：抽 `backend/src/services/summary-service.ts` / `backend/src/services/summary-regeneration.ts`，`backend/src/api/routes/summary.ts` 只做校验与转发；补齐 `backend/src/api/validators/summary.ts`；统一周计算到 `shared/src/lib/date.ts`
-- [x] 后端日志单一入口：移除 `backend/src/api/server.ts` / `backend/src/lib/workflow-runner.ts` 的直接 `console.*`，统一走 `backend/src/lib/logger.ts`；新增 `DEBUG_HTTP` / `DEBUG_WORKFLOW_PROGRESS` 噪声开关（`backend/src/config/constants.ts`）
-- [x] C-008 ESLint 一致性护栏（frontend）：开启 `no-console`、`no-empty`、`@typescript-eslint/no-floating-promises`（src 范围）；修复存量 floating promises；`src/lib/logger.ts` 允许 console
-- [x] B-004 YearEndGenerator 收敛：workflow step→UI step 映射集中到 `frontend/src/constants/workflow.ts`；phase 判断统一使用 `WORKFLOW_PHASES`；补齐 effect deps / 避免潜在 floating promise
-- [x] B-002 UnifiedBoard 下沉：新增 `frontend/src/hooks/useUnifiedBoard.ts` 承担数据拼装、选择加载、repo 选择；组件只保留渲染与最少交互胶水
-- [x] workflow step/phase 单一真相：新增 `shared/src/constants/workflow.ts` 并替换前后端散落字符串（`currentStep`/`phase`/`type` 判断等）
-- [x] 生命周期对称（前端）：为 effect 内异步请求增加 `AbortController` 并在 cleanup abort；SSE EventSource 的 add/removeEventListener 成对出现；轮询/重连定时器均可追踪与可清理
-- [x] 前端错误日志单一入口：新增 `frontend/src/lib/logger.ts`，并替换主要 catch/console.error 为 `logError(scope, error, context)`（保证不吞错且可检索）
-- [x] B-001 后端一致性收尾：收敛 `backend/src/lib/git.ts` 的日志与错误处理（移除 `console.*`、禁止空 `catch`），并明确允许降级的错误（`git fetch` / 单 commit stats/diff 失败）
-- [x] C-007 输出目录单一真相：统一读写 `userData/outputs`，并提供 `scripts/migrate-outputs.cjs` 迁移历史 `backend/outputs`（避免“多份真相”导致数据看似丢失）
-- [x] C-005 错误处理基线（后端）：增加 requestId、统一 async handler + error middleware（兼容旧 `{ error: string }`），并为关键链路补齐上下文日志（routes / SummaryStore / WorkflowRunner）
-- [x] SummaryStore 自愈：`index.json` 缺失/损坏时从磁盘重建，降低“数据看起来丢失”的概率
-- [x] 引入 `shared/` 工作区包：作为跨端常量/协议的唯一来源（为 C-003 打底）
-- [x] C-001 配置唯一入口：新增后端 `backend/src/config/` 作为唯一入口；统一 `.env`/`config.json`/env 注入优先级，并替换关键散落读取点（port/rootPath/includeStat/outputDir）
-- [x] Electron dev 冒烟通过：`pnpm dev` 启动后 UI/接口正常（本机确认）
-- [x] 修复 Electron 模块解析：CommonJS `require()` 显式使用 `.cjs` 后缀（避免 `Cannot find module './config'`）
-- [x] 输出目录一致性：通过 `RECAPLY_OUTPUT_DIR` 统一 backend 落盘路径（避免 prod 写入不可写目录）
-- [x] Electron 运行冒烟：`pnpm dev` 启动后确认 UI/接口正常（需要本机 GUI）
-- [x] 统一 Electron：拆分模块（config/logger/backend/window/preload）+ 收敛启动/退出流程
-- [x] Electron 一致性重构：新增 `electron/config.cjs` / `electron/logger.cjs` / `electron/backend.cjs` / `electron/window.cjs` / `electron/preload.cjs`
-- [x] Electron 安全默认：`nodeIntegration=false` + `contextIsolation=true`，并通过 preload 暴露最小运行时信息（如 `homeDir`）
-- [x] 统一 UI 文案：用户可见文案集中到 `frontend/src/constants/copy.ts` 并保持英文
-- [x] 将 UI 文案集中到 constants（为后续 i18n 做准备）
-- [x] 多年份支持 + 年份切换（后端 `/api/summary/years` + 前端 `YearSwitcher`）
-- [x] Daily 多 repo 必须弹 repo 选择（生成弹窗 + Unified Board + Sidebar）
-- [x] 前端 API 调用集中到 service 层，抽共享 types（commit: `621ae5b`）
-- [x] workflow `status.result` 解析收敛 + Vite env typing + SSE debug 开关（commit: `03458f3`）
-- [x] 后端 repos 扫描日志统一使用 `logger`（commit: `7184123`）
-- [x] Electron 主进程入口清理：删除重复的 `electron/main.js`
-- [x] `SummaryContext` SSE payload 去 `any` + 类型化解析
-- [x] 日期/月选择器复用：抽 `YearCalendar` + `MonthSelect`，并在两处复用
-- [x] Electron 主进程日志与注释风格统一（`electron/main.cjs`）
-- [x] 后端日志统一为英文 + 降噪（`backend/src/api/server.ts`, `backend/src/lib/logger.ts`）
+- [ ] 实现 macOS Collector（最小版 CLI/常驻进程）
+  - 采集：每 5 秒截图（macOS 13+；当前先用 `CGDisplayCreateImage`，后续可替换为 ScreenCaptureKit）→ 下采样 → dHash 去重 → Vision OCR
+  - 写入：调用 Agent `POST /v1/ingest/frame`（带 token）
+  - [x] SwiftPM 可执行程序骨架：`apps/collector-macos`
+  - [x] 已实现：截图 + dHash 去重 + Vision OCR + 写入 `frames` + 缩略图写盘（可关）
+  - 验收：能在本机连续采集 10 分钟，`/v1/search` 与 MCP `recapsense_search` 能搜到当天内容
+- [x] 证据热窗口（默认 30 天）目录规范
+  - 缩略图按日期分桶（`media/thumbnails/YYYY-MM-DD/...`）
+  - DB 只存相对路径或可迁移路径（避免硬编码绝对路径）
+  - 已在 collector 落地：默认写入 `${RECAPSENSE_DATA_DIR}/media/thumbnails/YYYY-MM-DD/<ts>_<hash>.jpg`，并在 `frames.thumbnail_path` 存相对路径
+- [x] 证据清理任务（热窗口策略落地）
+  - 删除超过 30 天的 frames 与缩略图文件
+  - 仅清理热证据，不影响长期 chunks/summaries（B 模式）
+  - 已实现：`POST /v1/maintenance/cleanup` + 定时清理（默认每 60 分钟），并支持配置保留天数
+  - 安全性：只清理已压实（`chunk_id IS NOT NULL`）的 frames，避免因为压实滞后导致数据丢失
+  - 验收：可配置、可手动触发、可观察（日志/返回值）
+- [x] 解决“受限环境端口监听失败（EPERM）”的运行方式（可选其一）
+  - 已实现：Agent 支持 Unix Domain Socket（UDS），并可选择禁用 TCP 端口监听
+  - 配置：`RECAPSENSE_AGENT_SOCKET`（默认 `${RECAPSENSE_DATA_DIR}/run/agent.sock`），`RECAPSENSE_AGENT_DISABLE_TCP=1`
+  - MCP：支持通过 UDS 调用 Agent（设置同名环境变量即可）
+
+## P1（长期记忆可用：压实、迁移、可控）
+
+- [ ] 解决“FTS 模块缺失”导致的性能隐患（长期必须）
+  - 背景：在部分 Node/SQLite 构建中可能缺少 `fts5/fts4`，当前已做自动降级为 LIKE（能跑通，但数据量大时会很慢）
+  - 方向：评估并切换到“自带 fts5 的 SQLite 绑定/发行形态”（例如 `better-sqlite3` 或 `libsql`），或提供可控的 SQLite 构建方案
+  - 验收：在目标发布环境中 `chunks_fts` 能创建成功，搜索返回稳定排序（含 score），并能在 10 万 chunks 规模下保持可用延迟
+- [ ] 改进 frames→chunks 压实策略（减少重复与噪声）
+  - 更稳切分：按 app/window + gap + OCR 文本变化
+  - chunk 合并/更新策略（避免频繁生成碎片）
+  - 验收：同一窗口连续工作 30 分钟，chunks 数量与内容合理、无大量重复段
+- [ ] 做“导出/导入（换电脑）”能力（B 模式优先）
+  - 导出：`chunks + daily summaries + 配置 + manifest`（热证据可选）
+  - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
+  - 验收：新机器导入后，搜索与日总结可用
+- [ ] 做基础设置（先简单）
+  - 采集间隔（默认 5 秒）
+  - 缩略图开关（默认开）
+  - 热窗口天数（默认 30 天）
+  - 暂停/恢复（含定时暂停）
+- [ ] 数据目录约定与 macOS 推荐路径落地
+  - 默认开发：`./.recapsense/`
+  - 发布形态：`~/Library/Application Support/RecapSense/`
+
+## P2（RAG：混合检索与引用）
+
+- [ ] Embeddings 管线（只对 chunk 级别）
+  - 新增表：embeddings（记录 model/version/dim）
+  - 增量计算：只对新增/变更 chunk 算 embedding
+  - 验收：可对少量 chunks 计算 embedding，并可在检索中使用
+- [ ] 混合检索：FTS（精确）+ 向量（语义）+ 时间过滤
+  - 先做简单版：FTS 召回 TopN 后向量重排（成本低、实现快）
+  - 后续再上 ANN（HNSW / 本地向量服务）
+- [ ] `ask` API（本地只读）
+  - 输入：问题 + 可选时间范围
+  - 输出：答案 + 引用（chunk id + 时间戳 + app/window）
+  - 验收：能回答“我今天主要在做什么/找某个链接”并给出处
+- [ ] MCP 工具扩展（保持简单）
+  - [ ] `recapsense_get_chunk`
+  - [ ] `recapsense_get_daily_summary`
+  - （后续）`recapsense_ask`
+
+## P3（增强：LLM 视觉、音频、Littlebird 方向）
+
+- [ ] 视觉增强 worker（策略性触发，不对每帧调用）
+  - jobs：写 `vision_jobs`（预算/重试/黑名单/白名单）
+  - extractions：写 `vision_extractions`（长期保存可检索文本 + JSON）
+  - 验收：对每个 chunk 选 1 张关键帧做抽取，搜索可命中抽取文本
+- [ ] 音频（mic + 可选系统音频）
+  - mic：VAD 分段 + 云端 ASR（先快）
+  - 系统音频：优先 ScreenCaptureKit（macOS 13+），否则提供回环设备方案
+- [ ] 更贴近 Littlebird 的 text-first（后续可替换截图 OCR）
+  - Accessibility（AX）读取可见文本
+  - 浏览器扩展提供 URL/DOM 文本（域名黑名单）
+
+## 安全与隐私（贯穿所有阶段）
+
+- [ ] App/域名黑名单（默认排除敏感场景）
+- [ ] “危险区域”删除：删除最近 1 小时/1 天/全部
+- [ ] 加密策略（至少导出包加密；本地加密可后置）
+- [ ] 对外接口默认只绑定本机（127.0.0.1 或 UDS），并强制 token
