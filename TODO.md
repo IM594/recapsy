@@ -1,14 +1,14 @@
 # TODO
 
-> Last updated: 2026-01-21 22:56
+> Last updated: 2026-01-21 23:08
 >
 > 规则：每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
 
 ## In Progress
-- [ ] 统一后端日志语言：`backend/src/api/server.ts` + `backend/src/lib/logger.ts` 输出改为英文并减少噪音
+- [ ] 统一 UI 文案：确保用户可见内容始终英文（并加简单约束/检查）
 
 ## Next
-- [ ] 统一 UI 文案：确保用户可见内容始终英文（并加简单约束/检查）
+- [ ] 将 UI 文案集中到 constants（可选：为后续 i18n 做准备）
 
 ## Done (recent)
 - [x] 多年份支持 + 年份切换（后端 `/api/summary/years` + 前端 `YearSwitcher`）
@@ -20,3 +20,4 @@
 - [x] `SummaryContext` SSE payload 去 `any` + 类型化解析
 - [x] 日期/月选择器复用：抽 `YearCalendar` + `MonthSelect`，并在两处复用
 - [x] Electron 主进程日志与注释风格统一（`electron/main.cjs`）
+- [x] 后端日志统一为英文 + 降噪（`backend/src/api/server.ts`, `backend/src/lib/logger.ts`）

@@ -1,5 +1,5 @@
 /**
- * 日志工具 - 美化后端输出
+ * Logger utility for backend output.
  */
 
 // ANSI 颜色码
@@ -17,7 +17,7 @@ const colors = {
 };
 
 function timestamp(): string {
-  return new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  return new Date().toLocaleTimeString("en-GB", { hour12: false });
 }
 
 function formatDuration(ms: number): string {
@@ -28,13 +28,13 @@ function formatDuration(ms: number): string {
 
 export const logger = {
   /**
-   * 任务开始 - 打印分隔线和任务头
+   * Task start - prints a section header.
    */
   taskStart(taskName: string, details?: Record<string, any>) {
     console.log("");
     console.log(`${colors.cyan}${"═".repeat(60)}${colors.reset}`);
     console.log(
-      `${colors.bright}🚀 ${taskName}${colors.reset}  ${
+      `${colors.bright}▶ ${taskName}${colors.reset}  ${
         colors.gray
       }[${timestamp()}]${colors.reset}`
     );
@@ -49,14 +49,14 @@ export const logger = {
   },
 
   /**
-   * 任务完成
+   * Task done
    */
   taskEnd(taskName: string, duration?: number, result?: string) {
     console.log(`${colors.cyan}${"─".repeat(60)}${colors.reset}`);
     console.log(
-      `${colors.green}✅ ${taskName} 完成${colors.reset}` +
+      `${colors.green}✔ ${taskName} finished${colors.reset}` +
         (duration
-          ? `  ${colors.gray}耗时: ${formatDuration(duration)}${colors.reset}`
+          ? `  ${colors.gray}time: ${formatDuration(duration)}${colors.reset}`
           : "") +
         (result ? `  ${colors.dim}→ ${result}${colors.reset}` : "")
     );
@@ -65,11 +65,11 @@ export const logger = {
   },
 
   /**
-   * 任务失败
+   * Task failed
    */
   taskError(taskName: string, error: Error | string) {
     console.log(`${colors.cyan}${"─".repeat(60)}${colors.reset}`);
-    console.log(`${colors.red}❌ ${taskName} 失败${colors.reset}`);
+    console.log(`${colors.red}✖ ${taskName} failed${colors.reset}`);
     console.log(
       `   ${colors.red}${typeof error === "string" ? error : error.message}${
         colors.reset
@@ -80,7 +80,7 @@ export const logger = {
   },
 
   /**
-   * 步骤开始
+   * Step start
    */
   step(icon: string, message: string, details?: Record<string, any>) {
     console.log(
@@ -98,7 +98,7 @@ export const logger = {
   },
 
   /**
-   * 步骤完成
+   * Step done
    */
   stepDone(message: string, duration?: number) {
     console.log(
@@ -110,14 +110,14 @@ export const logger = {
   },
 
   /**
-   * 信息日志
+   * Info
    */
   info(message: string) {
     console.log(`   ${colors.dim}│${colors.reset} ${message}`);
   },
 
   /**
-   * 调试信息
+   * Debug
    */
   debug(label: string, value: any) {
     const valueStr =
@@ -130,14 +130,14 @@ export const logger = {
   },
 
   /**
-   * 警告
+   * Warning
    */
   warn(message: string) {
-    console.log(`   ${colors.yellow}⚠ ${message}${colors.reset}`);
+    console.log(`   ${colors.yellow}! ${message}${colors.reset}`);
   },
 
   /**
-   * 错误
+   * Error
    */
   error(message: string, error?: Error) {
     console.log(`   ${colors.red}✗ ${message}${colors.reset}`);
