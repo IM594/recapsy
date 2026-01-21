@@ -1,5 +1,36 @@
 import { ulid } from "./ids.mjs";
 
+function safeJsonParse(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneDefaults() {
+  return {
+    collector: {
+      intervalSeconds: 5,
+      dedupeThreshold: 2,
+      thumbnailEnabled: true,
+      thumbnailMaxWidth: 420,
+      ocrLevel: "fast",
+      ocrLanguages: ["zh-Hans", "en-US"],
+    },
+    agent: {
+      evidenceRetentionDays: 30,
+      evidenceCleanupIntervalMinutes: 60,
+    },
+  };
+}
+
 function normalizeText(text) {
   return String(text ?? "")
     .replace(/\r\n/g, "\n")
@@ -31,6 +62,19 @@ function detectChunksFtsMode(db) {
 }
 
 export function createStore(db, { withTransaction }) {
+  const listSettingsStmt = db.prepare(
+    `SELECT key, value_json
+     FROM settings`
+  );
+
+  const upsertSettingStmt = db.prepare(
+    `INSERT INTO settings (key, value_json, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET
+       value_json=excluded.value_json,
+       updated_at=excluded.updated_at`
+  );
+
   const insertFrameStmt = db.prepare(
     `INSERT INTO frames (
         ts, app, window_title, ocr_text, phash,
@@ -353,6 +397,166 @@ export function createStore(db, { withTransaction }) {
     return { date: dateStr, startTs, endTs, summary };
   }
 
+  function readAllSettingsRows() {
+    try {
+      return listSettingsStmt.all();
+    } catch {
+      // 兼容旧库或迁移失败的极端情况：返回空，让上层走默认值。
+      return [];
+    }
+  }
+
+  function getSettings() {
+    const settings = cloneDefaults();
+    const rows = readAllSettingsRows();
+
+    for (const row of rows) {
+      const key = String(row.key ?? "");
+      const parsed = safeJsonParse(row.value_json);
+      if (parsed == null) continue;
+
+      // 我们只读取“已知 key”，避免未来扩展时污染当前返回结构。
+      switch (key) {
+      case "collector.intervalSeconds": {
+        const value = Number(parsed);
+        if (Number.isFinite(value) && value > 0) settings.collector.intervalSeconds = value;
+        break;
+      }
+      case "collector.dedupeThreshold": {
+        const value = Number.parseInt(String(parsed), 10);
+        if (Number.isFinite(value) && value >= 0) settings.collector.dedupeThreshold = value;
+        break;
+      }
+      case "collector.thumbnailEnabled": {
+        if (typeof parsed === "boolean") settings.collector.thumbnailEnabled = parsed;
+        break;
+      }
+      case "collector.thumbnailMaxWidth": {
+        const value = Number.parseInt(String(parsed), 10);
+        if (Number.isFinite(value) && value > 0) settings.collector.thumbnailMaxWidth = value;
+        break;
+      }
+      case "collector.ocrLevel": {
+        const value = String(parsed);
+        if (value === "fast" || value === "accurate") settings.collector.ocrLevel = value;
+        break;
+      }
+      case "collector.ocrLanguages": {
+        if (Array.isArray(parsed)) {
+          const langs = parsed
+            .map((x) => String(x).trim())
+            .filter((x) => x);
+          if (langs.length > 0) settings.collector.ocrLanguages = langs;
+        }
+        break;
+      }
+      case "agent.evidenceRetentionDays": {
+        const value = Number.parseInt(String(parsed), 10);
+        if (Number.isFinite(value) && value > 0) settings.agent.evidenceRetentionDays = value;
+        break;
+      }
+      case "agent.evidenceCleanupIntervalMinutes": {
+        const value = Number.parseInt(String(parsed), 10);
+        if (Number.isFinite(value) && value > 0) settings.agent.evidenceCleanupIntervalMinutes = value;
+        break;
+      }
+      default:
+        break;
+      }
+    }
+
+    return settings;
+  }
+
+  function patchSettings(patch) {
+    if (!isPlainObject(patch)) {
+      throw new Error("settings patch must be an object");
+    }
+
+    const now = Date.now();
+    const updates = [];
+
+    if (isPlainObject(patch.collector)) {
+      const c = patch.collector;
+      if (c.intervalSeconds != null) {
+        const value = Number(c.intervalSeconds);
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("collector.intervalSeconds must be a positive number");
+        }
+        updates.push(["collector.intervalSeconds", JSON.stringify(value)]);
+      }
+      if (c.dedupeThreshold != null) {
+        const value = Number.parseInt(String(c.dedupeThreshold), 10);
+        if (!Number.isFinite(value) || value < 0) {
+          throw new Error("collector.dedupeThreshold must be >= 0");
+        }
+        updates.push(["collector.dedupeThreshold", JSON.stringify(value)]);
+      }
+      if (c.thumbnailEnabled != null) {
+        if (typeof c.thumbnailEnabled !== "boolean") {
+          throw new Error("collector.thumbnailEnabled must be boolean");
+        }
+        updates.push(["collector.thumbnailEnabled", JSON.stringify(c.thumbnailEnabled)]);
+      }
+      if (c.thumbnailMaxWidth != null) {
+        const value = Number.parseInt(String(c.thumbnailMaxWidth), 10);
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("collector.thumbnailMaxWidth must be a positive integer");
+        }
+        updates.push(["collector.thumbnailMaxWidth", JSON.stringify(value)]);
+      }
+      if (c.ocrLevel != null) {
+        const value = String(c.ocrLevel);
+        if (value !== "fast" && value !== "accurate") {
+          throw new Error("collector.ocrLevel must be fast|accurate");
+        }
+        updates.push(["collector.ocrLevel", JSON.stringify(value)]);
+      }
+      if (c.ocrLanguages != null) {
+        if (!Array.isArray(c.ocrLanguages)) {
+          throw new Error("collector.ocrLanguages must be an array of strings");
+        }
+        const langs = c.ocrLanguages
+          .map((x) => String(x).trim())
+          .filter((x) => x);
+        if (langs.length === 0) {
+          throw new Error("collector.ocrLanguages must not be empty");
+        }
+        updates.push(["collector.ocrLanguages", JSON.stringify(langs)]);
+      }
+    }
+
+    if (isPlainObject(patch.agent)) {
+      const a = patch.agent;
+      if (a.evidenceRetentionDays != null) {
+        const value = Number.parseInt(String(a.evidenceRetentionDays), 10);
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("agent.evidenceRetentionDays must be a positive integer");
+        }
+        updates.push(["agent.evidenceRetentionDays", JSON.stringify(value)]);
+      }
+      if (a.evidenceCleanupIntervalMinutes != null) {
+        const value = Number.parseInt(String(a.evidenceCleanupIntervalMinutes), 10);
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("agent.evidenceCleanupIntervalMinutes must be a positive integer");
+        }
+        updates.push(["agent.evidenceCleanupIntervalMinutes", JSON.stringify(value)]);
+      }
+    }
+
+    if (updates.length === 0) {
+      return getSettings();
+    }
+
+    withTransaction(db, () => {
+      for (const [key, valueJson] of updates) {
+        upsertSettingStmt.run(String(key), String(valueJson), now);
+      }
+    });
+
+    return getSettings();
+  }
+
   function upsertDailySummary({ date, startTs, endTs, summary }) {
     const now = Date.now();
     const dateStr = String(date);
@@ -525,6 +729,8 @@ export function createStore(db, { withTransaction }) {
   }
 
   return {
+    getSettings,
+    patchSettings,
     ingestFrame,
     upsertChunk,
     getChunk,

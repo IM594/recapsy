@@ -152,6 +152,7 @@ export async function migrate(db) {
   const migrations = [
     { version: 1, sql: () => loadSchemaSql() },
     { version: 2, sql: () => loadMigrationSql("./migrations/0002_vision.sql") },
+    { version: 3, sql: () => loadMigrationSql("./migrations/0003_settings.sql") },
   ];
 
   for (const migration of migrations) {

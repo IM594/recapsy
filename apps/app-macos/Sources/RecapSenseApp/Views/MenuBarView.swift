@@ -3,7 +3,6 @@ import SwiftUI
 
 struct MenuBarView: View {
   @EnvironmentObject var supervisor: Supervisor
-  @Environment(\.openWindow) private var openWindow
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -19,9 +18,7 @@ struct MenuBarView: View {
       Divider()
 
       Button("打开主窗口") {
-        openWindow(id: "main")
-        // 让窗口立刻获得焦点（否则可能只在后台创建出来，用户以为“没打开”）。
-        NSApp.activate(ignoringOtherApps: true)
+        MainWindowController.shared.show(supervisor: supervisor)
       }
 
       Divider()

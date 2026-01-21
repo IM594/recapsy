@@ -67,15 +67,6 @@ async function main() {
   );
   const socketPath = resolveSocketPath(dataDir);
 
-  const evidenceRetentionDays = parsePositiveInt(
-    process.env.RECAPSENSE_EVIDENCE_RETENTION_DAYS,
-    30
-  );
-  const evidenceCleanupIntervalMinutes = parsePositiveInt(
-    process.env.RECAPSENSE_EVIDENCE_CLEANUP_INTERVAL_MINUTES,
-    60
-  );
-
   // 尽力而为的后台压实任务（frames → chunks），失败不影响主流程。
   const compactionIntervalMs = 30_000;
   const compactionTimer = setInterval(() => {
@@ -118,10 +109,12 @@ async function main() {
   }
 
   async function cleanupEvidence({
-    retentionDays = evidenceRetentionDays,
+    retentionDays,
     maxFramesPerRun = 5000,
   } = {}) {
-    const retentionMs = Number(retentionDays) * 24 * 60 * 60_000;
+    const effectiveRetentionDays =
+      retentionDays ?? store.getSettings().agent.evidenceRetentionDays;
+    const retentionMs = Number(effectiveRetentionDays) * 24 * 60 * 60_000;
     const cutoffTs = Date.now() - retentionMs;
 
     const deleted = store.deleteExpiredEvidenceFrames({
@@ -152,7 +145,7 @@ async function main() {
     }
 
     return {
-      retentionDays: Number(retentionDays),
+      retentionDays: Number(effectiveRetentionDays),
       cutoffTs,
       deletedFrames: deleted.deletedFrames,
       deletedFiles,
@@ -161,25 +154,36 @@ async function main() {
     };
   }
 
-  const evidenceCleanupTimer = setInterval(() => {
-    cleanupEvidence()
-      .then((result) => {
-        if (result.deletedFrames > 0 || result.deletedFiles > 0) {
-          console.log(
-            `[agent] cleanup evidence: frames=${result.deletedFrames} files=${result.deletedFiles} (retentionDays=${result.retentionDays})`
-          );
-        }
-        if (result.fileErrors > 0) {
-          console.warn(
-            `[agent] cleanup evidence had fileErrors=${result.fileErrors}`
-          );
-        }
-      })
-      .catch((error) => {
-        console.warn("[agent] cleanup evidence error:", error);
-      });
-  }, evidenceCleanupIntervalMinutes * 60_000);
-  evidenceCleanupTimer.unref();
+  // 证据清理任务：从 settings 读取间隔，允许 UI 动态修改后生效（无需重启 Agent）。
+  const scheduleEvidenceCleanup = () => {
+    const intervalMinutes = store.getSettings().agent.evidenceCleanupIntervalMinutes;
+    const delayMs = Math.max(1, Number(intervalMinutes)) * 60_000;
+
+    const timer = setTimeout(() => {
+      cleanupEvidence()
+        .then((result) => {
+          if (result.deletedFrames > 0 || result.deletedFiles > 0) {
+            console.log(
+              `[agent] cleanup evidence: frames=${result.deletedFrames} files=${result.deletedFiles} (retentionDays=${result.retentionDays})`
+            );
+          }
+          if (result.fileErrors > 0) {
+            console.warn(
+              `[agent] cleanup evidence had fileErrors=${result.fileErrors}`
+            );
+          }
+        })
+        .catch((error) => {
+          console.warn("[agent] cleanup evidence error:", error);
+        })
+        .finally(() => {
+          scheduleEvidenceCleanup();
+        });
+    }, delayMs);
+    timer.unref();
+  };
+
+  scheduleEvidenceCleanup();
 
   console.log(`[agent] dataDir: ${dataDir}`);
   console.log(`[agent] tokenFile: ${dataDir}/secret/token`);
@@ -198,6 +202,17 @@ async function main() {
       }
 
       requireAuth(req, token);
+
+      if (req.method === "GET" && url.pathname === "/v1/settings") {
+        const settings = store.getSettings();
+        return sendJson(res, 200, { settings });
+      }
+
+      if (req.method === "PATCH" && url.pathname === "/v1/settings") {
+        const body = await readJson(req);
+        const settings = store.patchSettings(body ?? {});
+        return sendJson(res, 200, { settings });
+      }
 
       if (req.method === "GET" && url.pathname === "/v1/search") {
         const query = url.searchParams.get("q") ?? "";
@@ -237,7 +252,7 @@ async function main() {
         const body = await readJson(req);
         const retentionDays = parsePositiveInt(
           body?.retentionDays,
-          evidenceRetentionDays
+          store.getSettings().agent.evidenceRetentionDays
         );
         const maxFramesPerRun = parsePositiveInt(body?.maxFramesPerRun, 5000);
         const result = await cleanupEvidence({ retentionDays, maxFramesPerRun });

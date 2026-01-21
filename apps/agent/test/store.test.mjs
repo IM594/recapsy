@@ -84,3 +84,36 @@ test("store: ensureDailySummary generates text summary", async () => {
   assert.equal(summary.date, dateStr);
   assert.match(summary.summary, /每日总结/);
 });
+
+test("store: settings read + patch", async () => {
+  const dataDir = await makeTempDir();
+  const { db, withTransaction } = await openDatabase(dataDir);
+  const store = createStore(db, { withTransaction });
+
+  const initial = store.getSettings();
+  assert.equal(initial.collector.intervalSeconds, 5);
+  assert.equal(initial.collector.dedupeThreshold, 2);
+  assert.equal(initial.collector.thumbnailEnabled, true);
+  assert.equal(initial.agent.evidenceRetentionDays, 30);
+
+  const updated = store.patchSettings({
+    collector: {
+      intervalSeconds: 3,
+      dedupeThreshold: 1,
+      thumbnailEnabled: false,
+    },
+    agent: {
+      evidenceRetentionDays: 7,
+    },
+  });
+
+  assert.equal(updated.collector.intervalSeconds, 3);
+  assert.equal(updated.collector.dedupeThreshold, 1);
+  assert.equal(updated.collector.thumbnailEnabled, false);
+  assert.equal(updated.agent.evidenceRetentionDays, 7);
+
+  assert.throws(
+    () => store.patchSettings({ collector: { intervalSeconds: 0 } }),
+    /intervalSeconds/
+  );
+});

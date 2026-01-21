@@ -7,8 +7,6 @@ struct SupervisorConfig: Equatable {
 
   var agentSocketEnabled: Bool
 
-  var collectorIntervalSeconds: Double
-
   var logsDir: URL {
     dataDir.appendingPathComponent("logs", isDirectory: true)
   }
@@ -42,14 +40,11 @@ struct SupervisorConfig: Equatable {
 
     let agentSocketEnabled = (env["RECAPSENSE_AGENT_SOCKET"] ?? "1") != "0"
 
-    let interval = Double(env["RECAPSENSE_COLLECTOR_INTERVAL_SECONDS"] ?? "5") ?? 5
-
     return SupervisorConfig(
       repoRoot: repoRoot,
       dataDir: dataDir,
       agentUrl: agentUrl,
-      agentSocketEnabled: agentSocketEnabled,
-      collectorIntervalSeconds: interval
+      agentSocketEnabled: agentSocketEnabled
     )
   }
 }

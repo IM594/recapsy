@@ -7,6 +7,7 @@
 - 菜单栏（Menu Bar）入口：显示状态、启动/停止采集与本机服务（后续完善）
 - 主窗口：先做搜索与日志（聊天后置，只预留入口）
 - Supervisor：统一托管子进程生命周期（Agent/MCP/Collector），并把日志写入数据目录
+- 设置页：可调整采集间隔/去重/缩略图/证据保留等（设置存 Agent 的 SQLite `settings` 表）
 
 > 说明：为了先跑通闭环、降低工程复杂度，本目录暂时不做 .app 打包/签名/notarize；后续会补齐发布形态（DMG/PKG + 开机自启 + 自动更新等）。
 
@@ -44,6 +45,12 @@ npm run dev:app:macos
    - `采集（Collector）`
 
 4. 点击“打开主窗口”，在“搜索”页直接搜索（query 为空表示最近内容）。
+
+## 当前行为（MVP）
+
+- 应用启动后会尝试自动启动：Agent + MCP（SSE）+ Collector（如果你的开发环境 PATH 里有 node）。
+- 点击 Dock 图标会打开主窗口（如果主窗口没打开过/已关闭）。
+- 日志落盘位置：`${RECAPSENSE_DATA_DIR}/logs/*.log`
 
 ### 常见问题：`env: node: No such file or directory`
 

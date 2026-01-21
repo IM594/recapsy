@@ -59,10 +59,10 @@
   - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
   - 验收：新机器导入后，搜索与日总结可用
 - [ ] 做基础设置（先简单）
-  - 采集间隔（默认 5 秒）
-  - 缩略图开关（默认开）
-  - 热窗口天数（默认 30 天）
-  - 暂停/恢复（含定时暂停）
+  - [x] 采集间隔（默认 5 秒；可在 UI 设置中调整，存入 SQLite settings）
+  - [x] 缩略图开关（默认开；可在 UI 设置中调整，存入 SQLite settings）
+  - [x] 热窗口天数（默认 30 天；可在 UI 设置中调整，存入 SQLite settings）
+  - [ ] 暂停/恢复（含定时暂停）
 - [ ] 数据目录约定与 macOS 推荐路径落地
   - 默认开发：`./.recapsense/`
   - 发布形态：`~/Library/Application Support/RecapSense/`
@@ -73,7 +73,10 @@
   - [x] 修复：启动子进程时继承 PATH（避免出现 `env: node: No such file or directory`）
   - [x] 修复：主窗口使用单实例（避免“打开主窗口”点多次弹出多个）
   - [x] 修复：菜单栏应用在 Dock/Cmd-Tab 可见（为未来聊天主窗口做准备）
+  - [x] 修复：Dock 点击可打开主窗口（并临时设置 SF Symbol 图标，避免黑色 exec）
+  - [x] 自动启动：应用启动后默认启动 Agent + MCP（SSE）+ Collector
   - [x] 主窗口：搜索（调用 Agent `GET /v1/search`）+ 日志（展示 logs tail）
+  - [x] 主窗口：设置页（调用 Agent `/v1/settings`；设置存 SQLite `settings` 表）
   - [x] 聊天入口占位（不实现交互）
   - 菜单栏（Menu bar）职责（先做功能，样式后置）：
     - 状态：采集中/暂停/错误（状态灯 + 简要文字）

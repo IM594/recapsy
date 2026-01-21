@@ -37,6 +37,8 @@ token 默认存放在：
 ## 接口（MVP）
 
 - `GET /health`（无需鉴权）：健康检查
+- `GET /v1/settings`：获取设置（来自 SQLite `settings` 表）
+- `PATCH /v1/settings`：更新设置（写入 SQLite `settings` 表）
 - `GET /v1/search?q=...&limit=...`：搜索 chunks（FTS）；`q` 为空则返回最近 chunks
 - `GET /v1/chunks/:id`：按 id 获取 chunk
 - `GET /v1/summaries/daily?date=YYYY-MM-DD`：获取（并尽力自动生成）日总结
@@ -47,6 +49,7 @@ token 默认存放在：
 - `POST /v1/maintenance/cleanup`：清理过期“热证据”（frames + 缩略图文件）
   - 说明：只清理 **已经被压实进 chunks 的 frames**（`chunk_id IS NOT NULL`），避免数据丢失
   - body（可选）：`{ retentionDays?: number, maxFramesPerRun?: number }`
+    - retentionDays 默认取 `settings.agent.evidenceRetentionDays`
   - response：`{ result: { deletedFrames, deletedFiles, cutoffTs, ... } }`
 
 ## 预留接口（未实现，仅做协议占位）
@@ -127,6 +130,17 @@ token 默认存放在：
     - 相对路径：相对 `${RECAPSENSE_DATA_DIR}`（便于迁移）
   - 说明：默认仍会监听 `127.0.0.1:4832`，用于兼容 collector（Swift 的 URLSession 不支持 UDS）
 - `RECAPSENSE_AGENT_DISABLE_TCP=1`：只启用 UDS，不监听 TCP 端口（用于受限环境/更严格的本机隔离）
-- `RECAPSENSE_EVIDENCE_RETENTION_DAYS`：热证据保留天数（默认 `30`）
-- `RECAPSENSE_EVIDENCE_CLEANUP_INTERVAL_MINUTES`：清理任务运行间隔分钟数（默认 `60`）
 - `RECAPSENSE_DISABLE_FTS=1`：强制禁用 FTS（排障用；会降级为 LIKE 搜索）
+
+## 设置（SQLite settings 表）
+
+开发期我们把“用户设置”统一存放在数据库的 `settings` 表里，并提供 `/v1/settings` 读写接口。
+
+当前已使用/约定的 key（后续会扩展）：
+
+- `collector.intervalSeconds`：采集间隔秒数（默认 `5`）
+- `collector.dedupeThreshold`：dHash 去重阈值（默认 `2`）
+- `collector.thumbnailEnabled`：是否写入缩略图（默认 `true`）
+- `collector.thumbnailMaxWidth`：缩略图最大宽度（默认 `420`）
+- `agent.evidenceRetentionDays`：热证据保留天数（默认 `30`）
+- `agent.evidenceCleanupIntervalMinutes`：清理任务间隔分钟数（默认 `60`）

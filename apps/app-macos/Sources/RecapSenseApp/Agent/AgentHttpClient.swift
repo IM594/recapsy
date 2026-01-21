@@ -19,6 +19,49 @@ struct AgentHttpClient {
     self.token = token
   }
 
+  func getSettings() async throws -> RecapSenseSettings {
+    let url = baseURL.appendingPathComponent("/v1/settings")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    struct Payload: Decodable { let settings: RecapSenseSettings }
+    return try JSONDecoder().decode(Payload.self, from: data).settings
+  }
+
+  func patchSettings(_ patch: RecapSenseSettings) async throws -> RecapSenseSettings {
+    let url = baseURL.appendingPathComponent("/v1/settings")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "PATCH"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+    request.httpBody = try JSONEncoder().encode(patch)
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    struct Payload: Decodable { let settings: RecapSenseSettings }
+    return try JSONDecoder().decode(Payload.self, from: data).settings
+  }
+
   func search(query: String, limit: Int) async throws -> [SearchResultItem] {
     var url = baseURL.appendingPathComponent("/v1/search")
     var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
@@ -60,4 +103,3 @@ struct AgentHttpClient {
     return token
   }
 }
-
