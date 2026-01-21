@@ -22,8 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { format } from "date-fns";
-import { getSummaryApiUrl } from "@/lib/api";
-import type { GenerationConfig, SummaryType } from "../hooks/useSummary";
+import {
+  fetchDailySummaries,
+  fetchMonthlySummaries,
+  fetchWeeklySummaries,
+  fetchYearlySummary,
+} from "@/services/summary";
+import type { GenerationConfig, SummaryType } from "@/types/summary";
 
 type GenerationType = SummaryType;
 
@@ -100,30 +105,26 @@ export function GenerationPreview({
     setChecking(true);
     setExists(false);
     try {
-      const res = await fetch(
-        getSummaryApiUrl(`/data?type=${type}&year=${year}`)
-      );
-      if (res.ok) {
-        const data = await res.json();
-        let found = false;
+      let found = false;
 
-        // 统一使用 rangeStart 来匹配，保证与 dateRange 计算一致
-        if (type === "daily") {
-          // rangeStart 就是目标日期 YYYY-MM-DD
-          found = data.some((d: { date: string }) => d.date === rangeStart);
-        } else if (type === "weekly") {
-          // rangeStart 是周一日期
-          found = data.some((d: { weekStart: string }) => d.weekStart === rangeStart);
-        } else if (type === "monthly") {
-          // 从 rangeStart (月初日期) 提取月份 YYYY-MM
-          const targetMonth = rangeStart.substring(0, 7);
-          found = data.some((d: { month: string }) => d.month === targetMonth);
-        } else if (type === "yearly") {
-          found = !!data.content;
-        }
-
-        setExists(found);
+      // Match by rangeStart to stay consistent with getDateRangeForType().
+      if (type === "daily") {
+        found = (await fetchDailySummaries(year)).some((d) => d.date === rangeStart);
+      } else if (type === "weekly") {
+        found = (await fetchWeeklySummaries(year)).some(
+          (d) => d.weekStart === rangeStart
+        );
+      } else if (type === "monthly") {
+        const targetMonth = rangeStart.substring(0, 7);
+        found = (await fetchMonthlySummaries(year)).some(
+          (d) => d.month === targetMonth
+        );
+      } else if (type === "yearly") {
+        const data = await fetchYearlySummary(year);
+        found = !!data?.content;
       }
+
+      setExists(found);
     } catch (error) {
       console.error("Failed to check existence", error);
     } finally {

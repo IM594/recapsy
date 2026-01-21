@@ -19,7 +19,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { SettingsDialog } from "./SettingsDialog";
 import { GenerationPreview } from "./GenerationPreview";
 import { toast } from "sonner";
-import type { GenerationConfig, SummaryType } from "@/hooks/useSummary";
+import type { GenerationConfig, SummaryType } from "@/types/summary";
 
 // Updated signature to match App.tsx
 type GenerationRequest = Pick<

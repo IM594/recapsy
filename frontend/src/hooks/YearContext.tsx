@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { getSummaryApiUrl } from "@/lib/api";
+import { fetchAvailableYears } from "@/services/summary";
 
 interface YearContextType {
   activeYear: number;
@@ -32,16 +32,7 @@ export function YearProvider({ children }: { children: ReactNode }) {
 
   const refreshAvailableYears = useCallback(async () => {
     try {
-      const res = await fetch(getSummaryApiUrl("/years"));
-      if (!res.ok) throw new Error("Failed to fetch years");
-      const data = (await res.json()) as { years?: number[] };
-
-      const yearsSet = new Set<number>([currentYear]);
-      for (const y of data.years || []) {
-        if (Number.isFinite(y)) yearsSet.add(y);
-      }
-
-      const years = Array.from(yearsSet).sort((a, b) => b - a);
+      const years = await fetchAvailableYears();
       setAvailableYears(years);
 
       // Ensure active year is always a valid option; fallback to currentYear.

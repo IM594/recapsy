@@ -17,10 +17,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { getSummaryApiUrl } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/hooks/useSettings";
 import { useSummary } from "@/hooks/useSummary";
+import { resetSummaryStatus } from "@/services/summary";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -165,15 +165,7 @@ export function YearEndGenerator({
     // If we need to reset checkpoint (regenerate mode)
     if (shouldResetCheckpoint) {
       try {
-        const res = await fetch(getSummaryApiUrl("/reset"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ year }),
-        });
-        if (!res.ok) {
-          toast.error("Failed to reset status");
-          return;
-        }
+        await resetSummaryStatus(year);
       } catch {
         toast.error("Failed to reset status");
         return;

@@ -1,31 +1,16 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { getSummaryApiUrl } from "@/lib/api";
 
 import { useSummary } from "@/hooks/useSummary";
+import { regenerateSummary } from "@/services/summary";
 import { JournalSidebar } from "./unified-board/JournalSidebar";
 import { JournalEntry } from "./unified-board/JournalEntry";
+import { RepoPickerDialog } from "@/components/RepoPickerDialog";
 import {
   Structure,
   NavigationNode,
   DailyInfo,
 } from "./unified-board/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 interface UnifiedBoardProps {
   year?: number;
@@ -42,9 +27,9 @@ export function UnifiedBoard({
   const [repoPicker, setRepoPicker] = useState<{
     open: boolean;
     date: string;
-    options: string[];
+    repos: string[];
     repo: string;
-  }>({ open: false, date: "", options: [], repo: "" });
+  }>({ open: false, date: "", repos: [], repo: "" });
 
   const {
     getYearlySummary,
@@ -80,7 +65,7 @@ export function UnifiedBoard({
 
       // Organize daily data by month (preserve repo info)
       const monthMap = new Map<string, DailyInfo[]>();
-      (dailyData || []).forEach((d: { date: string; repo: string }) => {
+      (dailyData || []).forEach((d) => {
         const month = d.date.substring(0, 7);
         if (!monthMap.has(month)) monthMap.set(month, []);
         // Avoid duplicates
@@ -89,16 +74,13 @@ export function UnifiedBoard({
           existing.push({
             date: d.date,
             repo: d.repo,
-            hasSummary: !!(d as any).summary,
+            hasSummary: !!d.summary,
           });
         }
       });
 
-      const monthlyByMonth = new Map<string, { month: string; summary?: string }>(
-        (monthlyData || []).map((m: { month: string; summary?: string }) => [
-          m.month,
-          m,
-        ])
+      const monthlyByMonth = new Map(
+        (monthlyData || []).map((m) => [m.month, m] as const)
       );
 
       const monthsSet = new Set<string>([
@@ -121,14 +103,12 @@ export function UnifiedBoard({
           }),
         })),
         weeks: (weeklyData || [])
-          .map(
-            (w: { weekStart: string; weekEnd: string; summary?: string }) => ({
-              weekStart: w.weekStart,
-              weekEnd: w.weekEnd,
-              hasSummary: !!w.summary,
-              title: `Week ${getWeekNumber(new Date(w.weekStart))}`,
-            })
-          )
+          .map((w) => ({
+            weekStart: w.weekStart,
+            weekEnd: w.weekEnd,
+            hasSummary: !!w.summary,
+            title: `Week ${getWeekNumber(new Date(w.weekStart))}`,
+          }))
           .sort(
             (
               a: {
@@ -159,26 +139,26 @@ export function UnifiedBoard({
     try {
       if (node.type === "yearly") {
         const data = await getYearlySummary(year);
-        setContent(data.content || "");
+        setContent(data?.content || "");
       } else if (node.type === "monthly") {
         const data = await getMonthlySummaries(year);
-        const monthData = data.find((m: any) => m.month === node.id);
+        const monthData = data.find((m) => m.month === node.id);
         setContent(monthData?.summary || "");
       } else if (node.type === "weekly") {
         const data = await getWeeklySummaries(year);
         // id is weekStart
-        const weekData = data.find((w: any) => w.weekStart === node.id);
+        const weekData = data.find((w) => w.weekStart === node.id);
         setContent(weekData?.summary || "");
       } else {
         const data = await getDailySummaries(year);
-        const matches = (data || []).filter((d: any) => d.date === node.id);
+        const matches = (data || []).filter((d) => d.date === node.id);
         if (matches.length === 0) {
           setContent("");
           return;
         }
 
         if (node.repo) {
-          const exact = matches.find((d: any) => d.repo === node.repo);
+          const exact = matches.find((d) => d.repo === node.repo);
           setContent(exact?.summary || "");
           return;
         }
@@ -190,15 +170,14 @@ export function UnifiedBoard({
         }
 
         const options = matches
-          .map((d: any) => d.repo)
-          .filter(Boolean)
+          .map((d) => d.repo)
           .slice()
           .sort((a: string, b: string) => a.localeCompare(b));
 
         setRepoPicker({
           open: true,
           date: node.id,
-          options,
+          repos: options,
           repo: options[0] || "",
         });
         setContent("");
@@ -221,34 +200,24 @@ export function UnifiedBoard({
 
     setRegenerating(true);
     try {
-      const res = await fetch(getSummaryApiUrl("/regenerate"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: selectedNode.type,
-          id: selectedNode.id,
-          year,
-          customPrompt: customPrompt.trim() || undefined,
-          repo: selectedNode.repo,
-        }),
+      const updated = await regenerateSummary({
+        type: selectedNode.type,
+        id: selectedNode.id,
+        year,
+        repo: selectedNode.repo,
+        customPrompt,
       });
 
-      const data = await res.json();
-
-      if (res.ok) {
-        toast.success("Regeneration successful!");
-        // Update local content
-        if (data.summary) setContent(data.summary);
-        else if (data.content) setContent(data.content);
-
-        // Reload structure and notify global state
-        fetchStructure();
-        refetchData();
-      } else {
-        toast.error(`Failed: ${data.error}`);
-      }
-    } catch {
-      toast.error("Network error during regeneration");
+      toast.success("Regeneration successful!");
+      setContent(updated);
+      fetchStructure();
+      refetchData();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Network error during regeneration";
+      toast.error(message);
     } finally {
       setRegenerating(false);
     }
@@ -264,65 +233,25 @@ export function UnifiedBoard({
 
   return (
     <>
-      <Dialog
+      <RepoPickerDialog
         open={repoPicker.open}
-        onOpenChange={(open) =>
-          setRepoPicker((prev) => ({ ...prev, open }))
-        }
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Select repository</DialogTitle>
-            <DialogDescription>
-              Multiple repositories have daily summaries for {repoPicker.date}.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2 py-2">
-            <Label>Repository</Label>
-            <Select
-              value={repoPicker.repo}
-              onValueChange={(repo) => setRepoPicker((prev) => ({ ...prev, repo }))}
-            >
-              <SelectTrigger aria-label="Select repository" className="bg-white">
-                <SelectValue placeholder="Select repository" />
-              </SelectTrigger>
-              <SelectContent>
-                {repoPicker.options.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setRepoPicker((prev) => ({ ...prev, open: false }))}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                const repo = repoPicker.repo;
-                if (!repo) return;
-                setSelectedNode((prev) => {
-                  if (!prev || prev.type !== "daily" || prev.id !== repoPicker.date) {
-                    return prev;
-                  }
-                  return { ...prev, repo };
-                });
-                setRepoPicker((prev) => ({ ...prev, open: false }));
-              }}
-              disabled={!repoPicker.repo}
-            >
-              Open
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={(open) => setRepoPicker((prev) => ({ ...prev, open }))}
+        date={repoPicker.date}
+        repos={repoPicker.repos}
+        repo={repoPicker.repo}
+        onRepoChange={(repo) => setRepoPicker((prev) => ({ ...prev, repo }))}
+        onConfirm={() => {
+          const repo = repoPicker.repo;
+          if (!repo) return;
+          setSelectedNode((prev) => {
+            if (!prev || prev.type !== "daily" || prev.id !== repoPicker.date) {
+              return prev;
+            }
+            return { ...prev, repo };
+          });
+          setRepoPicker((prev) => ({ ...prev, open: false }));
+        }}
+      />
 
       <div className="grid grid-cols-12 h-[calc(100vh-10rem)] bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
       {/* Sidebar - Timeline Navigation */}

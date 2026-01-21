@@ -9,48 +9,28 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { getSummaryApiUrl } from "@/lib/api";
+import {
+  fetchDailySummaries,
+  fetchMonthlySummaries,
+  fetchWeeklySummaries,
+  fetchYearlySummary,
+  resetSummaryStatus,
+  startSummaryGeneration,
+} from "@/services/summary";
 
-export interface SummaryStatus {
-  isRunning: boolean;
-  phase: string;
-  progress: number;
-  currentStep: string | null;
-  result?: any;
-}
+import type {
+  DailySummaryData,
+  GenerationConfig,
+  LogEntry,
+  MonthlySummaryData,
+  SSEEvent,
+  SummaryStatus,
+  SummaryType,
+  WeeklySummaryData,
+  YearlySummaryData,
+} from "@/types/summary";
 
-export type SummaryType = "daily" | "weekly" | "monthly" | "yearly";
-
-export interface GenerationConfig {
-  selectedRepos: string[];
-  since: string;
-  until: string;
-  summaryType: SummaryType;
-  year: number;
-  author?: string;
-}
-
-export interface LogEntry {
-  timestamp: string;
-  message: string;
-  type: "info" | "error" | "success";
-}
-
-/**
- * New SSE event format from LangGraph streaming
- */
-export interface SSEEvent {
-  nodeId: string;
-  state: {
-    progress?: number;
-    currentStep?: string;
-    phase?: string;
-    isRunning?: boolean;
-    message?: string;
-    result?: any;
-    error?: string;
-  };
-  timestamp: number;
-}
+export type { GenerationConfig, LogEntry, SSEEvent, SummaryStatus, SummaryType };
 
 interface SummaryContextType {
   status: SummaryStatus;
@@ -58,10 +38,10 @@ interface SummaryContextType {
   isConnected: boolean;
   dataVersion: number;
   startGeneration: (config: GenerationConfig) => Promise<void>;
-  getYearlySummary: (year?: number) => Promise<any>;
-  getDailySummaries: (year?: number) => Promise<any>;
-  getWeeklySummaries: (year?: number) => Promise<any>;
-  getMonthlySummaries: (year?: number) => Promise<any>;
+  getYearlySummary: (year?: number) => Promise<YearlySummaryData>;
+  getDailySummaries: (year?: number) => Promise<DailySummaryData[]>;
+  getWeeklySummaries: (year?: number) => Promise<WeeklySummaryData[]>;
+  getMonthlySummaries: (year?: number) => Promise<MonthlySummaryData[]>;
   resetStatus: (year?: number) => Promise<void>;
   refetchData: () => void;
 }
@@ -229,31 +209,21 @@ export function SummaryProvider({
   const startGeneration = useCallback(
     async (config: GenerationConfig) => {
       try {
-        const res = await fetch(getSummaryApiUrl("/generate"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...config,
-            author: config.author || "",
-          }),
-        });
-
-        if (!res.ok) {
-          const err = await res.json();
-          if (res.status === 409) {
-            toast.warning("A task is already running.");
-            if (err.status) setStatus(err.status);
-            return;
-          }
-          throw new Error(err.error || "Failed to start generation");
+        const result = await startSummaryGeneration(config);
+        if (result.kind === "already_running") {
+          toast.warning("A task is already running.");
+          setStatus(result.status);
+          return;
         }
 
         setStatus((prev) => ({ ...prev, isRunning: true, phase: "starting" }));
         setLogs([]);
         addLog("Started background generation task...", "info");
         toast.info("Started background generation task...");
-      } catch (error: any) {
-        toast.error(error.message);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to start generation";
+        toast.error(message);
       }
     },
     [addLog]
@@ -261,38 +231,31 @@ export function SummaryProvider({
 
   const getYearlySummary = useCallback(async (requestedYear?: number) => {
     const y = requestedYear ?? year;
-    const res = await fetch(getSummaryApiUrl(`/data?type=yearly&year=${y}`));
-    return res.json();
+    return fetchYearlySummary(y);
   }, [year]);
 
   const getDailySummaries = useCallback(async (requestedYear?: number) => {
     const y = requestedYear ?? year;
-    const res = await fetch(getSummaryApiUrl(`/data?type=daily&year=${y}`));
-    return res.json();
+    return fetchDailySummaries(y);
   }, [year]);
 
   const getMonthlySummaries = useCallback(async (requestedYear?: number) => {
     const y = requestedYear ?? year;
-    const res = await fetch(getSummaryApiUrl(`/data?type=monthly&year=${y}`));
-    return res.json();
+    return fetchMonthlySummaries(y);
   }, [year]);
 
   const getWeeklySummaries = useCallback(async (requestedYear?: number) => {
     const y = requestedYear ?? year;
-    const res = await fetch(getSummaryApiUrl(`/data?type=weekly&year=${y}`));
-    return res.json();
+    return fetchWeeklySummaries(y);
   }, [year]);
 
   const resetStatus = useCallback(async (requestedYear?: number) => {
     const y = requestedYear ?? year;
-    const res = await fetch(getSummaryApiUrl("/reset"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ year: y }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      setStatus(data.status);
+    try {
+      const next = await resetSummaryStatus(y);
+      setStatus(next);
+    } catch {
+      // Keep UI stable even if reset fails; callers can show toasts if needed.
     }
   }, [year]);
 

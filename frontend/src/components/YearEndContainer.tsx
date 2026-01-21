@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { YearEndGenerator } from "./YearEndGenerator";
 import { UnifiedBoard } from "./UnifiedBoard";
 import { Loader2 } from "lucide-react";
-import { getSummaryApiUrl } from "@/lib/api";
+import { fetchSummaryStatus } from "@/services/summary";
 
 interface YearEndContainerProps {
   initialYear?: number;
@@ -21,13 +21,8 @@ export function YearEndContainer({
   useEffect(() => {
     const checkStatus = async () => {
       try {
-        const statusRes = await fetch(
-          getSummaryApiUrl(`/status?year=${year}`)
-        );
-        if (statusRes.ok) {
-          const status = await statusRes.json();
-          setIsRunning(status.isRunning);
-        }
+        const status = await fetchSummaryStatus(year);
+        setIsRunning(!!status.isRunning);
       } catch (error) {
         console.error("Failed to check status", error);
       } finally {

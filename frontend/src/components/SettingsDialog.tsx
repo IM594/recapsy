@@ -15,16 +15,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { FolderSearch, Loader2, Save } from "lucide-react";
 import { useSettings } from "@/hooks/useSettings";
 import { toast } from "sonner";
-import { getApiUrl } from "@/lib/api";
+import { scanRepos as scanReposService } from "@/services/repos";
+import type { RepoInfo } from "@/types/repos";
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-interface Repo {
-  name: string;
-  path: string;
 }
 
 const STORAGE_KEY_SCAN_ROOT = "recaply_scan_root_path";
@@ -46,7 +42,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   const [selectedRepos, setSelectedRepos] = useState<string[]>(savedRepos);
   const [author, setAuthor] = useState(savedAuthor);
-  const [availableRepos, setAvailableRepos] = useState<Repo[]>([]);
+  const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanRootPath, setScanRootPath] = useState<string>(() => {
     return localStorage.getItem(STORAGE_KEY_SCAN_ROOT) || getDefaultScanRootPath();
@@ -66,13 +62,8 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setScanning(true);
     try {
       localStorage.setItem(STORAGE_KEY_SCAN_ROOT, scanRootPath);
-      const response = await fetch(
-        getApiUrl(`/repos?rootPath=${encodeURIComponent(scanRootPath)}`)
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableRepos(data.repos || []);
-      }
+      const repos = await scanReposService(scanRootPath);
+      setAvailableRepos(repos);
     } catch (error) {
       console.error("Scan failed", error);
       toast.error("Failed to scan repositories");

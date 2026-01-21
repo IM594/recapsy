@@ -40,6 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { getWeekMonday, toDateString } from "@/lib/date-utils";
+import { RepoPickerDialog } from "@/components/RepoPickerDialog";
 
 import { Structure, NavigationNode } from "./types";
 import { ContributionGraph } from "./ContributionGraph";
@@ -537,63 +538,25 @@ export function JournalSidebar({
       </Dialog>
 
       {/* Repo Picker Dialog (daily only) */}
-      <Dialog
+      <RepoPickerDialog
         open={repoPicker.open}
         onOpenChange={(open) => setRepoPicker((prev) => ({ ...prev, open }))}
-      >
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Select repository</DialogTitle>
-            <DialogDescription>
-              Multiple repositories have daily summaries for {repoPicker.date}.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2 py-2">
-            <Label>Repository</Label>
-            <Select
-              value={repoPicker.repo}
-              onValueChange={(repo) => setRepoPicker((prev) => ({ ...prev, repo }))}
-            >
-              <SelectTrigger aria-label="Select repository" className="bg-white">
-                <SelectValue placeholder="Select repository" />
-              </SelectTrigger>
-              <SelectContent>
-                {repoPicker.repos.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setRepoPicker((prev) => ({ ...prev, open: false }))}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => {
-                const month = repoPicker.date.substring(0, 7);
-                ensureMonthExpanded(month);
-                onSelect({
-                  type: "daily",
-                  id: repoPicker.date,
-                  repo: repoPicker.repo,
-                  label: repoPicker.date,
-                });
-                setRepoPicker((prev) => ({ ...prev, open: false }));
-              }}
-              disabled={!repoPicker.repo}
-            >
-              Open
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        date={repoPicker.date}
+        repos={repoPicker.repos}
+        repo={repoPicker.repo}
+        onRepoChange={(repo) => setRepoPicker((prev) => ({ ...prev, repo }))}
+        onConfirm={() => {
+          const month = repoPicker.date.substring(0, 7);
+          ensureMonthExpanded(month);
+          onSelect({
+            type: "daily",
+            id: repoPicker.date,
+            repo: repoPicker.repo,
+            label: repoPicker.date,
+          });
+          setRepoPicker((prev) => ({ ...prev, open: false }));
+        }}
+      />
 
       {/* Command Palette */}
       <CommandDialog open={openCommand} onOpenChange={setOpenCommand}>

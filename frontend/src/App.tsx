@@ -4,8 +4,8 @@ import { ArrowLeft, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { getSummaryApiUrl } from "@/lib/api";
 import { toDateString, toMonthString } from "@/lib/date-utils";
+import { regenerateSummary } from "@/services/summary";
 
 import { Dashboard } from "@/components/Dashboard";
 import { ResultCard } from "@/components/ResultCard";
@@ -13,8 +13,9 @@ import { YearEndContainer } from "@/components/YearEndContainer";
 import { YearSwitcher } from "@/components/YearSwitcher";
 import { SummaryProvider } from "@/hooks/SummaryContext";
 import { SettingsProvider, useSettings } from "@/hooks/useSettings";
-import { SummaryType, useSummary } from "@/hooks/useSummary";
+import { useSummary } from "@/hooks/useSummary";
 import { YearProvider, useYear } from "@/hooks/YearContext";
+import type { SummaryType } from "@/types/summary";
 
 type ViewState = "dashboard" | "review";
 
@@ -23,6 +24,21 @@ interface GenerationRequest {
   year: number;
   since: string;
   until: string;
+}
+
+type SummaryWorkflowResult = {
+  taskType?: SummaryType;
+  since?: string;
+  year?: number;
+  dailySummaries?: Array<{ date: string; repo: string; summary: string }>;
+  weeklySummaries?: Array<{ weekStart: string; summary: string }>;
+  monthlySummaries?: Array<{ month: string; summary: string }>;
+  content?: string;
+  result?: { content?: string };
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
 type GenerationContext =
@@ -67,21 +83,22 @@ function AppContent() {
   // Watch for completion
   useEffect(() => {
     if (!status.isRunning && status.phase === "complete" && status.result) {
-      const taskType = status.result.taskType as SummaryType | undefined;
-      const since = status.result.since as string | undefined;
+      if (!isRecord(status.result)) return;
+      const result = status.result as SummaryWorkflowResult;
+      const taskType = result.taskType;
+      const since = result.since;
+      const dailySummaries = result.dailySummaries;
+      const weeklySummaries = result.weeklySummaries;
+      const monthlySummaries = result.monthlySummaries;
 
       if (!taskType) return;
 
       // Find the most relevant summary based on the original selection.
-      if (taskType === "daily" && status.result.dailySummaries?.length > 0) {
+      if (taskType === "daily" && dailySummaries && dailySummaries.length > 0) {
         const targetDate = since ? toDateString(new Date(since)) : undefined;
         if (!targetDate) return;
 
-        const matches = (status.result.dailySummaries as Array<{
-          date: string;
-          repo: string;
-          summary: string;
-        }>).filter((d) => d.date === targetDate);
+        const matches = dailySummaries.filter((d) => d.date === targetDate);
 
         if (matches.length === 0) return;
 
@@ -99,7 +116,7 @@ function AppContent() {
         if (!defaultSummary) return;
 
         setGenerationResult({
-          year: status.result.year ?? activeYear,
+          year: result.year ?? activeYear,
           title: `Daily Brief (${targetDate})`,
           summary: defaultSummary,
           outputPath: "",
@@ -114,20 +131,20 @@ function AppContent() {
         return;
       } else if (
         taskType === "weekly" &&
-        status.result.weeklySummaries?.length > 0
+        weeklySummaries &&
+        weeklySummaries.length > 0
       ) {
         const targetWeekStart = since ? toDateString(new Date(since)) : undefined;
         if (!targetWeekStart) return;
 
-        const matched = (status.result.weeklySummaries as Array<{
-          weekStart: string;
-          summary: string;
-        }>).find((w) => w.weekStart === targetWeekStart);
+        const matched = weeklySummaries.find(
+          (w) => w.weekStart === targetWeekStart
+        );
 
         if (!matched?.summary) return;
 
         setGenerationResult({
-          year: status.result.year ?? activeYear,
+          year: result.year ?? activeYear,
           title: `Weekly Report (${targetWeekStart})`,
           summary: matched.summary,
           outputPath: "",
@@ -139,20 +156,20 @@ function AppContent() {
         return;
       } else if (
         taskType === "monthly" &&
-        status.result.monthlySummaries?.length > 0
+        monthlySummaries &&
+        monthlySummaries.length > 0
       ) {
         const targetMonth = since ? toMonthString(new Date(since)) : undefined;
         if (!targetMonth) return;
 
-        const matched = (status.result.monthlySummaries as Array<{
-          month: string;
-          summary: string;
-        }>).find((m) => m.month === targetMonth);
+        const matched = monthlySummaries.find(
+          (m) => m.month === targetMonth
+        );
 
         if (!matched?.summary) return;
 
         setGenerationResult({
-          year: status.result.year ?? activeYear,
+          year: result.year ?? activeYear,
           title: `Monthly Summary (${targetMonth})`,
           summary: matched.summary,
           outputPath: "",
@@ -163,14 +180,14 @@ function AppContent() {
         });
         return;
       }
-      // 年度总结的特殊格式
-      else if (status.result.result?.content) {
-        const content = String(status.result.result.content);
+      // Year-end workflow has a different nested payload shape.
+      else if (result.result?.content) {
+        const content = String(result.result.content);
         if (!content) return;
 
-        const y = String(status.result.year ?? activeYear);
+        const y = String(result.year ?? activeYear);
         setGenerationResult({
-          year: status.result.year ?? activeYear,
+          year: result.year ?? activeYear,
           title: `Yearly Review (${y})`,
           summary: content,
           outputPath: "",
@@ -181,18 +198,18 @@ function AppContent() {
         });
         return;
       }
-      // 最后的 fallback
-      else if (status.result.content) {
-        const content = String(status.result.content);
+      // Final fallback: some workflows return `{ content }` directly.
+      else if (result.content) {
+        const content = String(result.content);
         if (!content) return;
         setGenerationResult({
-          year: status.result.year ?? activeYear,
+          year: result.year ?? activeYear,
           title: "Generation Complete",
           summary: content,
           outputPath: "",
           context: {
             type: "yearly",
-            id: String(status.result.year ?? activeYear),
+            id: String(result.year ?? activeYear),
           },
         });
         return;
@@ -223,7 +240,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
-      {/* macOS 标题栏拖动区域 */}
+      {/* macOS titlebar drag region */}
       <div className="h-7 w-full" style={{ WebkitAppRegion: "drag" }} />
 
       <div className="p-4 md:p-8 max-w-6xl mx-auto space-y-8">
@@ -311,24 +328,16 @@ function AppContent() {
               }}
               onRegenerate={async (prompt) => {
                 try {
-                  const res = await fetch(getSummaryApiUrl("/regenerate"), {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                      type: generationResult.context.type,
-                      id: generationResult.context.id,
-                      repo:
-                        generationResult.context.type === "daily"
-                          ? generationResult.context.repo
-                          : undefined,
-                      customPrompt: prompt,
-                      year: generationResult.year ?? activeYear,
-                    }),
+                  const updated = await regenerateSummary({
+                    type: generationResult.context.type,
+                    id: generationResult.context.id,
+                    repo:
+                      generationResult.context.type === "daily"
+                        ? generationResult.context.repo
+                        : undefined,
+                    customPrompt: prompt,
+                    year: generationResult.year ?? activeYear,
                   });
-                  if (!res.ok) throw new Error("Failed to regenerate");
-                  const data = await res.json();
-                  const updated = data.summary ?? data.content;
-                  if (!updated) throw new Error("Invalid regeneration response");
 
                   // Update local state with new summary
                   setGenerationResult((prev) => {
@@ -356,7 +365,9 @@ function AppContent() {
                   toast.success("Regeneration successful!");
                 } catch (e) {
                   console.error(e);
-                  toast.error("Regeneration failed");
+                  const message =
+                    e instanceof Error ? e.message : "Regeneration failed";
+                  toast.error(message);
                 }
               }}
               isRegenerating={false} // Would need state for true async loading if we want spinner to persist longer than await
