@@ -7,6 +7,7 @@
 - `apps/agent`：本地 Node.js Agent（HTTP + SQLite/FTS）  
 - `apps/mcp`：MCP server（stdio），提供只读工具（先从 `recapsense_search` 开始）  
 - `apps/collector-macos`：macOS 原生采集端（最小可用：截图 → dHash 去重 → Vision OCR → 写入 frames）
+- `apps/app-macos`：macOS SwiftUI 菜单栏应用（骨架：开关 + 主窗口：搜索/日志）
 
 ## 兼容性提示：SQLite FTS
 
@@ -90,6 +91,14 @@ npm run dev:mcp:sse
 
 ```bash
 npm run dev:collector -- --interval 5
+```
+
+### 启动 macOS 菜单栏应用（开发）
+
+> 说明：当前是 SwiftPM 可执行程序形态（先跑通骨架）。后续会补齐 .app 打包/签名/notarize 等发布形态。
+
+```bash
+npm run dev:app:macos
 ```
 
 只采集一次（用于验证权限/OCR）：

@@ -1,0 +1,63 @@
+import Foundation
+
+struct AgentHttpClient {
+  private let baseURL: URL
+  private let token: String
+
+  init() throws {
+    let env = ProcessInfo.processInfo.environment
+
+    let baseURL = URL(string: env["RECAPSENSE_AGENT_URL"] ?? "http://127.0.0.1:4832")
+      ?? URL(string: "http://127.0.0.1:4832")!
+
+    let repoRoot = URL(fileURLWithPath: env["RECAPSENSE_REPO_ROOT"] ?? FileManager.default.currentDirectoryPath)
+    let dataDir = URL(fileURLWithPath: env["RECAPSENSE_DATA_DIR"] ?? repoRoot.appendingPathComponent(".recapsense").path)
+
+    let token = try Self.loadToken(dataDir: dataDir)
+
+    self.baseURL = baseURL
+    self.token = token
+  }
+
+  func search(query: String, limit: Int) async throws -> [SearchResultItem] {
+    var url = baseURL.appendingPathComponent("/v1/search")
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
+    components?.queryItems = [
+      URLQueryItem(name: "q", value: query),
+      URLQueryItem(name: "limit", value: String(limit)),
+    ]
+    url = components?.url ?? url
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    struct Payload: Decodable { let results: [SearchResultItem] }
+    return try JSONDecoder().decode(Payload.self, from: data).results
+  }
+
+  private static func loadToken(dataDir: URL) throws -> String {
+    let env = ProcessInfo.processInfo.environment
+    if let token = env["RECAPSENSE_API_TOKEN"], !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return token.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    let tokenFile = dataDir.appendingPathComponent("secret/token")
+    let raw = try String(contentsOf: tokenFile, encoding: .utf8)
+    let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if token.isEmpty {
+      throw NSError(domain: "AgentHttpClient", code: -2, userInfo: [NSLocalizedDescriptionKey: "token 为空：\(tokenFile.path)"])
+    }
+    return token
+  }
+}
+

@@ -9,6 +9,7 @@
     "dev:agent": "node apps/agent/src/server.mjs",
     "dev:mcp": "node apps/mcp/src/server.mjs",
     "dev:mcp:sse": "node apps/mcp/src/server-sse.mjs",
+    "dev:app:macos": "swift run --package-path apps/app-macos",
     "dev:collector": "node scripts/collector.mjs",
     "seed": "node apps/agent/src/seed.mjs",
     "test": "node --test"
