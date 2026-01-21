@@ -20,6 +20,8 @@ struct MenuBarView: View {
 
       Button("打开主窗口") {
         openWindow(id: "main")
+        // 让窗口立刻获得焦点（否则可能只在后台创建出来，用户以为“没打开”）。
+        NSApp.activate(ignoringOtherApps: true)
       }
 
       Divider()

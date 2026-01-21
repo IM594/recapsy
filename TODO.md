@@ -71,6 +71,8 @@
   - [x] 新增 `apps/app-macos` SwiftPM 骨架（先跑通开发期 GUI）
   - [x] Supervisor：可启动/停止 Agent、MCP（SSE）、Collector，并把子进程 stdout/stderr 写入 `${RECAPSENSE_DATA_DIR}/logs/*.log`
   - [x] 修复：启动子进程时继承 PATH（避免出现 `env: node: No such file or directory`）
+  - [x] 修复：主窗口使用单实例（避免“打开主窗口”点多次弹出多个）
+  - [x] 修复：菜单栏应用在 Dock/Cmd-Tab 可见（为未来聊天主窗口做准备）
   - [x] 主窗口：搜索（调用 Agent `GET /v1/search`）+ 日志（展示 logs tail）
   - [x] 聊天入口占位（不实现交互）
   - 菜单栏（Menu bar）职责（先做功能，样式后置）：

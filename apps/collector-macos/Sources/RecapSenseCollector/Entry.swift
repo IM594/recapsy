@@ -1,4 +1,5 @@
 import CoreGraphics
+import Darwin
 import Foundation
 
 struct CollectorConfig {
@@ -18,15 +19,18 @@ struct Logger {
 
   func info(_ message: String) {
     print("[collector] \(message)")
+    fflush(stdout)
   }
 
   func debug(_ message: String) {
     guard verbose else { return }
     print("[collector][debug] \(message)")
+    fflush(stdout)
   }
 
   func warn(_ message: String) {
     print("[collector][warn] \(message)")
+    fflush(stdout)
   }
 }
 
