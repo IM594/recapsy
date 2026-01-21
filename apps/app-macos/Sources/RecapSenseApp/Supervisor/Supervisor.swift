@@ -48,6 +48,11 @@ final class Supervisor: ObservableObject {
   }
 
   func startMcpSse() {
+    if !agent.state.isRunning {
+      // MCP 需要 token/Agent 可用，开发期先做一个“傻瓜化”兜底：启动 MCP 时自动拉起 Agent。
+      startAgent()
+    }
+
     let spec = ProcessSpec(
       label: "mcp-sse",
       executable: "/usr/bin/env",
@@ -66,6 +71,11 @@ final class Supervisor: ObservableObject {
   }
 
   func startCollector() {
+    if !agent.state.isRunning {
+      // Collector 需要写入 Agent。开发期体验：用户只要点“开始采集”，Agent 会被自动拉起。
+      startAgent()
+    }
+
     // 说明：当前先假设 collector 二进制已构建完成（开发期可用 `npm run dev:collector` 或手动 swift build）。
     // 后续会把“自动构建/内置 helper”变成发布形态的一部分。
     let binaryPath = config.collectorBinary.path

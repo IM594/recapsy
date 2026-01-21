@@ -20,11 +20,13 @@ struct SupervisorConfig: Equatable {
   }
 
   var baseEnvironment: [String: String] {
-    [
-      "RECAPSENSE_REPO_ROOT": repoRoot.path,
-      "RECAPSENSE_DATA_DIR": dataDir.path,
-      "RECAPSENSE_AGENT_URL": agentUrl.absoluteString,
-    ]
+    // 注意：不能只传 RecapSense 自己的环境变量，否则会把 PATH 等系统变量“清空”，
+    // 进而导致 `/usr/bin/env node` 找不到 node（常见报错：`env: node: No such file or directory`）。
+    var env = ProcessInfo.processInfo.environment
+    env["RECAPSENSE_REPO_ROOT"] = repoRoot.path
+    env["RECAPSENSE_DATA_DIR"] = dataDir.path
+    env["RECAPSENSE_AGENT_URL"] = agentUrl.absoluteString
+    return env
   }
 
   static func loadFromEnvironment() -> SupervisorConfig {
@@ -51,4 +53,3 @@ struct SupervisorConfig: Equatable {
     )
   }
 }
-

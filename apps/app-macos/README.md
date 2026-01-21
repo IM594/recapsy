@@ -18,9 +18,44 @@
 swift run --package-path apps/app-macos
 ```
 
+或使用 npm（推荐）：
+
+```bash
+npm run dev:app:macos
+```
+
+### 启动顺序（推荐）
+
+1. 先编译一次 collector（只需要做一次；之后可复用二进制）：
+
+   ```bash
+   swift build -c release --package-path apps/collector-macos
+   ```
+
+2. 启动菜单栏应用：
+
+   ```bash
+   npm run dev:app:macos
+   ```
+
+3. 在菜单栏 RecapSense 中按顺序打开开关：
+   - `Agent`
+   - `MCP（SSE）`
+   - `采集（Collector）`
+
+4. 点击“打开主窗口”，在“搜索”页直接搜索（query 为空表示最近内容）。
+
+### 常见问题：`env: node: No such file or directory`
+
+开发期我们用 `/usr/bin/env node ...` 启动 Agent/MCP，所以需要 `node` 在 PATH 里。
+
+- 先在终端确认：`node -v` 可用
+- 然后从同一个终端启动：`npm run dev:app:macos`
+
+> 后续做发布形态（.app/DMG）时，我们会把 Node runtime 内置到应用里或将 Agent/MCP 收敛到原生实现，避免依赖用户的 PATH。
+
 推荐环境变量（可选）：
 
 - `RECAPSENSE_DATA_DIR`：数据目录（默认 `./.recapsense`）
 - `RECAPSENSE_AGENT_URL`：Agent 地址（默认 `http://127.0.0.1:4832`）
 - `RECAPSENSE_REPO_ROOT`：仓库根目录（默认当前工作目录）
-

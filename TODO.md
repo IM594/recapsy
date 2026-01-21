@@ -70,6 +70,7 @@
   - 目标：面向非开发用户使用时 **不需要跑命令行**；安装后打开应用即可控制采集与 MCP
   - [x] 新增 `apps/app-macos` SwiftPM 骨架（先跑通开发期 GUI）
   - [x] Supervisor：可启动/停止 Agent、MCP（SSE）、Collector，并把子进程 stdout/stderr 写入 `${RECAPSENSE_DATA_DIR}/logs/*.log`
+  - [x] 修复：启动子进程时继承 PATH（避免出现 `env: node: No such file or directory`）
   - [x] 主窗口：搜索（调用 Agent `GET /v1/search`）+ 日志（展示 logs tail）
   - [x] 聊天入口占位（不实现交互）
   - 菜单栏（Menu bar）职责（先做功能，样式后置）：

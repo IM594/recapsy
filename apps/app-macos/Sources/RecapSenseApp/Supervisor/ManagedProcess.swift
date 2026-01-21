@@ -8,6 +8,13 @@ enum ManagedProcessState: Equatable {
   case failed(message: String)
 }
 
+extension ManagedProcessState {
+  var isRunning: Bool {
+    if case .running = self { return true }
+    return false
+  }
+}
+
 struct ProcessSpec: Equatable {
   let label: String
   let executable: String
@@ -26,6 +33,8 @@ final class ManagedProcess: ObservableObject {
 
   private var process: Process? = nil
   private var logHandle: FileHandle? = nil
+  private var lastSpec: ProcessSpec? = nil
+  private var stopRequested = false
 
   init(name: String) {
     self.name = name
@@ -36,6 +45,8 @@ final class ManagedProcess: ObservableObject {
 
     state = .starting
     lastErrorMessage = nil
+    lastSpec = spec
+    stopRequested = false
 
     if spec.requiresExecutableOnDisk && !FileManager.default.fileExists(atPath: spec.executable) {
       let message = "可执行文件不存在：\(spec.executable)"
@@ -71,8 +82,24 @@ final class ManagedProcess: ObservableObject {
       p.terminationHandler = { [weak self] proc in
         Task { @MainActor in
           guard let self else { return }
+          let code = proc.terminationStatus
+          let reason = proc.terminationReason
+
+          // 用户主动 stop：视为“已停止”，不标红。
+          if self.stopRequested {
+            self.state = .stopped
+          } else if reason == .exit, code == 0 {
+            self.state = .stopped
+          } else if code == 127, self.isLikelyMissingNode() {
+            let message = "找不到 node（PATH 中不存在）。开发期请确保终端里 `node -v` 可用，并从该终端启动 `npm run dev:app:macos`。"
+            self.lastErrorMessage = message
+            self.state = .failed(message: message)
+          } else {
+            self.state = .exited(code: code)
+          }
+
+          self.stopRequested = false
           self.process = nil
-          self.state = .exited(code: proc.terminationStatus)
           self.teardownLogHandle()
         }
       }
@@ -91,8 +118,18 @@ final class ManagedProcess: ObservableObject {
   func stop() {
     guard let p = process else { return }
     // 先温和结束，避免损坏数据；必要时未来可以加强制 kill。
+    stopRequested = true
     p.terminate()
     // terminationHandler 会做 teardown。
+  }
+
+  private func isLikelyMissingNode() -> Bool {
+    // 我们用 `/usr/bin/env node ...` 来启动 Node 进程；
+    // 当 PATH 缺失或 node 未安装时，常见退出码是 127。
+    guard let spec = lastSpec else { return false }
+    guard spec.executable == "/usr/bin/env" else { return false }
+    guard spec.arguments.first == "node" else { return false }
+    return true
   }
 
   private func teardownLogHandle() {

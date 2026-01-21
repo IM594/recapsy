@@ -102,10 +102,3 @@ private struct StatusRow: View {
     }
   }
 }
-
-private extension ManagedProcessState {
-  var isRunning: Bool {
-    if case .running = self { return true }
-    return false
-  }
-}
