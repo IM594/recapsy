@@ -12,16 +12,9 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Loader2, AlertTriangle, Calendar, CheckCircle2 } from "lucide-react";
 import { useSettings } from "@/hooks/useSettings";
 import { getDateRangeForType } from "@/lib/date-utils";
-import { Calendar as DateCalendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { format } from "date-fns";
+import { YearCalendar } from "@/components/YearCalendar";
+import { MonthSelect } from "@/components/MonthSelect";
 import {
   fetchDailySummaries,
   fetchMonthlySummaries,
@@ -180,16 +173,11 @@ export function GenerationPreview({
           {(type === "daily" || type === "weekly") && (
             <div className="space-y-2">
               <Label>Pick a date</Label>
-              <div className="rounded-md border bg-white p-2">
-                <DateCalendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={setSelectedDate}
-                  fromDate={new Date(year, 0, 1)}
-                  toDate={new Date(year, 11, 31)}
-                  captionLayout="dropdown"
-                />
-              </div>
+              <YearCalendar
+                year={year}
+                selected={selectedDate}
+                onSelect={setSelectedDate}
+              />
               <p className="text-xs text-muted-foreground">
                 We will generate a {type} summary for the selected period.
               </p>
@@ -199,23 +187,11 @@ export function GenerationPreview({
           {type === "monthly" && (
             <div className="space-y-2">
               <Label>Pick a month</Label>
-              <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-                <SelectTrigger aria-label="Select month" className="bg-white">
-                  <SelectValue placeholder="Select month" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 12 }).map((_, i) => {
-                    const monthIndex = i;
-                    const value = String(monthIndex + 1).padStart(2, "0");
-                    const label = format(new Date(year, monthIndex, 1), "MMMM");
-                    return (
-                      <SelectItem key={value} value={value}>
-                        {label}
-                      </SelectItem>
-                    );
-                  })}
-                </SelectContent>
-              </Select>
+              <MonthSelect
+                year={year}
+                value={selectedMonth}
+                onValueChange={setSelectedMonth}
+              />
               <p className="text-xs text-muted-foreground">
                 We will generate a monthly summary for {year}.
               </p>

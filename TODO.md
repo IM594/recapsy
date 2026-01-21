@@ -1,14 +1,14 @@
 # TODO
 
-> Last updated: 2026-01-21 22:19
+> Last updated: 2026-01-21 22:45
 >
 > 规则：每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
 
 ## In Progress
-- [ ] 统一日期/月选择器：`GenerationPreview` 与 `JournalSidebar Jump` 复用同一套组件/逻辑
+- [ ] 统一 UI 文案与日志语言：尽量保持英文（尤其是用户可见部分）
 
 ## Next
-- [ ] 统一 UI 文案与日志语言：尽量保持英文（尤其是用户可见部分）
+- [ ] 清理/统一 Electron 主进程日志与注释风格（保留必要日志，减少噪音）
 
 ## Done (recent)
 - [x] 多年份支持 + 年份切换（后端 `/api/summary/years` + 前端 `YearSwitcher`）
@@ -18,3 +18,4 @@
 - [x] 后端 repos 扫描日志统一使用 `logger`（commit: `7184123`）
 - [x] Electron 主进程入口清理：删除重复的 `electron/main.js`
 - [x] `SummaryContext` SSE payload 去 `any` + 类型化解析
+- [x] 日期/月选择器复用：抽 `YearCalendar` + `MonthSelect`，并在两处复用

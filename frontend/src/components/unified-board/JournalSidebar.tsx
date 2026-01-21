@@ -13,7 +13,6 @@ import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Calendar as DateCalendar } from "@/components/ui/calendar";
 import {
   Dialog,
   DialogContent,
@@ -32,15 +31,10 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { getWeekMonday, toDateString } from "@/lib/date-utils";
 import { RepoPickerDialog } from "@/components/RepoPickerDialog";
+import { YearCalendar } from "@/components/YearCalendar";
+import { MonthSelect } from "@/components/MonthSelect";
 
 import { Structure, NavigationNode } from "./types";
 import { ContributionGraph } from "./ContributionGraph";
@@ -478,16 +472,11 @@ export function JournalSidebar({
             {(jumpTab === "daily" || jumpTab === "weekly") && (
               <div className="space-y-2">
                 <Label>Pick a date</Label>
-                <div className="rounded-md border bg-white p-2">
-                  <DateCalendar
-                    mode="single"
-                    selected={jumpDate}
-                    onSelect={setJumpDate}
-                    fromDate={new Date(structure.year, 0, 1)}
-                    toDate={new Date(structure.year, 11, 31)}
-                    captionLayout="dropdown"
-                  />
-                </div>
+                <YearCalendar
+                  year={structure.year}
+                  selected={jumpDate}
+                  onSelect={setJumpDate}
+                />
                 {jumpTab === "daily" &&
                   jumpDate &&
                   getDailyReposForDate(toDateString(jumpDate)).length > 1 && (
@@ -502,26 +491,11 @@ export function JournalSidebar({
             {jumpTab === "monthly" && (
               <div className="space-y-2">
                 <Label>Pick a month</Label>
-                <Select value={jumpMonth} onValueChange={setJumpMonth}>
-                  <SelectTrigger aria-label="Select month" className="bg-white">
-                    <SelectValue placeholder="Select month" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 12 }).map((_, i) => {
-                      const monthIndex = i;
-                      const value = String(monthIndex + 1).padStart(2, "0");
-                      const label = format(
-                        new Date(structure.year, monthIndex, 1),
-                        "MMMM"
-                      );
-                      return (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      );
-                    })}
-                  </SelectContent>
-                </Select>
+                <MonthSelect
+                  year={structure.year}
+                  value={jumpMonth}
+                  onValueChange={setJumpMonth}
+                />
               </div>
             )}
           </div>
