@@ -59,7 +59,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   // Load available repos when dialog opens
   useEffect(() => {
     if (open) {
-      scanRepos();
+      void scanRepos();
       // Sync state with global settings when opening
       setSelectedRepos(savedRepos);
       setAuthor(savedAuthor);

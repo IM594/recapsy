@@ -15,17 +15,14 @@ function safeJson(value: unknown): unknown {
 
 export function logDebug(scope: string, ...args: unknown[]) {
   if (!import.meta.env.DEV) return;
-  // eslint-disable-next-line no-console
   console.log(`[${scope}]`, ...args);
 }
 
 export function logInfo(scope: string, message: string, context?: Record<string, unknown>) {
-  // eslint-disable-next-line no-console
   console.log(`[${scope}] ${message}`, context ? safeJson(context) : "");
 }
 
 export function logWarn(scope: string, message: string, context?: Record<string, unknown>) {
-  // eslint-disable-next-line no-console
   console.warn(`[${scope}] ${message}`, context ? safeJson(context) : "");
 }
 
@@ -49,17 +46,14 @@ export function logError(
       extra.payload = safeJson(error.payload);
     }
 
-    // eslint-disable-next-line no-console
     console.error(error.debugMessage || error.message, safeJson(extra));
     return;
   }
 
   if (error instanceof Error) {
-    // eslint-disable-next-line no-console
     console.error(`[${scope}] ${error.message}`, safeJson(base), error);
     return;
   }
 
-  // eslint-disable-next-line no-console
   console.error(`[${scope}] Unknown error`, safeJson(base), error);
 }

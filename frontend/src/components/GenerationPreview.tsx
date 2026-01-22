@@ -96,7 +96,7 @@ export function GenerationPreview({
     );
 
     setDateRange({ start: startStr, end: endStr });
-    checkExistence(type, startStr);
+    void checkExistence(type, startStr);
 
     return () => {
       existenceControllerRef.current?.abort();

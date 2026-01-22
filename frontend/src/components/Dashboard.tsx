@@ -194,7 +194,7 @@ export function Dashboard({
           type={previewType}
           year={year}
           onGenerateStart={(req) => {
-            onGenerate(req);
+            void onGenerate(req);
             setPreviewType(null);
           }}
         />

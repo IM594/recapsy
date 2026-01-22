@@ -132,7 +132,7 @@ export function useUnifiedBoard(year: number) {
     structureControllerRef.current?.abort();
     const controller = new AbortController();
     structureControllerRef.current = controller;
-    fetchStructure(controller.signal);
+    void fetchStructure(controller.signal);
 
     return () => {
       structureControllerRef.current?.abort();
@@ -229,7 +229,7 @@ export function useUnifiedBoard(year: number) {
     contentControllerRef.current?.abort();
     const controller = new AbortController();
     contentControllerRef.current = controller;
-    loadContent(selectedNode, controller);
+    void loadContent(selectedNode, controller);
     return () => {
       controller.abort();
       if (contentControllerRef.current === controller) {
@@ -281,7 +281,7 @@ export function useUnifiedBoard(year: number) {
         structureControllerRef.current?.abort();
         const controller = new AbortController();
         structureControllerRef.current = controller;
-        fetchStructure(controller.signal);
+        void fetchStructure(controller.signal);
 
         refetchData();
       } catch (error) {
@@ -317,4 +317,3 @@ export function useUnifiedBoard(year: number) {
     confirmRepoPicker,
   };
 }
-

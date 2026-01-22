@@ -38,8 +38,10 @@ export function YearEndContainer({
       }
     };
 
-    checkStatus();
-    const interval = setInterval(checkStatus, 2000);
+    void checkStatus();
+    const interval = setInterval(() => {
+      void checkStatus();
+    }, 2000);
     return () => {
       clearInterval(interval);
       statusControllerRef.current?.abort();

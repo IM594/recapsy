@@ -3,6 +3,10 @@ import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const tsconfigRootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default tseslint.config(
   {
@@ -23,11 +27,15 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.{ts,tsx}"],
+    files: ["src/**/*.{ts,tsx}"],
     languageOptions: {
       globals: {
         ...globals.browser,
         ...globals.node,
+      },
+      parserOptions: {
+        project: ["./tsconfig.json"],
+        tsconfigRootDir,
       },
     },
     plugins: {
@@ -40,9 +48,22 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "off",
       "react-refresh/only-export-components": "off",
 
+      // Consistency guardrails
+      "no-console": "error",
+      "no-empty": ["error", { allowEmptyCatch: false }],
+
+      // Promise / async safety
+      "@typescript-eslint/no-floating-promises": ["error", { ignoreVoid: true, ignoreIIFE: true }],
+
       // Keep lint actionable for this repo: TypeScript already runs in `pnpm build`.
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-empty-object-type": "off",
+    },
+  },
+  {
+    files: ["src/lib/logger.ts"],
+    rules: {
+      "no-console": "off",
     },
   }
 );

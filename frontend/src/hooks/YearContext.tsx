@@ -58,7 +58,7 @@ export function YearProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    refreshAvailableYears();
+    void refreshAvailableYears();
     return () => {
       refreshControllerRef.current?.abort();
       refreshControllerRef.current = null;
