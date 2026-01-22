@@ -70,6 +70,12 @@ async function startBackendDev() {
     log("Backend .env found:", envPath);
   }
 
+  try {
+    fs.mkdirSync(getOutputDir(), { recursive: true });
+  } catch (e) {
+    warn("Failed to ensure output directory exists:", e);
+  }
+
   log("Starting backend server (dev)...");
   log("Backend cwd:", backendDir);
 
@@ -81,9 +87,11 @@ async function startBackendDev() {
     env: {
       ...process.env,
       PORT: String(backendPort),
-      // Dev mode: keep backend behavior consistent with running `pnpm dev:backend`,
-      // so existing persisted data under `backend/outputs` remains visible.
-      // Production packaging injects RECAPLY_OUTPUT_DIR/RECAPLY_CONFIG_PATH instead.
+      // Single source of truth: always write/read outputs from Electron userData.
+      // Use `pnpm migrate:outputs` to migrate legacy `backend/outputs` once.
+      RECAPLY_OUTPUT_DIR: getOutputDir(),
+      RECAPLY_CONFIG_PATH: getConfigPath(),
+      RECAPLY_ENV_PATH: fs.existsSync(envPath) ? envPath : "",
     },
     stdio: "pipe",
   });
@@ -117,6 +125,11 @@ async function startBackendProd() {
   log("Starting backend server (prod, in-process)...");
   process.env.RECAPLY_OUTPUT_DIR = process.env.RECAPLY_OUTPUT_DIR || getOutputDir();
   process.env.RECAPLY_CONFIG_PATH = process.env.RECAPLY_CONFIG_PATH || getConfigPath();
+  try {
+    fs.mkdirSync(process.env.RECAPLY_OUTPUT_DIR, { recursive: true });
+  } catch (e) {
+    warn("Failed to ensure output directory exists:", e);
+  }
   const backendDir = path.join(process.resourcesPath, "backend");
   const envPath = path.join(backendDir, ".env");
 

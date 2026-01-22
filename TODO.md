@@ -15,6 +15,7 @@
 
 ## In Progress（P0，一致性优先）
 - [ ] C-003 常量集中（shared 包）：统一并集中 `localStorage key`、SSE 事件名、API mounts/paths；继续迁移页面/视图状态常量与其他散落 magic string
+- [ ] C-007 输出目录单一真相：统一使用 userData/outputs，并提供迁移脚本把历史 `backend/outputs` 迁移到新目录
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
