@@ -293,7 +293,29 @@ struct RecapSenseCollectorMain {
             continue
           }
 
-          let ocrText = try recognizeText(from: screenshot, level: config.ocrLevel, languages: config.ocrLanguages)
+          // OCR：默认 fast，但在明显低质量时自动升级跑一次 accurate（减少碎片/乱码）。
+          var ocrText = try recognizeText(from: screenshot, level: config.ocrLevel, languages: config.ocrLanguages)
+          var ocrPass = config.ocrLevel.rawValue
+
+          if config.ocrLevel == .fast {
+            let fastQ = evaluateOCRTextQuality(ocrText)
+            if shouldUpgradeFastOCR(fastQ) {
+              let accurateText = try recognizeText(from: screenshot, level: .accurate, languages: config.ocrLanguages)
+              let accurateQ = evaluateOCRTextQuality(accurateText)
+
+              // 选择更好的那次输出（评分更高者）。相等时优先 accurate（通常更稳定）。
+              if accurateQ.score >= fastQ.score {
+                ocrText = accurateText
+                ocrPass = "fast→accurate"
+              } else {
+                ocrPass = "fast（kept）"
+              }
+
+              logger.debug(
+                "OCR 自动二次识别：fast(score=\(Int(fastQ.score)) good=\(fastQ.goodChars) weird=\(fastQ.weirdChars)) vs accurate(score=\(Int(accurateQ.score)) good=\(accurateQ.goodChars) weird=\(accurateQ.weirdChars)) chosen=\(ocrPass)"
+              )
+            }
+          }
           if ocrText.isEmpty {
             logger.debug("OCR 为空（跳过写入）")
             await sleepSeconds(config.intervalSeconds)
@@ -315,7 +337,7 @@ struct RecapSenseCollectorMain {
             let localTs = formatLocalTimestamp(now)
             let lines = ocrText.split(separator: "\n").count
             let header =
-              "[\(localTs)] tsMs=\(tsMs) app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") phash=\(hash.stringValue) ocrLines=\(lines) ocrChars=\(ocrText.count)\n"
+              "[\(localTs)] tsMs=\(tsMs) app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) phash=\(hash.stringValue) ocrLines=\(lines) ocrChars=\(ocrText.count)\n"
             let body =
               "----- OCR BEGIN -----\n\(ocrText)\n----- OCR END -----\n\n"
             ocrDebugLog.append(header + body)
@@ -352,13 +374,13 @@ struct RecapSenseCollectorMain {
             let preview = String(ocrText.prefix(220))
             let lines = ocrText.split(separator: "\n").count
             logger.info(
-              "dry-run frame：app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocrLines=\(lines) ocrChars=\(ocrText.count) text=\(preview)"
+              "dry-run frame：app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count) text=\(preview)"
             )
           } else {
             let id = try await client.ingestFrame(payload)
             let lines = ocrText.split(separator: "\n").count
             var message =
-              "写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocrLines=\(lines) ocrChars=\(ocrText.count)"
+              "写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count)"
             if config.verbose {
               message += " title=\(windowTitle ?? "-")"
             }

@@ -100,6 +100,15 @@ npm run dev:collector -- --interval 5
 npm run dev:collector -- --capture-mode screen
 ```
 
+#### OCR 质量与自动升级
+
+Collector 默认 OCR `fast`（更省资源），但当识别结果明显“低信号/乱码”时，会自动再跑一次 `accurate` 并择优写入。相关信息会在：
+
+- `logs/collector.log`（每条 `写入 frame 成功` 带 `ocr=...`）
+- `logs/collector-ocr.log`（每条记录头带 `ocr=...`）
+
+如果你想强制全程都用 `accurate`（更慢但通常更准），可以在设置页把 OCR Level 改为 `accurate`。
+
 ### 启动 macOS 菜单栏应用（开发）
 
 > 说明：当前是 SwiftPM 可执行程序形态（先跑通骨架）。后续会补齐 .app 打包/签名/notarize 等发布形态。

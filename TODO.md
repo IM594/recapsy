@@ -87,6 +87,9 @@
     - [x] 缩略图默认尺寸提升（更适合多模态输入）
       - 背景：默认 420px 对多模态 LLM 来说偏糊，不利于提取关键信息。
       - 验收：默认提升到 720px；历史库若仍为旧默认值（420）会在迁移时自动更新；用户仍可在设置页手动调整。
+    - [x] Collector：fast OCR 自动升级 accurate（按质量触发）
+      - 背景：fast OCR 在低对比度/小字/复杂 UI 时容易乱码；一刀切改成 accurate 会显著增加常驻成本。
+      - 验收：默认仍跑 fast；当识别结果明显低信号时自动再跑一次 accurate 并择优写入；`collector.log`/`collector-ocr.log` 会标注 `ocr=fast→accurate`。
     - [x] Agent：压实清洗增强（先让搜索可用）
       - 背景：OCR 会把顶栏/侧边栏/徽标/符号块识别成大量短行，导致 chunk 文本碎片化，搜索结果 snippet 不可读。
       - 验收：新生成的 chunk 不再包含 `File/Edit/View/Window/Help`、`Home/Inbox/Search/99+` 等 UI 短行；`****` 这类符号块不会进入 chunk 文本。
