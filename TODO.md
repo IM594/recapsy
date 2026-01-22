@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-23 01:21
+> Last updated: 2026-01-23 01:43
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -19,12 +19,14 @@
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
 - [ ] C-004 生命周期审计：梳理全局订阅/轮询/SSE/进程/窗口事件，确保创建与销毁成对且可追踪
+- [ ] B-003 继续下沉业务逻辑：把组件内的数据拼装/筛选/判定抽到 hook/service（优先：UnifiedBoard 以外的生成/预览/侧栏）
 
 ## Deferred（按你要求：语言相关暂缓）
 - [ ] L-001 增加回归检查：避免新增硬编码 UI 文案（可选）
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] B-002 UnifiedBoard 下沉：新增 `frontend/src/hooks/useUnifiedBoard.ts` 承担数据拼装、选择加载、repo 选择；组件只保留渲染与最少交互胶水
 - [x] workflow step/phase 单一真相：新增 `shared/src/constants/workflow.ts` 并替换前后端散落字符串（`currentStep`/`phase`/`type` 判断等）
 - [x] 生命周期对称（前端）：为 effect 内异步请求增加 `AbortController` 并在 cleanup abort；SSE EventSource 的 add/removeEventListener 成对出现；轮询/重连定时器均可追踪与可清理
 - [x] 前端错误日志单一入口：新增 `frontend/src/lib/logger.ts`，并替换主要 catch/console.error 为 `logError(scope, error, context)`（保证不吞错且可检索）
