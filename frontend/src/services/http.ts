@@ -1,12 +1,25 @@
 import type { ErrorCode, ErrorResponse } from "@recaply/shared";
 import { isErrorResponse } from "@recaply/shared";
 
+function formatApiErrorDebugMessage(opts: {
+  status: number;
+  message: string;
+  code?: ErrorCode;
+  requestId?: string;
+}): string {
+  const parts: string[] = [opts.message, `status=${opts.status}`];
+  if (opts.code) parts.push(`code=${opts.code}`);
+  if (opts.requestId) parts.push(`requestId=${opts.requestId}`);
+  return parts.join(" ");
+}
+
 export class ApiError extends Error {
   status: number;
   payload: unknown;
   code?: ErrorCode;
   requestId?: string;
   details?: unknown;
+  debugMessage?: string;
 
   constructor(
     status: number,
@@ -21,6 +34,18 @@ export class ApiError extends Error {
     this.code = meta?.code;
     this.requestId = meta?.requestId;
     this.details = meta?.details;
+
+    // Keep `message` user-friendly; put structured info into debugMessage for logs.
+    this.debugMessage = formatApiErrorDebugMessage({
+      status,
+      message,
+      code: this.code,
+      requestId: this.requestId,
+    });
+  }
+
+  toString(): string {
+    return this.debugMessage || this.message;
   }
 }
 
