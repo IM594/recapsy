@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-23 01:43
+> Last updated: 2026-01-23 01:49
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -26,6 +26,7 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] B-004 YearEndGenerator 收敛：workflow step→UI step 映射集中到 `frontend/src/constants/workflow.ts`；phase 判断统一使用 `WORKFLOW_PHASES`；补齐 effect deps / 避免潜在 floating promise
 - [x] B-002 UnifiedBoard 下沉：新增 `frontend/src/hooks/useUnifiedBoard.ts` 承担数据拼装、选择加载、repo 选择；组件只保留渲染与最少交互胶水
 - [x] workflow step/phase 单一真相：新增 `shared/src/constants/workflow.ts` 并替换前后端散落字符串（`currentStep`/`phase`/`type` 判断等）
 - [x] 生命周期对称（前端）：为 effect 内异步请求增加 `AbortController` 并在 cleanup abort；SSE EventSource 的 add/removeEventListener 成对出现；轮询/重连定时器均可追踪与可清理

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -22,8 +22,12 @@ import { useSettings } from "@/hooks/useSettings";
 import { useSummary } from "@/hooks/useSummary";
 import { resetSummaryStatus } from "@/services/summary";
 import { COPY } from "@/constants/copy";
+import {
+  YEAR_END_STEP_BY_WORKFLOW_STEP,
+  type YearEndProcessStepId,
+} from "@/constants/workflow";
 import { logError } from "@/lib/logger";
-import { SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
+import { SUMMARY_TYPES, WORKFLOW_PHASES } from "@recaply/shared";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -34,7 +38,7 @@ interface YearEndGeneratorProps {
 type StepStatus = "pending" | "running" | "completed" | "error";
 
 interface ProcessStep {
-  id: string;
+  id: YearEndProcessStepId;
   title: string;
   description: string;
   status: StepStatus;
@@ -102,7 +106,7 @@ export function YearEndGenerator({
     // Only trigger completion if this is a NEW task we started
     if (
       !status.isRunning &&
-      status.phase === "complete" &&
+      status.phase === WORKFLOW_PHASES.complete &&
       hasStartedNewTask.current
     ) {
       setSteps((s) => s.map((step) => ({ ...step, status: "completed" })));
@@ -114,27 +118,8 @@ export function YearEndGenerator({
     }
 
     if (status.currentStep) {
-      const stepMapping: Record<string, string> = {
-        [WORKFLOW_STEP_IDS.setup]: "collect",
-        [WORKFLOW_STEP_IDS.collectData]: "collect",
-        // Subgraph Phase Nodes
-        [WORKFLOW_STEP_IDS.dailyPhase]: "daily",
-        [WORKFLOW_STEP_IDS.weeklyPhase]: "weekly",
-        [WORKFLOW_STEP_IDS.monthlyPhase]: "monthly",
-        // Internal Subgraph Nodes (keep for safety/granularity)
-        [WORKFLOW_STEP_IDS.fanOutDaily]: "daily",
-        [WORKFLOW_STEP_IDS.processSingleDaily]: "daily",
-        // Map new weekly/monthly nodes to the "monthly" (Aggregation) step
-        [WORKFLOW_STEP_IDS.fanOutWeekly]: "weekly",
-        [WORKFLOW_STEP_IDS.processSingleWeek]: "weekly",
-        [WORKFLOW_STEP_IDS.fanOutMonthly]: "monthly",
-        [WORKFLOW_STEP_IDS.processSingleMonth]: "monthly",
-        [WORKFLOW_STEP_IDS.yearlySummarizer]: "yearly",
-        [WORKFLOW_STEP_IDS.persist]: "yearly",
-      };
-
       const activeStepId =
-        stepMapping[status.currentStep] || status.currentStep;
+        YEAR_END_STEP_BY_WORKFLOW_STEP[status.currentStep] || status.currentStep;
 
       setSteps((prev) => {
         // Mark previous steps as completed
@@ -149,7 +134,7 @@ export function YearEndGenerator({
       });
     }
 
-    if (status.phase === "error") {
+    if (status.phase === WORKFLOW_PHASES.error) {
       setSteps((prev) => {
         // Find the running step and mark as error
         return prev.map((step) =>
@@ -157,9 +142,9 @@ export function YearEndGenerator({
         );
       });
     }
-  }, [status, onComplete]);
+  }, [onComplete, status]);
 
-  const handleStart = async () => {
+  const handleStart = useCallback(async () => {
     if (selectedRepos.length === 0) {
       toast.error(COPY.toasts.configureReposFirst);
       return;
@@ -177,7 +162,7 @@ export function YearEndGenerator({
     }
 
     // Start generation
-    startGeneration({
+    await startGeneration({
       selectedRepos,
       since,
       until,
@@ -185,7 +170,7 @@ export function YearEndGenerator({
       author,
       year,
     });
-  };
+  }, [author, selectedRepos, shouldResetCheckpoint, since, startGeneration, until, year]);
 
   // Auto-start on mount (with protection against duplicate triggers)
   const hasAutoStartedRef = useRef(false);
@@ -195,13 +180,13 @@ export function YearEndGenerator({
     // Don't auto-start if task is already running
     if (status.isRunning) return;
     hasAutoStartedRef.current = true;
-    handleStart();
-  }, []);
+    void handleStart();
+  }, [handleStart, status.isRunning]);
 
   if (
     status.isRunning ||
-    status.phase === "complete" ||
-    status.phase === "error"
+    status.phase === WORKFLOW_PHASES.complete ||
+    status.phase === WORKFLOW_PHASES.error
   ) {
     return (
       <Card className="max-w-2xl mx-auto border-2 shadow-sm animate-in zoom-in-95 duration-700">
@@ -216,7 +201,7 @@ export function YearEndGenerator({
           </div>
           <CardTitle>{COPY.yearEnd.generatingTitle(year)}</CardTitle>
           <CardDescription>
-            {status.phase === "error"
+            {status.phase === WORKFLOW_PHASES.error
               ? COPY.yearEnd.generatingDescription.error
               : COPY.yearEnd.generatingDescription.running}
           </CardDescription>
