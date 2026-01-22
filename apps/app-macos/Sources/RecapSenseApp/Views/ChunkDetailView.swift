@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -24,6 +25,11 @@ final class ChunkDetailViewModel: ObservableObject {
 struct ChunkDetailView: View {
   let chunkId: String
   @StateObject private var model = ChunkDetailViewModel()
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
 
   var body: some View {
     Group {
@@ -66,12 +72,17 @@ struct ChunkDetailView: View {
 
           Divider()
 
-          ScrollView {
-            Text(chunk.text)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .textSelection(.enabled)
-              .font(.system(.body, design: .monospaced))
-          }
+          SelectableTextView(
+            text: chunk.text,
+            font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+          .background(Color(nsColor: .textBackgroundColor))
+          .overlay(
+            RoundedRectangle(cornerRadius: 8)
+              .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+          )
+          .clipShape(RoundedRectangle(cornerRadius: 8))
 
           Divider()
 
@@ -99,9 +110,6 @@ struct ChunkDetailView: View {
 
   private func formatDate(ms: Int64) -> String {
     let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.string(from: date)
+    return Self.isoFormatter.string(from: date)
   }
 }
-

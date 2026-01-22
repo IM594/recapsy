@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @MainActor
@@ -64,18 +65,17 @@ struct DailySummaryView: View {
           }
           .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let summary = model.summary {
-          ScrollView {
-            Text(summary.summary)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .textSelection(.enabled)
-              .font(.system(.body, design: .monospaced))
-              .padding(.vertical, 4)
-          }
+          SelectableTextView(
+            text: summary.summary,
+            font: .monospacedSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+          )
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
           .background(Color(nsColor: .textBackgroundColor))
           .overlay(
             RoundedRectangle(cornerRadius: 8)
               .stroke(Color.gray.opacity(0.25), lineWidth: 1)
           )
+          .clipShape(RoundedRectangle(cornerRadius: 8))
         } else {
           VStack(alignment: .leading, spacing: 8) {
             Text("暂无日总结")
@@ -96,4 +96,3 @@ struct DailySummaryView: View {
     }
   }
 }
-

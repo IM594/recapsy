@@ -26,6 +26,11 @@ final class SearchViewModel: ObservableObject {
 struct SearchView: View {
   @StateObject private var model = SearchViewModel()
   @State private var selectedChunkId: String? = nil
+  private static let isoFormatter: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+  }()
 
   var body: some View {
     NavigationSplitView {
@@ -114,8 +119,6 @@ struct SearchView: View {
 
   private func formatDate(ms: Int64) -> String {
     let date = Date(timeIntervalSince1970: TimeInterval(ms) / 1000)
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return formatter.string(from: date)
+    return Self.isoFormatter.string(from: date)
   }
 }

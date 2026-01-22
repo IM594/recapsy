@@ -527,7 +527,14 @@ export function createStore(db, { withTransaction }) {
   );
 
   const listRecentChunksStmt = db.prepare(
-    `SELECT id, start_ts, end_ts, app, window_title, text
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
      FROM chunks
      WHERE deleted_at IS NULL
      ORDER BY end_ts DESC
@@ -663,8 +670,7 @@ export function createStore(db, { withTransaction }) {
     if (!trimmed) {
       return listRecentChunksStmt.all(safeLimit).map((row) => ({
         ...row,
-        snippet: normalizeText(row.text).slice(0, 240),
-        score: null,
+        snippet: normalizeText(row.snippet ?? "").slice(0, 240),
       }));
     }
 

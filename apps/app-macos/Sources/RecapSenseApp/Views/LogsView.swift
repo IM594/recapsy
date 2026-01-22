@@ -6,6 +6,7 @@ struct LogsView: View {
   @State private var selected: LogSource = .agent
   @State private var content: String = ""
   @State private var errorMessage: String? = nil
+  @State private var loadingSource: LogSource? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -23,20 +24,26 @@ struct LogsView: View {
           .font(.caption)
       }
 
-      ScrollView {
-        Text(content.isEmpty ? "暂无日志（或尚未启动）。" : content)
-          .font(.system(.caption, design: .monospaced))
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .textSelection(.enabled)
+      ZStack {
+        SelectableTextView(
+          text: content.isEmpty ? "暂无日志（或尚未启动）。" : content,
+          font: .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+        if loadingSource != nil {
+          ProgressView()
+        }
       }
       .background(Color(nsColor: .textBackgroundColor))
       .overlay(
         RoundedRectangle(cornerRadius: 8)
           .stroke(Color.gray.opacity(0.25), lineWidth: 1)
       )
+      .clipShape(RoundedRectangle(cornerRadius: 8))
 
       HStack {
-        Button("刷新") { load() }
+        Button("刷新") { Task { await load(source: selected) } }
         Button("复制当前日志") { copyToPasteboard(content) }
           .disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         Button("打开日志目录") { NSWorkspace.shared.open(supervisor.config.logsDir) }
@@ -47,22 +54,42 @@ struct LogsView: View {
       }
     }
     .padding(16)
-    .onAppear { load() }
-    .onChange(of: selected) { _ in load() }
+    .task(id: selected) {
+      await load(source: selected)
+    }
   }
 
-  private func load() {
+  @MainActor
+  private func load(source: LogSource) async {
+    loadingSource = source
+    defer {
+      // 避免“快速切换来源”时旧任务把新任务的 loading 状态清掉。
+      if loadingSource == source {
+        loadingSource = nil
+      }
+    }
+
     errorMessage = nil
-    let file = logFileURL(for: selected)
+    let file = logFileURL(for: source)
     guard let file else {
-      content = ""
+      if selected == source {
+        content = ""
+      }
       return
     }
 
     do {
       // 默认多读一些，便于“一次性复制”给排障。
-      content = try readTail(fileURL: file, maxBytes: 300_000)
+      let text = try await Task.detached(priority: .utility) {
+        try readTail(fileURL: file, maxBytes: 300_000)
+      }.value
+
+      if Task.isCancelled { return }
+      guard selected == source else { return }
+      content = text
     } catch {
+      if Task.isCancelled { return }
+      guard selected == source else { return }
       errorMessage = String(describing: error)
       content = ""
     }
