@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 16:55
+> Last updated: 2026-01-22 17:46
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -26,6 +26,8 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] 修复“数据看起来丢失”：dev 模式不再强制切换输出目录到 userData，保留读取 `backend/outputs` 以兼容历史数据
+- [x] 修复日志目录 ENOENT：启动时确保 outputDir 存在，避免 `workflow-debug.log` 写入失败刷屏
 - [x] 引入 `shared/` 工作区包：作为跨端常量/协议的唯一来源（为 C-003 打底）
 - [x] C-001 配置唯一入口：新增后端 `backend/src/config/` 作为唯一入口；统一 `.env`/`config.json`/env 注入优先级，并替换关键散落读取点（port/rootPath/includeStat/outputDir）
 - [x] Electron dev 冒烟通过：`pnpm dev` 启动后 UI/接口正常（本机确认）

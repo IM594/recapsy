@@ -59,6 +59,11 @@ export class WorkflowRunner extends EventEmitter {
     super();
     this.year = year;
     this.logFilePath = getWorkflowDebugLogPath();
+    try {
+      fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
+    } catch (e) {
+      console.error("Failed to create output directory for logs:", e);
+    }
     this.logToFile(
       `\n=== New WorkflowRunner Instance (Year: ${year}) - ${new Date().toISOString()} ===\n`
     );

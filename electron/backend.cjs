@@ -81,9 +81,9 @@ async function startBackendDev() {
     env: {
       ...process.env,
       PORT: String(backendPort),
-      RECAPLY_OUTPUT_DIR: getOutputDir(),
-      RECAPLY_CONFIG_PATH: getConfigPath(),
-      RECAPLY_ENV_PATH: fs.existsSync(envPath) ? envPath : "",
+      // Dev mode: keep backend behavior consistent with running `pnpm dev:backend`,
+      // so existing persisted data under `backend/outputs` remains visible.
+      // Production packaging injects RECAPLY_OUTPUT_DIR/RECAPLY_CONFIG_PATH instead.
     },
     stdio: "pipe",
   });
@@ -120,7 +120,8 @@ async function startBackendProd() {
   const backendDir = path.join(process.resourcesPath, "backend");
   const envPath = path.join(backendDir, ".env");
 
-  process.env.RECAPLY_ENV_PATH = process.env.RECAPLY_ENV_PATH || (fs.existsSync(envPath) ? envPath : "");
+  process.env.RECAPLY_ENV_PATH =
+    process.env.RECAPLY_ENV_PATH || (fs.existsSync(envPath) ? envPath : "");
 
   const serverModulePath = path.join(
     process.resourcesPath,
