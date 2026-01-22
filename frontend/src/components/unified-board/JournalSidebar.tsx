@@ -36,6 +36,7 @@ import { RepoPickerDialog } from "@/components/RepoPickerDialog";
 import { YearCalendar } from "@/components/YearCalendar";
 import { MonthSelect } from "@/components/MonthSelect";
 import { COPY } from "@/constants/copy";
+import { SUMMARY_TYPES } from "@recaply/shared";
 
 import { Structure, NavigationNode } from "./types";
 import { ContributionGraph } from "./ContributionGraph";
@@ -96,7 +97,7 @@ export function JournalSidebar({
         label: `${structure.year} ${COPY.journalSidebar.annualReview}`,
         value: `year ${structure.year}`,
         node: {
-          type: "yearly",
+          type: SUMMARY_TYPES.yearly,
           id: String(structure.year),
           label: COPY.journalSidebar.annualReview,
         },
@@ -106,11 +107,11 @@ export function JournalSidebar({
 
     // Months & Days
     structure.months.forEach((m) => {
-      const monthlyLabel = `${COPY.summaryTypes.label("monthly")} (${m.month})`;
+      const monthlyLabel = `${COPY.summaryTypes.label(SUMMARY_TYPES.monthly)} (${m.month})`;
       items.push({
         label: monthlyLabel,
         value: `month ${m.month} summary`,
-        node: { type: "monthly", id: m.month, label: monthlyLabel },
+        node: { type: SUMMARY_TYPES.monthly, id: m.month, label: monthlyLabel },
         icon: CalendarRange,
       });
 
@@ -118,7 +119,7 @@ export function JournalSidebar({
         items.push({
           label: `${d.date} (${d.repo})`,
           value: `daily ${d.date} ${d.repo} log`,
-          node: { type: "daily", id: d.date, repo: d.repo, label: d.date },
+          node: { type: SUMMARY_TYPES.daily, id: d.date, repo: d.repo, label: d.date },
           icon: CalendarIcon,
         });
       });
@@ -129,7 +130,7 @@ export function JournalSidebar({
       items.push({
         label: `${w.title} (${w.weekStart})`,
         value: `week ${w.title} ${w.weekStart} report`,
-        node: { type: "weekly", id: w.weekStart, label: w.title },
+        node: { type: SUMMARY_TYPES.weekly, id: w.weekStart, label: w.title },
         icon: LayoutTemplate,
       });
     });
@@ -169,7 +170,12 @@ export function JournalSidebar({
 
     if (repos.length === 1) {
       ensureMonthExpanded(month);
-      onSelect({ type: "daily", id: dateStr, repo: repos[0], label: dateStr });
+      onSelect({
+        type: SUMMARY_TYPES.daily,
+        id: dateStr,
+        repo: repos[0],
+        label: dateStr,
+      });
       return;
     }
 
@@ -200,17 +206,17 @@ export function JournalSidebar({
         ? String(today.getMonth() + 1).padStart(2, "0")
         : "01"
     );
-    setJumpTab("daily");
+    setJumpTab(SUMMARY_TYPES.daily);
   }, [jumpOpen, structure.year]);
 
   const handleJumpConfirm = () => {
-    if (jumpTab === "monthly") {
+    if (jumpTab === SUMMARY_TYPES.monthly) {
       const month = `${structure.year}-${jumpMonth}`;
       ensureMonthExpanded(month);
       onSelect({
-        type: "monthly",
+        type: SUMMARY_TYPES.monthly,
         id: month,
-        label: `${COPY.summaryTypes.label("monthly")} (${month})`,
+        label: `${COPY.summaryTypes.label(SUMMARY_TYPES.monthly)} (${month})`,
       });
       setJumpOpen(false);
       return;
@@ -218,12 +224,12 @@ export function JournalSidebar({
 
     if (!jumpDate) return;
 
-    if (jumpTab === "weekly") {
+    if (jumpTab === SUMMARY_TYPES.weekly) {
       const weekStart = toDateString(getWeekMonday(jumpDate));
       const week = structure.weeks.find((w) => w.weekStart === weekStart);
       ensureMonthExpanded(weekStart.substring(0, 7));
       onSelect({
-        type: "weekly",
+        type: SUMMARY_TYPES.weekly,
         id: weekStart,
         label: week?.title ?? COPY.journalSidebar.weekOf(weekStart),
       });
@@ -286,13 +292,13 @@ export function JournalSidebar({
           <div
             className={cn(
               "flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium cursor-pointer transition-colors mb-2",
-              selectedNode?.type === "yearly"
+              selectedNode?.type === SUMMARY_TYPES.yearly
                 ? "bg-amber-50 text-amber-900 border border-amber-200"
                 : "hover:bg-slate-100 text-slate-700"
             )}
             onClick={() =>
               onSelect({
-                type: "yearly",
+                type: SUMMARY_TYPES.yearly,
                 id: String(structure.year),
                 label: COPY.journalSidebar.annualReview,
               })
@@ -327,7 +333,7 @@ export function JournalSidebar({
                   <div
                     className={cn(
                       "flex items-center gap-1 px-2 py-1.5 rounded-md text-sm cursor-pointer select-none group transition-colors",
-                      selectedNode?.type === "monthly" &&
+                      selectedNode?.type === SUMMARY_TYPES.monthly &&
                         selectedNode.id === m.month
                         ? "bg-indigo-50 text-indigo-900 font-medium"
                         : "hover:bg-slate-100 text-slate-700"
@@ -351,9 +357,9 @@ export function JournalSidebar({
                       className="flex-1 flex items-center gap-2"
                       onClick={() =>
                         onSelect({
-                          type: "monthly",
+                          type: SUMMARY_TYPES.monthly,
                           id: m.month,
-                          label: `${COPY.summaryTypes.label("monthly")} (${m.month})`,
+                          label: `${COPY.summaryTypes.label(SUMMARY_TYPES.monthly)} (${m.month})`,
                         })
                       }
                     >
@@ -376,14 +382,14 @@ export function JournalSidebar({
                               key={w.weekStart}
                               className={cn(
                                 "flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors",
-                                selectedNode?.type === "weekly" &&
+                                selectedNode?.type === SUMMARY_TYPES.weekly &&
                                   selectedNode.id === w.weekStart
                                   ? "bg-purple-50 text-purple-900 font-medium"
                                   : "hover:bg-slate-100 text-slate-600"
                               )}
                               onClick={() =>
                                 onSelect({
-                                  type: "weekly",
+                                  type: SUMMARY_TYPES.weekly,
                                   id: w.weekStart,
                                   label: w.title,
                                 })
@@ -408,7 +414,7 @@ export function JournalSidebar({
                             key={`${d.date}-${d.repo}`}
                             className={cn(
                               "flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors",
-                              selectedNode?.type === "daily" &&
+                              selectedNode?.type === SUMMARY_TYPES.daily &&
                                 selectedNode.id === d.date &&
                                 selectedNode.repo === d.repo
                                 ? "bg-blue-50 text-blue-700 font-medium"
@@ -416,7 +422,7 @@ export function JournalSidebar({
                             )}
                             onClick={() =>
                               onSelect({
-                                type: "daily",
+                                type: SUMMARY_TYPES.daily,
                                 id: d.date,
                                 repo: d.repo,
                                 label: d.date,
@@ -463,19 +469,19 @@ export function JournalSidebar({
           <div className="space-y-4 py-2">
             <Tabs value={jumpTab} onValueChange={(v) => setJumpTab(v as any)}>
               <TabsList className="w-full">
-                <TabsTrigger value="daily" className="flex-1 text-xs">
+                <TabsTrigger value={SUMMARY_TYPES.daily} className="flex-1 text-xs">
                   {COPY.journalSidebar.jumpDialog.tabs.day}
                 </TabsTrigger>
-                <TabsTrigger value="weekly" className="flex-1 text-xs">
+                <TabsTrigger value={SUMMARY_TYPES.weekly} className="flex-1 text-xs">
                   {COPY.journalSidebar.jumpDialog.tabs.week}
                 </TabsTrigger>
-                <TabsTrigger value="monthly" className="flex-1 text-xs">
+                <TabsTrigger value={SUMMARY_TYPES.monthly} className="flex-1 text-xs">
                   {COPY.journalSidebar.jumpDialog.tabs.month}
                 </TabsTrigger>
               </TabsList>
             </Tabs>
 
-            {(jumpTab === "daily" || jumpTab === "weekly") && (
+            {(jumpTab === SUMMARY_TYPES.daily || jumpTab === SUMMARY_TYPES.weekly) && (
               <div className="space-y-2">
                 <Label>{COPY.common.labels.pickDate}</Label>
                 <YearCalendar
@@ -483,7 +489,7 @@ export function JournalSidebar({
                   selected={jumpDate}
                   onSelect={setJumpDate}
                 />
-                {jumpTab === "daily" &&
+                {jumpTab === SUMMARY_TYPES.daily &&
                   jumpDate &&
                   getDailyReposForDate(toDateString(jumpDate)).length > 1 && (
                     <p className="text-xs text-muted-foreground">
@@ -493,7 +499,7 @@ export function JournalSidebar({
               </div>
             )}
 
-            {jumpTab === "monthly" && (
+            {jumpTab === SUMMARY_TYPES.monthly && (
               <div className="space-y-2">
                 <Label>{COPY.common.labels.pickMonth}</Label>
                 <MonthSelect
@@ -511,7 +517,7 @@ export function JournalSidebar({
             </Button>
             <Button
               onClick={handleJumpConfirm}
-              disabled={jumpTab !== "monthly" && !jumpDate}
+              disabled={jumpTab !== SUMMARY_TYPES.monthly && !jumpDate}
             >
               {COPY.common.buttons.jump}
             </Button>
@@ -531,7 +537,7 @@ export function JournalSidebar({
           const month = repoPicker.date.substring(0, 7);
           ensureMonthExpanded(month);
           onSelect({
-            type: "daily",
+            type: SUMMARY_TYPES.daily,
             id: repoPicker.date,
             repo: repoPicker.repo,
             label: repoPicker.date,

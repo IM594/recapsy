@@ -9,7 +9,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { COPY } from "@/constants/copy";
-import { SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
+import { SSE_EVENTS, SUMMARY_ROUTES, WORKFLOW_PHASES } from "@recaply/shared";
 import { getSummaryApiUrl } from "@/lib/api";
 import { logDebug, logError, logWarn } from "@/lib/logger";
 import {
@@ -61,11 +61,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isSummaryPhase(value: unknown): value is SummaryPhase {
   return (
-    value === "idle" ||
+    value === WORKFLOW_PHASES.idle ||
     value === "starting" ||
-    value === "running" ||
-    value === "complete" ||
-    value === "error"
+    value === WORKFLOW_PHASES.running ||
+    value === WORKFLOW_PHASES.complete ||
+    value === WORKFLOW_PHASES.error
   );
 }
 
@@ -152,7 +152,7 @@ export function SummaryProvider({
 }) {
   const [status, setStatus] = useState<SummaryStatus>({
     isRunning: false,
-    phase: "idle",
+    phase: WORKFLOW_PHASES.idle,
     progress: 0,
     currentStep: null,
   });
@@ -223,7 +223,7 @@ export function SummaryProvider({
       if (event) {
         setStatus({
           isRunning: event.state.isRunning ?? false,
-          phase: event.state.phase ?? "idle",
+          phase: event.state.phase ?? WORKFLOW_PHASES.idle,
           progress: event.state.progress ?? 0,
           currentStep: event.state.currentStep ?? null,
         });
@@ -265,7 +265,7 @@ export function SummaryProvider({
       setStatus((prev) => ({
         ...prev,
         isRunning: false,
-        phase: "complete",
+        phase: WORKFLOW_PHASES.complete,
         progress: 100,
         currentStep: null,
         result: event.state.result ?? data,
@@ -287,7 +287,7 @@ export function SummaryProvider({
 
       toast.error(`${COPY.toasts.workflowErrorPrefix} ${errorMessage}`);
       addLog(`${COPY.toasts.workflowErrorPrefix} ${errorMessage}`, "error");
-      setStatus((prev) => ({ ...prev, isRunning: false, phase: "error" }));
+      setStatus((prev) => ({ ...prev, isRunning: false, phase: WORKFLOW_PHASES.error }));
     };
 
     eventSourceHandlersRef.current = { onStatus, onProgress, onComplete, onWorkflowError };
@@ -345,7 +345,7 @@ export function SummaryProvider({
     setLogs([]);
     setStatus({
       isRunning: false,
-      phase: "idle",
+      phase: WORKFLOW_PHASES.idle,
       progress: 0,
       currentStep: null,
     });

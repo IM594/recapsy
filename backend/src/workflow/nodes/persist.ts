@@ -5,6 +5,7 @@
 import { WorkflowState } from "../state";
 import { SummaryStore } from "../../lib/summary-store";
 import logger from "../../lib/logger";
+import { SUMMARY_TYPES } from "@recaply/shared";
 
 /**
  * LangGraph node: Persist all generated summaries to disk
@@ -40,7 +41,7 @@ export async function persistNode(
   }
 
   // Save yearly summary if exists
-  if (result?.type === "yearly" && result?.content) {
+  if (result?.type === SUMMARY_TYPES.yearly && result?.content) {
     await checkpoint.saveYearEndSummary(result.content);
   }
 

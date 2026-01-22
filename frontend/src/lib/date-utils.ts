@@ -3,6 +3,9 @@
  * Uses ISO week definition (Monday as first day of week)
  */
 
+import type { SummaryType } from "@/types/summary";
+import { SUMMARY_TYPES } from "@recaply/shared";
+
 /**
  * Get start of day (00:00:00.000) in local timezone
  */
@@ -76,7 +79,7 @@ export function toMonthString(date: Date): string {
  * Calculate date range for different summary types
  */
 export function getDateRangeForType(
-  type: "daily" | "weekly" | "monthly" | "yearly",
+  type: SummaryType,
   referenceDate: Date = new Date(),
   year?: number
 ): { start: Date; end: Date; startStr: string; endStr: string } {
@@ -84,19 +87,19 @@ export function getDateRangeForType(
   let end: Date;
 
   switch (type) {
-    case "daily":
+    case SUMMARY_TYPES.daily:
       start = getStartOfDay(referenceDate);
       end = getEndOfDay(referenceDate);
       break;
-    case "weekly":
+    case SUMMARY_TYPES.weekly:
       start = getWeekMonday(referenceDate);
       end = getWeekSunday(referenceDate);
       break;
-    case "monthly":
+    case SUMMARY_TYPES.monthly:
       start = getMonthStart(referenceDate);
       end = getMonthEnd(referenceDate);
       break;
-    case "yearly": {
+    case SUMMARY_TYPES.yearly: {
       const y = year || referenceDate.getFullYear();
       start = new Date(y, 0, 1);
       end = new Date(y, 11, 31, 23, 59, 59, 999);

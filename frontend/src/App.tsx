@@ -8,6 +8,7 @@ import { buildGenerationResultFromWorkflowResult } from "@/lib/workflow-result";
 import { regenerateSummary } from "@/services/summary";
 import { COPY } from "@/constants/copy";
 import { logError } from "@/lib/logger";
+import { SUMMARY_TYPES, WORKFLOW_PHASES } from "@recaply/shared";
 
 import { Dashboard } from "@/components/Dashboard";
 import { ResultCard } from "@/components/ResultCard";
@@ -39,7 +40,11 @@ function AppContent() {
 
   // Watch for completion
   useEffect(() => {
-    if (!status.isRunning && status.phase === "complete" && status.result) {
+    if (
+      !status.isRunning &&
+      status.phase === WORKFLOW_PHASES.complete &&
+      status.result
+    ) {
       const next = buildGenerationResultFromWorkflowResult(status.result, activeYear);
       if (next) {
         setGenerationResult(next);
@@ -50,7 +55,7 @@ function AppContent() {
   }, [activeYear, status.phase, status.isRunning, status.result]);
 
   const dailyRepoOptions = useMemo(() => {
-    return generationResult?.context.type === "daily"
+    return generationResult?.context.type === SUMMARY_TYPES.daily
       ? generationResult.context.repoOptions
       : undefined;
   }, [generationResult]);
@@ -141,14 +146,14 @@ function AppContent() {
               summary={generationResult.summary}
               outputPath={generationResult.outputPath}
               repo={
-                generationResult.context.type === "daily"
+                generationResult.context.type === SUMMARY_TYPES.daily
                   ? generationResult.context.repo
                   : undefined
               }
               repoOptions={dailyRepoOptions}
               onRepoChange={(repo) => {
                 setGenerationResult((prev) => {
-                  if (!prev || prev.context.type !== "daily") return prev;
+                  if (!prev || prev.context.type !== SUMMARY_TYPES.daily) return prev;
                   const summary = prev.context.summariesByRepo?.[repo];
                   if (!summary) return prev;
                   return {
@@ -164,7 +169,7 @@ function AppContent() {
                     type: generationResult.context.type,
                     id: generationResult.context.id,
                     repo:
-                      generationResult.context.type === "daily"
+                      generationResult.context.type === SUMMARY_TYPES.daily
                         ? generationResult.context.repo
                         : undefined,
                     customPrompt: prompt,
@@ -174,7 +179,7 @@ function AppContent() {
                   // Update local state with new summary
                   setGenerationResult((prev) => {
                     if (!prev) return prev;
-                    if (prev.context.type === "daily" && prev.context.repo) {
+                    if (prev.context.type === SUMMARY_TYPES.daily && prev.context.repo) {
                       const nextByRepo = {
                         ...(prev.context.summariesByRepo ?? {}),
                         [prev.context.repo]: updated,

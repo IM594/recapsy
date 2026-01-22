@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { YearCalendar } from "@/components/YearCalendar";
 import { MonthSelect } from "@/components/MonthSelect";
 import { COPY } from "@/constants/copy";
+import { SUMMARY_TYPES } from "@recaply/shared";
 import {
   fetchDailySummaries,
   fetchMonthlySummaries,
@@ -63,13 +64,13 @@ export function GenerationPreview({
 
   useEffect(() => {
     if (open) {
-      if (type === "daily" || type === "weekly") {
+      if (type === SUMMARY_TYPES.daily || type === SUMMARY_TYPES.weekly) {
         const today = new Date();
         setSelectedDate(
           year === today.getFullYear() ? today : new Date(year, 0, 1)
         );
       }
-      if (type === "monthly") {
+      if (type === SUMMARY_TYPES.monthly) {
         const today = new Date();
         setSelectedMonth(
           year === today.getFullYear()
@@ -84,7 +85,7 @@ export function GenerationPreview({
     if (!open) return;
 
     const referenceDate =
-      type === "monthly"
+      type === SUMMARY_TYPES.monthly
         ? new Date(year, Number.parseInt(selectedMonth, 10) - 1, 1)
         : selectedDate || new Date(year, 0, 1);
 
@@ -113,20 +114,20 @@ export function GenerationPreview({
       let found = false;
 
       // Match by rangeStart to stay consistent with getDateRangeForType().
-      if (type === "daily") {
+      if (type === SUMMARY_TYPES.daily) {
         found = (await fetchDailySummaries(year, undefined, { signal: controller.signal })).some(
           (d) => d.date === rangeStart
         );
-      } else if (type === "weekly") {
+      } else if (type === SUMMARY_TYPES.weekly) {
         found = (await fetchWeeklySummaries(year, { signal: controller.signal })).some(
           (d) => d.weekStart === rangeStart
         );
-      } else if (type === "monthly") {
+      } else if (type === SUMMARY_TYPES.monthly) {
         const targetMonth = rangeStart.substring(0, 7);
         found = (await fetchMonthlySummaries(year, { signal: controller.signal })).some(
           (d) => d.month === targetMonth
         );
-      } else if (type === "yearly") {
+      } else if (type === SUMMARY_TYPES.yearly) {
         const data = await fetchYearlySummary(year, { signal: controller.signal });
         found = !!data?.content;
       }
@@ -146,7 +147,7 @@ export function GenerationPreview({
     onOpenChange(false);
 
     const referenceDate =
-      type === "monthly"
+      type === SUMMARY_TYPES.monthly
         ? new Date(year, Number.parseInt(selectedMonth, 10) - 1, 1)
         : selectedDate || new Date(year, 0, 1);
 
@@ -174,7 +175,7 @@ export function GenerationPreview({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {(type === "daily" || type === "weekly") && (
+          {(type === SUMMARY_TYPES.daily || type === SUMMARY_TYPES.weekly) && (
             <div className="space-y-2">
               <Label>{COPY.common.labels.pickDate}</Label>
               <YearCalendar
@@ -188,7 +189,7 @@ export function GenerationPreview({
             </div>
           )}
 
-          {type === "monthly" && (
+          {type === SUMMARY_TYPES.monthly && (
             <div className="space-y-2">
               <Label>{COPY.common.labels.pickMonth}</Label>
               <MonthSelect

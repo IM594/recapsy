@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-23 00:58
+> Last updated: 2026-01-23 01:21
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -14,7 +14,7 @@
 - **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
 
 ## In Progress（P0，一致性优先）
-- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes、HTTP/query/body keys、summary types、ErrorResponse 结构；继续清理散落 magic string（尤其是 query keys / event names / config keys）
+- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes、HTTP/query/body keys、summary types、workflow step/phase、ErrorResponse 结构；继续清理散落 magic string（尤其是 query keys / event names / config keys）
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
@@ -25,6 +25,7 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] workflow step/phase 单一真相：新增 `shared/src/constants/workflow.ts` 并替换前后端散落字符串（`currentStep`/`phase`/`type` 判断等）
 - [x] 生命周期对称（前端）：为 effect 内异步请求增加 `AbortController` 并在 cleanup abort；SSE EventSource 的 add/removeEventListener 成对出现；轮询/重连定时器均可追踪与可清理
 - [x] 前端错误日志单一入口：新增 `frontend/src/lib/logger.ts`，并替换主要 catch/console.error 为 `logError(scope, error, context)`（保证不吞错且可检索）
 - [x] B-001 后端一致性收尾：收敛 `backend/src/lib/git.ts` 的日志与错误处理（移除 `console.*`、禁止空 `catch`），并明确允许降级的错误（`git fetch` / 单 commit stats/diff 失败）

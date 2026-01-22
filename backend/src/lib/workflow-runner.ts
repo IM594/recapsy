@@ -15,14 +15,14 @@ import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
 import { getWorkflowDebugLogPath } from "./paths";
-import { SSE_EVENTS } from "@recaply/shared";
+import { SSE_EVENTS, WORKFLOW_PHASES, WORKFLOW_STEP_IDS, type WorkflowPhase } from "@recaply/shared";
 import logger from "./logger";
 
 export interface RuntimeStatus {
   isRunning: boolean;
   progress: number;
   currentStep: string | null;
-  phase: "idle" | "running" | "complete" | "error";
+  phase: WorkflowPhase;
   error?: string;
 }
 
@@ -47,7 +47,7 @@ export class WorkflowRunner extends EventEmitter {
     isRunning: false,
     progress: 0,
     currentStep: null,
-    phase: "idle",
+    phase: WORKFLOW_PHASES.idle,
   };
 
   static getInstance(year: number): WorkflowRunner {
@@ -106,8 +106,8 @@ export class WorkflowRunner extends EventEmitter {
     this.status = {
       isRunning: true,
       progress: 0,
-      currentStep: "starting",
-      phase: "running",
+      currentStep: WORKFLOW_STEP_IDS.starting,
+      phase: WORKFLOW_PHASES.running,
     };
   }
 
@@ -172,7 +172,7 @@ export class WorkflowRunner extends EventEmitter {
       isRunning: false,
       progress: 100,
       currentStep: null,
-      phase: "complete",
+      phase: WORKFLOW_PHASES.complete,
     };
 
     const logMsg = "[WorkflowRunner] Emitting complete";
@@ -198,7 +198,7 @@ export class WorkflowRunner extends EventEmitter {
       isRunning: false,
       progress: this.status.progress,
       currentStep: this.status.currentStep,
-      phase: "error",
+      phase: WORKFLOW_PHASES.error,
       error: errorMessage,
     };
 
@@ -223,7 +223,7 @@ export class WorkflowRunner extends EventEmitter {
       isRunning: false,
       progress: 0,
       currentStep: null,
-      phase: "idle",
+      phase: WORKFLOW_PHASES.idle,
     };
   }
 }

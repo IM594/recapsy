@@ -1,11 +1,10 @@
-export type SummaryType = "daily" | "weekly" | "monthly" | "yearly";
+import type { SharedSummaryType, WorkflowPhase } from "@recaply/shared";
 
-export type SummaryPhase =
-  | "idle"
-  | "starting"
-  | "running"
-  | "complete"
-  | "error";
+export type SummaryType = SharedSummaryType;
+
+// UI includes a local "starting" phase for optimistic transitions;
+// the backend wire protocol uses WorkflowPhase.
+export type SummaryPhase = WorkflowPhase | "starting";
 
 export interface GenerationConfig {
   selectedRepos: string[];

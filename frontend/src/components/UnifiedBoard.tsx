@@ -6,6 +6,7 @@ import { regenerateSummary } from "@/services/summary";
 import { COPY } from "@/constants/copy";
 import { logError } from "@/lib/logger";
 import { isAbortError } from "@/lib/lifecycle";
+import { SUMMARY_TYPES } from "@recaply/shared";
 import { JournalSidebar } from "./unified-board/JournalSidebar";
 import { JournalEntry } from "./unified-board/JournalEntry";
 import { RepoPickerDialog } from "@/components/RepoPickerDialog";
@@ -169,14 +170,14 @@ export function UnifiedBoard({
     const signal = controller?.signal;
     setLoadingContent(true);
     try {
-      if (node.type === "yearly") {
+      if (node.type === SUMMARY_TYPES.yearly) {
         const data = await getYearlySummary(year, { signal });
         setContent(data?.content || "");
-      } else if (node.type === "monthly") {
+      } else if (node.type === SUMMARY_TYPES.monthly) {
         const data = await getMonthlySummaries(year, { signal });
         const monthData = data.find((m) => m.month === node.id);
         setContent(monthData?.summary || "");
-      } else if (node.type === "weekly") {
+      } else if (node.type === SUMMARY_TYPES.weekly) {
         const data = await getWeeklySummaries(year, { signal });
         // id is weekStart
         const weekData = data.find((w) => w.weekStart === node.id);
@@ -220,7 +221,7 @@ export function UnifiedBoard({
         year,
         nodeType: node.type,
         nodeId: node.id,
-        repo: node.type === "daily" ? node.repo : undefined,
+        repo: node.type === SUMMARY_TYPES.daily ? node.repo : undefined,
       });
       toast.error(COPY.toasts.boardContentFailed);
     } finally {
@@ -234,7 +235,7 @@ export function UnifiedBoard({
     if (!selectedNode) return;
 
     // Daily type requires repo
-    if (selectedNode.type === "daily" && !selectedNode.repo) {
+    if (selectedNode.type === SUMMARY_TYPES.daily && !selectedNode.repo) {
       toast.error(COPY.toasts.missingDailyRepoForRegeneration);
       return;
     }

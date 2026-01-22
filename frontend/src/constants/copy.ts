@@ -1,4 +1,5 @@
 import type { SummaryType } from "@/types/summary";
+import { SUMMARY_TYPES } from "@recaply/shared";
 
 const SUMMARY_TYPE_LABELS: Record<SummaryType, string> = {
   daily: "Daily Brief",
@@ -92,7 +93,7 @@ export const COPY = {
   summaryTypes: {
     label: (type: SummaryType) => SUMMARY_TYPE_LABELS[type],
     generationPreviewTitle: (type: SummaryType, year: number) => {
-      if (type === "yearly") return `Yearly Review (${year})`;
+      if (type === SUMMARY_TYPES.yearly) return `Yearly Review (${year})`;
       return SUMMARY_TYPE_LABELS[type];
     },
   },
@@ -141,12 +142,12 @@ export const COPY = {
 
   generationPreview: {
     title: (type: SummaryType, year: number) => {
-      if (type === "yearly") return `Generate Yearly Review (${year})`;
+      if (type === SUMMARY_TYPES.yearly) return `Generate Yearly Review (${year})`;
       return `Generate ${SUMMARY_TYPE_LABELS[type]}`;
     },
     description: "Review the scope before generating your summary.",
     help: {
-      dailyOrWeekly: (type: "daily" | "weekly") =>
+      dailyOrWeekly: (type: typeof SUMMARY_TYPES.daily | typeof SUMMARY_TYPES.weekly) =>
         `We will generate a ${type} summary for the selected period.`,
       monthly: (year: number) => `We will generate a monthly summary for ${year}.`,
     },

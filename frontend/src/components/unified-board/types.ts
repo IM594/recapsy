@@ -1,4 +1,6 @@
-export type NodeType = "daily" | "weekly" | "monthly" | "yearly";
+import type { SummaryType } from "@/types/summary";
+
+export type NodeType = SummaryType;
 
 export interface DailyInfo {
   date: string;

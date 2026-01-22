@@ -2,13 +2,10 @@ import { toDateString, toMonthString } from "@/lib/date-utils";
 import { COPY } from "@/constants/copy";
 import type { GenerationResultState } from "@/types/generation";
 import type { SummaryType, SummaryWorkflowResult } from "@/types/summary";
+import { SUMMARY_TYPES, isSummaryType as isSharedSummaryType } from "@recaply/shared";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
-}
-
-function isSummaryType(value: unknown): value is SummaryType {
-  return value === "daily" || value === "weekly" || value === "monthly" || value === "yearly";
 }
 
 function parseYear(value: unknown): number | null {
@@ -39,19 +36,19 @@ export function buildGenerationResultFromWorkflowResult(
   if (!result) return null;
 
   const year = parseYear(result.year) ?? fallbackYear;
-  const taskType = isSummaryType(result.taskType) ? result.taskType : undefined;
+  const taskType = isSharedSummaryType(result.taskType) ? result.taskType : undefined;
   const sinceDate = parseSinceDate(result.since);
 
   const inferredType: SummaryType | undefined =
     taskType ||
-    (result.dailySummaries?.length ? "daily" : undefined) ||
-    (result.weeklySummaries?.length ? "weekly" : undefined) ||
-    (result.monthlySummaries?.length ? "monthly" : undefined) ||
-    (result.result?.content || result.content ? "yearly" : undefined);
+    (result.dailySummaries?.length ? SUMMARY_TYPES.daily : undefined) ||
+    (result.weeklySummaries?.length ? SUMMARY_TYPES.weekly : undefined) ||
+    (result.monthlySummaries?.length ? SUMMARY_TYPES.monthly : undefined) ||
+    (result.result?.content || result.content ? SUMMARY_TYPES.yearly : undefined);
 
   if (!inferredType) return null;
 
-  if (inferredType === "daily") {
+  if (inferredType === SUMMARY_TYPES.daily) {
     if (!sinceDate) return null;
     const dailySummaries = result.dailySummaries;
     if (!dailySummaries?.length) return null;
@@ -78,7 +75,7 @@ export function buildGenerationResultFromWorkflowResult(
       summary: defaultSummary,
       outputPath: "",
       context: {
-        type: "daily",
+        type: SUMMARY_TYPES.daily,
         id: targetDate,
         repo: defaultRepo,
         repoOptions,
@@ -87,7 +84,7 @@ export function buildGenerationResultFromWorkflowResult(
     };
   }
 
-  if (inferredType === "weekly") {
+  if (inferredType === SUMMARY_TYPES.weekly) {
     if (!sinceDate) return null;
     const weeklySummaries = result.weeklySummaries;
     if (!weeklySummaries?.length) return null;
@@ -102,13 +99,13 @@ export function buildGenerationResultFromWorkflowResult(
       summary: matched.summary,
       outputPath: "",
       context: {
-        type: "weekly",
+        type: SUMMARY_TYPES.weekly,
         id: matched.weekStart,
       },
     };
   }
 
-  if (inferredType === "monthly") {
+  if (inferredType === SUMMARY_TYPES.monthly) {
     if (!sinceDate) return null;
     const monthlySummaries = result.monthlySummaries;
     if (!monthlySummaries?.length) return null;
@@ -123,7 +120,7 @@ export function buildGenerationResultFromWorkflowResult(
       summary: matched.summary,
       outputPath: "",
       context: {
-        type: "monthly",
+        type: SUMMARY_TYPES.monthly,
         id: matched.month,
       },
     };
@@ -134,11 +131,11 @@ export function buildGenerationResultFromWorkflowResult(
 
   return {
     year,
-    title: COPY.summaryTypes.generationPreviewTitle("yearly", year),
+    title: COPY.summaryTypes.generationPreviewTitle(SUMMARY_TYPES.yearly, year),
     summary: String(content),
     outputPath: "",
     context: {
-      type: "yearly",
+      type: SUMMARY_TYPES.yearly,
       id: String(year),
     },
   };

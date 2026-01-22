@@ -23,6 +23,7 @@ import { useSummary } from "@/hooks/useSummary";
 import { resetSummaryStatus } from "@/services/summary";
 import { COPY } from "@/constants/copy";
 import { logError } from "@/lib/logger";
+import { SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -114,22 +115,22 @@ export function YearEndGenerator({
 
     if (status.currentStep) {
       const stepMapping: Record<string, string> = {
-        setup: "collect",
-        collect_data: "collect",
+        [WORKFLOW_STEP_IDS.setup]: "collect",
+        [WORKFLOW_STEP_IDS.collectData]: "collect",
         // Subgraph Phase Nodes
-        daily_phase: "daily",
-        weekly_phase: "weekly",
-        monthly_phase: "monthly",
+        [WORKFLOW_STEP_IDS.dailyPhase]: "daily",
+        [WORKFLOW_STEP_IDS.weeklyPhase]: "weekly",
+        [WORKFLOW_STEP_IDS.monthlyPhase]: "monthly",
         // Internal Subgraph Nodes (keep for safety/granularity)
-        fan_out_daily: "daily",
-        process_single_daily: "daily",
+        [WORKFLOW_STEP_IDS.fanOutDaily]: "daily",
+        [WORKFLOW_STEP_IDS.processSingleDaily]: "daily",
         // Map new weekly/monthly nodes to the "monthly" (Aggregation) step
-        fan_out_weekly: "weekly",
-        process_single_week: "weekly",
-        fan_out_monthly: "monthly",
-        process_single_month: "monthly",
-        yearly_summarizer: "yearly",
-        persist: "yearly",
+        [WORKFLOW_STEP_IDS.fanOutWeekly]: "weekly",
+        [WORKFLOW_STEP_IDS.processSingleWeek]: "weekly",
+        [WORKFLOW_STEP_IDS.fanOutMonthly]: "monthly",
+        [WORKFLOW_STEP_IDS.processSingleMonth]: "monthly",
+        [WORKFLOW_STEP_IDS.yearlySummarizer]: "yearly",
+        [WORKFLOW_STEP_IDS.persist]: "yearly",
       };
 
       const activeStepId =
@@ -180,7 +181,7 @@ export function YearEndGenerator({
       selectedRepos,
       since,
       until,
-      summaryType: "yearly",
+      summaryType: SUMMARY_TYPES.yearly,
       author,
       year,
     });

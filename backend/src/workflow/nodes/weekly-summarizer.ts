@@ -7,6 +7,7 @@ import { WorkflowState } from "../state";
 import { SummaryStore } from "../../lib/summary-store";
 import type { WeeklySummary, DailySummary } from "../../lib/types";
 import logger from "../../lib/logger";
+import { SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
 
 /**
  * Get the Monday of the week for a given date
@@ -190,8 +191,8 @@ export async function weeklySummarizerNode(
     logger.warn("No daily summaries to aggregate for weekly");
     return {
       weeklySummaries: [],
-      progress: state.taskType === "yearly" ? 70 : 80,
-      currentStep: "weekly_summarizer",
+      progress: state.taskType === SUMMARY_TYPES.yearly ? 70 : 80,
+      currentStep: WORKFLOW_STEP_IDS.weeklySummarizer,
     };
   }
 
@@ -263,7 +264,7 @@ export async function weeklySummarizerNode(
 
   return {
     weeklySummaries: allWeeklySummaries,
-    progress: state.taskType === "yearly" ? 80 : 90,
-    currentStep: "weekly_summarizer",
+    progress: state.taskType === SUMMARY_TYPES.yearly ? 80 : 90,
+    currentStep: WORKFLOW_STEP_IDS.weeklySummarizer,
   };
 }

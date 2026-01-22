@@ -9,6 +9,7 @@ import { getCommitsByDay } from "../../lib/git";
 import { SummaryStore } from "../../lib/summary-store";
 import { WorkflowRunner } from "../../lib/workflow-runner";
 import logger from "../../lib/logger";
+import { WORKFLOW_STEP_IDS } from "@recaply/shared";
 
 /**
  * LangGraph node: Collect git commits from all repos
@@ -35,7 +36,7 @@ export async function collectDataNode(
       maxDiffLinesPerFile: 100,
       onProgress: (repoName, current, total) => {
         runner.updateProgress(
-          "collect_data",
+          WORKFLOW_STEP_IDS.collectData,
           Math.floor(((current + 1) / total) * 100),
           `Scanning ${repoName} (${current + 1}/${total})...`
         );
@@ -55,7 +56,7 @@ export async function collectDataNode(
 
   // Mark collect phase as 100% complete
   runner.updateProgress(
-    "collect_data",
+    WORKFLOW_STEP_IDS.collectData,
     100,
     `Completed: ${data.length} entries`
   );
@@ -63,6 +64,6 @@ export async function collectDataNode(
   // Pure state update
   return {
     rawCommits: data,
-    currentStep: "collect_data",
+    currentStep: WORKFLOW_STEP_IDS.collectData,
   };
 }

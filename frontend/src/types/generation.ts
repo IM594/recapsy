@@ -1,23 +1,24 @@
+import { SUMMARY_TYPES } from "@recaply/shared";
 import type { SummaryType } from "./summary";
 
 export type GenerationContext =
   | {
-      type: "daily";
+      type: typeof SUMMARY_TYPES.daily;
       id: string; // YYYY-MM-DD
       repo: string;
       repoOptions?: string[];
       summariesByRepo?: Record<string, string>;
     }
   | {
-      type: "weekly";
+      type: typeof SUMMARY_TYPES.weekly;
       id: string; // weekStart YYYY-MM-DD
     }
   | {
-      type: "monthly";
+      type: typeof SUMMARY_TYPES.monthly;
       id: string; // YYYY-MM
     }
   | {
-      type: "yearly";
+      type: typeof SUMMARY_TYPES.yearly;
       id: string; // YYYY
     };
 
@@ -35,4 +36,3 @@ export interface RegenerateRequestContext {
   year: number;
   repo?: string;
 }
-

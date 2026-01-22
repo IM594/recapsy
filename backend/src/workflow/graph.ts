@@ -15,6 +15,7 @@ import type {
 } from "../lib/types";
 import logger from "../lib/logger";
 import { WorkflowRunner } from "../lib/workflow-runner";
+import { SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
 
 // Helper functions for date calculations
 function getWeekStart(dateStr: string): string {
@@ -41,11 +42,11 @@ async function setupNode(
   const runner = WorkflowRunner.getInstance(year);
 
   logger.info("🚀 Initializing workflow...");
-  runner.updateProgress("setup", 100, "Workflow initialized");
+  runner.updateProgress(WORKFLOW_STEP_IDS.setup, 100, "Workflow initialized");
 
   const checkpoint = SummaryStore.getInstance(year);
   await checkpoint.initialize(selectedRepos || [], authorPattern || "");
-  return { status: "running", currentStep: "setup" };
+  return { status: "running", currentStep: WORKFLOW_STEP_IDS.setup };
 }
 
 // ==========================================
@@ -83,9 +84,9 @@ async function fanOutDailyNode(
 
   // Reset counter for this phase
   const runner = WorkflowRunner.getInstance(year);
-  runner.resetProgressCounter("process_single_daily");
+  runner.resetProgressCounter(WORKFLOW_STEP_IDS.processSingleDaily);
   runner.updateProgress(
-    "fan_out_daily",
+    WORKFLOW_STEP_IDS.fanOutDaily,
     0,
     `Starting daily processing (${toProcess.length} items)`
   );
@@ -93,7 +94,7 @@ async function fanOutDailyNode(
   return {
     rawCommits: toProcess,
     dailySummaries: cached,
-    currentStep: "fan_out_daily",
+    currentStep: WORKFLOW_STEP_IDS.fanOutDaily,
   };
 }
 
@@ -144,17 +145,17 @@ async function processSingleDailyNode(
     await checkpoint.saveDailySummary(summary);
 
     runner.incrementProgress(
-      "process_single_daily",
+      WORKFLOW_STEP_IDS.processSingleDaily,
       total,
       `Processed ${currentDailyCommit.date}`
     );
 
-    return { dailySummaries: [summary], currentStep: "process_single_daily" };
+    return { dailySummaries: [summary], currentStep: WORKFLOW_STEP_IDS.processSingleDaily };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error(`❌ Failed to process ${currentDailyCommit.date}: ${errMsg}`);
     runner.incrementProgress(
-      "process_single_daily",
+      WORKFLOW_STEP_IDS.processSingleDaily,
       total,
       `Failed ${currentDailyCommit.date}`
     );
@@ -196,13 +197,13 @@ async function fanOutWeeklyNode(
 
   // Reset counter for this phase
   const runner = WorkflowRunner.getInstance(year);
-  runner.resetProgressCounter("process_single_week");
+  runner.resetProgressCounter(WORKFLOW_STEP_IDS.processSingleWeek);
 
   if (!dailySummaries || dailySummaries.length === 0) {
-    runner.updateProgress("fan_out_weekly", 100, "No weekly tasks to process");
+    runner.updateProgress(WORKFLOW_STEP_IDS.fanOutWeekly, 100, "No weekly tasks to process");
     return {
       pendingWeeklyTasks: [],
-      currentStep: "fan_out_weekly",
+      currentStep: WORKFLOW_STEP_IDS.fanOutWeekly,
     };
   }
 
@@ -233,7 +234,7 @@ async function fanOutWeeklyNode(
   );
 
   runner.updateProgress(
-    "fan_out_weekly",
+    WORKFLOW_STEP_IDS.fanOutWeekly,
     0,
     `Starting weekly processing (${toProcess.length} weeks)`
   );
@@ -241,7 +242,7 @@ async function fanOutWeeklyNode(
   return {
     pendingWeeklyTasks: toProcess,
     weeklySummaries: cached,
-    currentStep: "fan_out_weekly",
+    currentStep: WORKFLOW_STEP_IDS.fanOutWeekly,
   };
 }
 
@@ -289,16 +290,16 @@ async function processSingleWeeklyNode(
     );
     await checkpoint.saveWeeklySummary(summary);
     runner.incrementProgress(
-      "process_single_week",
+      WORKFLOW_STEP_IDS.processSingleWeek,
       total,
       `Processed Week ${weekStart}`
     );
-    return { weeklySummaries: [summary], currentStep: "process_single_week" };
+    return { weeklySummaries: [summary], currentStep: WORKFLOW_STEP_IDS.processSingleWeek };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error(`❌ Failed to process week ${weekStart}: ${errMsg}`);
     runner.incrementProgress(
-      "process_single_week",
+      WORKFLOW_STEP_IDS.processSingleWeek,
       total,
       `Failed Week ${weekStart}`
     );
@@ -355,9 +356,9 @@ async function fanOutMonthlyNode(
 
   // Reset counter for this phase
   const runner = WorkflowRunner.getInstance(year);
-  runner.resetProgressCounter("process_single_month");
+  runner.resetProgressCounter(WORKFLOW_STEP_IDS.processSingleMonth);
   runner.updateProgress(
-    "fan_out_monthly",
+    WORKFLOW_STEP_IDS.fanOutMonthly,
     0,
     `Starting monthly processing (${toProcess.length} months)`
   );
@@ -365,7 +366,7 @@ async function fanOutMonthlyNode(
   return {
     pendingMonthlyTasks: toProcess,
     monthlySummaries: cached,
-    currentStep: "fan_out_monthly",
+    currentStep: WORKFLOW_STEP_IDS.fanOutMonthly,
   };
 }
 
@@ -409,16 +410,16 @@ async function processSingleMonthlyNode(
     const summary = await processMonthSummary(month, dailies);
     await checkpoint.saveMonthlySummary(summary);
     runner.incrementProgress(
-      "process_single_month",
+      WORKFLOW_STEP_IDS.processSingleMonth,
       total,
       `Processed Month ${month}`
     );
-    return { monthlySummaries: [summary], currentStep: "process_single_month" };
+    return { monthlySummaries: [summary], currentStep: WORKFLOW_STEP_IDS.processSingleMonth };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     logger.error(`❌ Failed to process month ${month}: ${errMsg}`);
     runner.incrementProgress(
-      "process_single_month",
+      WORKFLOW_STEP_IDS.processSingleMonth,
       total,
       `Failed Month ${month}`
     );
@@ -457,7 +458,7 @@ async function yearlySummarizerNode(
 
   logger.info("🎄 Generating year-end summary...");
   runner.updateProgress(
-    "yearly_summarizer",
+    WORKFLOW_STEP_IDS.yearlySummarizer,
     10,
     "Generating year-end summary..."
   );
@@ -469,11 +470,15 @@ async function yearlySummarizerNode(
   );
 
   logger.info("✅ Year-end summary complete");
-  runner.updateProgress("yearly_summarizer", 100, "Year-end summary complete");
+  runner.updateProgress(
+    WORKFLOW_STEP_IDS.yearlySummarizer,
+    100,
+    "Year-end summary complete"
+  );
 
   return {
-    result: { content: result.overview, type: "yearly" },
-    currentStep: "yearly_summarizer",
+    result: { content: result.overview, type: SUMMARY_TYPES.yearly },
+    currentStep: WORKFLOW_STEP_IDS.yearlySummarizer,
   };
 }
 
@@ -488,22 +493,22 @@ function routeAfterDailyPhase(
   // If task is daily, we stop. Else we go to weekly.
   // Note: "daily" task might imply "process valid days".
   // If we only wanted to do daily, we exit.
-  if (state.taskType === "daily") return "persist";
-  return "weekly_phase";
+  if (state.taskType === SUMMARY_TYPES.daily) return WORKFLOW_STEP_IDS.persist;
+  return WORKFLOW_STEP_IDS.weeklyPhase;
 }
 
 function routeAfterWeeklyPhase(
   state: WorkflowState
 ): "persist" | "monthly_phase" {
-  if (state.taskType === "weekly") return "persist";
-  return "monthly_phase";
+  if (state.taskType === SUMMARY_TYPES.weekly) return WORKFLOW_STEP_IDS.persist;
+  return WORKFLOW_STEP_IDS.monthlyPhase;
 }
 
 function routeAfterMonthlyPhase(
   state: WorkflowState
 ): "persist" | "yearly_summarizer" {
-  if (state.taskType === "monthly") return "persist";
-  return "yearly_summarizer";
+  if (state.taskType === SUMMARY_TYPES.monthly) return WORKFLOW_STEP_IDS.persist;
+  return WORKFLOW_STEP_IDS.yearlySummarizer;
 }
 
 export async function createSummaryWorkflow() {
