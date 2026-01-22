@@ -57,10 +57,8 @@ export function UnifiedBoard({
     structureControllerRef.current = controller;
     fetchStructure(controller.signal);
     return () => {
-      controller.abort();
-      if (structureControllerRef.current === controller) {
-        structureControllerRef.current = null;
-      }
+      structureControllerRef.current?.abort();
+      structureControllerRef.current = null;
     };
   }, [year]);
 
