@@ -40,6 +40,103 @@ function normalizeText(text) {
     .trim();
 }
 
+function splitLines(text) {
+  return String(text ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line);
+}
+
+function countGoodChars(text) {
+  // 允许中英文与数字，作为“这行是不是有意义”的粗判断。
+  // 注意：使用 Unicode property escapes，需要 Node 16+（当前项目默认 Node 18+）。
+  const matches = String(text ?? "").match(
+    /[\p{Script=Han}\p{Letter}\p{Number}]/gu
+  );
+  return matches ? matches.length : 0;
+}
+
+function looksLikeMenuBarLine(line) {
+  // 常见顶栏菜单项（跨应用比较通用）。如果一行几乎全由这些 token 组成，基本都是噪声。
+  const tokens = String(line ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length < 3) return false;
+
+  const menu = new Set([
+    "file",
+    "edit",
+    "view",
+    "history",
+    "window",
+    "help",
+    "format",
+    "insert",
+    "tools",
+    "go",
+    "navigate",
+    "debug",
+    "terminal",
+  ]);
+
+  let hit = 0;
+  for (const t of tokens) {
+    const normalized = t.toLowerCase().replace(/[^a-z]/g, "");
+    if (menu.has(normalized)) hit += 1;
+  }
+
+  return hit / tokens.length >= 0.8;
+}
+
+function isLowSignalLine(line) {
+  const trimmed = String(line ?? "").trim();
+  if (!trimmed) return true;
+
+  const compact = trimmed.replace(/\s+/g, "");
+  if (compact.length < 2) return true;
+
+  if (looksLikeMenuBarLine(trimmed)) return true;
+
+  // 过滤掉几乎全是标点/乱码的行（例如 OCR 抖动产生的符号块）。
+  const good = countGoodChars(compact);
+  const ratio = good / compact.length;
+  if (good < 2) return true;
+  if (ratio < 0.33) return true;
+
+  // 纯数字/页码之类的短行一般意义不大。
+  if (/^\d{1,4}$/.test(compact)) return true;
+
+  return false;
+}
+
+function cleanOcrLinesForChunk(rawText) {
+  const normalized = normalizeText(rawText);
+  if (!normalized) return [];
+
+  const lines = splitLines(normalized)
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .filter((line) => line && !isLowSignalLine(line));
+
+  // 同一帧内去重（保持顺序）
+  const seen = new Set();
+  const deduped = [];
+  for (const line of lines) {
+    if (seen.has(line)) continue;
+    seen.add(line);
+    deduped.push(line);
+  }
+
+  return deduped;
+}
+
+function stableTextSignature(lines) {
+  // 轻量级签名：用于判断“这一帧的可用文本是否真的变化了”。
+  // 不引入哈希依赖，先用归一化拼接即可。
+  if (!Array.isArray(lines)) return "";
+  return lines.join("\n");
+}
+
 function detectChunksFtsMode(db) {
   // 通过 sqlite_master 里的建表 SQL 判断 chunks_fts 是 fts5 / fts4 / 不存在。
   // 说明：在部分环境里 SQLite 可能没有编译进 fts5/fts4；此时我们会降级为 LIKE 搜索。
@@ -678,18 +775,54 @@ export function createStore(db, { withTransaction }) {
 
       const first = currentGroup[0];
       const last = currentGroup[currentGroup.length - 1];
-      const chunkTextParts = [];
-      let previousNormalized = "";
+      const cleanedPerFrame = [];
+      const lineCounts = new Map(); // line -> count (per-frame unique)
 
       for (const frame of currentGroup) {
-        const normalized = normalizeText(frame.ocr_text);
-        if (!normalized) continue;
-        if (normalized === previousNormalized) continue;
-        chunkTextParts.push(normalized);
-        previousNormalized = normalized;
+        const lines = cleanOcrLinesForChunk(frame.ocr_text);
+        if (lines.length === 0) continue;
+
+        cleanedPerFrame.push(lines);
+
+        const unique = new Set(lines);
+        for (const line of unique) {
+          lineCounts.set(line, (lineCounts.get(line) ?? 0) + 1);
+        }
       }
 
-      const text = normalizeText(chunkTextParts.join("\n\n"));
+      if (cleanedPerFrame.length === 0) {
+        currentGroup = [];
+        return;
+      }
+
+      // 过滤“几乎每一帧都出现”的短行（侧边栏/菜单/固定 UI 组件），降低碎片与噪声。
+      const threshold = Math.ceil(cleanedPerFrame.length * 0.9);
+      const frequentShortLines = new Set();
+      for (const [line, count] of lineCounts.entries()) {
+        if (count >= threshold && line.length <= 32) {
+          frequentShortLines.add(line);
+        }
+      }
+
+      // 组装 chunk 文本：跨帧去重（保持顺序），并跳过 frequentShortLines。
+      const out = [];
+      const seenLines = new Set();
+      let previousSig = "";
+
+      for (const lines of cleanedPerFrame) {
+        const sig = stableTextSignature(lines);
+        if (sig === previousSig) continue;
+        previousSig = sig;
+
+        for (const line of lines) {
+          if (frequentShortLines.has(line)) continue;
+          if (seenLines.has(line)) continue;
+          seenLines.add(line);
+          out.push(line);
+        }
+      }
+
+      const text = normalizeText(out.join("\n"));
       if (!text) {
         currentGroup = [];
         return;
