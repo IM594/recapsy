@@ -1,7 +1,11 @@
 const { BrowserWindow } = require("electron");
 
-const { getFrontendEntry, getPreloadPath, mainWindowDefaults } = require("./config");
-const { log } = require("./logger");
+const {
+  getFrontendEntry,
+  getPreloadPath,
+  mainWindowDefaults,
+} = require("./config.cjs");
+const { log } = require("./logger.cjs");
 
 function createMainWindow() {
   const win = new BrowserWindow({
@@ -30,4 +34,3 @@ function createMainWindow() {
 }
 
 module.exports = { createMainWindow };
-

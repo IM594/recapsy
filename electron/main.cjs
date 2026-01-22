@@ -1,9 +1,9 @@
 const { app, BrowserWindow } = require("electron");
 
-const { isDev } = require("./config");
-const { startBackend, stopBackend } = require("./backend");
-const { createMainWindow } = require("./window");
-const { log, error } = require("./logger");
+const { isDev } = require("./config.cjs");
+const { startBackend, stopBackend } = require("./backend.cjs");
+const { createMainWindow } = require("./window.cjs");
+const { log, error } = require("./logger.cjs");
 
 // ---- Log noise filtering (dev only) ----
 // Chromium log levels:

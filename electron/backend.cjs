@@ -3,8 +3,8 @@ const fs = require("fs");
 const http = require("http");
 const { spawn } = require("child_process");
 
-const { isDev, backendPort } = require("./config");
-const { log, warn, error } = require("./logger");
+const { isDev, backendPort } = require("./config.cjs");
+const { log, warn, error } = require("./logger.cjs");
 
 let backendProcess = null;
 let stopServer = null;
