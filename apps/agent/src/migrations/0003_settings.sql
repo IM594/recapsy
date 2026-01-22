@@ -21,7 +21,7 @@ INSERT OR IGNORE INTO settings (key, value_json, updated_at)
 VALUES ('collector.thumbnailEnabled', 'true', CAST(strftime('%s','now') AS INTEGER) * 1000);
 
 INSERT OR IGNORE INTO settings (key, value_json, updated_at)
-VALUES ('collector.thumbnailMaxWidth', '420', CAST(strftime('%s','now') AS INTEGER) * 1000);
+VALUES ('collector.thumbnailMaxWidth', '720', CAST(strftime('%s','now') AS INTEGER) * 1000);
 
 INSERT OR IGNORE INTO settings (key, value_json, updated_at)
 VALUES ('collector.ocrLevel', '\"fast\"', CAST(strftime('%s','now') AS INTEGER) * 1000);
@@ -34,4 +34,3 @@ VALUES ('agent.evidenceRetentionDays', '30', CAST(strftime('%s','now') AS INTEGE
 
 INSERT OR IGNORE INTO settings (key, value_json, updated_at)
 VALUES ('agent.evidenceCleanupIntervalMinutes', '60', CAST(strftime('%s','now') AS INTEGER) * 1000);
-

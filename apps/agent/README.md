@@ -141,6 +141,6 @@ token 默认存放在：
 - `collector.intervalSeconds`：采集间隔秒数（默认 `5`）
 - `collector.dedupeThreshold`：dHash 去重阈值（默认 `2`）
 - `collector.thumbnailEnabled`：是否写入缩略图（默认 `true`）
-- `collector.thumbnailMaxWidth`：缩略图最大宽度（默认 `420`）
+- `collector.thumbnailMaxWidth`：缩略图最大宽度（默认 `720`）
 - `agent.evidenceRetentionDays`：热证据保留天数（默认 `30`）
 - `agent.evidenceCleanupIntervalMinutes`：清理任务间隔分钟数（默认 `60`）

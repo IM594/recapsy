@@ -70,7 +70,7 @@ struct RecapSenseSettings: Codable, Equatable {
         intervalSeconds: 5,
         dedupeThreshold: 2,
         thumbnailEnabled: true,
-        thumbnailMaxWidth: 420,
+        thumbnailMaxWidth: 720,
         ocrLevel: "fast",
         ocrLanguages: ["zh-Hans", "en-US"],
         excludedApps: []

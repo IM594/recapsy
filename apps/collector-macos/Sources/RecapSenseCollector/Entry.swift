@@ -397,7 +397,9 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   var ocrLanguages: [String] = ["zh-Hans", "en-US"]
   var ocrLogEnabled = false
   var thumbnailEnabled = true
-  var thumbnailMaxWidth = 420
+  // 说明：该缩略图既用于 UI 预览，也会被未来的视觉/多模态处理复用。
+  // 420px 对 LLM 来说往往偏糊；这里把默认值适度提高，但仍保持对磁盘/CPU 的克制。
+  var thumbnailMaxWidth = 720
   var excludedApps: [String] = []
   var dryRun = false
   var once = false

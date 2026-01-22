@@ -153,6 +153,7 @@ export async function migrate(db) {
     { version: 1, sql: () => loadSchemaSql() },
     { version: 2, sql: () => loadMigrationSql("./migrations/0002_vision.sql") },
     { version: 3, sql: () => loadMigrationSql("./migrations/0003_settings.sql") },
+    { version: 4, sql: () => loadMigrationSql("./migrations/0004_thumbnail_width.sql") },
   ];
 
   for (const migration of migrations) {
