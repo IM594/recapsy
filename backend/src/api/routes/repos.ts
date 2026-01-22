@@ -1,13 +1,14 @@
 import { Router } from "express";
 import { findRepositories } from "../../lib/git";
 import logger from "../../lib/logger";
+import { getConfig } from "../../config";
 
 const router = Router();
 
 router.get("/repos", async (req, res) => {
   try {
     const rootPath = req.query.rootPath as string;
-    const rootDir = rootPath || process.env.PROJECTS_ROOT;
+    const rootDir = rootPath || getConfig().repos.defaultRootPath;
 
     if (!rootDir) {
       return res.status(400).json({ error: "Root path is required" });

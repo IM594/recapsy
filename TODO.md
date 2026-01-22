@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 14:59
+> Last updated: 2026-01-22 15:16
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -14,11 +14,10 @@
 - **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
 
 ## In Progress（P0，一致性优先）
-- [ ] C-001 配置唯一入口：统一 Electron/Backend 的配置读取规则（`.env`/`config.json`/env 注入）与优先级，并移除散落的读取点
+- [ ] C-003 常量集中：统一并集中 `localStorage key`、事件名、路由/页面名、API path（避免散落 magic string）
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
-- [ ] C-003 常量集中：统一并集中 `localStorage key`、事件名、路由/页面名、API path（避免散落 magic string）
 - [ ] C-004 生命周期审计：梳理全局订阅/轮询/SSE/进程/窗口事件，确保创建与销毁成对且可追踪
 - [ ] C-005 错误处理基线：补齐关键链路的上下文日志（例如后端启动/配置加载/文件读写），杜绝“吞错”
 
@@ -27,6 +26,7 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] C-001 配置唯一入口：新增后端 `backend/src/config/` 作为唯一入口；统一 `.env`/`config.json`/env 注入优先级，并替换关键散落读取点（port/rootPath/includeStat/outputDir）
 - [x] Electron dev 冒烟通过：`pnpm dev` 启动后 UI/接口正常（本机确认）
 - [x] 修复 Electron 模块解析：CommonJS `require()` 显式使用 `.cjs` 后缀（避免 `Cannot find module './config'`）
 - [x] 输出目录一致性：通过 `RECAPLY_OUTPUT_DIR` 统一 backend 落盘路径（避免 prod 写入不可写目录）

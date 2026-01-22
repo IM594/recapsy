@@ -1,12 +1,14 @@
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import summaryRouter from "./routes/summary";
 import reposRouter from "./routes/repos";
+import { getConfig } from "../config";
+import { ENV_KEYS } from "../config/constants";
+import { LLM_ENV_KEYS } from "../config/llm-env";
 
-dotenv.config();
+const config = getConfig();
 
-const DEBUG_STARTUP = process.env.DEBUG_STARTUP === "1";
+const DEBUG_STARTUP = process.env[ENV_KEYS.debugStartup] === "1";
 
 function flag(value: unknown): string {
   return value ? "yes" : "no";
@@ -16,30 +18,63 @@ if (DEBUG_STARTUP) {
   console.log("======================================");
   console.log("LLM Configuration");
   console.log("  Fallback:");
-  console.log(`    AI_MODEL_NAME: ${process.env.AI_MODEL_NAME || "(unset)"}`);
-  console.log(`    OPENAI_BASE_URL: ${flag(process.env.OPENAI_BASE_URL)}`);
-  console.log(`    OPENAI_API_KEY: ${flag(process.env.OPENAI_API_KEY)}`);
+  console.log(
+    `    ${LLM_ENV_KEYS.modelName}: ${
+      process.env[LLM_ENV_KEYS.modelName] || "(unset)"
+    }`
+  );
+  console.log(
+    `    ${LLM_ENV_KEYS.openaiBaseUrl}: ${flag(
+      process.env[LLM_ENV_KEYS.openaiBaseUrl]
+    )}`
+  );
+  console.log(
+    `    ${LLM_ENV_KEYS.openaiApiKey}: ${flag(
+      process.env[LLM_ENV_KEYS.openaiApiKey]
+    )}`
+  );
   console.log("  Fast (Daily):");
-  console.log(`    AI_MODEL_FAST: ${process.env.AI_MODEL_FAST || "(fallback)"}`);
-  console.log(`    AI_BASEURL_FAST: ${flag(process.env.AI_BASEURL_FAST)}`);
+  console.log(
+    `    ${LLM_ENV_KEYS.modelFast}: ${
+      process.env[LLM_ENV_KEYS.modelFast] || "(fallback)"
+    }`
+  );
+  console.log(
+    `    ${LLM_ENV_KEYS.baseUrlFast}: ${flag(
+      process.env[LLM_ENV_KEYS.baseUrlFast]
+    )}`
+  );
   console.log("  Balanced (Weekly):");
   console.log(
-    `    AI_MODEL_BALANCED: ${process.env.AI_MODEL_BALANCED || "(fallback)"}`
+    `    ${LLM_ENV_KEYS.modelBalanced}: ${
+      process.env[LLM_ENV_KEYS.modelBalanced] || "(fallback)"
+    }`
   );
-  console.log(`    AI_BASEURL_BALANCED: ${flag(process.env.AI_BASEURL_BALANCED)}`);
+  console.log(
+    `    ${LLM_ENV_KEYS.baseUrlBalanced}: ${flag(
+      process.env[LLM_ENV_KEYS.baseUrlBalanced]
+    )}`
+  );
   console.log("  Quality (Monthly/Yearly):");
   console.log(
-    `    AI_MODEL_QUALITY: ${process.env.AI_MODEL_QUALITY || "(fallback)"}`
+    `    ${LLM_ENV_KEYS.modelQuality}: ${
+      process.env[LLM_ENV_KEYS.modelQuality] || "(fallback)"
+    }`
   );
-  console.log(`    AI_BASEURL_QUALITY: ${flag(process.env.AI_BASEURL_QUALITY)}`);
+  console.log(
+    `    ${LLM_ENV_KEYS.baseUrlQuality}: ${flag(
+      process.env[LLM_ENV_KEYS.baseUrlQuality]
+    )}`
+  );
+  console.log("Config Files");
+  console.log(`  envPath: ${config.paths.envPath || "(not found)"}`);
+  console.log(`  configPath: ${config.paths.configPath}`);
+  console.log(`  outputDir: ${config.paths.outputDir}`);
   console.log("======================================");
 }
 
 const app = express();
-const PORT = (() => {
-  const parsed = Number.parseInt(process.env.PORT || "", 10);
-  return Number.isFinite(parsed) ? parsed : 3456;
-})();
+const PORT = config.server.port;
 
 // Middleware
 app.use(cors());

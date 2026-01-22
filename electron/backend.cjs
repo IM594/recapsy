@@ -83,6 +83,7 @@ async function startBackendDev() {
       PORT: String(backendPort),
       RECAPLY_OUTPUT_DIR: getOutputDir(),
       RECAPLY_CONFIG_PATH: getConfigPath(),
+      RECAPLY_ENV_PATH: fs.existsSync(envPath) ? envPath : "",
     },
     stdio: "pipe",
   });
@@ -119,13 +120,7 @@ async function startBackendProd() {
   const backendDir = path.join(process.resourcesPath, "backend");
   const envPath = path.join(backendDir, ".env");
 
-  if (fs.existsSync(envPath)) {
-    // eslint-disable-next-line global-require
-    require("dotenv").config({ path: envPath });
-    log("Backend .env loaded:", envPath);
-  } else {
-    warn("Backend .env not found; the backend may not work correctly.");
-  }
+  process.env.RECAPLY_ENV_PATH = process.env.RECAPLY_ENV_PATH || (fs.existsSync(envPath) ? envPath : "");
 
   const serverModulePath = path.join(
     process.resourcesPath,

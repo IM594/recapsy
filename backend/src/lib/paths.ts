@@ -1,14 +1,10 @@
 import path from "path";
+import { getConfig } from "../config";
 
 export function getBaseOutputDir(): string {
-  const configured = process.env.RECAPLY_OUTPUT_DIR;
-  if (typeof configured === "string" && configured.trim()) {
-    return path.resolve(configured);
-  }
-  return path.resolve(process.cwd(), "outputs");
+  return getConfig().paths.outputDir;
 }
 
 export function getWorkflowDebugLogPath(): string {
   return path.join(getBaseOutputDir(), "workflow-debug.log");
 }
-

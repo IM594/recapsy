@@ -2,6 +2,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import path from "path";
 import fs from "fs/promises";
+import { getConfig } from "../config";
 
 const execAsync = promisify(exec);
 
@@ -88,7 +89,7 @@ export async function getRepoCommits(
     // git log -E --author "pattern" --since="since" --pretty=format:"%h - %s (%an)"
     // -E enables extended regex for author pattern
     // 用户要求移除数量限制，获取完整记录
-    const includeStat = process.env.GIT_INCLUDE_STAT !== "0"; // 默认带 diffstat
+    const includeStat = getConfig().git.includeStat; // 默认带 diffstat
     const authorClause = authorPattern ? `--author "${authorPattern}"` : "";
     const untilClause = until ? `--until="${until}"` : "";
     const statFlag = includeStat ? "--stat" : "";

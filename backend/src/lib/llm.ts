@@ -4,6 +4,11 @@
  */
 
 import { ChatOpenAI } from "@langchain/openai";
+import {
+  LLM_DEBUG_ENV_KEYS,
+  LLM_ENV_KEYS,
+  LLM_ENV_PREFIXES,
+} from "../config/llm-env";
 
 /**
  * Model Tier for different use cases:
@@ -57,14 +62,14 @@ function getTierConfig(tier: ModelTier): TierConfig {
   const tierUpper = tier.toUpperCase();
 
   // Try tier-specific first
-  const tierModel = process.env[`AI_MODEL_${tierUpper}`];
-  const tierBaseURL = process.env[`AI_BASEURL_${tierUpper}`];
-  const tierApiKey = process.env[`AI_APIKEY_${tierUpper}`];
+  const tierModel = process.env[`${LLM_ENV_PREFIXES.tierModel}${tierUpper}`];
+  const tierBaseURL = process.env[`${LLM_ENV_PREFIXES.tierBaseUrl}${tierUpper}`];
+  const tierApiKey = process.env[`${LLM_ENV_PREFIXES.tierApiKey}${tierUpper}`];
 
   // Fallback to general config
-  const generalModel = process.env.AI_MODEL_NAME;
-  const generalBaseURL = process.env.OPENAI_BASE_URL;
-  const generalApiKey = process.env.OPENAI_API_KEY;
+  const generalModel = process.env[LLM_ENV_KEYS.modelName];
+  const generalBaseURL = process.env[LLM_ENV_KEYS.openaiBaseUrl];
+  const generalApiKey = process.env[LLM_ENV_KEYS.openaiApiKey];
 
   return {
     modelName: tierModel || generalModel || "claude-sonnet-4-20250514",
@@ -140,7 +145,7 @@ export function clearLLMCache(): void {
 import logger from "./logger";
 
 function shouldLogPromptPreview(): boolean {
-  const value = process.env.DEBUG_LLM_PROMPT_PREVIEW;
+  const value = process.env[LLM_DEBUG_ENV_KEYS.promptPreview];
   return value === "1" || value === "true";
 }
 
