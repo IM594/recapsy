@@ -29,3 +29,15 @@ struct DailySummaryItem: Decodable, Equatable {
   let summary: String
 }
 
+struct DangerDeleteResult: Decodable, Equatable {
+  let scope: String
+  let startTs: Int64
+  let endTs: Int64
+  let deletedFrames: Int
+  let deletedChunks: Int
+  let deletedDailySummaries: Int
+}
+
+struct DangerDeleteResponse: Decodable, Equatable {
+  let result: DangerDeleteResult
+}

@@ -134,6 +134,30 @@ struct AgentHttpClient {
     return try JSONDecoder().decode(Payload.self, from: data).results
   }
 
+  func dangerDelete(scope: String) async throws -> DangerDeleteResult {
+    let url = baseURL.appendingPathComponent("/v1/danger/delete")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+    struct Body: Encodable { let scope: String }
+    request.httpBody = try JSONEncoder().encode(Body(scope: scope))
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    let payload = try JSONDecoder().decode(DangerDeleteResponse.self, from: data)
+    return payload.result
+  }
+
   private static func loadToken(dataDir: URL) throws -> String {
     let env = ProcessInfo.processInfo.environment
     if let token = env["RECAPSENSE_API_TOKEN"], !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

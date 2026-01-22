@@ -8,6 +8,8 @@ struct SettingsView: View {
   @State private var isLoading = false
   @State private var message: String? = nil
   @State private var excludedAppInput: String = ""
+  @State private var pendingDangerScope: String? = nil
+  @State private var lastDangerResult: DangerDeleteResult? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -27,7 +29,28 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
       }
 
+      if let lastDangerResult {
+        Text(
+          "删除完成：frames=\(lastDangerResult.deletedFrames)，chunks=\(lastDangerResult.deletedChunks)，日总结=\(lastDangerResult.deletedDailySummaries)"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
       Form {
+        Section("危险区域（Danger Zone）") {
+          Text("删除是不可恢复的。建议先“暂停采集”，再执行删除。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          Button("删除最近 1 小时") { pendingDangerScope = "lastHour" }
+            .disabled(isLoading)
+          Button("删除最近 24 小时") { pendingDangerScope = "lastDay" }
+            .disabled(isLoading)
+          Button("删除全部数据（清空）") { pendingDangerScope = "all" }
+            .disabled(isLoading)
+        }
+
         Section("权限（macOS）") {
           Button("打开系统设置：屏幕录制") {
             openPrivacyPane(anchor: "Privacy_ScreenCapture")
@@ -136,6 +159,22 @@ struct SettingsView: View {
       draft = supervisor.settings
       refresh()
     }
+    .alert(
+      "确认删除？",
+      isPresented: Binding(
+        get: { pendingDangerScope != nil },
+        set: { newValue in if !newValue { pendingDangerScope = nil } }
+      )
+    ) {
+      Button("取消", role: .cancel) { pendingDangerScope = nil }
+      Button("确认删除", role: .destructive) {
+        let scope = pendingDangerScope ?? "lastHour"
+        pendingDangerScope = nil
+        runDangerDelete(scope: scope)
+      }
+    } message: {
+      Text(dangerMessage(for: pendingDangerScope))
+    }
   }
 
   private func refresh() {
@@ -164,6 +203,44 @@ struct SettingsView: View {
       } catch {
         message = "保存失败：\(String(describing: error))"
       }
+    }
+  }
+
+  private func runDangerDelete(scope: String) {
+    isLoading = true
+    lastDangerResult = nil
+    message = "正在删除…（\(scope)）"
+    Task {
+      defer { isLoading = false }
+      do {
+        let result = try await supervisor.dangerDelete(scope: scope)
+        lastDangerResult = result
+        switch scope {
+        case "all":
+          message = "已删除全部数据（已清空）。"
+        case "lastDay":
+          message = "已删除最近 24 小时的数据。"
+        case "lastHour":
+          message = "已删除最近 1 小时的数据。"
+        default:
+          message = "已删除。"
+        }
+      } catch {
+        message = "删除失败：\(String(describing: error))"
+      }
+    }
+  }
+
+  private func dangerMessage(for scope: String?) -> String {
+    switch scope {
+    case "all":
+      return "将清空数据库中的 frames/chunks/日总结，并删除热证据（media 目录）。这一步不可恢复。"
+    case "lastDay":
+      return "将删除最近 24 小时内的内容（如果某个 chunk 有一部分命中范围，会删除整个 chunk 以及关联的 frames）。不可恢复。"
+    case "lastHour":
+      return "将删除最近 1 小时内的内容（如果某个 chunk 有一部分命中范围，会删除整个 chunk 以及关联的 frames）。不可恢复。"
+    default:
+      return "这一步不可恢复。"
     }
   }
 

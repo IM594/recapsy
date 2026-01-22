@@ -228,6 +228,24 @@ final class Supervisor: ObservableObject {
     }
   }
 
+  func dangerDelete(scope: String) async throws -> DangerDeleteResult {
+    let shouldResume = (collectorPauseState == .none && collector.state.isRunning)
+    stopCollector()
+
+    let client = try AgentHttpClient()
+    let result = try await client.dangerDelete(scope: scope)
+
+    // 删除可能影响“最近搜索/日总结”：刷新一下 settings（顺便验证 agent 仍可用）。
+    // 失败不影响主流程。
+    try? await refreshSettingsFromAgent()
+
+    if shouldResume {
+      startCollector()
+    }
+
+    return result
+  }
+
   private func restartCollector() async {
     stopCollector()
 

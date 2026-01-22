@@ -103,6 +103,55 @@ export function createStore(db, { withTransaction }) {
 
   const deleteFrameStmt = db.prepare(`DELETE FROM frames WHERE id = ?`);
 
+  const listUnchunkedFrameIdsInRangeStmt = db.prepare(
+    `SELECT id, screenshot_path, thumbnail_path
+     FROM frames
+     WHERE deleted_at IS NULL
+       AND chunk_id IS NULL
+       AND ts >= ?
+       AND ts < ?
+     ORDER BY ts ASC
+     LIMIT ?`
+  );
+
+  const listChunkIdsOverlappingRangeStmt = db.prepare(
+    `SELECT DISTINCT chunk_id
+     FROM frames
+     WHERE deleted_at IS NULL
+       AND chunk_id IS NOT NULL
+       AND chunk_id != ''
+       AND ts >= ?
+       AND ts < ?
+     LIMIT ?`
+  );
+
+  const listFrameFilePathsByChunkIdStmt = db.prepare(
+    `SELECT screenshot_path, thumbnail_path
+     FROM frames
+     WHERE deleted_at IS NULL
+       AND chunk_id = ?`
+  );
+
+  const listFrameIdsByChunkIdStmt = db.prepare(
+    `SELECT id
+     FROM frames
+     WHERE deleted_at IS NULL
+       AND chunk_id = ?
+     ORDER BY ts ASC`
+  );
+
+  const deleteChunkStmt = db.prepare(`DELETE FROM chunks WHERE id = ?`);
+  const deleteDailySummariesOverlappingRangeStmt = db.prepare(
+    `DELETE FROM summaries_daily
+     WHERE deleted_at IS NULL
+       AND end_ts >= ?
+       AND start_ts < ?`
+  );
+
+  const deleteAllFramesStmt = db.prepare(`DELETE FROM frames`);
+  const deleteAllChunksStmt = db.prepare(`DELETE FROM chunks`);
+  const deleteAllDailySummariesStmt = db.prepare(`DELETE FROM summaries_daily`);
+
   const setFrameChunkStmt = db.prepare(
     `UPDATE frames SET chunk_id = ? WHERE id = ?`
   );
@@ -751,6 +800,125 @@ export function createStore(db, { withTransaction }) {
     };
   }
 
+  function deleteDangerZone({ startTs, endTs, scope, maxChunkIdsPerBatch = 200, maxFramesPerBatch = 5000 } = {}) {
+    const now = Date.now();
+    const resolvedScope = String(scope ?? "").trim();
+
+    if (resolvedScope !== "lastHour" && resolvedScope !== "lastDay" && resolvedScope !== "all" && resolvedScope !== "range") {
+      throw new Error("scope must be lastHour|lastDay|all|range");
+    }
+
+    let effectiveStartTs = Number(startTs);
+    let effectiveEndTs = Number(endTs);
+    if (resolvedScope === "lastHour") {
+      effectiveEndTs = now;
+      effectiveStartTs = now - 60 * 60_000;
+    } else if (resolvedScope === "lastDay") {
+      effectiveEndTs = now;
+      effectiveStartTs = now - 24 * 60 * 60_000;
+    } else if (resolvedScope === "all") {
+      effectiveStartTs = 0;
+      effectiveEndTs = Number.MAX_SAFE_INTEGER;
+    } else {
+      // range
+      if (!Number.isFinite(effectiveStartTs) || !Number.isFinite(effectiveEndTs)) {
+        throw new Error("startTs/endTs must be numbers for scope=range");
+      }
+      if (effectiveEndTs <= effectiveStartTs) {
+        throw new Error("endTs must be greater than startTs");
+      }
+    }
+
+    const result = {
+      scope: resolvedScope,
+      startTs: effectiveStartTs,
+      endTs: effectiveEndTs,
+      deletedFrames: 0,
+      deletedChunks: 0,
+      deletedDailySummaries: 0,
+      filePaths: [],
+    };
+
+    // scope=all：直接清空表（FTS 也清空）。证据文件由上层按 dataDir/media 整体清理更划算。
+    if (resolvedScope === "all") {
+      withTransaction(db, () => {
+        deleteAllFramesStmt.run();
+        deleteAllChunksStmt.run();
+        deleteAllDailySummariesStmt.run();
+        if (ftsEnabled) {
+          try {
+            db.exec("DELETE FROM chunks_fts;");
+          } catch {
+            // 忽略：没有 chunks_fts 或 SQLite 构建不支持 FTS 时会失败
+          }
+        }
+      });
+      return result;
+    }
+
+    // 关键原则：
+    // - 删除时间范围内的 unchunked frames（还没压实的）；
+    // - 对于已经压实成 chunk 的内容：只要 chunk 有任何 frame 命中范围，就删除整个 chunk，
+    //   并删除所有属于该 chunk 的 frames（避免 chunk 文本仍残留敏感信息）。
+    while (true) {
+      const chunkIds = listChunkIdsOverlappingRangeStmt
+        .all(effectiveStartTs, effectiveEndTs, maxChunkIdsPerBatch)
+        .map((row) => String(row.chunk_id ?? "").trim())
+        .filter((x) => x);
+
+      const unchunkedFrames = listUnchunkedFrameIdsInRangeStmt
+        .all(effectiveStartTs, effectiveEndTs, maxFramesPerBatch)
+        .map((row) => ({
+          id: Number(row.id),
+          screenshot_path: row.screenshot_path,
+          thumbnail_path: row.thumbnail_path,
+        }));
+
+      if (chunkIds.length === 0 && unchunkedFrames.length === 0) break;
+
+      withTransaction(db, () => {
+        // 1) 删除 unchunked frames（并收集文件路径）
+        for (const frame of unchunkedFrames) {
+          if (frame.screenshot_path) result.filePaths.push(frame.screenshot_path);
+          if (frame.thumbnail_path) result.filePaths.push(frame.thumbnail_path);
+          deleteFrameStmt.run(frame.id);
+          result.deletedFrames += 1;
+        }
+
+        // 2) 删除 chunk + chunk 相关 frames（并收集文件路径）
+        for (const chunkId of chunkIds) {
+          const paths = listFrameFilePathsByChunkIdStmt.all(chunkId);
+          for (const row of paths) {
+            if (row.screenshot_path) result.filePaths.push(row.screenshot_path);
+            if (row.thumbnail_path) result.filePaths.push(row.thumbnail_path);
+          }
+
+          const frameIds = listFrameIdsByChunkIdStmt.all(chunkId);
+          for (const row of frameIds) {
+            deleteFrameStmt.run(Number(row.id));
+            result.deletedFrames += 1;
+          }
+
+          if (ftsEnabled && deleteChunkFtsStmt) {
+            deleteChunkFtsStmt.run(chunkId);
+          }
+          deleteChunkStmt.run(chunkId);
+          result.deletedChunks += 1;
+        }
+      });
+    }
+
+    // 删除可能受影响的日总结：按时间范围 overlap 删掉，后续再访问会自动再生成（基于剩余 chunks）。
+    try {
+      const info = deleteDailySummariesOverlappingRangeStmt.run(effectiveStartTs, effectiveEndTs);
+      result.deletedDailySummaries = Number(info.changes ?? 0);
+    } catch {
+      result.deletedDailySummaries = 0;
+    }
+
+    return result;
+  }
+
   return {
     getSettings,
     patchSettings,
@@ -762,5 +930,6 @@ export function createStore(db, { withTransaction }) {
     ensureDailySummary,
     compactFramesToChunks,
     deleteExpiredEvidenceFrames,
+    deleteDangerZone,
   };
 }

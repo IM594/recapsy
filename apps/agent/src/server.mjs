@@ -154,6 +154,45 @@ async function main() {
     };
   }
 
+  async function deleteEvidenceFiles(filePaths) {
+    let deletedFiles = 0;
+    let skippedPaths = 0;
+    let fileErrors = 0;
+
+    for (const filePath of filePaths ?? []) {
+      const absolute = resolveSafePath(filePath);
+      if (!absolute) {
+        skippedPaths += 1;
+        continue;
+      }
+      try {
+        await fs.unlink(absolute);
+        deletedFiles += 1;
+      } catch (error) {
+        if (error && typeof error === "object" && error.code === "ENOENT") {
+          continue;
+        }
+        fileErrors += 1;
+        console.warn("[agent] danger zone file delete error:", absolute, error);
+      }
+    }
+
+    return { deletedFiles, skippedPaths, fileErrors };
+  }
+
+  async function deleteMediaDirectory() {
+    // scope=all 时，我们直接删除整个 media 目录（热证据）。
+    // 这是“尽力而为”的删除：失败不应阻塞 DB 清空。
+    const mediaDir = path.join(dataDir, "media");
+    try {
+      await fs.rm(mediaDir, { recursive: true, force: true });
+      return { ok: true, mediaDir };
+    } catch (error) {
+      console.warn("[agent] delete media dir failed (ignored):", mediaDir, error);
+      return { ok: false, mediaDir };
+    }
+  }
+
   // 证据清理任务：从 settings 读取间隔，允许 UI 动态修改后生效（无需重启 Agent）。
   const scheduleEvidenceCleanup = () => {
     const intervalMinutes = store.getSettings().agent.evidenceCleanupIntervalMinutes;
@@ -257,6 +296,28 @@ async function main() {
         const maxFramesPerRun = parsePositiveInt(body?.maxFramesPerRun, 5000);
         const result = await cleanupEvidence({ retentionDays, maxFramesPerRun });
         return sendJson(res, 200, { result });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/danger/delete") {
+        const body = await readJson(req);
+        const scope = String(body?.scope ?? "").trim() || "lastHour";
+
+        const result = store.deleteDangerZone({
+          scope,
+          startTs: body?.startTs,
+          endTs: body?.endTs,
+          maxChunkIdsPerBatch: parsePositiveInt(body?.maxChunkIdsPerBatch, 200),
+          maxFramesPerBatch: parsePositiveInt(body?.maxFramesPerBatch, 5000),
+        });
+
+        // 证据文件删除：对于 scope=all，直接删 media 目录更快；否则按 frames 收集到的路径删除。
+        if (scope === "all") {
+          const media = await deleteMediaDirectory();
+          return sendJson(res, 200, { result, media });
+        }
+
+        const files = await deleteEvidenceFiles(result.filePaths);
+        return sendJson(res, 200, { result, files });
       }
 
       return sendJson(res, 404, { error: "Not found" });
