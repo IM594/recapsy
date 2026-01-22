@@ -46,6 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       return .terminateNow
     }
 
+    // 退出：允许主窗口真正关闭（平时红灯=隐藏，避免丢状态）。
+    MainWindowController.shared.prepareForTermination()
+
     // 关键：优雅退出并等待子进程停止，避免 Agent/MCP 端口残留导致下次启动 `EADDRINUSE`。
     Task { @MainActor in
       await RecapSenseAppContext.shared.supervisor?.stopAllAndWait()

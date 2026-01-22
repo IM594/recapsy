@@ -74,6 +74,7 @@ struct MenuBarView: View {
       Divider()
 
       Button("退出并停止全部") {
+        MainWindowController.shared.prepareForTermination()
         NSApp.terminate(nil)
       }
     }

@@ -10,9 +10,13 @@ final class MainWindowController: NSObject, NSWindowDelegate {
   static let shared = MainWindowController()
 
   private var window: NSWindow? = nil
+  private var allowCloseForTermination = false
 
   func show(supervisor: Supervisor) {
     if let window {
+      if window.isMiniaturized {
+        window.deminiaturize(nil)
+      }
       window.makeKeyAndOrderFront(nil)
       NSApp.activate(ignoringOtherApps: true)
       return
@@ -40,9 +44,19 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     NSApp.activate(ignoringOtherApps: true)
   }
 
-  func windowWillClose(_ notification: Notification) {
-    // 用户点红灯关闭后，释放引用；下次 show() 会重新创建。
-    window = nil
+  func prepareForTermination() {
+    // 退出应用时允许窗口真正关闭（不再拦截）。
+    allowCloseForTermination = true
+  }
+
+  func windowShouldClose(_ sender: NSWindow) -> Bool {
+    // 关键行为：
+    // - 红灯关闭（或 Cmd-W）不应销毁主窗口，否则 SwiftUI 的 Tab/滚动/筛选等状态会全部丢失；
+    // - 更符合 macOS 直觉的是“关闭=隐藏”，再次打开时保留上次位置与状态。
+    if allowCloseForTermination {
+      return true
+    }
+    sender.orderOut(nil)
+    return false
   }
 }
-
