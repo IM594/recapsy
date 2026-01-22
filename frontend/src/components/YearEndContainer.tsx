@@ -3,6 +3,7 @@ import { YearEndGenerator } from "./YearEndGenerator";
 import { UnifiedBoard } from "./UnifiedBoard";
 import { Loader2 } from "lucide-react";
 import { fetchSummaryStatus } from "@/services/summary";
+import { logError } from "@/lib/logger";
 
 interface YearEndContainerProps {
   initialYear?: number;
@@ -24,7 +25,7 @@ export function YearEndContainer({
         const status = await fetchSummaryStatus(year);
         setIsRunning(!!status.isRunning);
       } catch (error) {
-        console.error("Failed to check status", error);
+        logError("yearEnd.checkStatus", error, { year });
       } finally {
         setChecking(false);
       }

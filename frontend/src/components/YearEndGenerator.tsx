@@ -22,6 +22,7 @@ import { useSettings } from "@/hooks/useSettings";
 import { useSummary } from "@/hooks/useSummary";
 import { resetSummaryStatus } from "@/services/summary";
 import { COPY } from "@/constants/copy";
+import { logError } from "@/lib/logger";
 
 interface YearEndGeneratorProps {
   onComplete: () => void;
@@ -167,7 +168,8 @@ export function YearEndGenerator({
     if (shouldResetCheckpoint) {
       try {
         await resetSummaryStatus(year);
-      } catch {
+      } catch (error) {
+        logError("yearEnd.resetStatus", error, { year });
         toast.error(COPY.toasts.resetStatusFailed);
         return;
       }

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { fetchAvailableYears } from "@/services/summary";
 import { STORAGE_KEYS } from "@recaply/shared";
+import { logError } from "@/lib/logger";
 
 interface YearContextType {
   activeYear: number;
@@ -36,7 +37,8 @@ export function YearProvider({ children }: { children: ReactNode }) {
 
       // Ensure active year is always a valid option; fallback to currentYear.
       setActiveYearState((prev) => (years.includes(prev) ? prev : currentYear));
-    } catch {
+    } catch (error) {
+      logError("year.refreshAvailableYears", error, { currentYear });
       setAvailableYears([currentYear]);
       setActiveYearState((prev) => (Number.isFinite(prev) ? prev : currentYear));
     }

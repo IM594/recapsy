@@ -23,6 +23,7 @@ import {
   fetchYearlySummary,
 } from "@/services/summary";
 import type { GenerationConfig, SummaryType } from "@/types/summary";
+import { logError } from "@/lib/logger";
 
 type GenerationType = SummaryType;
 
@@ -120,7 +121,7 @@ export function GenerationPreview({
 
       setExists(found);
     } catch (error) {
-      console.error("Failed to check existence", error);
+      logError("generationPreview.checkExistence", error, { type, year, rangeStart });
     } finally {
       setChecking(false);
     }

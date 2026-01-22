@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { COPY } from "@/constants/copy";
+import { logError } from "@/lib/logger";
 
 interface ResultCardProps {
   summary: string;
@@ -59,7 +60,8 @@ export function ResultCard({
     try {
       await navigator.clipboard.writeText(summary);
       toast.success(COPY.toasts.copiedToClipboard);
-    } catch {
+    } catch (error) {
+      logError("resultCard.copy", error);
       toast.error(COPY.toasts.copyFailed);
     }
   };
@@ -74,7 +76,8 @@ export function ResultCard({
       a.click();
       URL.revokeObjectURL(url);
       toast.success(COPY.toasts.downloadingMarkdown);
-    } catch {
+    } catch (error) {
+      logError("resultCard.download", error);
       toast.error(COPY.toasts.downloadFailed);
     }
   };

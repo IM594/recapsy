@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { useSummary } from "@/hooks/useSummary";
 import { regenerateSummary } from "@/services/summary";
 import { COPY } from "@/constants/copy";
+import { logError } from "@/lib/logger";
 import { JournalSidebar } from "./unified-board/JournalSidebar";
 import { JournalEntry } from "./unified-board/JournalEntry";
 import { RepoPickerDialog } from "@/components/RepoPickerDialog";
@@ -130,7 +131,7 @@ export function UnifiedBoard({
 
       setStructure(structure);
     } catch (error) {
-      console.error(error);
+      logError("unifiedBoard.fetchStructure", error, { year });
       toast.error(COPY.toasts.boardStructureFailed);
     }
   };
@@ -183,7 +184,13 @@ export function UnifiedBoard({
         });
         setContent("");
       }
-    } catch {
+    } catch (error) {
+      logError("unifiedBoard.loadContent", error, {
+        year,
+        nodeType: node.type,
+        nodeId: node.id,
+        repo: node.type === "daily" ? node.repo : undefined,
+      });
       toast.error(COPY.toasts.boardContentFailed);
     } finally {
       setLoadingContent(false);
@@ -214,6 +221,12 @@ export function UnifiedBoard({
       fetchStructure();
       refetchData();
     } catch (error) {
+      logError("unifiedBoard.regenerate", error, {
+        year,
+        selectedNodeType: selectedNode.type,
+        selectedNodeId: selectedNode.id,
+        repo: selectedNode.repo,
+      });
       const message =
         error instanceof Error
           ? error.message

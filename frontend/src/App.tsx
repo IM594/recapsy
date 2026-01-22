@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { buildGenerationResultFromWorkflowResult } from "@/lib/workflow-result";
 import { regenerateSummary } from "@/services/summary";
 import { COPY } from "@/constants/copy";
+import { logError } from "@/lib/logger";
 
 import { Dashboard } from "@/components/Dashboard";
 import { ResultCard } from "@/components/ResultCard";
@@ -195,7 +196,11 @@ function AppContent() {
                   });
                   toast.success(COPY.toasts.regenerationSuccessful);
                 } catch (e) {
-                  console.error(e);
+                  logError("app.regenerate", e, {
+                    type: generationResult.context.type,
+                    id: generationResult.context.id,
+                    year: generationResult.year ?? activeYear,
+                  });
                   const message =
                     e instanceof Error ? e.message : COPY.toasts.regenerationFailedFallback;
                   toast.error(message);

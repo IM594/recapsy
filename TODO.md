@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 20:29
+> Last updated: 2026-01-22 22:44
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -25,6 +25,7 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] 前端错误日志单一入口：新增 `frontend/src/lib/logger.ts`，并替换主要 catch/console.error 为 `logError(scope, error, context)`（保证不吞错且可检索）
 - [x] B-001 后端一致性收尾：收敛 `backend/src/lib/git.ts` 的日志与错误处理（移除 `console.*`、禁止空 `catch`），并明确允许降级的错误（`git fetch` / 单 commit stats/diff 失败）
 - [x] C-007 输出目录单一真相：统一读写 `userData/outputs`，并提供 `scripts/migrate-outputs.cjs` 迁移历史 `backend/outputs`（避免“多份真相”导致数据看似丢失）
 - [x] C-005 错误处理基线（后端）：增加 requestId、统一 async handler + error middleware（兼容旧 `{ error: string }`），并为关键链路补齐上下文日志（routes / SummaryStore / WorkflowRunner）

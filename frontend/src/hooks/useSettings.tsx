@@ -1,5 +1,6 @@
 import { useState, createContext, useContext, ReactNode } from "react";
 import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "@recaply/shared";
+import { logWarn } from "@/lib/logger";
 
 interface SettingsContextType {
   selectedRepos: string[];
@@ -25,7 +26,10 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       }
 
       return [];
-    } catch {
+    } catch (error) {
+      logWarn("settings.localStorage", "failed to read/parse selectedRepos; using empty", {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   });

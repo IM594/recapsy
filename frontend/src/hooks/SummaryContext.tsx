@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { COPY } from "@/constants/copy";
 import { SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
 import { getSummaryApiUrl } from "@/lib/api";
+import { logDebug, logError, logWarn } from "@/lib/logger";
 import {
   fetchDailySummaries,
   fetchMonthlySummaries,
@@ -41,13 +42,14 @@ const DEBUG_SSE = (() => {
 })();
 
 function debugSse(...args: unknown[]) {
-  if (DEBUG_SSE) console.log(...args);
+  if (DEBUG_SSE) logDebug("sse", ...args);
 }
 
 function safeJsonParse(raw: string): unknown | null {
   try {
     return JSON.parse(raw) as unknown;
-  } catch {
+  } catch (error) {
+    if (DEBUG_SSE) logError("sse.safeJsonParse", error, { rawPreview: raw.slice(0, 120) });
     return null;
   }
 }
@@ -192,6 +194,7 @@ export function SummaryProvider({
 
       // Reconnect after delay
       if (!reconnectTimeoutRef.current) {
+        if (DEBUG_SSE) logWarn("sse.connection", "connection error; scheduling reconnect", { year });
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectTimeoutRef.current = null;
           connect();
@@ -325,6 +328,13 @@ export function SummaryProvider({
         addLog(COPY.toasts.startedGenerationTask, "info");
         toast.info(COPY.toasts.startedGenerationTask);
       } catch (error) {
+        logError("summary.startGeneration", error, {
+          year: config.year,
+          summaryType: config.summaryType,
+          hasSince: Boolean(config.since),
+          hasUntil: Boolean(config.until),
+          selectedReposCount: config.selectedRepos?.length ?? 0,
+        });
         const message =
           error instanceof Error ? error.message : "Failed to start generation";
         toast.error(message);
@@ -358,8 +368,9 @@ export function SummaryProvider({
     try {
       const next = await resetSummaryStatus(y);
       setStatus(next);
-    } catch {
+    } catch (error) {
       // Keep UI stable even if reset fails; callers can show toasts if needed.
+      logError("summary.resetStatus", error, { year: y });
     }
   }, [year]);
 

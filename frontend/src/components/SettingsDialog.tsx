@@ -19,6 +19,7 @@ import { scanRepos as scanReposService } from "@/services/repos";
 import { COPY } from "@/constants/copy";
 import { STORAGE_KEYS } from "@recaply/shared";
 import type { RepoInfo } from "@/types/repos";
+import { logError } from "@/lib/logger";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -70,7 +71,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       const repos = await scanReposService(scanRootPath);
       setAvailableRepos(repos);
     } catch (error) {
-      console.error("Scan failed", error);
+      logError("settings.scanRepos", error, { scanRootPath });
       toast.error(COPY.toasts.scanReposFailed);
     } finally {
       setScanning(false);
