@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 17:46
+> Last updated: 2026-01-22 18:41
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -14,21 +14,21 @@
 - **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
 
 ## In Progress（P0，一致性优先）
-- [ ] C-003 常量集中（shared 包）：统一并集中 `localStorage key`、SSE 事件名、API mounts/paths；继续迁移页面/视图状态常量与其他散落 magic string
-- [ ] C-007 输出目录单一真相：统一使用 userData/outputs，并提供迁移脚本把历史 `backend/outputs` 迁移到新目录
+- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes；继续清理散落 magic string（尤其是 query keys / event names / config keys）
+- [ ] B-001 后端一致性收尾：补齐 `backend/src/lib/git.ts` 的日志与错误上下文（替换 `console.*`），并明确哪些错误允许静默降级（例如 `git fetch`）
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
 - [ ] C-004 生命周期审计：梳理全局订阅/轮询/SSE/进程/窗口事件，确保创建与销毁成对且可追踪
-- [ ] C-005 错误处理基线：补齐关键链路的上下文日志（例如后端启动/配置加载/文件读写），杜绝“吞错”
 
 ## Deferred（按你要求：语言相关暂缓）
 - [ ] L-001 增加回归检查：避免新增硬编码 UI 文案（可选）
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
-- [x] 修复“数据看起来丢失”：dev 模式不再强制切换输出目录到 userData，保留读取 `backend/outputs` 以兼容历史数据
-- [x] 修复日志目录 ENOENT：启动时确保 outputDir 存在，避免 `workflow-debug.log` 写入失败刷屏
+- [x] C-007 输出目录单一真相：统一读写 `userData/outputs`，并提供 `scripts/migrate-outputs.cjs` 迁移历史 `backend/outputs`（避免“多份真相”导致数据看似丢失）
+- [x] C-005 错误处理基线（后端）：增加 requestId、统一 async handler + error middleware（兼容旧 `{ error: string }`），并为关键链路补齐上下文日志（routes / SummaryStore / WorkflowRunner）
+- [x] SummaryStore 自愈：`index.json` 缺失/损坏时从磁盘重建，降低“数据看起来丢失”的概率
 - [x] 引入 `shared/` 工作区包：作为跨端常量/协议的唯一来源（为 C-003 打底）
 - [x] C-001 配置唯一入口：新增后端 `backend/src/config/` 作为唯一入口；统一 `.env`/`config.json`/env 注入优先级，并替换关键散落读取点（port/rootPath/includeStat/outputDir）
 - [x] Electron dev 冒烟通过：`pnpm dev` 启动后 UI/接口正常（本机确认）

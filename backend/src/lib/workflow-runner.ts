@@ -16,6 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getWorkflowDebugLogPath } from "./paths";
 import { SSE_EVENTS } from "@recaply/shared";
+import logger from "./logger";
 
 export interface RuntimeStatus {
   isRunning: boolean;
@@ -41,6 +42,7 @@ const runnersByYear = new Map<number, WorkflowRunner>();
 export class WorkflowRunner extends EventEmitter {
   private year: number;
   private logFilePath: string;
+  private fileLoggingEnabled = true;
   private status: RuntimeStatus = {
     isRunning: false,
     progress: 0,
@@ -62,7 +64,12 @@ export class WorkflowRunner extends EventEmitter {
     try {
       fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
     } catch (e) {
-      console.error("Failed to create output directory for logs:", e);
+      this.fileLoggingEnabled = false;
+      logger.error(
+        "WorkflowRunner: failed to create output directory for logs",
+        e instanceof Error ? e : undefined
+      );
+      logger.debug("logFilePath", this.logFilePath);
     }
     this.logToFile(
       `\n=== New WorkflowRunner Instance (Year: ${year}) - ${new Date().toISOString()} ===\n`
@@ -70,10 +77,16 @@ export class WorkflowRunner extends EventEmitter {
   }
 
   private logToFile(message: string) {
+    if (!this.fileLoggingEnabled) return;
     try {
       fs.appendFileSync(this.logFilePath, message + "\n");
     } catch (err) {
-      console.error("Failed to write to log file:", err);
+      this.fileLoggingEnabled = false;
+      logger.error(
+        "WorkflowRunner: failed to write to workflow debug log; disabling file logging",
+        err instanceof Error ? err : undefined
+      );
+      logger.debug("logFilePath", this.logFilePath);
     }
   }
 

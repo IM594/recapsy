@@ -1,11 +1,15 @@
 import express from "express";
 import cors from "cors";
+import fs from "fs";
 import summaryRouter from "./routes/summary";
 import reposRouter from "./routes/repos";
 import { getConfig } from "../config";
 import { ENV_KEYS } from "../config/constants";
 import { LLM_ENV_KEYS } from "../config/llm-env";
 import { API_MOUNTS } from "@recaply/shared";
+import logger from "../lib/logger";
+import { requestIdMiddleware } from "./middleware/request-id";
+import { errorHandler } from "./middleware/error-handler";
 
 const config = getConfig();
 
@@ -74,17 +78,26 @@ if (DEBUG_STARTUP) {
   console.log("======================================");
 }
 
+try {
+  fs.mkdirSync(config.paths.outputDir, { recursive: true });
+} catch (error) {
+  logger.error("Failed to create outputDir", error instanceof Error ? error : undefined);
+  logger.debug("outputDir", config.paths.outputDir);
+}
+
 const app = express();
 const PORT = config.server.port;
 
 // Middleware
 app.use(cors());
+app.use(requestIdMiddleware);
 app.use(express.json({ limit: "50mb" }));
 
 // Simple request logging (avoid spamming for SSE)
 app.use((req, res, next) => {
   if (!req.originalUrl.includes("/api/summary/events")) {
-    console.log(`[HTTP] ${req.method} ${req.originalUrl}`);
+    const requestId = res.locals.requestId as string | undefined;
+    console.log(`[HTTP] ${req.method} ${req.originalUrl}${requestId ? ` (${requestId})` : ""}`);
   }
   next();
 });
@@ -97,6 +110,9 @@ app.use(API_MOUNTS.api, reposRouter);
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date() });
 });
+
+// Error handler (must be last)
+app.use(errorHandler);
 
 // Export app for potential tests
 export default app;

@@ -13,11 +13,16 @@ import logger from "../../lib/logger";
 import { SummaryStore } from "../../lib/summary-store";
 import { WorkflowRunner } from "../../lib/workflow-runner";
 import fs from "fs/promises";
-import path from "path";
 import { getBaseOutputDir } from "../../lib/paths";
-import { SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
+import { ERROR_CODES, SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
+import { asyncHandler } from "../middleware/async-handler";
+import { badRequest, notFound } from "../errors";
 
 const router = Router();
+
+function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+  return typeof error === "object" && error !== null && "code" in error;
+}
 
 /**
  * GET /api/summary/years
@@ -25,354 +30,403 @@ const router = Router();
  *
  * This powers the year switcher in the UI.
  */
-router.get(SUMMARY_ROUTES.years, async (_req, res) => {
-  const currentYear = new Date().getFullYear();
-  const years = new Set<number>([currentYear]);
+router.get(
+  SUMMARY_ROUTES.years,
+  asyncHandler(async (_req, res) => {
+    const currentYear = new Date().getFullYear();
+    const years = new Set<number>([currentYear]);
 
-  try {
-    const baseDir = getBaseOutputDir();
-    const entries = await fs.readdir(baseDir, { withFileTypes: true });
+    try {
+      const baseDir = getBaseOutputDir();
+      const entries = await fs.readdir(baseDir, { withFileTypes: true });
 
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      if (!entry.name.startsWith("year-end-")) continue;
-      const yearStr = entry.name.replace("year-end-", "");
-      const yearNum = Number.parseInt(yearStr, 10);
-      if (Number.isFinite(yearNum)) years.add(yearNum);
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (!entry.name.startsWith("year-end-")) continue;
+        const yearStr = entry.name.replace("year-end-", "");
+        const yearNum = Number.parseInt(yearStr, 10);
+        if (Number.isFinite(yearNum)) years.add(yearNum);
+      }
+    } catch (error) {
+      if (isErrnoException(error) && error.code === "ENOENT") {
+        logger.debug("summary.years: outputDir missing", getBaseOutputDir());
+      } else {
+        logger.warn(
+          "summary.years: failed to scan outputDir; returning current year only"
+        );
+        logger.error(
+          "summary.years: scan error",
+          error instanceof Error ? error : undefined
+        );
+        logger.debug("outputDir", getBaseOutputDir());
+      }
     }
-  } catch {
-    // Ignore missing directories / read errors and still return currentYear.
-  }
 
-  res.json({
-    years: Array.from(years).sort((a, b) => b - a), // newest first
-  });
-});
+    res.json({
+      years: Array.from(years).sort((a, b) => b - a), // newest first
+    });
+  })
+);
 
 /**
  * POST /api/summary/generate
  * Start workflow execution with streaming progress
  */
-router.post(SUMMARY_ROUTES.generate, async (req, res) => {
-  const {
-    selectedRepos,
-    since,
-    until,
-    summaryType,
-    author,
-    year = new Date().getFullYear(),
-  } = req.body;
+router.post(
+  SUMMARY_ROUTES.generate,
+  asyncHandler(async (req, res) => {
+    const {
+      selectedRepos,
+      since,
+      until,
+      summaryType,
+      author,
+      year = new Date().getFullYear(),
+    } = req.body;
 
-  const validTaskTypes = ["daily", "weekly", "monthly", "yearly"] as const;
-  type TaskType = (typeof validTaskTypes)[number];
-  const taskType: TaskType = validTaskTypes.includes(summaryType)
-    ? summaryType
-    : "daily";
+    const validTaskTypes = ["daily", "weekly", "monthly", "yearly"] as const;
+    type TaskType = (typeof validTaskTypes)[number];
+    const taskType: TaskType = validTaskTypes.includes(summaryType)
+      ? summaryType
+      : "daily";
 
-  const runner = WorkflowRunner.getInstance(year);
-  const store = SummaryStore.getInstance(year);
+    const runner = WorkflowRunner.getInstance(year);
+    const store = SummaryStore.getInstance(year);
 
-  // Check if already running
-  if (runner.isRunning()) {
-    return res.status(409).json({
-      error: "Task already running",
-      status: runner.getStatus(),
-    });
-  }
-
-  // Initialize store and mark as running
-  await store.initialize(selectedRepos || [], author || "");
-  runner.start();
-
-  // Execute workflow in background
-  setImmediate(async () => {
-    try {
-      logger.taskStart("Workflow Execution", {
-        type: taskType,
-        range: `${since} -> ${until}`,
+    // Check if already running
+    if (runner.isRunning()) {
+      return res.status(409).json({
+        error: "Task already running",
+        code: ERROR_CODES.conflict,
+        status: runner.getStatus(),
       });
+    }
 
-      const workflow = await createSummaryWorkflow();
+    // Initialize store and mark as running
+    await store.initialize(selectedRepos || [], author || "");
+    runner.start();
 
-      const input = {
-        taskType,
-        year,
-        selectedRepos: selectedRepos || [],
-        authorPattern: author || "",
-        since: since || "",
-        until: until || "",
-      };
+    // Execute workflow in background
+    setImmediate(async () => {
+      try {
+        logger.taskStart("Workflow Execution", {
+          type: taskType,
+          range: `${since} -> ${until}`,
+        });
 
-      // Stream workflow execution for real-time progress
-      const stream = await workflow.stream(input, {
-        streamMode: "updates",
-      });
+        const workflow = await createSummaryWorkflow();
 
-      let lastState: any = null;
-      for await (const chunk of stream) {
-        const chunkData = chunk as Record<string, any>;
-        for (const nodeName of Object.keys(chunkData)) {
-          const stateUpdate = chunkData[nodeName];
-          lastState = { ...lastState, ...stateUpdate };
+        const input = {
+          taskType,
+          year,
+          selectedRepos: selectedRepos || [],
+          authorPattern: author || "",
+          since: since || "",
+          until: until || "",
+        };
 
-          // Emit progress via WorkflowRunner
-          if (stateUpdate?.progress !== undefined) {
-            runner.updateProgress(
-              stateUpdate.currentStep || nodeName,
-              stateUpdate.progress,
-              `Completed: ${nodeName}`
-            );
+        // Stream workflow execution for real-time progress
+        const stream = await workflow.stream(input, {
+          streamMode: "updates",
+        });
+
+        let lastState: any = null;
+        for await (const chunk of stream) {
+          const chunkData = chunk as Record<string, any>;
+          for (const nodeName of Object.keys(chunkData)) {
+            const stateUpdate = chunkData[nodeName];
+            lastState = { ...lastState, ...stateUpdate };
+
+            // Emit progress via WorkflowRunner
+            if (stateUpdate?.progress !== undefined) {
+              runner.updateProgress(
+                stateUpdate.currentStep || nodeName,
+                stateUpdate.progress,
+                `Completed: ${nodeName}`
+              );
+            }
           }
         }
+
+        runner.complete(lastState);
+        logger.taskEnd("Workflow Execution", 0, "completed");
+      } catch (error: any) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error("Workflow failed", err);
+        logger.debug("workflow", { year, taskType });
+        runner.error(err.message);
       }
+    });
 
-      runner.complete(lastState);
-      logger.taskEnd("Workflow Execution", 0, "completed");
-    } catch (error: any) {
-      logger.error(`Workflow failed: ${error.message}`);
-      runner.error(error.message);
-    }
-  });
-
-  res.json({
-    status: "started",
-    message: "Workflow started in background",
-  });
-});
+    res.json({
+      status: "started",
+      message: "Workflow started in background",
+    });
+  })
+);
 
 /**
  * GET /api/summary/events
  * Server-Sent Events for real-time progress
  */
-router.get(SUMMARY_ROUTES.events, async (req, res) => {
-  const year = parseInt(req.query.year as string) || new Date().getFullYear();
-  const runner = WorkflowRunner.getInstance(year);
+router.get(
+  SUMMARY_ROUTES.events,
+  asyncHandler(async (req, res) => {
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const runner = WorkflowRunner.getInstance(year);
 
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
-  res.setHeader("Connection", "keep-alive");
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
 
-  const sendEvent = (event: string, data: any) => {
-    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  };
+    const sendEvent = (event: string, data: any) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
 
-  // Send initial status
-  const status = runner.getStatus();
-  sendEvent(SSE_EVENTS.status, {
-    nodeId: status.currentStep || "idle",
-    state: {
-      progress: status.progress,
-      currentStep: status.currentStep,
-      phase: status.phase,
-      isRunning: status.isRunning,
-    },
-    timestamp: Date.now(),
-  });
+    // Send initial status
+    const status = runner.getStatus();
+    sendEvent(SSE_EVENTS.status, {
+      nodeId: status.currentStep || "idle",
+      state: {
+        progress: status.progress,
+        currentStep: status.currentStep,
+        phase: status.phase,
+        isRunning: status.isRunning,
+      },
+      timestamp: Date.now(),
+    });
 
-  // Event handlers
-  const onProgress = (data: any) => sendEvent(SSE_EVENTS.progress, data);
-  const onComplete = (data: any) => sendEvent(SSE_EVENTS.complete, data);
-  const onError = (data: any) => sendEvent(SSE_EVENTS.workflowError, data);
+    // Event handlers
+    const onProgress = (data: any) => sendEvent(SSE_EVENTS.progress, data);
+    const onComplete = (data: any) => sendEvent(SSE_EVENTS.complete, data);
+    const onError = (data: any) => sendEvent(SSE_EVENTS.workflowError, data);
 
-  runner.on(SSE_EVENTS.progress, onProgress);
-  runner.on(SSE_EVENTS.complete, onComplete);
-  runner.on(SSE_EVENTS.workflowError, onError);
+    runner.on(SSE_EVENTS.progress, onProgress);
+    runner.on(SSE_EVENTS.complete, onComplete);
+    runner.on(SSE_EVENTS.workflowError, onError);
 
-  req.on("close", () => {
-    runner.off(SSE_EVENTS.progress, onProgress);
-    runner.off(SSE_EVENTS.complete, onComplete);
-    runner.off(SSE_EVENTS.workflowError, onError);
-  });
-});
+    req.on("close", () => {
+      runner.off(SSE_EVENTS.progress, onProgress);
+      runner.off(SSE_EVENTS.complete, onComplete);
+      runner.off(SSE_EVENTS.workflowError, onError);
+    });
+  })
+);
 
 /**
  * GET /api/summary/status
  * Get current workflow status
  */
-router.get(SUMMARY_ROUTES.status, async (req, res) => {
-  const year = parseInt(req.query.year as string) || new Date().getFullYear();
-  const runner = WorkflowRunner.getInstance(year);
-  res.json(runner.getStatus());
-});
+router.get(
+  SUMMARY_ROUTES.status,
+  asyncHandler(async (req, res) => {
+    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const runner = WorkflowRunner.getInstance(year);
+    res.json(runner.getStatus());
+  })
+);
 
 /**
  * POST /api/summary/reset
  * Reset workflow status to idle
  */
-router.post(SUMMARY_ROUTES.reset, async (req, res) => {
-  const { year = new Date().getFullYear() } = req.body;
-  const runner = WorkflowRunner.getInstance(year);
-  runner.reset();
-  res.json({ success: true, status: runner.getStatus() });
-});
+router.post(
+  SUMMARY_ROUTES.reset,
+  asyncHandler(async (req, res) => {
+    const { year = new Date().getFullYear() } = req.body;
+    const runner = WorkflowRunner.getInstance(year);
+    runner.reset();
+    res.json({ success: true, status: runner.getStatus() });
+  })
+);
 
 /**
  * GET /api/summary/data
  * Get generated summary data
  */
-router.get(SUMMARY_ROUTES.data, async (req, res) => {
-  const { type, year = new Date().getFullYear(), repo } = req.query;
-  const store = SummaryStore.getInstance(Number(year));
-  await store.loadIfExists();
-
-  try {
-    if (type === "daily") {
-      const all = await store.loadAllDailySummaries();
-      const filtered = repo ? all.filter((d) => d.repo === repo) : all;
-      return res.json(filtered);
+router.get(
+  SUMMARY_ROUTES.data,
+  asyncHandler(async (req, res) => {
+    const { type, year = new Date().getFullYear(), repo } = req.query;
+    if (typeof type !== "string" || !type.trim()) {
+      throw badRequest("Missing type parameter", { query: req.query });
     }
+    const store = SummaryStore.getInstance(Number(year));
+    await store.loadIfExists();
 
-    if (type === "weekly") {
-      return res.json(await store.loadAllWeeklySummaries());
+    try {
+      if (type === "daily") {
+        const all = await store.loadAllDailySummaries();
+        const filtered = repo ? all.filter((d) => d.repo === repo) : all;
+        return res.json(filtered);
+      }
+
+      if (type === "weekly") {
+        return res.json(await store.loadAllWeeklySummaries());
+      }
+
+      if (type === "monthly") {
+        return res.json(await store.loadAllMonthlySummaries());
+      }
+
+      if (type === "yearly") {
+        const summary = await store.loadYearEndSummary();
+        return res.json(summary ? { content: summary } : null);
+      }
+
+      throw badRequest("Invalid type parameter", { type });
+    } catch (error: any) {
+      logger.error(
+        "summary.data: failed to load data",
+        error instanceof Error ? error : undefined
+      );
+      logger.debug("query", req.query);
+      throw error;
     }
-
-    if (type === "monthly") {
-      return res.json(await store.loadAllMonthlySummaries());
-    }
-
-    if (type === "yearly") {
-      const summary = await store.loadYearEndSummary();
-      return res.json(summary ? { content: summary } : null);
-    }
-
-    res.status(400).json({ error: "Invalid type parameter" });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  })
+);
 
 /**
  * POST /api/summary/regenerate
  * Regenerate a specific summary with optional custom prompt
  */
-router.post(SUMMARY_ROUTES.regenerate, async (req, res) => {
-  const {
-    type,
-    id,
-    year = new Date().getFullYear(),
-    customPrompt,
-    repo,
-  } = req.body;
+router.post(
+  SUMMARY_ROUTES.regenerate,
+  asyncHandler(async (req, res) => {
+    const {
+      type,
+      id,
+      year = new Date().getFullYear(),
+      customPrompt,
+      repo,
+    } = req.body;
 
-  if (!type || !id) {
-    return res.status(400).json({ error: "Missing type or id" });
-  }
-
-  const store = SummaryStore.getInstance(Number(year));
-  await store.loadIfExists();
-
-  try {
-    if (type === "daily") {
-      // Load raw data for the day
-      if (!repo) {
-        return res
-          .status(400)
-          .json({ error: "Missing repo for daily regeneration" });
-      }
-
-      const rawData = await store.loadRawData(id, repo);
-      if (!rawData) {
-        return res
-          .status(404)
-          .json({ error: "Raw data not found for this date" });
-      }
-
-      // Import and call processDailySummary
-      const { processDailySummary } = await import(
-        "../../workflow/nodes/daily-summarizer.js"
-      );
-      const newSummary = await processDailySummary({
-        ...rawData,
-        additionalInstructions: customPrompt,
-      });
-
-      // Save and return
-      await store.saveDailySummary(newSummary);
-      return res.json({ summary: newSummary.summary });
+    if (!type || !id) {
+      throw badRequest("Missing type or id", { body: req.body });
     }
 
-    if (type === "weekly") {
-      // id is weekStart
-      const allDailies = await store.loadAllDailySummaries();
-      const weekDailies = allDailies.filter((d) => {
-        const weekStart = getWeekStart(d.date);
-        return weekStart === id;
-      });
+    const store = SummaryStore.getInstance(Number(year));
+    await store.loadIfExists();
 
-      if (weekDailies.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No daily summaries found for this week" });
+    try {
+      if (type === "daily") {
+        // Load raw data for the day
+        if (!repo) {
+          throw badRequest("Missing repo for daily regeneration", { body: req.body });
+        }
+
+        const rawData = await store.loadRawData(id, repo);
+        if (!rawData) {
+          throw notFound("Raw data not found for this date", {
+            date: id,
+            repo,
+            year,
+          });
+        }
+
+        // Import and call processDailySummary
+        const { processDailySummary } = await import(
+          "../../workflow/nodes/daily-summarizer.js"
+        );
+        const newSummary = await processDailySummary({
+          ...rawData,
+          additionalInstructions: customPrompt,
+        });
+
+        // Save and return
+        await store.saveDailySummary(newSummary);
+        return res.json({ summary: newSummary.summary });
       }
 
-      const weekEnd = getWeekEnd(id);
-      const { processWeeklySummary } = await import(
-        "../../workflow/nodes/weekly-summarizer.js"
-      );
-      const newSummary = await processWeeklySummary(
-        id,
-        weekEnd,
-        weekDailies,
-        customPrompt
-      );
+      if (type === "weekly") {
+        // id is weekStart
+        const allDailies = await store.loadAllDailySummaries();
+        const weekDailies = allDailies.filter((d) => {
+          const weekStart = getWeekStart(d.date);
+          return weekStart === id;
+        });
 
-      await store.saveWeeklySummary(newSummary);
-      return res.json({ summary: newSummary.summary });
-    }
+        if (weekDailies.length === 0) {
+          throw notFound("No daily summaries found for this week", {
+            weekStart: id,
+            year,
+          });
+        }
 
-    if (type === "monthly") {
-      // id is month (YYYY-MM)
-      const allDailies = await store.loadAllDailySummaries();
-      const monthDailies = allDailies.filter((d) => d.date.startsWith(id));
+        const weekEnd = getWeekEnd(id);
+        const { processWeeklySummary } = await import(
+          "../../workflow/nodes/weekly-summarizer.js"
+        );
+        const newSummary = await processWeeklySummary(
+          id,
+          weekEnd,
+          weekDailies,
+          customPrompt
+        );
 
-      if (monthDailies.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "No daily summaries found for this month" });
+        await store.saveWeeklySummary(newSummary);
+        return res.json({ summary: newSummary.summary });
       }
 
-      const { processMonthSummary } = await import(
-        "../../workflow/nodes/monthly-summarizer.js"
-      );
-      const newSummary = await processMonthSummary(
-        id,
-        monthDailies,
-        customPrompt
-      );
+      if (type === "monthly") {
+        // id is month (YYYY-MM)
+        const allDailies = await store.loadAllDailySummaries();
+        const monthDailies = allDailies.filter((d) => d.date.startsWith(id));
 
-      await store.saveMonthlySummary(newSummary);
-      return res.json({ summary: newSummary.summary });
-    }
+        if (monthDailies.length === 0) {
+          throw notFound("No daily summaries found for this month", {
+            month: id,
+            year,
+          });
+        }
 
-    if (type === "yearly") {
-      const allMonthly = await store.loadAllMonthlySummaries();
-      const allWeekly = await store.loadAllWeeklySummaries();
+        const { processMonthSummary } = await import(
+          "../../workflow/nodes/monthly-summarizer.js"
+        );
+        const newSummary = await processMonthSummary(
+          id,
+          monthDailies,
+          customPrompt
+        );
 
-      if (allMonthly.length === 0) {
-        return res.status(404).json({ error: "No monthly summaries found" });
+        await store.saveMonthlySummary(newSummary);
+        return res.json({ summary: newSummary.summary });
       }
 
-      const { processYearEndSummary } = await import(
-        "../../workflow/nodes/year-end-summarizer.js"
-      );
-      // New signature: (year, monthly, weekly, customPrompt)
-      const newSummary = await processYearEndSummary(
-        Number(year),
-        allMonthly,
-        allWeekly,
-        customPrompt
-      );
+      if (type === "yearly") {
+        const allMonthly = await store.loadAllMonthlySummaries();
+        const allWeekly = await store.loadAllWeeklySummaries();
 
-      await store.saveYearEndSummary(newSummary.overview);
-      return res.json({ content: newSummary.overview });
+        if (allMonthly.length === 0) {
+          throw notFound("No monthly summaries found", { year });
+        }
+
+        const { processYearEndSummary } = await import(
+          "../../workflow/nodes/year-end-summarizer.js"
+        );
+        // New signature: (year, monthly, weekly, customPrompt)
+        const newSummary = await processYearEndSummary(
+          Number(year),
+          allMonthly,
+          allWeekly,
+          customPrompt
+        );
+
+        await store.saveYearEndSummary(newSummary.overview);
+        return res.json({ content: newSummary.overview });
+      }
+
+      throw badRequest("Invalid type parameter", { type });
+    } catch (error: any) {
+      logger.error(
+        "Regeneration failed",
+        error instanceof Error ? error : undefined
+      );
+      logger.debug("regenerate", { type, id, year, repo });
+      throw error;
     }
-
-    res.status(400).json({ error: "Invalid type parameter" });
-  } catch (error: any) {
-    logger.error(`Regeneration failed: ${error.message}`);
-    res.status(500).json({ error: error.message });
-  }
-});
+  })
+);
 
 // Helper functions for week calculation
 function getWeekStart(dateStr: string): string {

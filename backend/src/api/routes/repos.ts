@@ -3,16 +3,19 @@ import { findRepositories } from "../../lib/git";
 import logger from "../../lib/logger";
 import { getConfig } from "../../config";
 import { API_ROUTES } from "@recaply/shared";
+import { asyncHandler } from "../middleware/async-handler";
+import { badRequest } from "../errors";
 
 const router = Router();
 
-router.get(API_ROUTES.repos, async (req, res) => {
-  try {
+router.get(
+  API_ROUTES.repos,
+  asyncHandler(async (req, res) => {
     const rootPath = req.query.rootPath as string;
     const rootDir = rootPath || getConfig().repos.defaultRootPath;
 
     if (!rootDir) {
-      return res.status(400).json({ error: "Root path is required" });
+      throw badRequest("Root path is required", { query: req.query });
     }
 
     logger.step("🔎", "Scanning repositories", { rootDir });
@@ -20,10 +23,7 @@ router.get(API_ROUTES.repos, async (req, res) => {
     const repos = await findRepositories(rootDir);
     logger.stepDone(`Found ${repos.length} repositories`, Date.now() - startedAt);
     res.json({ repos });
-  } catch (error: any) {
-    logger.error("Repository scan failed", error);
-    res.status(500).json({ error: error.message ?? "Failed to scan repositories" });
-  }
-});
+  })
+);
 
 export default router;

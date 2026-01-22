@@ -22,6 +22,7 @@ import type {
   WeeklySummary,
 } from "./types";
 import { getBaseOutputDir } from "./paths";
+import logger from "./logger";
 
 interface CacheIndex {
   year: number;
@@ -46,6 +47,10 @@ export class SummaryStore {
   private index: CacheIndex | null = null;
   private year: number;
 
+  private isErrnoException(error: unknown): error is NodeJS.ErrnoException {
+    return typeof error === "object" && error !== null && "code" in error;
+  }
+
   static getInstance(
     year: number,
     baseDir: string = getBaseOutputDir()
@@ -62,6 +67,80 @@ export class SummaryStore {
     this.indexPath = path.join(this.outputDir, "index.json");
   }
 
+  private async safeReadDir(dirPath: string): Promise<string[]> {
+    try {
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      return entries.filter((e) => e.isFile()).map((e) => e.name);
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") return [];
+      logger.error("SummaryStore: failed to read directory", error instanceof Error ? error : undefined);
+      logger.debug("dirPath", dirPath);
+      return [];
+    }
+  }
+
+  private async rebuildIndexFromDisk(opts: {
+    repos: string[];
+    authorPattern: string;
+    createdAt?: string;
+  }): Promise<CacheIndex> {
+    const now = new Date().toISOString();
+    const createdAt = opts.createdAt || now;
+
+    const rawFiles = await this.safeReadDir(path.join(this.outputDir, "raw"));
+    const dailyFiles = await this.safeReadDir(path.join(this.outputDir, "daily"));
+    const weeklyFiles = await this.safeReadDir(path.join(this.outputDir, "weekly"));
+    const monthlyFiles = await this.safeReadDir(path.join(this.outputDir, "monthly"));
+
+    const collectedDates = rawFiles
+      .filter((name) => name.startsWith("commits-") && name.endsWith(".json"))
+      .map((name) => name.slice("commits-".length, -".json".length));
+
+    const dailySummaries = dailyFiles
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => name.slice(0, -".json".length));
+
+    const weeklySummaries = weeklyFiles
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => {
+        const base = name.slice(0, -".json".length);
+        try {
+          return decodeURIComponent(base);
+        } catch {
+          return base;
+        }
+      });
+
+    const monthlySummaries = monthlyFiles
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => name.slice(0, -".json".length));
+
+    const hasYearEndSummary = await fs
+      .access(path.join(this.outputDir, "year-end-summary.md"))
+      .then(() => true)
+      .catch((error) => {
+        if (this.isErrnoException(error) && error.code === "ENOENT") return false;
+        logger.error(
+          "SummaryStore: failed to check year-end summary file",
+          error instanceof Error ? error : undefined
+        );
+        return false;
+      });
+
+    return {
+      year: this.year,
+      repos: opts.repos,
+      authorPattern: opts.authorPattern,
+      createdAt,
+      updatedAt: now,
+      collectedDates: Array.from(new Set(collectedDates)).sort(),
+      dailySummaries: Array.from(new Set(dailySummaries)).sort(),
+      weeklySummaries: Array.from(new Set(weeklySummaries)).sort(),
+      monthlySummaries: Array.from(new Set(monthlySummaries)).sort(),
+      hasYearEndSummary,
+    };
+  }
+
   /**
    * Initialize directories and load/create index
    */
@@ -74,22 +153,23 @@ export class SummaryStore {
     try {
       const data = await fs.readFile(this.indexPath, "utf-8");
       this.index = JSON.parse(data);
-      console.log(`[SummaryStore] Loaded index from ${this.indexPath}`);
-    } catch {
-      this.index = {
-        year: this.year,
-        repos,
-        authorPattern,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        collectedDates: [],
-        dailySummaries: [],
-        weeklySummaries: [],
-        monthlySummaries: [],
-        hasYearEndSummary: false,
-      };
+      logger.info(`SummaryStore: loaded index (year=${this.year})`);
+      logger.debug("indexPath", this.indexPath);
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") {
+        logger.info(`SummaryStore: index missing; rebuilding (year=${this.year})`);
+      } else {
+        logger.warn(`SummaryStore: failed to read index; rebuilding (year=${this.year})`);
+        logger.error(
+          "SummaryStore: index read error",
+          error instanceof Error ? error : undefined
+        );
+      }
+
+      this.index = await this.rebuildIndexFromDisk({ repos, authorPattern });
       await this.saveIndex();
-      console.log(`[SummaryStore] Created new index at ${this.indexPath}`);
+      logger.info(`SummaryStore: index saved (year=${this.year})`);
+      logger.debug("indexPath", this.indexPath);
     }
   }
 
@@ -102,7 +182,32 @@ export class SummaryStore {
       const data = await fs.readFile(this.indexPath, "utf-8");
       this.index = JSON.parse(data);
       return true;
-    } catch {
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") {
+        // If index is missing but the year directory exists, rebuild so the UI can still read data.
+        const rebuilt = await this.rebuildIndexFromDisk({
+          repos: [],
+          authorPattern: "",
+        });
+        const hasAnyData =
+          rebuilt.collectedDates.length > 0 ||
+          rebuilt.dailySummaries.length > 0 ||
+          rebuilt.weeklySummaries.length > 0 ||
+          rebuilt.monthlySummaries.length > 0 ||
+          rebuilt.hasYearEndSummary;
+        if (!hasAnyData) return false;
+
+        this.index = rebuilt;
+        await this.saveIndex();
+        logger.info(`SummaryStore: index rebuilt for read-only (year=${this.year})`);
+        return true;
+      }
+
+      logger.warn(`SummaryStore: failed to load index (year=${this.year})`);
+      logger.error(
+        "SummaryStore: loadIfExists error",
+        error instanceof Error ? error : undefined
+      );
       return false;
     }
   }
@@ -139,7 +244,11 @@ export class SummaryStore {
       const filePath = path.join(this.outputDir, "raw", `commits-${key}.json`);
       const data = await fs.readFile(filePath, "utf-8");
       return JSON.parse(data);
-    } catch {
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") return null;
+      logger.warn("SummaryStore: failed to load raw data");
+      logger.error("SummaryStore: loadRawData error", error instanceof Error ? error : undefined);
+      logger.debug("rawKey", `${date}-${repo}`);
       return null;
     }
   }
@@ -174,7 +283,14 @@ export class SummaryStore {
       const jsonPath = path.join(this.outputDir, "daily", `${key}.json`);
       const data = await fs.readFile(jsonPath, "utf-8");
       return JSON.parse(data);
-    } catch {
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") return null;
+      logger.warn("SummaryStore: failed to load daily summary");
+      logger.error(
+        "SummaryStore: loadDailySummary error",
+        error instanceof Error ? error : undefined
+      );
+      logger.debug("dailyKey", repo ? `${date}-${repo}` : date);
       return null;
     }
   }
@@ -193,8 +309,14 @@ export class SummaryStore {
         const jsonPath = path.join(this.outputDir, "daily", `${key}.json`);
         const data = await fs.readFile(jsonPath, "utf-8");
         summaries.push(JSON.parse(data));
-      } catch {
-        // Skip missing
+      } catch (error) {
+        if (this.isErrnoException(error) && error.code === "ENOENT") continue;
+        logger.warn("SummaryStore: failed to load daily summary from index key");
+        logger.error(
+          "SummaryStore: loadAllDailySummaries error",
+          error instanceof Error ? error : undefined
+        );
+        logger.debug("dailyKey", key);
       }
     }
     return summaries.sort((a, b) => a.date.localeCompare(b.date));
@@ -223,7 +345,14 @@ export class SummaryStore {
       const jsonPath = path.join(this.outputDir, "weekly", `${safeKey}.json`);
       const data = await fs.readFile(jsonPath, "utf-8");
       return JSON.parse(data);
-    } catch {
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") return null;
+      logger.warn("SummaryStore: failed to load weekly summary");
+      logger.error(
+        "SummaryStore: loadWeeklySummary error",
+        error instanceof Error ? error : undefined
+      );
+      logger.debug("weekStart", weekStart);
       return null;
     }
   }
@@ -242,8 +371,14 @@ export class SummaryStore {
         const jsonPath = path.join(this.outputDir, "weekly", `${safeKey}.json`);
         const data = await fs.readFile(jsonPath, "utf-8");
         summaries.push(JSON.parse(data));
-      } catch {
-        // Skip missing
+      } catch (error) {
+        if (this.isErrnoException(error) && error.code === "ENOENT") continue;
+        logger.warn("SummaryStore: failed to load weekly summary from index key");
+        logger.error(
+          "SummaryStore: loadAllWeeklySummaries error",
+          error instanceof Error ? error : undefined
+        );
+        logger.debug("weekStart", key);
       }
     }
     return summaries.sort((a, b) => a.weekStart.localeCompare(b.weekStart));
@@ -277,7 +412,14 @@ export class SummaryStore {
       const jsonPath = path.join(this.outputDir, "monthly", `${month}.json`);
       const data = await fs.readFile(jsonPath, "utf-8");
       return JSON.parse(data);
-    } catch {
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") return null;
+      logger.warn("SummaryStore: failed to load monthly summary");
+      logger.error(
+        "SummaryStore: loadMonthlySummary error",
+        error instanceof Error ? error : undefined
+      );
+      logger.debug("month", month);
       return null;
     }
   }
@@ -313,7 +455,13 @@ export class SummaryStore {
     try {
       const filePath = path.join(this.outputDir, "year-end-summary.md");
       return await fs.readFile(filePath, "utf-8");
-    } catch {
+    } catch (error) {
+      if (this.isErrnoException(error) && error.code === "ENOENT") return null;
+      logger.warn("SummaryStore: failed to load year-end summary");
+      logger.error(
+        "SummaryStore: loadYearEndSummary error",
+        error instanceof Error ? error : undefined
+      );
       return null;
     }
   }
