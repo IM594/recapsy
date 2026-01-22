@@ -1,5 +1,6 @@
 import type { RequestHandler } from "express";
 import crypto from "crypto";
+import { HTTP_HEADERS } from "@recaply/shared";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -16,7 +17,6 @@ export const requestIdMiddleware: RequestHandler = (_req, res, next) => {
     typeof crypto.randomUUID === "function" ? crypto.randomUUID() : fallbackRequestId();
 
   res.locals.requestId = id;
-  res.setHeader("x-request-id", id);
+  res.setHeader(HTTP_HEADERS.requestId, id);
   next();
 };
-

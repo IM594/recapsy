@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 18:53
+> Last updated: 2026-01-22 19:06
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -14,7 +14,7 @@
 - **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
 
 ## In Progress（P0，一致性优先）
-- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes；继续清理散落 magic string（尤其是 query keys / event names / config keys）
+- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes、HTTP/query/body keys、summary types；继续清理散落 magic string（尤其是 query keys / event names / config keys）
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）

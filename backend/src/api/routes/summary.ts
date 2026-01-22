@@ -14,7 +14,14 @@ import { SummaryStore } from "../../lib/summary-store";
 import { WorkflowRunner } from "../../lib/workflow-runner";
 import fs from "fs/promises";
 import { getBaseOutputDir } from "../../lib/paths";
-import { ERROR_CODES, SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
+import {
+  ERROR_CODES,
+  QUERY_KEYS,
+  SSE_EVENTS,
+  SUMMARY_ROUTES,
+  isSummaryType,
+  SUMMARY_TYPES,
+} from "@recaply/shared";
 import { asyncHandler } from "../middleware/async-handler";
 import { badRequest, notFound } from "../errors";
 
@@ -84,11 +91,9 @@ router.post(
       year = new Date().getFullYear(),
     } = req.body;
 
-    const validTaskTypes = ["daily", "weekly", "monthly", "yearly"] as const;
-    type TaskType = (typeof validTaskTypes)[number];
-    const taskType: TaskType = validTaskTypes.includes(summaryType)
+    const taskType = isSummaryType(summaryType)
       ? summaryType
-      : "daily";
+      : SUMMARY_TYPES.daily;
 
     const runner = WorkflowRunner.getInstance(year);
     const store = SummaryStore.getInstance(year);
@@ -172,7 +177,8 @@ router.post(
 router.get(
   SUMMARY_ROUTES.events,
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const yearStr = req.query[QUERY_KEYS.year] as string | undefined;
+    const year = parseInt(yearStr || "", 10) || new Date().getFullYear();
     const runner = WorkflowRunner.getInstance(year);
 
     res.setHeader("Content-Type", "text/event-stream");
@@ -220,7 +226,8 @@ router.get(
 router.get(
   SUMMARY_ROUTES.status,
   asyncHandler(async (req, res) => {
-    const year = parseInt(req.query.year as string) || new Date().getFullYear();
+    const yearStr = req.query[QUERY_KEYS.year] as string | undefined;
+    const year = parseInt(yearStr || "", 10) || new Date().getFullYear();
     const runner = WorkflowRunner.getInstance(year);
     res.json(runner.getStatus());
   })
@@ -247,7 +254,11 @@ router.post(
 router.get(
   SUMMARY_ROUTES.data,
   asyncHandler(async (req, res) => {
-    const { type, year = new Date().getFullYear(), repo } = req.query;
+    const type = req.query[QUERY_KEYS.type] as string | undefined;
+    const repo = req.query[QUERY_KEYS.repo] as string | undefined;
+    const yearStr = req.query[QUERY_KEYS.year] as string | undefined;
+    const year = parseInt(yearStr || "", 10) || new Date().getFullYear();
+
     if (typeof type !== "string" || !type.trim()) {
       throw badRequest("Missing type parameter", { query: req.query });
     }
@@ -255,21 +266,21 @@ router.get(
     await store.loadIfExists();
 
     try {
-      if (type === "daily") {
+      if (type === SUMMARY_TYPES.daily) {
         const all = await store.loadAllDailySummaries();
         const filtered = repo ? all.filter((d) => d.repo === repo) : all;
         return res.json(filtered);
       }
 
-      if (type === "weekly") {
+      if (type === SUMMARY_TYPES.weekly) {
         return res.json(await store.loadAllWeeklySummaries());
       }
 
-      if (type === "monthly") {
+      if (type === SUMMARY_TYPES.monthly) {
         return res.json(await store.loadAllMonthlySummaries());
       }
 
-      if (type === "yearly") {
+      if (type === SUMMARY_TYPES.yearly) {
         const summary = await store.loadYearEndSummary();
         return res.json(summary ? { content: summary } : null);
       }
@@ -309,7 +320,7 @@ router.post(
     await store.loadIfExists();
 
     try {
-      if (type === "daily") {
+      if (type === SUMMARY_TYPES.daily) {
         // Load raw data for the day
         if (!repo) {
           throw badRequest("Missing repo for daily regeneration", { body: req.body });
@@ -338,7 +349,7 @@ router.post(
         return res.json({ summary: newSummary.summary });
       }
 
-      if (type === "weekly") {
+      if (type === SUMMARY_TYPES.weekly) {
         // id is weekStart
         const allDailies = await store.loadAllDailySummaries();
         const weekDailies = allDailies.filter((d) => {
@@ -368,7 +379,7 @@ router.post(
         return res.json({ summary: newSummary.summary });
       }
 
-      if (type === "monthly") {
+      if (type === SUMMARY_TYPES.monthly) {
         // id is month (YYYY-MM)
         const allDailies = await store.loadAllDailySummaries();
         const monthDailies = allDailies.filter((d) => d.date.startsWith(id));
@@ -393,7 +404,7 @@ router.post(
         return res.json({ summary: newSummary.summary });
       }
 
-      if (type === "yearly") {
+      if (type === SUMMARY_TYPES.yearly) {
         const allMonthly = await store.loadAllMonthlySummaries();
         const allWeekly = await store.loadAllWeeklySummaries();
 

@@ -1,5 +1,12 @@
 import { getSummaryApiUrl } from "@/lib/api";
-import { SUMMARY_ROUTES } from "@recaply/shared";
+import {
+  BODY_KEYS,
+  CONTENT_TYPES,
+  HTTP_HEADERS,
+  QUERY_KEYS,
+  SUMMARY_ROUTES,
+  SUMMARY_TYPES,
+} from "@recaply/shared";
 import type {
   DailySummaryData,
   GenerationConfig,
@@ -26,7 +33,7 @@ export async function fetchAvailableYears(): Promise<number[]> {
 }
 
 export async function fetchSummaryStatus(year: number): Promise<SummaryStatus> {
-  const search = new URLSearchParams({ year: String(year) });
+  const search = new URLSearchParams({ [QUERY_KEYS.year]: String(year) });
   return fetchJson<SummaryStatus>(
     getSummaryApiUrl(`${SUMMARY_ROUTES.status}?${search}`)
   );
@@ -37,8 +44,8 @@ export async function resetSummaryStatus(year: number): Promise<SummaryStatus> {
     getSummaryApiUrl(SUMMARY_ROUTES.reset),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ year }),
+      headers: { [HTTP_HEADERS.contentType]: CONTENT_TYPES.json },
+      body: JSON.stringify({ [BODY_KEYS.year]: year }),
     }
   );
   return data.status;
@@ -58,10 +65,14 @@ export async function startSummaryGeneration(
       getSummaryApiUrl(SUMMARY_ROUTES.generate),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { [HTTP_HEADERS.contentType]: CONTENT_TYPES.json },
         body: JSON.stringify({
-          ...config,
-          author: config.author || "",
+          [BODY_KEYS.selectedRepos]: config.selectedRepos,
+          [BODY_KEYS.since]: config.since,
+          [BODY_KEYS.until]: config.until,
+          [BODY_KEYS.summaryType]: config.summaryType,
+          [BODY_KEYS.year]: config.year,
+          [BODY_KEYS.author]: config.author || "",
         }),
       }
     );
@@ -76,7 +87,10 @@ export async function startSummaryGeneration(
 }
 
 export async function fetchYearlySummary(year: number): Promise<YearlySummaryData> {
-  const search = new URLSearchParams({ type: "yearly", year: String(year) });
+  const search = new URLSearchParams({
+    [QUERY_KEYS.type]: SUMMARY_TYPES.yearly,
+    [QUERY_KEYS.year]: String(year),
+  });
   return fetchJson<YearlySummaryData>(
     getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
   );
@@ -86,22 +100,31 @@ export async function fetchDailySummaries(
   year: number,
   repo?: string
 ): Promise<DailySummaryData[]> {
-  const search = new URLSearchParams({ type: "daily", year: String(year) });
-  if (repo) search.set("repo", repo);
+  const search = new URLSearchParams({
+    [QUERY_KEYS.type]: SUMMARY_TYPES.daily,
+    [QUERY_KEYS.year]: String(year),
+  });
+  if (repo) search.set(QUERY_KEYS.repo, repo);
   return fetchJson<DailySummaryData[]>(
     getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
   );
 }
 
 export async function fetchWeeklySummaries(year: number): Promise<WeeklySummaryData[]> {
-  const search = new URLSearchParams({ type: "weekly", year: String(year) });
+  const search = new URLSearchParams({
+    [QUERY_KEYS.type]: SUMMARY_TYPES.weekly,
+    [QUERY_KEYS.year]: String(year),
+  });
   return fetchJson<WeeklySummaryData[]>(
     getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
   );
 }
 
 export async function fetchMonthlySummaries(year: number): Promise<MonthlySummaryData[]> {
-  const search = new URLSearchParams({ type: "monthly", year: String(year) });
+  const search = new URLSearchParams({
+    [QUERY_KEYS.type]: SUMMARY_TYPES.monthly,
+    [QUERY_KEYS.year]: String(year),
+  });
   return fetchJson<MonthlySummaryData[]>(
     getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
   );
@@ -127,13 +150,13 @@ export async function regenerateSummary(
     getSummaryApiUrl(SUMMARY_ROUTES.regenerate),
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { [HTTP_HEADERS.contentType]: CONTENT_TYPES.json },
       body: JSON.stringify({
-        type: req.type,
-        id: req.id,
-        year: req.year,
-        repo: req.repo,
-        customPrompt: req.customPrompt?.trim() || undefined,
+        [BODY_KEYS.type]: req.type,
+        [BODY_KEYS.id]: req.id,
+        [BODY_KEYS.year]: req.year,
+        [BODY_KEYS.repo]: req.repo,
+        [BODY_KEYS.customPrompt]: req.customPrompt?.trim() || undefined,
       }),
     }
   );
