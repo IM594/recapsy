@@ -20,6 +20,7 @@ import {
   resetSummaryStatus,
   startSummaryGeneration,
 } from "@/services/summary";
+import type { RequestOptions } from "@/services/http";
 
 import type {
   DailySummaryData,
@@ -132,11 +133,11 @@ interface SummaryContextType {
   isConnected: boolean;
   dataVersion: number;
   startGeneration: (config: GenerationConfig) => Promise<void>;
-  getYearlySummary: (year?: number) => Promise<YearlySummaryData>;
-  getDailySummaries: (year?: number) => Promise<DailySummaryData[]>;
-  getWeeklySummaries: (year?: number) => Promise<WeeklySummaryData[]>;
-  getMonthlySummaries: (year?: number) => Promise<MonthlySummaryData[]>;
-  resetStatus: (year?: number) => Promise<void>;
+  getYearlySummary: (year?: number, opts?: RequestOptions) => Promise<YearlySummaryData>;
+  getDailySummaries: (year?: number, opts?: RequestOptions) => Promise<DailySummaryData[]>;
+  getWeeklySummaries: (year?: number, opts?: RequestOptions) => Promise<WeeklySummaryData[]>;
+  getMonthlySummaries: (year?: number, opts?: RequestOptions) => Promise<MonthlySummaryData[]>;
+  resetStatus: (year?: number, opts?: RequestOptions) => Promise<void>;
   refetchData: () => void;
 }
 
@@ -160,7 +161,14 @@ export function SummaryProvider({
   const [dataVersion, setDataVersion] = useState(0);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const eventSourceHandlersRef = useRef<{
+    onStatus: (e: MessageEvent) => void;
+    onProgress: (e: MessageEvent) => void;
+    onComplete: (e: MessageEvent) => void;
+    onWorkflowError: (e: MessageEvent) => void;
+  } | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const disposedRef = useRef(false);
 
   const addLog = useCallback(
     (message: string, type: LogEntry["type"] = "info") => {
@@ -173,6 +181,7 @@ export function SummaryProvider({
   );
 
   const connect = useCallback(() => {
+    if (disposedRef.current) return;
     if (eventSourceRef.current) return;
 
     const es = new EventSource(
@@ -191,10 +200,13 @@ export function SummaryProvider({
       setIsConnected(false);
       es.close();
       eventSourceRef.current = null;
+      eventSourceHandlersRef.current = null;
 
       // Reconnect after delay
-      if (!reconnectTimeoutRef.current) {
-        if (DEBUG_SSE) logWarn("sse.connection", "connection error; scheduling reconnect", { year });
+      if (!reconnectTimeoutRef.current && !disposedRef.current) {
+        if (DEBUG_SSE) {
+          logWarn("sse.connection", "connection error; scheduling reconnect", { year });
+        }
         reconnectTimeoutRef.current = setTimeout(() => {
           reconnectTimeoutRef.current = null;
           connect();
@@ -202,8 +214,7 @@ export function SummaryProvider({
       }
     };
 
-    // Handle status event with new format: { nodeId, state, timestamp }
-    es.addEventListener(SSE_EVENTS.status, (e: MessageEvent) => {
+    const onStatus = (e: MessageEvent) => {
       debugSse("[SSE] status event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -221,10 +232,9 @@ export function SummaryProvider({
 
       const fallback = parseSummaryStatus(data);
       if (fallback) setStatus(fallback);
-    });
+    };
 
-    // Handle progress event with new format
-    es.addEventListener(SSE_EVENTS.progress, (e: MessageEvent) => {
+    const onProgress = (e: MessageEvent) => {
       debugSse("[SSE] progress event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -242,10 +252,9 @@ export function SummaryProvider({
 
       const message = event.state.message || `Completed: ${event.nodeId}`;
       addLog(message, "info");
-    });
+    };
 
-    // Handle complete event with new format
-    es.addEventListener(SSE_EVENTS.complete, (e: MessageEvent) => {
+    const onComplete = (e: MessageEvent) => {
       debugSse("[SSE] complete event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -264,10 +273,9 @@ export function SummaryProvider({
       addLog(COPY.toasts.generationCompleted, "success");
       toast.success(COPY.toasts.generationCompleted);
       setDataVersion((v) => v + 1);
-    });
+    };
 
-    // Handle workflow_error event with new format
-    es.addEventListener(SSE_EVENTS.workflowError, (e: MessageEvent) => {
+    const onWorkflowError = (e: MessageEvent) => {
       debugSse("[SSE] workflow_error event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -280,14 +288,40 @@ export function SummaryProvider({
       toast.error(`${COPY.toasts.workflowErrorPrefix} ${errorMessage}`);
       addLog(`${COPY.toasts.workflowErrorPrefix} ${errorMessage}`, "error");
       setStatus((prev) => ({ ...prev, isRunning: false, phase: "error" }));
-    });
+    };
+
+    eventSourceHandlersRef.current = { onStatus, onProgress, onComplete, onWorkflowError };
+
+    // Handle status event with new format: { nodeId, state, timestamp }
+    es.addEventListener(SSE_EVENTS.status, onStatus);
+
+    // Handle progress event with new format
+    es.addEventListener(SSE_EVENTS.progress, onProgress);
+
+    // Handle complete event with new format
+    es.addEventListener(SSE_EVENTS.complete, onComplete);
+
+    // Handle workflow_error event with new format
+    es.addEventListener(SSE_EVENTS.workflowError, onWorkflowError);
 
     eventSourceRef.current = es;
   }, [addLog, year]);
 
   const disconnect = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+    const es = eventSourceRef.current;
+    const handlers = eventSourceHandlersRef.current;
+    if (es && handlers) {
+      es.removeEventListener(SSE_EVENTS.status, handlers.onStatus);
+      es.removeEventListener(SSE_EVENTS.progress, handlers.onProgress);
+      es.removeEventListener(SSE_EVENTS.complete, handlers.onComplete);
+      es.removeEventListener(SSE_EVENTS.workflowError, handlers.onWorkflowError);
+    }
+    eventSourceHandlersRef.current = null;
+
+    if (es) {
+      es.onopen = null;
+      es.onerror = null;
+      es.close();
       eventSourceRef.current = null;
       setIsConnected(false);
     }
@@ -298,8 +332,12 @@ export function SummaryProvider({
   }, []);
 
   useEffect(() => {
+    disposedRef.current = false;
     connect();
-    return () => disconnect();
+    return () => {
+      disposedRef.current = true;
+      disconnect();
+    };
   }, [connect, disconnect]);
 
   // When switching years, clear UI state to avoid mixing years.
@@ -343,30 +381,30 @@ export function SummaryProvider({
     [addLog]
   );
 
-  const getYearlySummary = useCallback(async (requestedYear?: number) => {
+  const getYearlySummary = useCallback(async (requestedYear?: number, opts?: RequestOptions) => {
     const y = requestedYear ?? year;
-    return fetchYearlySummary(y);
+    return fetchYearlySummary(y, opts);
   }, [year]);
 
-  const getDailySummaries = useCallback(async (requestedYear?: number) => {
+  const getDailySummaries = useCallback(async (requestedYear?: number, opts?: RequestOptions) => {
     const y = requestedYear ?? year;
-    return fetchDailySummaries(y);
+    return fetchDailySummaries(y, undefined, opts);
   }, [year]);
 
-  const getMonthlySummaries = useCallback(async (requestedYear?: number) => {
+  const getMonthlySummaries = useCallback(async (requestedYear?: number, opts?: RequestOptions) => {
     const y = requestedYear ?? year;
-    return fetchMonthlySummaries(y);
+    return fetchMonthlySummaries(y, opts);
   }, [year]);
 
-  const getWeeklySummaries = useCallback(async (requestedYear?: number) => {
+  const getWeeklySummaries = useCallback(async (requestedYear?: number, opts?: RequestOptions) => {
     const y = requestedYear ?? year;
-    return fetchWeeklySummaries(y);
+    return fetchWeeklySummaries(y, opts);
   }, [year]);
 
-  const resetStatus = useCallback(async (requestedYear?: number) => {
+  const resetStatus = useCallback(async (requestedYear?: number, opts?: RequestOptions) => {
     const y = requestedYear ?? year;
     try {
-      const next = await resetSummaryStatus(y);
+      const next = await resetSummaryStatus(y, opts);
       setStatus(next);
     } catch (error) {
       // Keep UI stable even if reset fails; callers can show toasts if needed.

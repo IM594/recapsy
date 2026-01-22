@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +24,7 @@ import {
 } from "@/services/summary";
 import type { GenerationConfig, SummaryType } from "@/types/summary";
 import { logError } from "@/lib/logger";
+import { isAbortError } from "@/lib/lifecycle";
 
 type GenerationType = SummaryType;
 
@@ -58,6 +59,7 @@ export function GenerationPreview({
   const [selectedMonth, setSelectedMonth] = useState<string>(() =>
     String(new Date().getMonth() + 1).padStart(2, "0")
   );
+  const existenceControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -94,36 +96,49 @@ export function GenerationPreview({
 
     setDateRange({ start: startStr, end: endStr });
     checkExistence(type, startStr);
+
+    return () => {
+      existenceControllerRef.current?.abort();
+      existenceControllerRef.current = null;
+    };
   }, [open, selectedDate, selectedMonth, type, year]);
 
   const checkExistence = async (type: GenerationType, rangeStart: string) => {
     setChecking(true);
     setExists(false);
+    existenceControllerRef.current?.abort();
+    const controller = new AbortController();
+    existenceControllerRef.current = controller;
     try {
       let found = false;
 
       // Match by rangeStart to stay consistent with getDateRangeForType().
       if (type === "daily") {
-        found = (await fetchDailySummaries(year)).some((d) => d.date === rangeStart);
+        found = (await fetchDailySummaries(year, undefined, { signal: controller.signal })).some(
+          (d) => d.date === rangeStart
+        );
       } else if (type === "weekly") {
-        found = (await fetchWeeklySummaries(year)).some(
+        found = (await fetchWeeklySummaries(year, { signal: controller.signal })).some(
           (d) => d.weekStart === rangeStart
         );
       } else if (type === "monthly") {
         const targetMonth = rangeStart.substring(0, 7);
-        found = (await fetchMonthlySummaries(year)).some(
+        found = (await fetchMonthlySummaries(year, { signal: controller.signal })).some(
           (d) => d.month === targetMonth
         );
       } else if (type === "yearly") {
-        const data = await fetchYearlySummary(year);
+        const data = await fetchYearlySummary(year, { signal: controller.signal });
         found = !!data?.content;
       }
 
       setExists(found);
     } catch (error) {
+      if (isAbortError(error)) return;
       logError("generationPreview.checkExistence", error, { type, year, rangeStart });
     } finally {
-      setChecking(false);
+      if (existenceControllerRef.current === controller) {
+        setChecking(false);
+      }
     }
   };
 

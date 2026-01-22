@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { YearEndGenerator } from "./YearEndGenerator";
 import { UnifiedBoard } from "./UnifiedBoard";
 import { Loader2 } from "lucide-react";
 import { fetchSummaryStatus } from "@/services/summary";
 import { logError } from "@/lib/logger";
+import { isAbortError } from "@/lib/lifecycle";
 
 interface YearEndContainerProps {
   initialYear?: number;
@@ -17,14 +18,20 @@ export function YearEndContainer({
   const year = initialYear;
   const [isRunning, setIsRunning] = useState(false);
   const [checking, setChecking] = useState(true);
+  const statusControllerRef = useRef<AbortController | null>(null);
 
   // Check running status on mount and poll
   useEffect(() => {
     const checkStatus = async () => {
+      statusControllerRef.current?.abort();
+      const controller = new AbortController();
+      statusControllerRef.current = controller;
+
       try {
-        const status = await fetchSummaryStatus(year);
+        const status = await fetchSummaryStatus(year, { signal: controller.signal });
         setIsRunning(!!status.isRunning);
       } catch (error) {
+        if (isAbortError(error)) return;
         logError("yearEnd.checkStatus", error, { year });
       } finally {
         setChecking(false);
@@ -33,7 +40,11 @@ export function YearEndContainer({
 
     checkStatus();
     const interval = setInterval(checkStatus, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      statusControllerRef.current?.abort();
+      statusControllerRef.current = null;
+    };
   }, [year]);
 
   const handleGenerationComplete = () => {

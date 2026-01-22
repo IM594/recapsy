@@ -1,6 +1,10 @@
 import type { ErrorCode, ErrorResponse } from "@recaply/shared";
 import { isErrorResponse } from "@recaply/shared";
 
+export type RequestOptions = {
+  signal?: AbortSignal;
+};
+
 function formatApiErrorDebugMessage(opts: {
   status: number;
   message: string;

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ import { COPY } from "@/constants/copy";
 import { STORAGE_KEYS } from "@recaply/shared";
 import type { RepoInfo } from "@/types/repos";
 import { logError } from "@/lib/logger";
+import { isAbortError } from "@/lib/lifecycle";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -47,6 +48,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [author, setAuthor] = useState(savedAuthor);
   const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([]);
   const [scanning, setScanning] = useState(false);
+  const scanControllerRef = useRef<AbortController | null>(null);
   const [scanRootPath, setScanRootPath] = useState<string>(() => {
     return (
       localStorage.getItem(STORAGE_KEYS.settings.scanRootPath) ||
@@ -62,19 +64,29 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
       setSelectedRepos(savedRepos);
       setAuthor(savedAuthor);
     }
+    return () => {
+      scanControllerRef.current?.abort();
+      scanControllerRef.current = null;
+    };
   }, [open]);
 
   const scanRepos = async () => {
     setScanning(true);
+    scanControllerRef.current?.abort();
+    const controller = new AbortController();
+    scanControllerRef.current = controller;
     try {
       localStorage.setItem(STORAGE_KEYS.settings.scanRootPath, scanRootPath);
-      const repos = await scanReposService(scanRootPath);
+      const repos = await scanReposService(scanRootPath, { signal: controller.signal });
       setAvailableRepos(repos);
     } catch (error) {
+      if (isAbortError(error)) return;
       logError("settings.scanRepos", error, { scanRootPath });
       toast.error(COPY.toasts.scanReposFailed);
     } finally {
-      setScanning(false);
+      if (scanControllerRef.current === controller) {
+        setScanning(false);
+      }
     }
   };
 

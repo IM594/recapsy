@@ -5,11 +5,13 @@ import {
   useEffect,
   useMemo,
   useState,
+  useRef,
   type ReactNode,
 } from "react";
 import { fetchAvailableYears } from "@/services/summary";
 import { STORAGE_KEYS } from "@recaply/shared";
 import { logError } from "@/lib/logger";
+import { isAbortError } from "@/lib/lifecycle";
 
 interface YearContextType {
   activeYear: number;
@@ -22,6 +24,7 @@ const YearContext = createContext<YearContextType | null>(null);
 
 export function YearProvider({ children }: { children: ReactNode }) {
   const currentYear = new Date().getFullYear();
+  const refreshControllerRef = useRef<AbortController | null>(null);
 
   const [availableYears, setAvailableYears] = useState<number[]>([currentYear]);
   const [activeYear, setActiveYearState] = useState<number>(() => {
@@ -31,13 +34,18 @@ export function YearProvider({ children }: { children: ReactNode }) {
   });
 
   const refreshAvailableYears = useCallback(async () => {
+    refreshControllerRef.current?.abort();
+    const controller = new AbortController();
+    refreshControllerRef.current = controller;
+
     try {
-      const years = await fetchAvailableYears();
+      const years = await fetchAvailableYears({ signal: controller.signal });
       setAvailableYears(years);
 
       // Ensure active year is always a valid option; fallback to currentYear.
       setActiveYearState((prev) => (years.includes(prev) ? prev : currentYear));
     } catch (error) {
+      if (isAbortError(error)) return;
       logError("year.refreshAvailableYears", error, { currentYear });
       setAvailableYears([currentYear]);
       setActiveYearState((prev) => (Number.isFinite(prev) ? prev : currentYear));
@@ -51,6 +59,10 @@ export function YearProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     refreshAvailableYears();
+    return () => {
+      refreshControllerRef.current?.abort();
+      refreshControllerRef.current = null;
+    };
   }, [refreshAvailableYears]);
 
   const value = useMemo<YearContextType>(() => {

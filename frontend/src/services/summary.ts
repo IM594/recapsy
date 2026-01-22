@@ -16,12 +16,13 @@ import type {
   WeeklySummaryData,
   YearlySummaryData,
 } from "@/types/summary";
-import { ApiError, fetchJson } from "./http";
+import { ApiError, fetchJson, type RequestOptions } from "./http";
 
-export async function fetchAvailableYears(): Promise<number[]> {
+export async function fetchAvailableYears(opts?: RequestOptions): Promise<number[]> {
   const currentYear = new Date().getFullYear();
   const data = await fetchJson<{ years?: number[] }>(
-    getSummaryApiUrl(SUMMARY_ROUTES.years)
+    getSummaryApiUrl(SUMMARY_ROUTES.years),
+    { signal: opts?.signal }
   );
 
   const years = new Set<number>([currentYear]);
@@ -32,20 +33,28 @@ export async function fetchAvailableYears(): Promise<number[]> {
   return Array.from(years).sort((a, b) => b - a);
 }
 
-export async function fetchSummaryStatus(year: number): Promise<SummaryStatus> {
+export async function fetchSummaryStatus(
+  year: number,
+  opts?: RequestOptions
+): Promise<SummaryStatus> {
   const search = new URLSearchParams({ [QUERY_KEYS.year]: String(year) });
   return fetchJson<SummaryStatus>(
-    getSummaryApiUrl(`${SUMMARY_ROUTES.status}?${search}`)
+    getSummaryApiUrl(`${SUMMARY_ROUTES.status}?${search}`),
+    { signal: opts?.signal }
   );
 }
 
-export async function resetSummaryStatus(year: number): Promise<SummaryStatus> {
+export async function resetSummaryStatus(
+  year: number,
+  opts?: RequestOptions
+): Promise<SummaryStatus> {
   const data = await fetchJson<{ success: boolean; status: SummaryStatus }>(
     getSummaryApiUrl(SUMMARY_ROUTES.reset),
     {
       method: "POST",
       headers: { [HTTP_HEADERS.contentType]: CONTENT_TYPES.json },
       body: JSON.stringify({ [BODY_KEYS.year]: year }),
+      signal: opts?.signal,
     }
   );
   return data.status;
@@ -86,19 +95,24 @@ export async function startSummaryGeneration(
   }
 }
 
-export async function fetchYearlySummary(year: number): Promise<YearlySummaryData> {
+export async function fetchYearlySummary(
+  year: number,
+  opts?: RequestOptions
+): Promise<YearlySummaryData> {
   const search = new URLSearchParams({
     [QUERY_KEYS.type]: SUMMARY_TYPES.yearly,
     [QUERY_KEYS.year]: String(year),
   });
   return fetchJson<YearlySummaryData>(
-    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`),
+    { signal: opts?.signal }
   );
 }
 
 export async function fetchDailySummaries(
   year: number,
-  repo?: string
+  repo?: string,
+  opts?: RequestOptions
 ): Promise<DailySummaryData[]> {
   const search = new URLSearchParams({
     [QUERY_KEYS.type]: SUMMARY_TYPES.daily,
@@ -106,27 +120,36 @@ export async function fetchDailySummaries(
   });
   if (repo) search.set(QUERY_KEYS.repo, repo);
   return fetchJson<DailySummaryData[]>(
-    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`),
+    { signal: opts?.signal }
   );
 }
 
-export async function fetchWeeklySummaries(year: number): Promise<WeeklySummaryData[]> {
+export async function fetchWeeklySummaries(
+  year: number,
+  opts?: RequestOptions
+): Promise<WeeklySummaryData[]> {
   const search = new URLSearchParams({
     [QUERY_KEYS.type]: SUMMARY_TYPES.weekly,
     [QUERY_KEYS.year]: String(year),
   });
   return fetchJson<WeeklySummaryData[]>(
-    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`),
+    { signal: opts?.signal }
   );
 }
 
-export async function fetchMonthlySummaries(year: number): Promise<MonthlySummaryData[]> {
+export async function fetchMonthlySummaries(
+  year: number,
+  opts?: RequestOptions
+): Promise<MonthlySummaryData[]> {
   const search = new URLSearchParams({
     [QUERY_KEYS.type]: SUMMARY_TYPES.monthly,
     [QUERY_KEYS.year]: String(year),
   });
   return fetchJson<MonthlySummaryData[]>(
-    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`),
+    { signal: opts?.signal }
   );
 }
 

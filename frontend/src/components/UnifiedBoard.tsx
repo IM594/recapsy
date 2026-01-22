@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useSummary } from "@/hooks/useSummary";
 import { regenerateSummary } from "@/services/summary";
 import { COPY } from "@/constants/copy";
 import { logError } from "@/lib/logger";
+import { isAbortError } from "@/lib/lifecycle";
 import { JournalSidebar } from "./unified-board/JournalSidebar";
 import { JournalEntry } from "./unified-board/JournalEntry";
 import { RepoPickerDialog } from "@/components/RepoPickerDialog";
@@ -26,6 +27,8 @@ export function UnifiedBoard({
   const [content, setContent] = useState<string>("");
   const [loadingContent, setLoadingContent] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
+  const structureControllerRef = useRef<AbortController | null>(null);
+  const contentControllerRef = useRef<AbortController | null>(null);
   const [repoPicker, setRepoPicker] = useState<{
     open: boolean;
     date: string;
@@ -43,24 +46,48 @@ export function UnifiedBoard({
 
   // Load structure
   useEffect(() => {
-    fetchStructure();
+    // Year switch: clear view state to avoid mixing years.
+    setStructure(null);
+    setSelectedNode(null);
+    setContent("");
+    setRepoPicker({ open: false, date: "", repos: [], repo: "" });
+
+    structureControllerRef.current?.abort();
+    const controller = new AbortController();
+    structureControllerRef.current = controller;
+    fetchStructure(controller.signal);
+    return () => {
+      controller.abort();
+      if (structureControllerRef.current === controller) {
+        structureControllerRef.current = null;
+      }
+    };
   }, [year]);
 
   // Load content when selection changes
   useEffect(() => {
     if (selectedNode) {
-      loadContent(selectedNode);
+      contentControllerRef.current?.abort();
+      const controller = new AbortController();
+      contentControllerRef.current = controller;
+      loadContent(selectedNode, controller);
+      return () => {
+        controller.abort();
+        if (contentControllerRef.current === controller) {
+          contentControllerRef.current = null;
+        }
+      };
     }
   }, [selectedNode]);
 
-  const fetchStructure = async () => {
+  const fetchStructure = async (signal?: AbortSignal) => {
     try {
       const [yearlyData, monthlyData, dailyData, weeklyData] =
         await Promise.all([
-          getYearlySummary(year),
-          getMonthlySummaries(year),
-          getDailySummaries(year),
-          getWeeklySummaries(year),
+          getYearlySummary(year, { signal }),
+          getMonthlySummaries(year, { signal }),
+          getDailySummaries(year, { signal }),
+          getWeeklySummaries(year, { signal }),
         ]);
 
       const hasYearlySummary = !!yearlyData?.content;
@@ -131,28 +158,33 @@ export function UnifiedBoard({
 
       setStructure(structure);
     } catch (error) {
+      if (isAbortError(error)) return;
       logError("unifiedBoard.fetchStructure", error, { year });
       toast.error(COPY.toasts.boardStructureFailed);
     }
   };
 
-  const loadContent = async (node: NavigationNode) => {
+  const loadContent = async (
+    node: NavigationNode,
+    controller?: AbortController
+  ) => {
+    const signal = controller?.signal;
     setLoadingContent(true);
     try {
       if (node.type === "yearly") {
-        const data = await getYearlySummary(year);
+        const data = await getYearlySummary(year, { signal });
         setContent(data?.content || "");
       } else if (node.type === "monthly") {
-        const data = await getMonthlySummaries(year);
+        const data = await getMonthlySummaries(year, { signal });
         const monthData = data.find((m) => m.month === node.id);
         setContent(monthData?.summary || "");
       } else if (node.type === "weekly") {
-        const data = await getWeeklySummaries(year);
+        const data = await getWeeklySummaries(year, { signal });
         // id is weekStart
         const weekData = data.find((w) => w.weekStart === node.id);
         setContent(weekData?.summary || "");
       } else {
-        const data = await getDailySummaries(year);
+        const data = await getDailySummaries(year, { signal });
         const matches = (data || []).filter((d) => d.date === node.id);
         if (matches.length === 0) {
           setContent("");
@@ -185,6 +217,7 @@ export function UnifiedBoard({
         setContent("");
       }
     } catch (error) {
+      if (isAbortError(error)) return;
       logError("unifiedBoard.loadContent", error, {
         year,
         nodeType: node.type,
@@ -193,7 +226,9 @@ export function UnifiedBoard({
       });
       toast.error(COPY.toasts.boardContentFailed);
     } finally {
-      setLoadingContent(false);
+      if (!controller || contentControllerRef.current === controller) {
+        setLoadingContent(false);
+      }
     }
   };
 
@@ -218,7 +253,10 @@ export function UnifiedBoard({
 
       toast.success(COPY.toasts.regenerationSuccessful);
       setContent(updated);
-      fetchStructure();
+      structureControllerRef.current?.abort();
+      const controller = new AbortController();
+      structureControllerRef.current = controller;
+      fetchStructure(controller.signal);
       refetchData();
     } catch (error) {
       logError("unifiedBoard.regenerate", error, {
