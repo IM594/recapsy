@@ -7,6 +7,30 @@ import { createMcpRequestHandler, resolveAgentSocketPath } from "./mcp-core.mjs"
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4833;
 
+function formatLocalTimestamp(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}.${ms}`;
+}
+
+function installTimestampedConsole() {
+  const original = {
+    log: console.log.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+  };
+
+  const prefix = () => `[${formatLocalTimestamp()}]`;
+  console.log = (...args) => original.log(prefix(), ...args);
+  console.warn = (...args) => original.warn(prefix(), ...args);
+  console.error = (...args) => original.error(prefix(), ...args);
+}
+
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -97,6 +121,9 @@ function generateSessionId() {
 }
 
 async function main() {
+  installTimestampedConsole();
+  console.log("[mcp-sse] session start");
+
   const host = process.env.RECAPSENSE_MCP_HOST ?? DEFAULT_HOST;
   const port = parsePositiveInt(process.env.RECAPSENSE_MCP_PORT, DEFAULT_PORT);
 
@@ -224,4 +251,3 @@ main().catch((error) => {
   console.error("[mcp-sse] fatal:", error);
   process.exitCode = 1;
 });
-

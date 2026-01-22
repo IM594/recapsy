@@ -18,19 +18,28 @@ struct CollectorConfig {
 struct Logger {
   let verbose: Bool
 
+  private func timestamp() -> String {
+    // 使用本地时区（用户在中国杭州），便于直接对应“我当时在干什么”。
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+    return formatter.string(from: Date())
+  }
+
   func info(_ message: String) {
-    print("[collector] \(message)")
+    print("[\(timestamp())] [collector] \(message)")
     fflush(stdout)
   }
 
   func debug(_ message: String) {
     guard verbose else { return }
-    print("[collector][debug] \(message)")
+    print("[\(timestamp())] [collector][debug] \(message)")
     fflush(stdout)
   }
 
   func warn(_ message: String) {
-    print("[collector][warn] \(message)")
+    print("[\(timestamp())] [collector][warn] \(message)")
     fflush(stdout)
   }
 }
