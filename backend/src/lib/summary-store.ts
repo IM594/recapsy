@@ -21,8 +21,7 @@ import type {
   MonthlySummary,
   WeeklySummary,
 } from "./types";
-
-const DEFAULT_OUTPUT_DIR = "./outputs";
+import { getBaseOutputDir } from "./paths";
 
 interface CacheIndex {
   year: number;
@@ -49,7 +48,7 @@ export class SummaryStore {
 
   static getInstance(
     year: number,
-    baseDir: string = DEFAULT_OUTPUT_DIR
+    baseDir: string = getBaseOutputDir()
   ): SummaryStore {
     if (!instancesByYear.has(year)) {
       instancesByYear.set(year, new SummaryStore(year, baseDir));
@@ -57,7 +56,7 @@ export class SummaryStore {
     return instancesByYear.get(year)!;
   }
 
-  constructor(year: number, baseDir: string = DEFAULT_OUTPUT_DIR) {
+  constructor(year: number, baseDir: string = getBaseOutputDir()) {
     this.year = year;
     this.outputDir = path.join(baseDir, `year-end-${year}`);
     this.indexPath = path.join(this.outputDir, "index.json");

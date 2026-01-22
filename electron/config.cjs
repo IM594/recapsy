@@ -34,6 +34,16 @@ function getFrontendEntry() {
   };
 }
 
+function getOutputDir() {
+  return path.join(app.getPath("userData"), "outputs");
+}
+
+function getConfigPath() {
+  if (process.env.RECAPLY_CONFIG_PATH) return process.env.RECAPLY_CONFIG_PATH;
+  if (isDev) return path.join(__dirname, "../backend/config.json");
+  return path.join(process.resourcesPath, "config.json");
+}
+
 module.exports = {
   isDev,
   backendPort,
@@ -41,5 +51,6 @@ module.exports = {
   mainWindowDefaults,
   getPreloadPath,
   getFrontendEntry,
+  getOutputDir,
+  getConfigPath,
 };
-

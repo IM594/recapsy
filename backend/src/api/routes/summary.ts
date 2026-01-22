@@ -14,6 +14,7 @@ import { SummaryStore } from "../../lib/summary-store";
 import { WorkflowRunner } from "../../lib/workflow-runner";
 import fs from "fs/promises";
 import path from "path";
+import { getBaseOutputDir } from "../../lib/paths";
 
 const router = Router();
 
@@ -28,8 +29,7 @@ router.get("/years", async (_req, res) => {
   const years = new Set<number>([currentYear]);
 
   try {
-    // SummaryStore defaults to "./outputs" relative to backend cwd.
-    const baseDir = path.resolve("./outputs");
+    const baseDir = getBaseOutputDir();
     const entries = await fs.readdir(baseDir, { withFileTypes: true });
 
     for (const entry of entries) {

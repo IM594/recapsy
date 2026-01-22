@@ -3,7 +3,7 @@ const fs = require("fs");
 const http = require("http");
 const { spawn } = require("child_process");
 
-const { isDev, backendPort } = require("./config.cjs");
+const { isDev, backendPort, getOutputDir, getConfigPath } = require("./config.cjs");
 const { log, warn, error } = require("./logger.cjs");
 
 let backendProcess = null;
@@ -81,6 +81,8 @@ async function startBackendDev() {
     env: {
       ...process.env,
       PORT: String(backendPort),
+      RECAPLY_OUTPUT_DIR: getOutputDir(),
+      RECAPLY_CONFIG_PATH: getConfigPath(),
     },
     stdio: "pipe",
   });
@@ -112,6 +114,8 @@ async function startBackendDev() {
 
 async function startBackendProd() {
   log("Starting backend server (prod, in-process)...");
+  process.env.RECAPLY_OUTPUT_DIR = process.env.RECAPLY_OUTPUT_DIR || getOutputDir();
+  process.env.RECAPLY_CONFIG_PATH = process.env.RECAPLY_CONFIG_PATH || getConfigPath();
   const backendDir = path.join(process.resourcesPath, "backend");
   const envPath = path.join(backendDir, ".env");
 

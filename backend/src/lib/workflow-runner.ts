@@ -14,6 +14,7 @@
 import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
+import { getWorkflowDebugLogPath } from "./paths";
 
 export interface RuntimeStatus {
   isRunning: boolean;
@@ -56,7 +57,7 @@ export class WorkflowRunner extends EventEmitter {
   constructor(year: number) {
     super();
     this.year = year;
-    this.logFilePath = path.join(process.cwd(), "workflow-debug.log");
+    this.logFilePath = getWorkflowDebugLogPath();
     this.logToFile(
       `\n=== New WorkflowRunner Instance (Year: ${year}) - ${new Date().toISOString()} ===\n`
     );
