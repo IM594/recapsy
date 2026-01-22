@@ -6,9 +6,21 @@ declare module '*.css' {
 
 // Augment React's CSSProperties to allow for the -webkit-app-region property.
 // This is used by Electron to create draggable regions.
-declare namespace React {
+declare module "react" {
   interface CSSProperties {
     WebkitAppRegion?: "drag" | "no-drag";
     '-webkit-app-region'?: 'drag' | 'no-drag';
   }
 }
+
+declare global {
+  interface Window {
+    recaply?: {
+      env?: {
+        homeDir?: string;
+      };
+    };
+  }
+}
+
+export {};

@@ -27,7 +27,9 @@ interface SettingsDialogProps {
 const STORAGE_KEY_SCAN_ROOT = "recaply_scan_root_path";
 
 function getDefaultScanRootPath(): string {
-  const home = (globalThis as any).process?.env?.HOME;
+  const home =
+    globalThis.window?.recaply?.env?.homeDir ||
+    (globalThis as any).process?.env?.HOME;
   if (typeof home === "string" && home.trim()) {
     return `${home.replace(/\/$/, "")}/Downloads/projects`;
   }

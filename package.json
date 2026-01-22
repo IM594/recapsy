@@ -15,6 +15,7 @@
     "build:app": "pnpm build && electron-builder --mac",
     "preview": "pnpm --filter recaply-frontend preview",
     "lint": "pnpm -r lint",
+    "check:electron": "node --check electron/main.cjs && node --check electron/backend.cjs && node --check electron/window.cjs && node --check electron/preload.cjs && node --check electron/config.cjs && node --check electron/logger.cjs",
     "clean": "pnpm -r clean && find . -name '.DS_Store' -delete"
   },
   "keywords": [
