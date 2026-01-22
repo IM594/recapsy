@@ -9,6 +9,7 @@ import {
 } from "react";
 import { toast } from "sonner";
 import { COPY } from "@/constants/copy";
+import { SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
 import { getSummaryApiUrl } from "@/lib/api";
 import {
   fetchDailySummaries,
@@ -172,7 +173,9 @@ export function SummaryProvider({
   const connect = useCallback(() => {
     if (eventSourceRef.current) return;
 
-    const es = new EventSource(getSummaryApiUrl(`/events?year=${year}`));
+    const es = new EventSource(
+      getSummaryApiUrl(`${SUMMARY_ROUTES.events}?year=${year}`)
+    );
 
     es.onopen = () => {
       setIsConnected(true);
@@ -197,7 +200,7 @@ export function SummaryProvider({
     };
 
     // Handle status event with new format: { nodeId, state, timestamp }
-    es.addEventListener("status", (e: MessageEvent) => {
+    es.addEventListener(SSE_EVENTS.status, (e: MessageEvent) => {
       debugSse("[SSE] status event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -218,7 +221,7 @@ export function SummaryProvider({
     });
 
     // Handle progress event with new format
-    es.addEventListener("progress", (e: MessageEvent) => {
+    es.addEventListener(SSE_EVENTS.progress, (e: MessageEvent) => {
       debugSse("[SSE] progress event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -239,7 +242,7 @@ export function SummaryProvider({
     });
 
     // Handle complete event with new format
-    es.addEventListener("complete", (e: MessageEvent) => {
+    es.addEventListener(SSE_EVENTS.complete, (e: MessageEvent) => {
       debugSse("[SSE] complete event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;
@@ -261,7 +264,7 @@ export function SummaryProvider({
     });
 
     // Handle workflow_error event with new format
-    es.addEventListener("workflow_error", (e: MessageEvent) => {
+    es.addEventListener(SSE_EVENTS.workflowError, (e: MessageEvent) => {
       debugSse("[SSE] workflow_error event:", e.data);
       const data = safeJsonParse(e.data);
       if (!data) return;

@@ -15,6 +15,7 @@ import { EventEmitter } from "events";
 import * as fs from "fs";
 import * as path from "path";
 import { getWorkflowDebugLogPath } from "./paths";
+import { SSE_EVENTS } from "@recaply/shared";
 
 export interface RuntimeStatus {
   isRunning: boolean;
@@ -142,7 +143,7 @@ export class WorkflowRunner extends EventEmitter {
     console.log(logMsg);
     this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
-    this.emit("progress", event);
+    this.emit(SSE_EVENTS.progress, event);
   }
 
   /**
@@ -160,7 +161,7 @@ export class WorkflowRunner extends EventEmitter {
     console.log(logMsg);
     this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
-    this.emit("complete", {
+    this.emit(SSE_EVENTS.complete, {
       nodeId: "complete",
       state: {
         progress: 100,
@@ -187,7 +188,7 @@ export class WorkflowRunner extends EventEmitter {
     console.error(logMsg);
     this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
-    this.emit("workflow_error", {
+    this.emit(SSE_EVENTS.workflowError, {
       nodeId: "error",
       state: {
         error: errorMessage,

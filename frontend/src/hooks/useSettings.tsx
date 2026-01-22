@@ -1,4 +1,5 @@
 import { useState, createContext, useContext, ReactNode } from "react";
+import { LEGACY_STORAGE_KEYS, STORAGE_KEYS } from "@recaply/shared";
 
 interface SettingsContextType {
   selectedRepos: string[];
@@ -11,25 +12,15 @@ const SettingsContext = createContext<SettingsContextType | undefined>(
   undefined
 );
 
-const STORAGE_KEYS = {
-  repos: "recaply_selected_repos",
-  author: "recaply_author",
-} as const;
-
-const LEGACY_STORAGE_KEYS = {
-  repos: "ye_selected_repos",
-  author: "ye_author",
-} as const;
-
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [selectedRepos, setSelectedRepos] = useState<string[]>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEYS.repos);
+      const saved = localStorage.getItem(STORAGE_KEYS.settings.selectedRepos);
       if (saved) return JSON.parse(saved);
 
-      const legacy = localStorage.getItem(LEGACY_STORAGE_KEYS.repos);
+      const legacy = localStorage.getItem(LEGACY_STORAGE_KEYS.settings.selectedRepos);
       if (legacy) {
-        localStorage.setItem(STORAGE_KEYS.repos, legacy);
+        localStorage.setItem(STORAGE_KEYS.settings.selectedRepos, legacy);
         return JSON.parse(legacy);
       }
 
@@ -40,12 +31,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   });
 
   const [author, setAuthor] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.author);
+    const saved = localStorage.getItem(STORAGE_KEYS.settings.author);
     if (saved) return saved;
 
-    const legacy = localStorage.getItem(LEGACY_STORAGE_KEYS.author);
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEYS.settings.author);
     if (legacy) {
-      localStorage.setItem(STORAGE_KEYS.author, legacy);
+      localStorage.setItem(STORAGE_KEYS.settings.author, legacy);
       return legacy;
     }
 
@@ -56,8 +47,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setSelectedRepos(repos);
     setAuthor(newAuthor);
 
-    localStorage.setItem(STORAGE_KEYS.repos, JSON.stringify(repos));
-    localStorage.setItem(STORAGE_KEYS.author, newAuthor);
+    localStorage.setItem(STORAGE_KEYS.settings.selectedRepos, JSON.stringify(repos));
+    localStorage.setItem(STORAGE_KEYS.settings.author, newAuthor);
   };
 
   const isConfigured = selectedRepos.length > 0;

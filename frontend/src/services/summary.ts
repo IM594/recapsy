@@ -1,4 +1,5 @@
 import { getSummaryApiUrl } from "@/lib/api";
+import { SUMMARY_ROUTES } from "@recaply/shared";
 import type {
   DailySummaryData,
   GenerationConfig,
@@ -12,7 +13,9 @@ import { ApiError, fetchJson } from "./http";
 
 export async function fetchAvailableYears(): Promise<number[]> {
   const currentYear = new Date().getFullYear();
-  const data = await fetchJson<{ years?: number[] }>(getSummaryApiUrl("/years"));
+  const data = await fetchJson<{ years?: number[] }>(
+    getSummaryApiUrl(SUMMARY_ROUTES.years)
+  );
 
   const years = new Set<number>([currentYear]);
   for (const y of data.years || []) {
@@ -24,12 +27,14 @@ export async function fetchAvailableYears(): Promise<number[]> {
 
 export async function fetchSummaryStatus(year: number): Promise<SummaryStatus> {
   const search = new URLSearchParams({ year: String(year) });
-  return fetchJson<SummaryStatus>(getSummaryApiUrl(`/status?${search}`));
+  return fetchJson<SummaryStatus>(
+    getSummaryApiUrl(`${SUMMARY_ROUTES.status}?${search}`)
+  );
 }
 
 export async function resetSummaryStatus(year: number): Promise<SummaryStatus> {
   const data = await fetchJson<{ success: boolean; status: SummaryStatus }>(
-    getSummaryApiUrl("/reset"),
+    getSummaryApiUrl(SUMMARY_ROUTES.reset),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -49,14 +54,17 @@ export async function startSummaryGeneration(
   | { kind: "already_running"; status: SummaryStatus }
 > {
   try {
-    const data = await fetchJson<StartGenerationOk>(getSummaryApiUrl("/generate"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...config,
-        author: config.author || "",
-      }),
-    });
+    const data = await fetchJson<StartGenerationOk>(
+      getSummaryApiUrl(SUMMARY_ROUTES.generate),
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...config,
+          author: config.author || "",
+        }),
+      }
+    );
     return { kind: "started", data };
   } catch (err) {
     if (err instanceof ApiError && err.status === 409) {
@@ -69,7 +77,9 @@ export async function startSummaryGeneration(
 
 export async function fetchYearlySummary(year: number): Promise<YearlySummaryData> {
   const search = new URLSearchParams({ type: "yearly", year: String(year) });
-  return fetchJson<YearlySummaryData>(getSummaryApiUrl(`/data?${search}`));
+  return fetchJson<YearlySummaryData>(
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+  );
 }
 
 export async function fetchDailySummaries(
@@ -78,17 +88,23 @@ export async function fetchDailySummaries(
 ): Promise<DailySummaryData[]> {
   const search = new URLSearchParams({ type: "daily", year: String(year) });
   if (repo) search.set("repo", repo);
-  return fetchJson<DailySummaryData[]>(getSummaryApiUrl(`/data?${search}`));
+  return fetchJson<DailySummaryData[]>(
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+  );
 }
 
 export async function fetchWeeklySummaries(year: number): Promise<WeeklySummaryData[]> {
   const search = new URLSearchParams({ type: "weekly", year: String(year) });
-  return fetchJson<WeeklySummaryData[]>(getSummaryApiUrl(`/data?${search}`));
+  return fetchJson<WeeklySummaryData[]>(
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+  );
 }
 
 export async function fetchMonthlySummaries(year: number): Promise<MonthlySummaryData[]> {
   const search = new URLSearchParams({ type: "monthly", year: String(year) });
-  return fetchJson<MonthlySummaryData[]>(getSummaryApiUrl(`/data?${search}`));
+  return fetchJson<MonthlySummaryData[]>(
+    getSummaryApiUrl(`${SUMMARY_ROUTES.data}?${search}`)
+  );
 }
 
 export type RegenerateSummaryRequest = {
@@ -108,7 +124,7 @@ export async function regenerateSummary(
   req: RegenerateSummaryRequest
 ): Promise<string> {
   const data = await fetchJson<RegenerateSummaryResponse>(
-    getSummaryApiUrl("/regenerate"),
+    getSummaryApiUrl(SUMMARY_ROUTES.regenerate),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -128,4 +144,3 @@ export async function regenerateSummary(
   }
   return updated;
 }
-

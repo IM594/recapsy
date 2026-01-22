@@ -17,14 +17,13 @@ import { useSettings } from "@/hooks/useSettings";
 import { toast } from "sonner";
 import { scanRepos as scanReposService } from "@/services/repos";
 import { COPY } from "@/constants/copy";
+import { STORAGE_KEYS } from "@recaply/shared";
 import type { RepoInfo } from "@/types/repos";
 
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-const STORAGE_KEY_SCAN_ROOT = "recaply_scan_root_path";
 
 function getDefaultScanRootPath(): string {
   const home =
@@ -48,7 +47,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [availableRepos, setAvailableRepos] = useState<RepoInfo[]>([]);
   const [scanning, setScanning] = useState(false);
   const [scanRootPath, setScanRootPath] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEY_SCAN_ROOT) || getDefaultScanRootPath();
+    return (
+      localStorage.getItem(STORAGE_KEYS.settings.scanRootPath) ||
+      getDefaultScanRootPath()
+    );
   });
 
   // Load available repos when dialog opens
@@ -64,7 +66,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const scanRepos = async () => {
     setScanning(true);
     try {
-      localStorage.setItem(STORAGE_KEY_SCAN_ROOT, scanRootPath);
+      localStorage.setItem(STORAGE_KEYS.settings.scanRootPath, scanRootPath);
       const repos = await scanReposService(scanRootPath);
       setAvailableRepos(repos);
     } catch (error) {

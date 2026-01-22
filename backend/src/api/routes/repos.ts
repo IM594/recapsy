@@ -2,10 +2,11 @@ import { Router } from "express";
 import { findRepositories } from "../../lib/git";
 import logger from "../../lib/logger";
 import { getConfig } from "../../config";
+import { API_ROUTES } from "@recaply/shared";
 
 const router = Router();
 
-router.get("/repos", async (req, res) => {
+router.get(API_ROUTES.repos, async (req, res) => {
   try {
     const rootPath = req.query.rootPath as string;
     const rootDir = rootPath || getConfig().repos.defaultRootPath;

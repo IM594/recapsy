@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 15:16
+> Last updated: 2026-01-22 16:55
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -14,7 +14,7 @@
 - **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
 
 ## In Progress（P0，一致性优先）
-- [ ] C-003 常量集中：统一并集中 `localStorage key`、事件名、路由/页面名、API path（避免散落 magic string）
+- [ ] C-003 常量集中（shared 包）：统一并集中 `localStorage key`、SSE 事件名、API mounts/paths；继续迁移页面/视图状态常量与其他散落 magic string
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
@@ -26,6 +26,7 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] 引入 `shared/` 工作区包：作为跨端常量/协议的唯一来源（为 C-003 打底）
 - [x] C-001 配置唯一入口：新增后端 `backend/src/config/` 作为唯一入口；统一 `.env`/`config.json`/env 注入优先级，并替换关键散落读取点（port/rootPath/includeStat/outputDir）
 - [x] Electron dev 冒烟通过：`pnpm dev` 启动后 UI/接口正常（本机确认）
 - [x] 修复 Electron 模块解析：CommonJS `require()` 显式使用 `.cjs` 后缀（避免 `Cannot find module './config'`）

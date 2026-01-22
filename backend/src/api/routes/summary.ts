@@ -15,6 +15,7 @@ import { WorkflowRunner } from "../../lib/workflow-runner";
 import fs from "fs/promises";
 import path from "path";
 import { getBaseOutputDir } from "../../lib/paths";
+import { SSE_EVENTS, SUMMARY_ROUTES } from "@recaply/shared";
 
 const router = Router();
 
@@ -24,7 +25,7 @@ const router = Router();
  *
  * This powers the year switcher in the UI.
  */
-router.get("/years", async (_req, res) => {
+router.get(SUMMARY_ROUTES.years, async (_req, res) => {
   const currentYear = new Date().getFullYear();
   const years = new Set<number>([currentYear]);
 
@@ -52,7 +53,7 @@ router.get("/years", async (_req, res) => {
  * POST /api/summary/generate
  * Start workflow execution with streaming progress
  */
-router.post("/generate", async (req, res) => {
+router.post(SUMMARY_ROUTES.generate, async (req, res) => {
   const {
     selectedRepos,
     since,
@@ -143,7 +144,7 @@ router.post("/generate", async (req, res) => {
  * GET /api/summary/events
  * Server-Sent Events for real-time progress
  */
-router.get("/events", async (req, res) => {
+router.get(SUMMARY_ROUTES.events, async (req, res) => {
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const runner = WorkflowRunner.getInstance(year);
 
@@ -157,7 +158,7 @@ router.get("/events", async (req, res) => {
 
   // Send initial status
   const status = runner.getStatus();
-  sendEvent("status", {
+  sendEvent(SSE_EVENTS.status, {
     nodeId: status.currentStep || "idle",
     state: {
       progress: status.progress,
@@ -169,18 +170,18 @@ router.get("/events", async (req, res) => {
   });
 
   // Event handlers
-  const onProgress = (data: any) => sendEvent("progress", data);
-  const onComplete = (data: any) => sendEvent("complete", data);
-  const onError = (data: any) => sendEvent("workflow_error", data);
+  const onProgress = (data: any) => sendEvent(SSE_EVENTS.progress, data);
+  const onComplete = (data: any) => sendEvent(SSE_EVENTS.complete, data);
+  const onError = (data: any) => sendEvent(SSE_EVENTS.workflowError, data);
 
-  runner.on("progress", onProgress);
-  runner.on("complete", onComplete);
-  runner.on("workflow_error", onError);
+  runner.on(SSE_EVENTS.progress, onProgress);
+  runner.on(SSE_EVENTS.complete, onComplete);
+  runner.on(SSE_EVENTS.workflowError, onError);
 
   req.on("close", () => {
-    runner.off("progress", onProgress);
-    runner.off("complete", onComplete);
-    runner.off("workflow_error", onError);
+    runner.off(SSE_EVENTS.progress, onProgress);
+    runner.off(SSE_EVENTS.complete, onComplete);
+    runner.off(SSE_EVENTS.workflowError, onError);
   });
 });
 
@@ -188,7 +189,7 @@ router.get("/events", async (req, res) => {
  * GET /api/summary/status
  * Get current workflow status
  */
-router.get("/status", async (req, res) => {
+router.get(SUMMARY_ROUTES.status, async (req, res) => {
   const year = parseInt(req.query.year as string) || new Date().getFullYear();
   const runner = WorkflowRunner.getInstance(year);
   res.json(runner.getStatus());
@@ -198,7 +199,7 @@ router.get("/status", async (req, res) => {
  * POST /api/summary/reset
  * Reset workflow status to idle
  */
-router.post("/reset", async (req, res) => {
+router.post(SUMMARY_ROUTES.reset, async (req, res) => {
   const { year = new Date().getFullYear() } = req.body;
   const runner = WorkflowRunner.getInstance(year);
   runner.reset();
@@ -209,7 +210,7 @@ router.post("/reset", async (req, res) => {
  * GET /api/summary/data
  * Get generated summary data
  */
-router.get("/data", async (req, res) => {
+router.get(SUMMARY_ROUTES.data, async (req, res) => {
   const { type, year = new Date().getFullYear(), repo } = req.query;
   const store = SummaryStore.getInstance(Number(year));
   await store.loadIfExists();
@@ -244,7 +245,7 @@ router.get("/data", async (req, res) => {
  * POST /api/summary/regenerate
  * Regenerate a specific summary with optional custom prompt
  */
-router.post("/regenerate", async (req, res) => {
+router.post(SUMMARY_ROUTES.regenerate, async (req, res) => {
   const {
     type,
     id,

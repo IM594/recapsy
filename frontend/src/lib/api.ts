@@ -1,3 +1,5 @@
+import { API_MOUNTS } from "@recaply/shared";
+
 const DEFAULT_BACKEND_ORIGIN = "http://localhost:3456";
 
 function getEnvBackendOrigin(): string | undefined {
@@ -11,10 +13,10 @@ export function getBackendOrigin(): string {
 
 export function getApiUrl(pathname: string): string {
   const normalized = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${getBackendOrigin()}/api${normalized}`;
+  return `${getBackendOrigin()}${API_MOUNTS.api}${normalized}`;
 }
 
 export function getSummaryApiUrl(pathname: string): string {
   const normalized = pathname.startsWith("/") ? pathname : `/${pathname}`;
-  return `${getBackendOrigin()}/api/summary${normalized}`;
+  return `${getBackendOrigin()}${API_MOUNTS.summary}${normalized}`;
 }

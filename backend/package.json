@@ -13,6 +13,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@recaply/shared": "workspace:*",
     "@langchain/core": "^1.1.7",
     "@langchain/langgraph": "^1.0.7",
     "@langchain/openai": "^1.2.0",

@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchAvailableYears } from "@/services/summary";
+import { STORAGE_KEYS } from "@recaply/shared";
 
 interface YearContextType {
   activeYear: number;
@@ -18,14 +19,12 @@ interface YearContextType {
 
 const YearContext = createContext<YearContextType | null>(null);
 
-const STORAGE_KEY = "recaply_active_year";
-
 export function YearProvider({ children }: { children: ReactNode }) {
   const currentYear = new Date().getFullYear();
 
   const [availableYears, setAvailableYears] = useState<number[]>([currentYear]);
   const [activeYear, setActiveYearState] = useState<number>(() => {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEYS.year.activeYear);
     const parsed = raw ? Number.parseInt(raw, 10) : NaN;
     return Number.isFinite(parsed) ? parsed : currentYear;
   });
@@ -45,7 +44,7 @@ export function YearProvider({ children }: { children: ReactNode }) {
 
   const setActiveYear = useCallback((year: number) => {
     setActiveYearState(year);
-    localStorage.setItem(STORAGE_KEY, String(year));
+    localStorage.setItem(STORAGE_KEYS.year.activeYear, String(year));
   }, []);
 
   useEffect(() => {

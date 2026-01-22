@@ -5,6 +5,7 @@ import reposRouter from "./routes/repos";
 import { getConfig } from "../config";
 import { ENV_KEYS } from "../config/constants";
 import { LLM_ENV_KEYS } from "../config/llm-env";
+import { API_MOUNTS } from "@recaply/shared";
 
 const config = getConfig();
 
@@ -89,8 +90,8 @@ app.use((req, res, next) => {
 });
 
 // Routes
-app.use("/api/summary", summaryRouter);
-app.use("/api", reposRouter);
+app.use(API_MOUNTS.summary, summaryRouter);
+app.use(API_MOUNTS.api, reposRouter);
 
 // Health check
 app.get("/health", (req, res) => {
