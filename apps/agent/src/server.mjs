@@ -35,6 +35,37 @@ function installTimestampedConsole() {
   console.error = (...args) => original.error(prefix(), ...args);
 }
 
+function installParentWatchdog(label) {
+  const raw = process.env.RECAPSENSE_PARENT_PID;
+  if (!raw) return;
+  const parentPid = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(parentPid) || parentPid <= 1) return;
+
+  const check = () => {
+    // 组合判断，尽量减少 PID 被复用导致误判的概率：
+    // - 如果 ppid 变成 1，几乎可以确定父进程已死（被 init/launchd 接管）。
+    // - 否则再用 kill(pid, 0) 做一次存在性检测。
+    if (process.ppid === 1) {
+      console.warn(`[${label}] parent pid missing (ppid=1), exiting`);
+      process.exit(0);
+    }
+
+    try {
+      process.kill(parentPid, 0);
+    } catch (error) {
+      // ESRCH：进程不存在；EPERM：存在但无权限（视为仍然存在）。
+      if (error && typeof error === "object" && error.code === "ESRCH") {
+        console.warn(`[${label}] parent pid missing (${parentPid}), exiting`);
+        process.exit(0);
+      }
+    }
+  };
+
+  check();
+  const timer = setInterval(check, 1000);
+  timer.unref();
+}
+
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -79,6 +110,7 @@ function parseLimit(value, fallback = 20) {
 
 async function main() {
   installTimestampedConsole();
+  installParentWatchdog("agent");
   console.log("[agent] session start");
 
   const dataDir = resolveDataDir();

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Darwin
 
 /// Supervisor 负责托管本机各个子进程（Agent / MCP / Collector）的生命周期。
 ///
@@ -63,6 +64,8 @@ final class Supervisor: ObservableObject {
       environment: config.baseEnvironment.merging([
         // 默认同时开启 TCP + UDS（collector 走 TCP；mcp 可选走 UDS）。
         "RECAPSENSE_AGENT_SOCKET": config.agentSocketEnabled ? "1" : "",
+        // 避免“非正常退出”导致子进程残留占用端口。
+        "RECAPSENSE_PARENT_PID": String(getpid()),
       ]) { _, new in new }
     )
 
@@ -86,6 +89,7 @@ final class Supervisor: ObservableObject {
       workingDirectory: config.repoRoot.path,
       environment: config.baseEnvironment.merging([
         "RECAPSENSE_AGENT_SOCKET": config.agentSocketEnabled ? "1" : "",
+        "RECAPSENSE_PARENT_PID": String(getpid()),
       ]) { _, new in new }
     )
 
@@ -142,6 +146,8 @@ final class Supervisor: ObservableObject {
       environment: config.baseEnvironment.merging([
         // 让 collector 的错误提示更精确：知道自己是被菜单栏 App 拉起的（而不是用户手动在终端跑）。
         "RECAPSENSE_LAUNCH_SOURCE": "app-macos",
+        // 让 collector 在父进程消失时能自动退出（避免后台悬挂）。
+        "RECAPSENSE_PARENT_PID": String(getpid()),
       ]) { _, new in new },
       requiresExecutableOnDisk: true
     )

@@ -31,6 +31,33 @@ function installTimestampedConsole() {
   console.error = (...args) => original.error(prefix(), ...args);
 }
 
+function installParentWatchdog(label) {
+  const raw = process.env.RECAPSENSE_PARENT_PID;
+  if (!raw) return;
+  const parentPid = Number.parseInt(String(raw), 10);
+  if (!Number.isFinite(parentPid) || parentPid <= 1) return;
+
+  const check = () => {
+    if (process.ppid === 1) {
+      console.warn(`[${label}] parent pid missing (ppid=1), exiting`);
+      process.exit(0);
+    }
+
+    try {
+      process.kill(parentPid, 0);
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ESRCH") {
+        console.warn(`[${label}] parent pid missing (${parentPid}), exiting`);
+        process.exit(0);
+      }
+    }
+  };
+
+  check();
+  const timer = setInterval(check, 1000);
+  timer.unref();
+}
+
 function parsePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
@@ -122,6 +149,7 @@ function generateSessionId() {
 
 async function main() {
   installTimestampedConsole();
+  installParentWatchdog("mcp-sse");
   console.log("[mcp-sse] session start");
 
   const host = process.env.RECAPSENSE_MCP_HOST ?? DEFAULT_HOST;

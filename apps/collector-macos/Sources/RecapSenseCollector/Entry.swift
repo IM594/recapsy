@@ -83,6 +83,25 @@ actor DedupeState {
   }
 }
 
+private func shouldExitBecauseParentMissing() -> Bool {
+  let env = ProcessInfo.processInfo.environment
+  guard let raw = env["RECAPSENSE_PARENT_PID"], !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+    return false
+  }
+  guard let parentPid = Int32(raw.trimmingCharacters(in: .whitespacesAndNewlines)), parentPid > 1 else {
+    return false
+  }
+
+  // kill(pid, 0)：
+  // - 0 表示不发送信号，仅用于检测进程是否存在/是否有权限
+  // - ESRCH 表示进程不存在
+  let rc = kill(parentPid, 0)
+  if rc == 0 { return false }
+  if errno == ESRCH { return true }
+  // EPERM：存在但没权限，视为“父进程还在”
+  return false
+}
+
 @main
 struct RecapSenseCollectorMain {
   static func main() async {
@@ -137,6 +156,11 @@ struct RecapSenseCollectorMain {
 
       var tickIndex = 0
       while !(await stop.shouldStop()) {
+        if shouldExitBecauseParentMissing() {
+          logger.warn("父进程已退出（RECAPSENSE_PARENT_PID 不存在），collector 自动退出。")
+          break
+        }
+
         tickIndex += 1
 
         do {
