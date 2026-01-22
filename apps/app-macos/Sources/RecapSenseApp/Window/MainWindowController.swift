@@ -9,6 +9,7 @@ import SwiftUI
 final class MainWindowController: NSObject, NSWindowDelegate {
   static let shared = MainWindowController()
 
+  private let autosaveName = NSWindow.FrameAutosaveName("RecapSense.MainWindow")
   private var window: NSWindow? = nil
   private var allowCloseForTermination = false
 
@@ -37,6 +38,8 @@ final class MainWindowController: NSObject, NSWindowDelegate {
     window.center()
     window.contentView = hosting
     window.isReleasedWhenClosed = false
+    // 让窗口位置/大小在重启 App 后自动恢复（写入 UserDefaults）。
+    window.setFrameAutosaveName(autosaveName)
     window.delegate = self
 
     self.window = window
