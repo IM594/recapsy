@@ -100,9 +100,11 @@ router.post(
 
     // Check if already running
     if (runner.isRunning()) {
+      const requestId = res.locals.requestId as string | undefined;
       return res.status(409).json({
         error: "Task already running",
         code: ERROR_CODES.conflict,
+        requestId,
         status: runner.getStatus(),
       });
     }

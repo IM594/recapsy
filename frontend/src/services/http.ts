@@ -1,12 +1,26 @@
+import type { ErrorCode, ErrorResponse } from "@recaply/shared";
+import { isErrorResponse } from "@recaply/shared";
+
 export class ApiError extends Error {
   status: number;
   payload: unknown;
+  code?: ErrorCode;
+  requestId?: string;
+  details?: unknown;
 
-  constructor(status: number, message: string, payload: unknown) {
+  constructor(
+    status: number,
+    message: string,
+    payload: unknown,
+    meta?: { code?: ErrorCode; requestId?: string; details?: unknown }
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.payload = payload;
+    this.code = meta?.code;
+    this.requestId = meta?.requestId;
+    this.details = meta?.details;
   }
 }
 
@@ -14,7 +28,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function extractErrorMeta(payload: unknown): {
+  code?: ErrorCode;
+  requestId?: string;
+  details?: unknown;
+} | null {
+  if (!isErrorResponse(payload)) return null;
+  const typed = payload as ErrorResponse;
+  return {
+    code: typed.code,
+    requestId: typed.requestId,
+    details: typed.details,
+  };
+}
+
 function extractErrorMessage(payload: unknown): string | undefined {
+  if (isErrorResponse(payload)) return payload.error;
   if (!isRecord(payload)) return undefined;
 
   const error = payload.error;
@@ -44,9 +73,9 @@ export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> 
   if (!res.ok) {
     const message =
       extractErrorMessage(payload) || `Request failed (${res.status})`;
-    throw new ApiError(res.status, message, payload);
+    const meta = extractErrorMeta(payload);
+    throw new ApiError(res.status, message, payload, meta ?? undefined);
   }
 
   return payload as T;
 }
-
