@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-22 18:41
+> Last updated: 2026-01-22 18:53
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -15,7 +15,6 @@
 
 ## In Progress（P0，一致性优先）
 - [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes；继续清理散落 magic string（尤其是 query keys / event names / config keys）
-- [ ] B-001 后端一致性收尾：补齐 `backend/src/lib/git.ts` 的日志与错误上下文（替换 `console.*`），并明确哪些错误允许静默降级（例如 `git fetch`）
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
@@ -26,6 +25,7 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] B-001 后端一致性收尾：收敛 `backend/src/lib/git.ts` 的日志与错误处理（移除 `console.*`、禁止空 `catch`），并明确允许降级的错误（`git fetch` / 单 commit stats/diff 失败）
 - [x] C-007 输出目录单一真相：统一读写 `userData/outputs`，并提供 `scripts/migrate-outputs.cjs` 迁移历史 `backend/outputs`（避免“多份真相”导致数据看似丢失）
 - [x] C-005 错误处理基线（后端）：增加 requestId、统一 async handler + error middleware（兼容旧 `{ error: string }`），并为关键链路补齐上下文日志（routes / SummaryStore / WorkflowRunner）
 - [x] SummaryStore 自愈：`index.json` 缺失/损坏时从磁盘重建，降低“数据看起来丢失”的概率
