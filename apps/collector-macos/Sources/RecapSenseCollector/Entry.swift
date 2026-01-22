@@ -9,6 +9,7 @@ struct CollectorConfig {
   let ocrLanguages: [String]
   let thumbnailEnabled: Bool
   let thumbnailMaxWidth: Int
+  let excludedApps: [String]
   let dryRun: Bool
   let once: Bool
   let verbose: Bool
@@ -101,6 +102,24 @@ struct RecapSenseCollectorMain {
         logger.warn("当前为 dry-run：不会写入 Agent（仅本地打印摘要）")
       }
 
+      // 屏幕录制权限提示：
+      // - macOS 的“屏幕录制”权限非常容易让人困惑：你以为是给终端授权，但实际采集进程可能是被别的 App 拉起的。
+      // - 这里提前做一次 preflight，并尽力给出更明确的提示。
+      let launchSource = ProcessInfo.processInfo.environment["RECAPSENSE_LAUNCH_SOURCE"] ?? ""
+      let executablePath = CommandLine.arguments.first ?? "recapsense-collector"
+      if !CGPreflightScreenCaptureAccess() {
+        if launchSource == "app-macos" {
+          logger.warn(
+            "当前未获得“屏幕录制”权限：你是从 RecapSense 菜单栏 App 启动的采集。请在 系统设置 → 隐私与安全性 → 屏幕录制 中给以下程序授权：\(executablePath)。"
+          )
+        } else {
+          logger.warn(
+            "当前未获得“屏幕录制”权限：请在 系统设置 → 隐私与安全性 → 屏幕录制 中给 recapsense-collector（或你运行它的终端）授权。可执行文件：\(executablePath)"
+          )
+        }
+        _ = CGRequestScreenCaptureAccess()
+      }
+
       let stop = StopController()
       await stop.installSignalHandlers(log: logger.info)
 
@@ -122,9 +141,23 @@ struct RecapSenseCollectorMain {
           let windowTitle = context.windowTitle
           let key = "\(appName ?? "")\n\(windowTitle ?? "")"
 
+          if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
+            logger.debug("命中应用黑名单（跳过采集）：\(appName)")
+            await sleepSeconds(config.intervalSeconds)
+            continue
+          }
+
           guard let screenshot = CGDisplayCreateImage(CGMainDisplayID()) else {
             notices.once(key: "screen-recording") {
-              logger.warn("无法截屏：请在 系统设置 → 隐私与安全性 → 屏幕录制 中给 recapsense-collector（或你运行它的终端）授权。")
+              if launchSource == "app-macos" {
+                logger.warn(
+                  "无法截屏：当前采集进程缺少“屏幕录制”权限。你是从 RecapSense 菜单栏 App 启动的采集，请在 系统设置 → 隐私与安全性 → 屏幕录制 中给以下程序授权：\(executablePath)。"
+                )
+              } else {
+                logger.warn(
+                  "无法截屏：请在 系统设置 → 隐私与安全性 → 屏幕录制 中给 recapsense-collector（或你运行它的终端）授权。可执行文件：\(executablePath)"
+                )
+              }
             }
             await sleepSeconds(config.intervalSeconds)
             continue
@@ -219,6 +252,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   var ocrLanguages: [String] = ["zh-Hans", "en-US"]
   var thumbnailEnabled = true
   var thumbnailMaxWidth = 420
+  var excludedApps: [String] = []
   var dryRun = false
   var once = false
   var verbose = false
@@ -269,6 +303,28 @@ private func parseConfig(args: [String]) -> CollectorConfig {
       } else {
         printUsageAndExit("参数 --thumbnail-width 需要一个整数（像素）")
       }
+    case "--exclude-app":
+      if i + 1 < args.count {
+        let raw = args[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+        if !raw.isEmpty, !excludedApps.contains(raw) {
+          excludedApps.append(raw)
+        }
+        i += 2
+      } else {
+        printUsageAndExit("参数 --exclude-app 需要一个应用名称")
+      }
+    case "--exclude-apps":
+      if i + 1 < args.count {
+        let raw = args[i + 1]
+        for part in raw.split(separator: ",") {
+          let name = part.trimmingCharacters(in: .whitespacesAndNewlines)
+          if name.isEmpty { continue }
+          if !excludedApps.contains(name) { excludedApps.append(name) }
+        }
+        i += 2
+      } else {
+        printUsageAndExit("参数 --exclude-apps 需要一个用逗号分隔的应用列表")
+      }
     case "--dry-run":
       dryRun = true
       i += 1
@@ -292,10 +348,20 @@ private func parseConfig(args: [String]) -> CollectorConfig {
     ocrLanguages: ocrLanguages,
     thumbnailEnabled: thumbnailEnabled,
     thumbnailMaxWidth: thumbnailMaxWidth,
+    excludedApps: excludedApps,
     dryRun: dryRun,
     once: once,
     verbose: verbose
   )
+}
+
+private func isExcludedApp(_ appName: String, excludedApps: [String]) -> Bool {
+  if excludedApps.isEmpty { return false }
+  let normalized = appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  if normalized.isEmpty { return false }
+  return excludedApps.contains { item in
+    item.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+  }
 }
 
 private func printUsageAndExit(_ error: String?) -> Never {
@@ -315,6 +381,8 @@ private func printUsageAndExit(_ error: String?) -> Never {
       --ocr-lang <a,b,c>             OCR 语言（默认 zh-Hans,en-US）
       --no-thumbnails                不写入缩略图文件
       --thumbnail-width <px>         缩略图最大宽度（默认 420）
+      --exclude-app <name>           应用黑名单（遇到该应用则跳过采集；可重复传入）
+      --exclude-apps <a,b,c>         应用黑名单（逗号分隔；等价于多次 --exclude-app）
       --dry-run                      不写入 Agent，仅打印 OCR 摘要
       --once                         只采集一次就退出
       --verbose                      输出更多调试日志

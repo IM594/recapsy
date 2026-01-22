@@ -23,6 +23,7 @@ function cloneDefaults() {
       thumbnailMaxWidth: 420,
       ocrLevel: "fast",
       ocrLanguages: ["zh-Hans", "en-US"],
+      excludedApps: [],
     },
     agent: {
       evidenceRetentionDays: 30,
@@ -450,6 +451,16 @@ export function createStore(db, { withTransaction }) {
         }
         break;
       }
+      case "collector.excludedApps": {
+        if (Array.isArray(parsed)) {
+          const apps = parsed
+            .map((x) => String(x).trim())
+            .filter((x) => x);
+          // 允许清空（空数组），表示“不排除任何应用”
+          settings.collector.excludedApps = apps;
+        }
+        break;
+      }
       case "agent.evidenceRetentionDays": {
         const value = Number.parseInt(String(parsed), 10);
         if (Number.isFinite(value) && value > 0) settings.agent.evidenceRetentionDays = value;
@@ -523,6 +534,18 @@ export function createStore(db, { withTransaction }) {
           throw new Error("collector.ocrLanguages must not be empty");
         }
         updates.push(["collector.ocrLanguages", JSON.stringify(langs)]);
+      }
+      if (c.excludedApps != null) {
+        if (!Array.isArray(c.excludedApps)) {
+          throw new Error("collector.excludedApps must be an array of strings");
+        }
+        const apps = c.excludedApps
+          .map((x) => String(x).trim())
+          .filter((x) => x);
+        if (apps.length > 200) {
+          throw new Error("collector.excludedApps is too large");
+        }
+        updates.push(["collector.excludedApps", JSON.stringify(apps)]);
       }
     }
 

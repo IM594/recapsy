@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -6,6 +7,7 @@ struct SettingsView: View {
   @State private var draft: RecapSenseSettings = .defaults
   @State private var isLoading = false
   @State private var message: String? = nil
+  @State private var excludedAppInput: String = ""
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -26,6 +28,31 @@ struct SettingsView: View {
       }
 
       Form {
+        Section("权限（macOS）") {
+          Button("打开系统设置：屏幕录制") {
+            openPrivacyPane(anchor: "Privacy_ScreenCapture")
+          }
+          Button("打开系统设置：辅助功能") {
+            openPrivacyPane(anchor: "Privacy_Accessibility")
+          }
+
+          Text("提示：如果 Collector 提示“无法截屏”，通常需要在这里给对应进程授权（可能是 recapsense-collector，也可能是启动它的 App）。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+          LabeledContent("Collector 实际可执行文件") {
+            Text(supervisor.config.collectorBinary.path)
+              .font(.caption)
+              .textSelection(.enabled)
+          }
+
+          LabeledContent("Collector 构建产物路径（开发）") {
+            Text(supervisor.config.collectorBuiltBinary.path)
+              .font(.caption)
+              .textSelection(.enabled)
+          }
+        }
+
         Section("采集（Collector）") {
           Stepper(
             value: $draft.collector.intervalSeconds,
@@ -44,6 +71,40 @@ struct SettingsView: View {
           Stepper(value: $draft.collector.thumbnailMaxWidth, in: 200...1200, step: 20) {
             Text("缩略图最大宽度：\(draft.collector.thumbnailMaxWidth) px")
           }
+
+          Divider()
+
+          Text("应用黑名单（不采集）")
+            .font(.subheadline)
+
+          if draft.collector.excludedApps.isEmpty {
+            Text("暂无黑名单。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else {
+            ForEach(draft.collector.excludedApps, id: \.self) { app in
+              HStack {
+                Text(app)
+                  .font(.caption)
+                Spacer()
+                Button("移除") {
+                  draft.collector.excludedApps.removeAll { $0 == app }
+                }
+                .buttonStyle(.borderless)
+              }
+            }
+          }
+
+          HStack {
+            TextField("例如：Google Chrome", text: $excludedAppInput)
+            Button("添加") { addExcludedApp(excludedAppInput) }
+              .disabled(excludedAppInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            Button("添加当前前台应用") { addFrontmostAppToBlacklist() }
+          }
+
+          Text("提示：这里填写的是 macOS 显示的应用名称（菜单栏左上角的 App 名称）。")
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
 
         Section("证据热窗口（Agent）") {
@@ -105,4 +166,26 @@ struct SettingsView: View {
       }
     }
   }
+
+  private func addExcludedApp(_ raw: String) {
+    let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !name.isEmpty else { return }
+    if !draft.collector.excludedApps.contains(name) {
+      draft.collector.excludedApps.append(name)
+      draft.collector.excludedApps.sort()
+    }
+    excludedAppInput = ""
+  }
+
+  private func addFrontmostAppToBlacklist() {
+    let name = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+    addExcludedApp(name)
+  }
+}
+
+private func openPrivacyPane(anchor: String) {
+  guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else {
+    return
+  }
+  NSWorkspace.shared.open(url)
 }

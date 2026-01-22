@@ -14,11 +14,13 @@ final class Supervisor: ObservableObject {
 
   @Published var config = SupervisorConfig.loadFromEnvironment()
   @Published private(set) var settings: RecapSenseSettings = .defaults
+  @Published private(set) var collectorPauseState: CollectorPauseState = .none
 
   private var cancellables: Set<AnyCancellable> = []
   private var hasAutoStarted = false
+  private var collectorResumeTask: Task<Void, Never>? = nil
 
-  init() {
+  init(autoStart: Bool = true) {
     // 把子进程对象的变更（state/logFile/lastErrorMessage）透传给 Supervisor，
     // 避免在 View 里再额外拆 @ObservedObject。
     [agent, mcp, collector].forEach { process in
@@ -29,8 +31,10 @@ final class Supervisor: ObservableObject {
         .store(in: &cancellables)
     }
 
-    // 约定：当前版本默认“启动后端 + 启动采集”，让安装后体验尽量接近“开箱即用”。
-    autoStartAllIfNeeded()
+    if autoStart {
+      // 约定：当前版本默认“启动后端 + 启动采集”，让安装后体验尽量接近“开箱即用”。
+      autoStartAllIfNeeded()
+    }
   }
 
   func autoStartAllIfNeeded() {
@@ -93,14 +97,18 @@ final class Supervisor: ObservableObject {
   }
 
   func startCollector() {
+    // 如果用户处于“暂停”状态，就不自动拉起采集（避免出现“我刚暂停怎么又起来了”）。
+    guard collectorPauseState == .none else { return }
+
     if !agent.state.isRunning {
       // Collector 需要写入 Agent。开发期体验：用户只要点“开始采集”，Agent 会被自动拉起。
       startAgent()
     }
 
-    // 说明：当前先假设 collector 二进制已构建完成（开发期可用 `npm run dev:collector` 或手动 swift build）。
-    // 后续会把“自动构建/内置 helper”变成发布形态的一部分。
-    let binaryPath = config.collectorBinary.path
+    // 说明：
+    // - 开发期 collector 先由 SwiftPM 构建（`apps/collector-macos/.build/...`）
+    // - 但为了让“屏幕录制”权限更稳定，我们优先把它复制到 `${DATA_DIR}/bin/` 再运行。
+    let binaryPath = ensureCollectorInstalled()
 
     var args: [String] = [
       "--interval",
@@ -115,6 +123,13 @@ final class Supervisor: ObservableObject {
       String(settings.collector.thumbnailMaxWidth),
     ]
 
+    for appName in settings.collector.excludedApps {
+      let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.isEmpty { continue }
+      args.append("--exclude-app")
+      args.append(trimmed)
+    }
+
     if !settings.collector.thumbnailEnabled {
       args.append("--no-thumbnails")
     }
@@ -124,7 +139,10 @@ final class Supervisor: ObservableObject {
       executable: binaryPath,
       arguments: args,
       workingDirectory: config.repoRoot.path,
-      environment: config.baseEnvironment,
+      environment: config.baseEnvironment.merging([
+        // 让 collector 的错误提示更精确：知道自己是被菜单栏 App 拉起的（而不是用户手动在终端跑）。
+        "RECAPSENSE_LAUNCH_SOURCE": "app-macos",
+      ]) { _, new in new },
       requiresExecutableOnDisk: true
     )
 
@@ -135,10 +153,60 @@ final class Supervisor: ObservableObject {
     collector.stop()
   }
 
+  func stopCollectorFully() {
+    collectorPauseState = .none
+    collectorResumeTask?.cancel()
+    collectorResumeTask = nil
+    stopCollector()
+  }
+
+  func pauseCollectorManually() {
+    collectorPauseState = .manual
+    collectorResumeTask?.cancel()
+    collectorResumeTask = nil
+    stopCollector()
+  }
+
+  func pauseCollector(forSeconds seconds: Double) {
+    let until = Date().addingTimeInterval(max(1, seconds))
+    collectorPauseState = .until(until)
+    collectorResumeTask?.cancel()
+    collectorResumeTask = nil
+    stopCollector()
+
+    collectorResumeTask = Task { @MainActor in
+      // 每 0.5s 轮询一次，便于 UI 显示“剩余时间”时可实时更新（未来可优化为定时器）。
+      while true {
+        if Task.isCancelled { return }
+        guard case .until(let pauseUntil) = collectorPauseState else { return }
+        if Date() >= pauseUntil {
+          collectorPauseState = .none
+          startCollector()
+          return
+        }
+        try? await Task.sleep(nanoseconds: 500_000_000)
+      }
+    }
+  }
+
+  func resumeCollector() {
+    collectorPauseState = .none
+    collectorResumeTask?.cancel()
+    collectorResumeTask = nil
+    startCollector()
+  }
+
   func stopAll() {
+    collectorResumeTask?.cancel()
+    collectorResumeTask = nil
     collector.stop()
     mcp.stop()
     agent.stop()
+  }
+
+  func stopAllAndWait(timeoutSeconds: Double = 4) async {
+    stopAll()
+    await waitUntilAllStopped(timeoutSeconds: timeoutSeconds)
   }
 
   func refreshSettingsFromAgent() async throws {
@@ -170,6 +238,40 @@ final class Supervisor: ObservableObject {
     }
 
     startCollector()
+  }
+
+  private func waitUntilAllStopped(timeoutSeconds: Double) async {
+    let deadline = Date().addingTimeInterval(timeoutSeconds)
+    while Date() < deadline {
+      let anyRunning =
+        agent.state.isRunning || mcp.state.isRunning || collector.state.isRunning
+      if !anyRunning { return }
+      try? await Task.sleep(nanoseconds: 120_000_000)
+    }
+  }
+
+  private func ensureCollectorInstalled() -> String {
+    let fm = FileManager.default
+
+    // 1) 已安装版本存在：直接用
+    let installed = config.collectorInstalledBinary
+    if fm.fileExists(atPath: installed.path) {
+      return installed.path
+    }
+
+    // 2) 尝试从构建产物复制一份到 dataDir/bin（稳定路径）
+    let built = config.collectorBuiltBinary
+    do {
+      try fm.createDirectory(at: installed.deletingLastPathComponent(), withIntermediateDirectories: true)
+      if fm.fileExists(atPath: installed.path) {
+        try fm.removeItem(at: installed)
+      }
+      try fm.copyItem(at: built, to: installed)
+      return installed.path
+    } catch {
+      // 复制失败就降级：直接用构建产物路径（至少能跑起来）
+      return built.path
+    }
   }
 
   private func waitForAgentHealthy(timeoutSeconds: Double) async -> Bool {

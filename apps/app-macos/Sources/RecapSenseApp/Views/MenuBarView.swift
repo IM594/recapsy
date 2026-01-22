@@ -43,14 +43,37 @@ struct MenuBarView: View {
         "采集（Collector）",
         isOn: Binding(
           get: { supervisor.collector.state.isRunning },
-          set: { on in on ? supervisor.startCollector() : supervisor.stopCollector() }
+          set: { on in
+            if on {
+              supervisor.resumeCollector()
+            } else {
+              // 关闭开关：视为“彻底停止”，不做自动恢复。
+              supervisor.stopCollectorFully()
+            }
+          }
         )
       )
+
+      if supervisor.collectorPauseState.isPaused {
+        Text("采集状态：\(supervisor.collectorPauseState.label)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Menu("暂停采集…") {
+        Button("暂停 15 分钟") { supervisor.pauseCollector(forSeconds: 15 * 60) }
+        Button("暂停 1 小时") { supervisor.pauseCollector(forSeconds: 60 * 60) }
+        Divider()
+        Button("暂停直到手动恢复") { supervisor.pauseCollectorManually() }
+        if supervisor.collectorPauseState.isPaused {
+          Divider()
+          Button("恢复采集") { supervisor.resumeCollector() }
+        }
+      }
 
       Divider()
 
       Button("退出并停止全部") {
-        supervisor.stopAll()
         NSApp.terminate(nil)
       }
     }

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 enum ManagedProcessState: Equatable {
   case stopped
@@ -120,6 +121,17 @@ final class ManagedProcess: ObservableObject {
     // 先温和结束，避免损坏数据；必要时未来可以加强制 kill。
     stopRequested = true
     p.terminate()
+
+    // 兜底：有些情况下子进程可能卡住（例如端口占用导致异常、或 Node 事件循环被某些句柄挂住），
+    // 为了避免“退出 App 后端口仍被占用”，我们做一个超时强杀。
+    let pid = p.processIdentifier
+    Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 1_500_000_000)
+      guard let current = self.process else { return }
+      guard current.processIdentifier == pid else { return }
+      guard current.isRunning else { return }
+      kill(pid, SIGKILL)
+    }
     // terminationHandler 会做 teardown。
   }
 

@@ -9,5 +9,10 @@ final class RecapSenseAppContext {
   static let shared = RecapSenseAppContext()
 
   var supervisor: Supervisor? = nil
-}
 
+  // 保持强引用，否则锁对象会被释放，文件锁也会随之失效。
+  var instanceLock: SingleInstanceLock? = nil
+
+  // 启动期错误（例如重复启动导致锁占用），用于弹窗提示。
+  var startupErrorMessage: String? = nil
+}

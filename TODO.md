@@ -8,134 +8,142 @@
   - 新增的 TODO 要补充背景/原因（为什么做）与最小验收标准（怎么算完成）
   - 如调整优先级，请在对应条目里注明原因（性能/隐私/成本/依赖变化等）
 
-## 当前状态（截至本次）
+## 项目约束（不轻易改变）
 
-- 已有最小骨架：
-  - Node.js Agent（HTTP + SQLite/FTS）：`apps/agent/src/server.mjs`
-  - MCP Server（stdio，工具：`recapsense_search`）：`apps/mcp/src/server.mjs`
-  - 数据库迁移框架（v1 schema + v2 视觉增强预留表）：`apps/agent/src/db.mjs`
-- 视觉增强（LLM Vision）已做数据库与协议占位，尚未实现 worker：`apps/agent/src/migrations/0002_vision.sql`
-- 日总结默认“无声自动生成”（启发式文本摘要，后续可替换为 LLM 总结）：`apps/agent/src/store.mjs`
+- 平台：只做 macOS，最低支持 13+。
+- 本机优先：默认只监听 `127.0.0.1`（或 UDS），对外网开放后置；所有 `/v1/*` 强制 token。
+- 采集默认：每 5 秒一帧（可配置），必须去重。
+- 留存模型：B 模式
+  - 长期保存：`chunks` / `daily summaries` /（未来）视觉抽取文本
+  - 热窗口证据：截图/音频（默认 30 天，可配置，可清理）
+- 文档与注释用中文；代码标识符/API/tool 名用英文。
 
-## P0（必须先跑通的最小闭环：截图→OCR→入库→搜索→MCP）
+## 当前状态（M0：闭环已跑通，可日常使用）
 
-- [ ] 实现 macOS Collector（最小版 CLI/常驻进程）
-  - 采集：每 5 秒截图（macOS 13+；当前先用 `CGDisplayCreateImage`，后续可替换为 ScreenCaptureKit）→ 下采样 → dHash 去重 → Vision OCR
-  - 写入：调用 Agent `POST /v1/ingest/frame`（带 token）
-  - [x] SwiftPM 可执行程序骨架：`apps/collector-macos`
-  - [x] 已实现：截图 + dHash 去重 + Vision OCR + 写入 `frames` + 缩略图写盘（可关）
-  - 验收：能在本机连续采集 10 分钟，`/v1/search` 与 MCP `recapsense_search` 能搜到当天内容
-- [x] 证据热窗口（默认 30 天）目录规范
-  - 缩略图按日期分桶（`media/thumbnails/YYYY-MM-DD/...`）
-  - DB 只存相对路径或可迁移路径（避免硬编码绝对路径）
-  - 已在 collector 落地：默认写入 `${RECAPSENSE_DATA_DIR}/media/thumbnails/YYYY-MM-DD/<ts>_<hash>.jpg`，并在 `frames.thumbnail_path` 存相对路径
+- 数据管线已跑通：`collector → agent(frames) → compaction(chunks) → search → mcp`
+- macOS UI 已可控：
+  - 菜单栏开关：启动/停止 Agent、MCP(SSE)、Collector
+  - 主窗口：搜索（含 chunk 详情）/日总结/日志/设置（聊天占位）
+- 设置已落库（SQLite `settings` 表）并有 API：`GET/PATCH /v1/settings`
+- 已知“噪音”：Node 内置 `sqlite` 的 ExperimentalWarning（不影响功能，后续发布形态会消除）
+
+## 当前阻塞 / 已知问题（P0：先修这些再扩功能）
+
+- [ ] macOS UI：主窗口应为单例（重复点击“打开主窗口”不应弹出多个）
+  - 背景：现在可能出现多个窗口，用户体验差，也会让后续“聊天窗口/搜索窗口”难以管理。
+  - 验收：无论点多少次，只会聚焦到同一个主窗口；关闭窗口后再次打开仍是同一个窗口实例（或重新创建但保持单例语义）。
+- [ ] macOS UI：Dock 图标行为符合直觉（可点开/切换/最小化）
+  - 背景：当前 SwiftPM 可执行程序的 Dock 交互不符合 macOS 习惯，影响“非开发用户”的使用。
+  - 验收：Dock 图标点击可显示主窗口；主窗口可最小化并从 Dock 恢复；从 Dock 关闭窗口不退出菜单栏常驻。
+- [x] macOS UI：退出时必须清理子进程，避免端口残留（`EADDRINUSE`）
+  - 背景：MCP SSE 端口（默认 4833）残留会导致下次启动失败。
+  - 验收：退出/重启 App 后可立刻再次启动 MCP；不存在需要手动 kill 的常态流程。
+- [x] macOS UI：启动 Agent/MCP 不应依赖 PATH，修复 `env: node: No such file or directory`
+  - 背景：从 .app/LaunchAgent 启动时环境变量不完整，`node`（尤其 nvm）经常找不到。
+  - 验收：UI 启动服务稳定（Homebrew/nvm 场景都可用）；若仍找不到，要给出明确的可操作提示（配置 Node 路径）。
+- [x] Collector：屏幕录制权限提示更精确（告诉用户该给谁授权）
+  - 背景：Collector 可能由 Warp 启动，也可能由菜单栏 App 启动；授权对象不同会让人困惑。
+  - 验收：错误信息能明确指出“当前采集进程是谁启动的”；并在 UI 中提供“打开系统设置 → 屏幕录制”的入口（后续做）。
+- [x] Collector：尽量避免“重编译导致屏幕录制权限失效”
+  - 背景：直接运行 `.build/...` 产物时，macOS 可能把重编译后的二进制视作“新程序”，导致屏幕录制权限失效。
+  - 验收：菜单栏 App 优先运行 `${DATA_DIR}/bin/recapsense-collector`（稳定路径），减少反复授权。
+
+## 近期计划（Plan：建议的接下来 1~2 个迭代）
+
+> 目标：让它能“放心全天候跑”，同时确保“换电脑/备份”不痛苦。
+
+- [ ] M1-0 稳定性收尾（先把 P0 清干净）
+  - 背景：先把“运行稳定+符合直觉”打磨好，后续功能才不会越堆越乱。
+  - 验收：P0 列表全部完成，开发期基本不需要手动 kill/重启来救场。
+- [x] M1-1 暂停/恢复采集（含定时暂停）
+  - 背景：需要在敏感场景快速暂停（会议/密码/隐私页面）。
+  - 验收：菜单栏可一键暂停/恢复；支持“暂停 15 分钟/1 小时”；暂停期间不会写入 frames。
+- [x] M1-2 App 黑名单（先做应用，域名后置）
+  - 背景：用户应能明确排除某些应用（例如密码管理器/银行/私聊）。
+  - 验收：可在设置页维护 appName 列表；collector 遇到黑名单应用直接跳过采集。
+- [ ] M1-3 “危险区域（Danger Zone）”删除
+  - 背景：需要随时删除最近的记录（最近 1 小时/1 天/全部）。
+  - 验收：UI 可点按钮删除；支持同时删 chunks 与热证据；删除后搜索不再出现。
+- [ ] M2-1 导出/导入（换电脑）
+  - 背景：长期几十年数据，必须可迁移。
+  - 验收：可导出 `db + settings + manifest`；导入后可直接搜索/日总结可用（热证据可选）。
+
+## Milestone M0（已完成）：最小闭环（截图→OCR→入库→搜索→MCP）
+
+- [x] macOS Collector（SwiftPM 可执行程序）
+  - 采集：截图 → dHash 去重 → Vision OCR
+  - 写入：`POST /v1/ingest/frame`（带 token）
+  - 验收：本机连续采集 10 分钟，`/v1/search` 能搜到当天内容
+- [x] 证据热窗口目录规范（默认 30 天）
+  - 缩略图按日期分桶：`media/thumbnails/YYYY-MM-DD/...`
+  - DB 存相对路径（可迁移）
 - [x] 证据清理任务（热窗口策略落地）
-  - 删除超过 30 天的 frames 与缩略图文件
-  - 仅清理热证据，不影响长期 chunks/summaries（B 模式）
-  - 已实现：`POST /v1/maintenance/cleanup` + 定时清理（默认每 60 分钟），并支持配置保留天数
-  - 安全性：只清理已压实（`chunk_id IS NOT NULL`）的 frames，避免因为压实滞后导致数据丢失
-  - 验收：可配置、可手动触发、可观察（日志/返回值）
-- [x] 解决“受限环境端口监听失败（EPERM）”的运行方式（可选其一）
-  - 已实现：Agent 支持 Unix Domain Socket（UDS），并可选择禁用 TCP 端口监听
-  - 配置：`RECAPSENSE_AGENT_SOCKET`（默认 `${RECAPSENSE_DATA_DIR}/run/agent.sock`），`RECAPSENSE_AGENT_DISABLE_TCP=1`
-  - MCP：支持通过 UDS 调用 Agent（设置同名环境变量即可）
-- [x] MCP 支持 SSE（HTTP）传输（本机）
-  - 用途：让 MCP 不依赖 stdio 进程管道，便于后续 UI/服务化（例如由菜单栏应用启动/托管）
-  - 已实现：`apps/mcp/src/server-sse.mjs`（默认 `http://127.0.0.1:4833/sse`）
-  - 安全性：要求 token（支持 `Authorization: Bearer ...` 或 `?token=...`）
+  - `POST /v1/maintenance/cleanup` + 定时清理
+  - 只清理已压实（`chunk_id IS NOT NULL`）的 frames
+- [x] Agent 支持 UDS（可选）+ MCP 支持走 UDS
+  - `RECAPSENSE_AGENT_SOCKET`，`RECAPSENSE_AGENT_DISABLE_TCP=1`
+- [x] MCP 支持 SSE（HTTP，本机）
+  - `apps/mcp/src/server-sse.mjs`（默认 `http://127.0.0.1:4833/sse`）
 
-## P1（长期记忆可用：压实、迁移、可控）
+## Milestone M1（进行中）：可控 + 隐私（能放心全天候跑）
 
-- [ ] 解决“FTS 模块缺失”导致的性能隐患（长期必须）
-  - 背景：在部分 Node/SQLite 构建中可能缺少 `fts5/fts4`，当前已做自动降级为 LIKE（能跑通，但数据量大时会很慢）
-  - 方向：评估并切换到“自带 fts5 的 SQLite 绑定/发行形态”（例如 `better-sqlite3` 或 `libsql`），或提供可控的 SQLite 构建方案
-  - 验收：在目标发布环境中 `chunks_fts` 能创建成功，搜索返回稳定排序（含 score），并能在 10 万 chunks 规模下保持可用延迟
-- [ ] 改进 frames→chunks 压实策略（减少重复与噪声）
-  - 更稳切分：按 app/window + gap + OCR 文本变化
-  - chunk 合并/更新策略（避免频繁生成碎片）
-  - 验收：同一窗口连续工作 30 分钟，chunks 数量与内容合理、无大量重复段
-- [ ] 做“导出/导入（换电脑）”能力（B 模式优先）
-  - 导出：`chunks + daily summaries + 配置 + manifest`（热证据可选）
-  - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
-  - 验收：新机器导入后，搜索与日总结可用
-- [ ] 做基础设置（先简单）
-  - [x] 采集间隔（默认 5 秒；可在 UI 设置中调整，存入 SQLite settings）
-  - [x] 缩略图开关（默认开；可在 UI 设置中调整，存入 SQLite settings）
-  - [x] 热窗口天数（默认 30 天；可在 UI 设置中调整，存入 SQLite settings）
-  - [ ] 暂停/恢复（含定时暂停）
+- [x] 设置落库（SQLite `settings`）+ API：`GET/PATCH /v1/settings`
+- [x] macOS UI：设置页可修改采集间隔/去重/缩略图/证据保留等，并可重启 collector 应用
+- [x] 暂停/恢复（含定时暂停）
+- [x] App 黑名单（先 App）
+- [ ] 域名黑名单（后置：浏览器 URL/扩展）
+- [ ] “危险区域”删除：最近 1 小时/1 天/全部
+
+## Milestone M2（待做）：迁移/备份 + 发布形态（面向非开发用户）
+
 - [ ] 数据目录约定与 macOS 推荐路径落地
   - 默认开发：`./.recapsense/`
   - 发布形态：`~/Library/Application Support/RecapSense/`
-- [ ] macOS App（SwiftUI，菜单栏开关 + 主窗口：搜索/日志；UI 设计后置）
-  - 目标：面向非开发用户使用时 **不需要跑命令行**；安装后打开应用即可控制采集与 MCP
-  - [x] 新增 `apps/app-macos` SwiftPM 骨架（先跑通开发期 GUI）
-  - [x] Supervisor：可启动/停止 Agent、MCP（SSE）、Collector，并把子进程 stdout/stderr 写入 `${RECAPSENSE_DATA_DIR}/logs/*.log`
-  - [x] 修复：启动子进程时继承 PATH（避免出现 `env: node: No such file or directory`）
-  - [x] 修复：主窗口使用单实例（避免“打开主窗口”点多次弹出多个）
-  - [x] 修复：菜单栏应用在 Dock/Cmd-Tab 可见（为未来聊天主窗口做准备）
-  - [x] 修复：Dock 点击可打开主窗口（并临时设置 SF Symbol 图标，避免黑色 exec）
-  - [x] 自动启动：应用启动后默认启动 Agent + MCP（SSE）+ Collector
-  - [x] 主窗口：搜索（调用 Agent `GET /v1/search`）+ 日志（展示 logs tail）
-  - [x] 主窗口：设置页（调用 Agent `/v1/settings`；设置存 SQLite `settings` 表）
-  - [x] 主窗口：chunk 详情（点击搜索结果，调用 Agent `GET /v1/chunks/:id` 展示全文）
-  - [x] 主窗口：日总结（调用 Agent `GET /v1/summaries/daily`）
-  - [x] 聊天入口占位（不实现交互）
-  - 菜单栏（Menu bar）职责（先做功能，样式后置）：
-    - 状态：采集中/暂停/错误（状态灯 + 简要文字）
-    - 开关：开始/暂停采集（collector）
-    - 开关：启动/停止 MCP（SSE）
-    - 操作：打开主窗口（搜索/日志）
-    - 操作：打开设置/权限指引/数据目录（后置逐步补齐）
-  - 主窗口职责（先做功能，样式后置）：
-    - 搜索：直接调用 Agent `GET /v1/search`
-    - 日志：展示最近的 Agent/Collector/MCP 输出（最小可用即可）
-    - 预留：聊天入口（先占位，不实现聊天交互）
-  - 工程解耦建议（先堆好骨架，后续迭代）：
-    - `apps/app-macos`：SwiftUI UI 壳（Menu bar + 主窗口）
-    - `Supervisor`（UI 内部模块或独立组件）：统一管理子进程生命周期（Agent/MCP/Collector），并把日志落到 `${RECAPSENSE_DATA_DIR}/logs/`
-  - 验收：首次安装后 3 分钟内可用（授权后），点击“开始采集”即可写入数据；主窗口能搜到内容；MCP SSE 可被本机客户端连接
+- [ ] 导出/导入（换电脑，B 模式优先）
+  - 导出：`chunks + daily summaries + settings + manifest`（热证据可选）
+  - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
+- [ ] 加密策略（先保守可用，后续增强）
+  - 导出包加密（至少密码/密钥保护）
+  - 本地静态加密后置（优先保证可迁移与可重建索引）
 - [ ] 发布与安装形态（面向非开发用户）
   - 目标：不要求用户预装 Node/Swift；不要求手动配置环境变量
   - 方向：notarized DMG/PKG +（可选）Sparkle 自动更新 + Launch at login
   - 技术路线候选：
     - 方案 A：逐步把 Agent/MCP 收敛到原生（Swift/Rust）以便单一二进制
     - 方案 B：继续用 Node 但打包为 app 内置 runtime（或改用 Electron/Tauri）
-  - 验收：新用户安装后 3 分钟内可用（权限授权后自动开始采集）
 
-## P2（RAG：混合检索与引用）
+## Milestone M3（待做）：RAG（混合检索 + 引用）
 
 - [ ] Embeddings 管线（只对 chunk 级别）
-  - 新增表：embeddings（记录 model/version/dim）
   - 增量计算：只对新增/变更 chunk 算 embedding
-  - 验收：可对少量 chunks 计算 embedding，并可在检索中使用
 - [ ] 混合检索：FTS（精确）+ 向量（语义）+ 时间过滤
-  - 先做简单版：FTS 召回 TopN 后向量重排（成本低、实现快）
+  - 先做简单版：FTS 召回 TopN 后向量重排
   - 后续再上 ANN（HNSW / 本地向量服务）
 - [ ] `ask` API（本地只读）
-  - 输入：问题 + 可选时间范围
   - 输出：答案 + 引用（chunk id + 时间戳 + app/window）
-  - 验收：能回答“我今天主要在做什么/找某个链接”并给出处
 - [ ] MCP 工具扩展（保持简单）
   - [ ] `recapsense_get_chunk`
   - [ ] `recapsense_get_daily_summary`
   - （后续）`recapsense_ask`
 
-## P3（增强：LLM 视觉、音频、Littlebird 方向）
+## Milestone M4（待做）：增强（LLM 视觉、音频、Littlebird 方向）
 
 - [ ] 视觉增强 worker（策略性触发，不对每帧调用）
   - jobs：写 `vision_jobs`（预算/重试/黑名单/白名单）
   - extractions：写 `vision_extractions`（长期保存可检索文本 + JSON）
-  - 验收：对每个 chunk 选 1 张关键帧做抽取，搜索可命中抽取文本
 - [ ] 音频（mic + 可选系统音频）
   - mic：VAD 分段 + 云端 ASR（先快）
   - 系统音频：优先 ScreenCaptureKit（macOS 13+），否则提供回环设备方案
-- [ ] 更贴近 Littlebird 的 text-first（后续可替换截图 OCR）
+- [ ] 更贴近 Littlebird 的 text-first（后续可替换 screenshot+OCR）
   - Accessibility（AX）读取可见文本
   - 浏览器扩展提供 URL/DOM 文本（域名黑名单）
 
-## 安全与隐私（贯穿所有阶段）
+## 技术债 / 风险（不做会影响长期）
 
-- [ ] App/域名黑名单（默认排除敏感场景）
-- [ ] “危险区域”删除：删除最近 1 小时/1 天/全部
-- [ ] 加密策略（至少导出包加密；本地加密可后置）
-- [ ] 对外接口默认只绑定本机（127.0.0.1 或 UDS），并强制 token
+- [ ] 解决“FTS 模块缺失”导致的性能隐患（长期必须）
+  - 背景：部分 Node/SQLite 构建缺少 `fts5/fts4`，当前已降级 LIKE（能跑通，但规模大后会慢）
+  - 方向：评估 `better-sqlite3` / `libsql` 或可控 SQLite 构建方案
+  - 验收：10 万 chunks 规模可用延迟（且排序稳定，含 score）
+- [ ] 改进 frames→chunks 压实策略（减少重复与噪声）
+  - 更稳切分：按 app/window + gap + OCR 文本变化
+  - chunk 合并/更新策略（避免碎片化）

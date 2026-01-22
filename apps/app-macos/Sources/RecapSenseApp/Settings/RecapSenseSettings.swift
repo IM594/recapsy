@@ -13,6 +13,47 @@ struct RecapSenseSettings: Codable, Equatable {
     var thumbnailMaxWidth: Int
     var ocrLevel: String
     var ocrLanguages: [String]
+    var excludedApps: [String]
+
+    enum CodingKeys: String, CodingKey {
+      case intervalSeconds
+      case dedupeThreshold
+      case thumbnailEnabled
+      case thumbnailMaxWidth
+      case ocrLevel
+      case ocrLanguages
+      case excludedApps
+    }
+
+    init(
+      intervalSeconds: Double,
+      dedupeThreshold: Int,
+      thumbnailEnabled: Bool,
+      thumbnailMaxWidth: Int,
+      ocrLevel: String,
+      ocrLanguages: [String],
+      excludedApps: [String]
+    ) {
+      self.intervalSeconds = intervalSeconds
+      self.dedupeThreshold = dedupeThreshold
+      self.thumbnailEnabled = thumbnailEnabled
+      self.thumbnailMaxWidth = thumbnailMaxWidth
+      self.ocrLevel = ocrLevel
+      self.ocrLanguages = ocrLanguages
+      self.excludedApps = excludedApps
+    }
+
+    init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      let defaults = RecapSenseSettings.defaults.collector
+      intervalSeconds = try c.decodeIfPresent(Double.self, forKey: .intervalSeconds) ?? defaults.intervalSeconds
+      dedupeThreshold = try c.decodeIfPresent(Int.self, forKey: .dedupeThreshold) ?? defaults.dedupeThreshold
+      thumbnailEnabled = try c.decodeIfPresent(Bool.self, forKey: .thumbnailEnabled) ?? defaults.thumbnailEnabled
+      thumbnailMaxWidth = try c.decodeIfPresent(Int.self, forKey: .thumbnailMaxWidth) ?? defaults.thumbnailMaxWidth
+      ocrLevel = try c.decodeIfPresent(String.self, forKey: .ocrLevel) ?? defaults.ocrLevel
+      ocrLanguages = try c.decodeIfPresent([String].self, forKey: .ocrLanguages) ?? defaults.ocrLanguages
+      excludedApps = try c.decodeIfPresent([String].self, forKey: .excludedApps) ?? defaults.excludedApps
+    }
   }
 
   struct Agent: Codable, Equatable {
@@ -31,7 +72,8 @@ struct RecapSenseSettings: Codable, Equatable {
         thumbnailEnabled: true,
         thumbnailMaxWidth: 420,
         ocrLevel: "fast",
-        ocrLanguages: ["zh-Hans", "en-US"]
+        ocrLanguages: ["zh-Hans", "en-US"],
+        excludedApps: []
       ),
       agent: Agent(
         evidenceRetentionDays: 30,
@@ -40,4 +82,3 @@ struct RecapSenseSettings: Codable, Equatable {
     )
   }
 }
-

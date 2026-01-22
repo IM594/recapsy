@@ -7,6 +7,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // 这里用一个 SF Symbol 做一个临时 icon，让体验不那么“命令行感”。
     if let icon = NSImage(systemSymbolName: "brain", accessibilityDescription: "RecapSense") {
       NSApp.applicationIconImage = icon
+      let view = NSImageView(image: icon)
+      view.imageScaling = .scaleProportionallyUpOrDown
+      NSApp.dockTile.contentView = view
+      NSApp.dockTile.display()
+    }
+
+    // 启动期错误（例如重复启动）：给出弹窗提示，避免用户以为“怎么没反应/怎么端口占用”。
+    if let message = RecapSenseAppContext.shared.startupErrorMessage {
+      let alert = NSAlert()
+      alert.messageText = "RecapSense 已在运行"
+      alert.informativeText = message
+      alert.alertStyle = .warning
+      alert.addButton(withTitle: "退出")
+      alert.runModal()
+      NSApp.terminate(nil)
     }
   }
 
@@ -24,5 +39,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // 菜单栏应用：关闭最后一个窗口不应退出（采集/服务仍然要常驻）。
     false
   }
-}
 
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    // 如果是“重复启动”的提示弹窗触发退出，不需要做 stopAll（也没有子进程是当前实例启动的）。
+    if RecapSenseAppContext.shared.startupErrorMessage != nil {
+      return .terminateNow
+    }
+
+    // 关键：优雅退出并等待子进程停止，避免 Agent/MCP 端口残留导致下次启动 `EADDRINUSE`。
+    Task { @MainActor in
+      await RecapSenseAppContext.shared.supervisor?.stopAllAndWait()
+      sender.reply(toApplicationShouldTerminate: true)
+    }
+    return .terminateLater
+  }
+}
