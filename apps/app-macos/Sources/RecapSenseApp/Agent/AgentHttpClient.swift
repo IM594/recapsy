@@ -158,6 +158,26 @@ struct AgentHttpClient {
     return payload.result
   }
 
+  /// 关闭 Agent（用于“外部进程已存在/端口占用”时的兜底）。
+  ///
+  /// 注意：这是本机工具进程的开发期能力；生产期可根据需要收敛/加固。
+  func shutdown() async throws {
+    let url = baseURL.appendingPathComponent("/v1/maintenance/shutdown")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) || http.statusCode == 202 else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+  }
+
   private static func loadToken(dataDir: URL) throws -> String {
     let env = ProcessInfo.processInfo.environment
     if let token = env["RECAPSENSE_API_TOKEN"], !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

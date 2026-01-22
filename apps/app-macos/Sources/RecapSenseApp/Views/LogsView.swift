@@ -13,6 +13,7 @@ struct LogsView: View {
         Text("Agent").tag(LogSource.agent)
         Text("MCP（SSE）").tag(LogSource.mcp)
         Text("Collector").tag(LogSource.collector)
+        Text("OCR（Collector）").tag(LogSource.collectorOcr)
       }
       .pickerStyle(.segmented)
 
@@ -36,6 +37,9 @@ struct LogsView: View {
 
       HStack {
         Button("刷新") { load() }
+        Button("复制当前日志") { copyToPasteboard(content) }
+          .disabled(content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        Button("打开日志目录") { NSWorkspace.shared.open(supervisor.config.logsDir) }
         Spacer()
         Text("日志目录：\(supervisor.config.logsDir.path)")
           .font(.caption)
@@ -56,7 +60,8 @@ struct LogsView: View {
     }
 
     do {
-      content = try readTail(fileURL: file, maxBytes: 48_000)
+      // 默认多读一些，便于“一次性复制”给排障。
+      content = try readTail(fileURL: file, maxBytes: 300_000)
     } catch {
       errorMessage = String(describing: error)
       content = ""
@@ -73,6 +78,8 @@ struct LogsView: View {
       filename = "mcp-sse.log"
     case .collector:
       filename = "collector.log"
+    case .collectorOcr:
+      filename = "collector-ocr.log"
     }
     return logsDir.appendingPathComponent(filename)
   }
@@ -82,6 +89,7 @@ private enum LogSource: String, CaseIterable, Hashable {
   case agent
   case mcp
   case collector
+  case collectorOcr
 }
 
 private func readTail(fileURL: URL, maxBytes: Int) throws -> String {
@@ -96,4 +104,12 @@ private func readTail(fileURL: URL, maxBytes: Int) throws -> String {
   try handle.seek(toOffset: start)
   let data = try handle.readToEnd() ?? Data()
   return String(decoding: data, as: UTF8.self)
+}
+
+private func copyToPasteboard(_ text: String) {
+  let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+  guard !trimmed.isEmpty else { return }
+  let pb = NSPasteboard.general
+  pb.clearContents()
+  pb.setString(trimmed, forType: .string)
 }

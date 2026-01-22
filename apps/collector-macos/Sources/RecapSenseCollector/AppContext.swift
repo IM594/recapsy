@@ -31,7 +31,7 @@ func readFrontmostAppContext(log: (String) -> Void) -> AppContext {
 }
 
 @MainActor
-private func readFocusedWindowTitle(pid: pid_t, log: (String) -> Void) -> String? {
+func readFocusedWindowTitle(pid: pid_t, log: (String) -> Void) -> String? {
   let appElement = AXUIElementCreateApplication(pid)
 
   var focusedWindow: CFTypeRef?

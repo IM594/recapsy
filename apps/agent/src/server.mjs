@@ -10,6 +10,7 @@ import { readJson, requireAuth, sendJson } from "./http.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4832;
+const SERVICE_NAME = "recapsense-agent";
 
 function formatLocalTimestamp(date = new Date()) {
   const year = date.getFullYear();
@@ -108,15 +109,101 @@ function parseLimit(value, fallback = 20) {
   return Math.max(1, Math.min(100, parsed));
 }
 
+function logSessionSeparator() {
+  const line = "=".repeat(78);
+  console.log(`[agent] ${line}`);
+  console.log(`[agent] 启动分割（pid=${process.pid}）`);
+  console.log(`[agent] argv：${process.argv.join(" ")}`);
+  console.log(`[agent] ${line}`);
+}
+
+function parseJsonSafe(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function probeAgentHealthOverTcp({ host, port, timeoutMs = 250 } = {}) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { host, port, path: "/health", method: "GET" },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) return resolve(null);
+          const body = Buffer.concat(chunks).toString("utf8");
+          const json = parseJsonSafe(body);
+          const service = json && typeof json === "object" ? json.service : null;
+          resolve(service);
+        });
+      }
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      resolve(null);
+    });
+
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
+function probeAgentHealthOverSocket({ socketPath, timeoutMs = 250 } = {}) {
+  return new Promise((resolve) => {
+    const req = http.request(
+      { socketPath, path: "/health", method: "GET" },
+      (res) => {
+        const chunks = [];
+        res.on("data", (c) => chunks.push(c));
+        res.on("end", () => {
+          if (res.statusCode < 200 || res.statusCode >= 300) return resolve(null);
+          const body = Buffer.concat(chunks).toString("utf8");
+          const json = parseJsonSafe(body);
+          const service = json && typeof json === "object" ? json.service : null;
+          resolve(service);
+        });
+      }
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      resolve(null);
+    });
+
+    req.on("error", () => resolve(null));
+    req.end();
+  });
+}
+
+async function detectExistingAgent({
+  host,
+  port,
+  socketPath,
+  disableTcp,
+} = {}) {
+  if (!disableTcp) {
+    const service = await probeAgentHealthOverTcp({ host, port });
+    if (service === SERVICE_NAME) return { via: "tcp" };
+  }
+
+  if (socketPath) {
+    const service = await probeAgentHealthOverSocket({ socketPath });
+    if (service === SERVICE_NAME) return { via: "socket" };
+  }
+
+  return null;
+}
+
 async function main() {
   installTimestampedConsole();
   installParentWatchdog("agent");
-  console.log("[agent] session start");
+  logSessionSeparator();
 
   const dataDir = resolveDataDir();
-  const token = await loadOrCreateApiToken(dataDir);
-  const { db, withTransaction } = await openDatabase(dataDir);
-  const store = createStore(db, { withTransaction });
 
   const host = process.env.RECAPSENSE_AGENT_HOST ?? DEFAULT_HOST;
   const disableTcp = process.env.RECAPSENSE_AGENT_DISABLE_TCP === "1";
@@ -125,6 +212,23 @@ async function main() {
     10
   );
   const socketPath = resolveSocketPath(dataDir);
+
+  const existing = await detectExistingAgent({
+    host,
+    port,
+    socketPath,
+    disableTcp,
+  });
+  if (existing) {
+    console.warn(
+      `[agent] 检测到已有 Agent 正在运行（via=${existing.via}），为避免多实例，本进程退出`
+    );
+    return;
+  }
+
+  const token = await loadOrCreateApiToken(dataDir);
+  const { db, withTransaction } = await openDatabase(dataDir);
+  const store = createStore(db, { withTransaction });
 
   // 尽力而为的后台压实任务（frames → chunks），失败不影响主流程。
   const compactionIntervalMs = 30_000;
@@ -292,7 +396,11 @@ async function main() {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
 
       if (url.pathname === "/health") {
-        return sendJson(res, 200, { ok: true });
+        return sendJson(res, 200, {
+          ok: true,
+          service: SERVICE_NAME,
+          pid: process.pid,
+        });
       }
 
       if (!url.pathname.startsWith("/v1/")) {
@@ -355,6 +463,23 @@ async function main() {
         const maxFramesPerRun = parsePositiveInt(body?.maxFramesPerRun, 5000);
         const result = await cleanupEvidence({ retentionDays, maxFramesPerRun });
         return sendJson(res, 200, { result });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/maintenance/reclean-chunks") {
+        const body = await readJson(req);
+        const limit = parsePositiveInt(body?.limit, 500);
+        const dryRun = Boolean(body?.dryRun);
+        const result = store.recleanChunks({ limit, dryRun });
+        return sendJson(res, 200, { result });
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/maintenance/shutdown") {
+        // 关闭 Agent：用于开发期“端口占用/外部进程”场景。
+        // 必须鉴权，避免任意本机进程随意 kill 掉 Agent。
+        sendJson(res, 202, { ok: true });
+        const timer = setTimeout(() => process.exit(0), 80);
+        timer.unref();
+        return;
       }
 
       if (req.method === "POST" && url.pathname === "/v1/danger/delete") {
@@ -437,9 +562,21 @@ async function main() {
     });
   }
 
-  const [tcpOk, socketOk] = await Promise.all([listenTcp(), listenSocket()]);
-  if (!tcpOk && !socketOk) {
+  // 重要：先启动 TCP，再启动 UDS。
+  // 否则在端口被占用（EADDRINUSE）时，第二个实例可能会先 unlink 掉正在使用的 agent.sock，
+  // 造成“主 agent 的 unix socket 被破坏”。
+  const tcpOk = await listenTcp();
+  if (!disableTcp && !tcpOk) {
+    throw new Error(`TCP listener failed (host=${host} port=${port})`);
+  }
+
+  const socketOk = await listenSocket();
+  if (!disableTcp && !tcpOk && !socketOk) {
     throw new Error("No listeners started (tcp + unix socket both failed)");
+  }
+
+  if (disableTcp && !socketOk) {
+    throw new Error("No listeners started (tcp disabled but unix socket failed)");
   }
 }
 

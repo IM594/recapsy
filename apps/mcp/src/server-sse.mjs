@@ -6,6 +6,7 @@ import { createMcpRequestHandler, resolveAgentSocketPath } from "./mcp-core.mjs"
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4833;
+const SERVICE_NAME = "recapsense-mcp-sse";
 
 function formatLocalTimestamp(date = new Date()) {
   const year = date.getFullYear();
@@ -56,6 +57,14 @@ function installParentWatchdog(label) {
   check();
   const timer = setInterval(check, 1000);
   timer.unref();
+}
+
+function logSessionSeparator() {
+  const line = "=".repeat(78);
+  console.log(`[mcp-sse] ${line}`);
+  console.log(`[mcp-sse] 启动分割（pid=${process.pid}）`);
+  console.log(`[mcp-sse] argv：${process.argv.join(" ")}`);
+  console.log(`[mcp-sse] ${line}`);
 }
 
 function parsePositiveInt(value, fallback) {
@@ -150,7 +159,7 @@ function generateSessionId() {
 async function main() {
   installTimestampedConsole();
   installParentWatchdog("mcp-sse");
-  console.log("[mcp-sse] session start");
+  logSessionSeparator();
 
   const host = process.env.RECAPSENSE_MCP_HOST ?? DEFAULT_HOST;
   const port = parsePositiveInt(process.env.RECAPSENSE_MCP_PORT, DEFAULT_PORT);
@@ -174,7 +183,23 @@ async function main() {
       const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
 
       if (req.method === "GET" && url.pathname === "/health") {
-        return sendJson(res, 200, { ok: true });
+        return sendJson(res, 200, {
+          ok: true,
+          service: SERVICE_NAME,
+          pid: process.pid,
+        });
+      }
+
+      if (req.method === "POST" && url.pathname === "/shutdown") {
+        const provided = getTokenFromRequest(req, url);
+        if (provided !== token) {
+          return sendJson(res, 401, { error: "Unauthorized" });
+        }
+
+        sendJson(res, 202, { ok: true });
+        const timer = setTimeout(() => process.exit(0), 80);
+        timer.unref();
+        return;
       }
 
       if (req.method === "GET" && url.pathname === "/sse") {
@@ -259,12 +284,18 @@ async function main() {
     }
   });
 
-  server.on("error", (error) => {
-    console.error("[mcp-sse] server error:", error);
-    process.exitCode = 1;
+  // listen 失败（例如 EADDRINUSE）时必须退出，否则会出现“进程还活着但端口没起来”的假象。
+  server.once("error", (error) => {
+    console.error("[mcp-sse] server listen error:", error);
+    process.exit(1);
   });
 
   server.listen(port, host, () => {
+    // listen 成功后，再把 error 降级为“仅记录”（避免把短暂连接错误当成 fatal）。
+    server.on("error", (error) => {
+      console.error("[mcp-sse] server error:", error);
+    });
+
     console.log(`[mcp-sse] listening: http://${host}:${port}`);
     console.log(`[mcp-sse] sse endpoint: http://${host}:${port}/sse`);
     console.log(`[mcp-sse] agentUrl: ${agentUrl}`);

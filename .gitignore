@@ -21,3 +21,6 @@ build/
 # SwiftPM / Xcode
 .build/
 .swiftpm/
+
+# 临时测试目录（例如 agent/ocr 调试脚本生成）
+.tmp-*/

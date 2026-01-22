@@ -5,14 +5,20 @@ enum ManagedProcessState: Equatable {
   case stopped
   case starting
   case running(pid: Int32)
+  /// 端口/health 检测到“已有外部进程在跑”，当前 App 不重复拉起。
+  case runningExternal
   case exited(code: Int32)
   case failed(message: String)
 }
 
 extension ManagedProcessState {
   var isRunning: Bool {
-    if case .running = self { return true }
-    return false
+    switch self {
+    case .running, .runningExternal:
+      return true
+    default:
+      return false
+    }
   }
 }
 
@@ -39,6 +45,24 @@ final class ManagedProcess: ObservableObject {
 
   init(name: String) {
     self.name = name
+  }
+
+  func markExternalRunning(logFile: URL) {
+    guard process == nil else { return }
+    self.logFile = logFile
+    lastErrorMessage = nil
+    state = .runningExternal
+  }
+
+  func markStoppedIfExternal() {
+    if case .runningExternal = state {
+      state = .stopped
+    }
+  }
+
+  func markFailed(message: String) {
+    lastErrorMessage = message
+    state = .failed(message: message)
   }
 
   func start(spec: ProcessSpec, logsDirectory: URL) {
@@ -68,6 +92,7 @@ final class ManagedProcess: ObservableObject {
       let handle = try FileHandle(forWritingTo: logFile)
       try handle.seekToEnd()
       logHandle = handle
+      appendStartSeparator(handle: handle, spec: spec)
 
       let p = Process()
       p.currentDirectoryURL = URL(fileURLWithPath: spec.workingDirectory)
@@ -147,5 +172,30 @@ final class ManagedProcess: ObservableObject {
   private func teardownLogHandle() {
     try? logHandle?.close()
     logHandle = nil
+  }
+
+  private func appendStartSeparator(handle: FileHandle, spec: ProcessSpec) {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "zh_CN")
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+    let ts = formatter.string(from: Date())
+
+    let line = String(repeating: "=", count: 88)
+    let payload =
+      """
+
+\(line)
+[RecapSense] \(spec.label) 启动：\(ts)
+executable：\(spec.executable)
+args：\(spec.arguments.joined(separator: " "))
+cwd：\(spec.workingDirectory)
+\(line)
+
+"""
+
+    if let data = payload.data(using: .utf8) {
+      handle.write(data)
+    }
   }
 }

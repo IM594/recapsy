@@ -94,6 +94,12 @@ npm run dev:mcp:sse
 npm run dev:collector -- --interval 5
 ```
 
+默认会优先截取“前台窗口”区域（比全屏更干净、更适合 OCR）。如果你遇到某些窗口无法截图/黑屏等兼容性问题，可临时切换到全屏模式：
+
+```bash
+npm run dev:collector -- --capture-mode screen
+```
+
 ### 启动 macOS 菜单栏应用（开发）
 
 > 说明：当前是 SwiftPM 可执行程序形态（先跑通骨架）。后续会补齐 .app 打包/签名/notarize 等发布形态。
@@ -101,6 +107,17 @@ npm run dev:collector -- --interval 5
 ```bash
 npm run dev:app:macos
 ```
+
+#### 日志与排障
+
+菜单栏 App 会把日志写到数据目录下的 `logs/`：
+
+- `logs/agent.log`
+- `logs/mcp-sse.log`
+- `logs/collector.log`
+- `logs/collector-ocr.log`（调试：OCR 全文，体量较大，超过上限会轮转为 `collector-ocr.log.1`）
+
+主窗口「日志」页支持一键复制当前内容，便于你把问题反馈贴出来。
 
 只采集一次（用于验证权限/OCR）：
 

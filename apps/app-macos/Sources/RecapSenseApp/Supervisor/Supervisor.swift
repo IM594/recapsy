@@ -20,6 +20,8 @@ final class Supervisor: ObservableObject {
   private var cancellables: Set<AnyCancellable> = []
   private var hasAutoStarted = false
   private var collectorResumeTask: Task<Void, Never>? = nil
+  private var agentStartTask: Task<Void, Never>? = nil
+  private var mcpStartTask: Task<Void, Never>? = nil
 
   init(autoStart: Bool = true) {
     // 把子进程对象的变更（state/logFile/lastErrorMessage）透传给 Supervisor，
@@ -56,47 +58,111 @@ final class Supervisor: ObservableObject {
   }
 
   func startAgent() {
-    let spec = ProcessSpec(
-      label: "agent",
-      executable: "/usr/bin/env",
-      arguments: ["node", "apps/agent/src/server.mjs"],
-      workingDirectory: config.repoRoot.path,
-      environment: config.baseEnvironment.merging([
-        // 默认同时开启 TCP + UDS（collector 走 TCP；mcp 可选走 UDS）。
-        "RECAPSENSE_AGENT_SOCKET": config.agentSocketEnabled ? "1" : "",
-        // 避免“非正常退出”导致子进程残留占用端口。
-        "RECAPSENSE_PARENT_PID": String(getpid()),
-      ]) { _, new in new }
-    )
+    guard !agent.state.isRunning else { return }
+    guard agentStartTask == nil else { return }
 
-    agent.start(spec: spec, logsDirectory: config.logsDir)
+    agentStartTask = Task { @MainActor in
+      defer { agentStartTask = nil }
+
+      // 先用 /health 探测：避免重复启动第二个 Agent（多实例写同一 DB 风险很高）。
+      let healthUrl = config.agentUrl.appendingPathComponent("health")
+      let existing = await probeHealth(url: healthUrl, timeoutSeconds: 0.35)
+      if existing.ok {
+        if existing.service == nil || existing.service == "recapsense-agent" {
+          agent.markExternalRunning(logFile: config.logsDir.appendingPathComponent("agent.log"))
+          return
+        }
+        agent.markFailed(message: "Agent 端口已被占用：\(existing.service ?? "unknown")")
+        return
+      }
+
+      let spec = ProcessSpec(
+        label: "agent",
+        executable: config.node.executable,
+        arguments: config.node.argumentsPrefix + ["apps/agent/src/server.mjs"],
+        workingDirectory: config.repoRoot.path,
+        environment: config.baseEnvironment.merging([
+          // 默认同时开启 TCP + UDS（collector 走 TCP；mcp 可选走 UDS）。
+          "RECAPSENSE_AGENT_SOCKET": config.agentSocketEnabled ? "1" : "",
+          // 避免“非正常退出”导致子进程残留占用端口。
+          "RECAPSENSE_PARENT_PID": String(getpid()),
+        ]) { _, new in new }
+      )
+
+      agent.start(spec: spec, logsDirectory: config.logsDir)
+    }
   }
 
   func stopAgent() {
+    if case .runningExternal = agent.state {
+      Task { @MainActor in
+        do {
+          let client = try AgentHttpClient()
+          try await client.shutdown()
+          _ = await waitForAgentGone(timeoutSeconds: 2.0)
+          agent.markStoppedIfExternal()
+        } catch {
+          agent.markFailed(message: "无法关闭外部 Agent：\(String(describing: error))")
+        }
+      }
+      return
+    }
+
     agent.stop()
   }
 
   func startMcpSse() {
-    if !agent.state.isRunning {
-      // MCP 需要 token/Agent 可用，开发期先做一个“傻瓜化”兜底：启动 MCP 时自动拉起 Agent。
-      startAgent()
+    guard !mcp.state.isRunning else { return }
+    guard mcpStartTask == nil else { return }
+
+    mcpStartTask = Task { @MainActor in
+      defer { mcpStartTask = nil }
+
+      // 先探测 4833：避免异常退出时端口残留，导致再次启动直接 EADDRINUSE。
+      let healthUrl = config.mcpUrl.appendingPathComponent("health")
+      let existing = await probeHealth(url: healthUrl, timeoutSeconds: 0.35)
+      if existing.ok {
+        if existing.service == nil || existing.service == "recapsense-mcp-sse" {
+          mcp.markExternalRunning(logFile: config.logsDir.appendingPathComponent("mcp-sse.log"))
+          return
+        }
+        mcp.markFailed(message: "MCP 端口已被占用：\(existing.service ?? "unknown")")
+        return
+      }
+
+      if !agent.state.isRunning {
+        // MCP 需要 token/Agent 可用，开发期先做一个“傻瓜化”兜底：启动 MCP 时自动拉起 Agent。
+        startAgent()
+      }
+
+      let spec = ProcessSpec(
+        label: "mcp-sse",
+        executable: config.node.executable,
+        arguments: config.node.argumentsPrefix + ["apps/mcp/src/server-sse.mjs"],
+        workingDirectory: config.repoRoot.path,
+        environment: config.baseEnvironment.merging([
+          "RECAPSENSE_AGENT_SOCKET": config.agentSocketEnabled ? "1" : "",
+          "RECAPSENSE_PARENT_PID": String(getpid()),
+        ]) { _, new in new }
+      )
+
+      mcp.start(spec: spec, logsDirectory: config.logsDir)
     }
-
-    let spec = ProcessSpec(
-      label: "mcp-sse",
-      executable: "/usr/bin/env",
-      arguments: ["node", "apps/mcp/src/server-sse.mjs"],
-      workingDirectory: config.repoRoot.path,
-      environment: config.baseEnvironment.merging([
-        "RECAPSENSE_AGENT_SOCKET": config.agentSocketEnabled ? "1" : "",
-        "RECAPSENSE_PARENT_PID": String(getpid()),
-      ]) { _, new in new }
-    )
-
-    mcp.start(spec: spec, logsDirectory: config.logsDir)
   }
 
   func stopMcpSse() {
+    if case .runningExternal = mcp.state {
+      Task { @MainActor in
+        do {
+          try await shutdownMcpSse()
+          mcp.markStoppedIfExternal()
+        } catch {
+          mcp.markFailed(message: "无法关闭外部 MCP：\(String(describing: error))")
+        }
+      }
+      return
+    }
+
     mcp.stop()
   }
 
@@ -121,6 +187,9 @@ final class Supervisor: ObservableObject {
       String(settings.collector.dedupeThreshold),
       "--ocr-level",
       settings.collector.ocrLevel,
+      // 先默认开启 OCR 全文调试日志：用户可以在“日志”页一键复制发来排障。
+      // 注意：这是高隐私/高体量日志（带轮转），后续可在设置里做开关。
+      "--ocr-log",
       "--ocr-lang",
       settings.collector.ocrLanguages.joined(separator: ","),
       "--thumbnail-width",
@@ -277,14 +346,30 @@ final class Supervisor: ObservableObject {
   private func ensureCollectorInstalled() -> String {
     let fm = FileManager.default
 
-    // 1) 已安装版本存在：直接用
+    // 1) 已安装版本存在：优先用（稳定路径，利于 TCC 授权）
     let installed = config.collectorInstalledBinary
+    let built = config.collectorBuiltBinary
     if fm.fileExists(atPath: installed.path) {
+      // 开发期：如果构建产物比已安装版本更新，则自动覆盖一次，
+      // 避免出现“我改了 collector 代码但 App 仍在跑旧二进制”的困惑。
+      if fm.fileExists(atPath: built.path) {
+        let installedMtime = (try? fm.attributesOfItem(atPath: installed.path)[.modificationDate]) as? Date
+        let builtMtime = (try? fm.attributesOfItem(atPath: built.path)[.modificationDate]) as? Date
+        if let installedMtime, let builtMtime, builtMtime > installedMtime {
+          do {
+            if fm.fileExists(atPath: installed.path) {
+              try fm.removeItem(at: installed)
+            }
+            try fm.copyItem(at: built, to: installed)
+          } catch {
+            // 覆盖失败不影响运行：继续使用已安装版本
+          }
+        }
+      }
       return installed.path
     }
 
     // 2) 尝试从构建产物复制一份到 dataDir/bin（稳定路径）
-    let built = config.collectorBuiltBinary
     do {
       try fm.createDirectory(at: installed.deletingLastPathComponent(), withIntermediateDirectories: true)
       if fm.fileExists(atPath: installed.path) {
@@ -318,5 +403,83 @@ final class Supervisor: ObservableObject {
     }
 
     return false
+  }
+}
+
+// MARK: - Health / shutdown helpers
+
+private struct HealthProbeResult {
+  let ok: Bool
+  let service: String?
+}
+
+@MainActor
+private func probeHealth(url: URL, timeoutSeconds: Double) async -> HealthProbeResult {
+  var request = URLRequest(url: url)
+  request.httpMethod = "GET"
+  request.timeoutInterval = timeoutSeconds
+
+  do {
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else { return HealthProbeResult(ok: false, service: nil) }
+    guard (200..<300).contains(http.statusCode) else { return HealthProbeResult(ok: false, service: nil) }
+
+    // 尽力解析 json：如果 body 不是 json，也不影响我们判断“端口上有人”。
+    if let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      let service = object["service"] as? String
+      return HealthProbeResult(ok: true, service: service)
+    }
+
+    return HealthProbeResult(ok: true, service: nil)
+  } catch {
+    return HealthProbeResult(ok: false, service: nil)
+  }
+}
+
+@MainActor
+private func waitForAgentGone(timeoutSeconds: Double) async -> Bool {
+  let start = Date()
+  let env = ProcessInfo.processInfo.environment
+
+  let baseURL = URL(string: env["RECAPSENSE_AGENT_URL"] ?? "http://127.0.0.1:4832")
+    ?? URL(string: "http://127.0.0.1:4832")!
+  let healthUrl = baseURL.appendingPathComponent("health")
+
+  while Date().timeIntervalSince(start) < timeoutSeconds {
+    let probe = await probeHealth(url: healthUrl, timeoutSeconds: 0.25)
+    if !probe.ok { return true }
+    try? await Task.sleep(nanoseconds: 200_000_000)
+  }
+
+  return false
+}
+
+@MainActor
+private func shutdownMcpSse() async throws {
+  let env = ProcessInfo.processInfo.environment
+
+  let mcpHost = env["RECAPSENSE_MCP_HOST"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let resolvedMcpHost = (mcpHost?.isEmpty == false) ? mcpHost! : "127.0.0.1"
+  let mcpPort = Int(env["RECAPSENSE_MCP_PORT"] ?? "") ?? 4833
+  let baseURL = URL(string: "http://\(resolvedMcpHost):\(mcpPort)") ?? URL(string: "http://127.0.0.1:4833")!
+
+  let repoRoot = URL(fileURLWithPath: env["RECAPSENSE_REPO_ROOT"] ?? FileManager.default.currentDirectoryPath)
+  let dataDir = URL(fileURLWithPath: env["RECAPSENSE_DATA_DIR"] ?? repoRoot.appendingPathComponent(".recapsense").path)
+  let tokenFile = dataDir.appendingPathComponent("secret/token")
+  let raw = try String(contentsOf: tokenFile, encoding: .utf8)
+  let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+
+  let url = baseURL.appendingPathComponent("shutdown")
+  var request = URLRequest(url: url)
+  request.httpMethod = "POST"
+  request.timeoutInterval = 2.0
+  request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+  let (_, response) = try await URLSession.shared.data(for: request)
+  guard let http = response as? HTTPURLResponse else {
+    throw NSError(domain: "Supervisor", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+  }
+  guard (200..<300).contains(http.statusCode) || http.statusCode == 202 else {
+    throw NSError(domain: "Supervisor", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode)"])
   }
 }

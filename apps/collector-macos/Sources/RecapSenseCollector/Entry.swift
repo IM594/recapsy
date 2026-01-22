@@ -5,14 +5,23 @@ import Foundation
 struct CollectorConfig {
   let intervalSeconds: Double
   let dedupeThreshold: Int
+  let captureMode: CaptureMode
   let ocrLevel: OCRLevel
   let ocrLanguages: [String]
+  let ocrLogEnabled: Bool
   let thumbnailEnabled: Bool
   let thumbnailMaxWidth: Int
   let excludedApps: [String]
   let dryRun: Bool
   let once: Bool
   let verbose: Bool
+}
+
+enum CaptureMode: String {
+  /// 优先截取“前台窗口”区域（噪声更少，适合 OCR）。
+  case window
+  /// 直接截取全屏（兼容性最好，但 UI 噪声更大）。
+  case screen
 }
 
 struct Logger {
@@ -109,6 +118,12 @@ struct RecapSenseCollectorMain {
     let logger = Logger(verbose: config.verbose)
     let notices = OneTimeNotice()
 
+    let sep = String(repeating: "=", count: 78)
+    logger.info(sep)
+    logger.info("session start（pid=\(getpid())）")
+    logger.info("argv：\(CommandLine.arguments.joined(separator: " "))")
+    logger.info(sep)
+
     do {
       let dataDir = resolveDataDir()
       let token = try loadToken(dataDir: dataDir)
@@ -126,6 +141,10 @@ struct RecapSenseCollectorMain {
       logger.info("Agent：\(agentURL.absoluteString)")
       logger.info("数据目录：\(dataDir.path)")
       logger.info("采集间隔：\(config.intervalSeconds)s，去重阈值：\(config.dedupeThreshold)")
+      logger.info("截图范围：\(config.captureMode.rawValue)（window=前台窗口优先；screen=全屏）")
+      logger.info("OCR：level=\(config.ocrLevel.rawValue)，languages=\(config.ocrLanguages.joined(separator: ","))")
+      logger.info("缩略图：enabled=\(config.thumbnailEnabled)，maxWidth=\(config.thumbnailMaxWidth)px")
+      logger.info("OCR 全文日志：\(config.ocrLogEnabled ? "enabled" : "disabled")（调试用途，文件：logs/collector-ocr.log）")
       if config.dryRun {
         logger.warn("当前为 dry-run：不会写入 Agent（仅本地打印摘要）")
       }
@@ -153,6 +172,17 @@ struct RecapSenseCollectorMain {
 
       let dedupeState = DedupeState()
       let paths = CollectorPaths(dataDir: dataDir)
+      let ocrLogsDir = dataDir.appendingPathComponent("logs", isDirectory: true)
+      let ocrDebugLog: OcrDebugLog? = {
+        guard config.ocrLogEnabled else { return nil }
+        do {
+          // 体量上限：50MB（超过会轮转为 `.1`）
+          return try OcrDebugLog(logsDir: ocrLogsDir, maxBytes: 50_000_000)
+        } catch {
+          logger.warn("OCR 全文日志初始化失败：\(String(describing: error))")
+          return nil
+        }
+      }()
 
       var tickIndex = 0
       while !(await stop.shouldStop()) {
@@ -170,17 +200,69 @@ struct RecapSenseCollectorMain {
             })
           }
 
-          let appName = context.appName
-          let windowTitle = context.windowTitle
-          let key = "\(appName ?? "")\n\(windowTitle ?? "")"
+          var appName = context.appName
+          var windowTitle = context.windowTitle
+          var captureResult: ScreenCaptureResult? = nil
 
-          if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
-            logger.debug("命中应用黑名单（跳过采集）：\(appName)")
-            await sleepSeconds(config.intervalSeconds)
-            continue
+          if config.captureMode == .window {
+            let decision = captureFrontmostWindowForOCR(
+              excludedApps: config.excludedApps,
+              log: { message in logger.debug(message) }
+            )
+
+            switch decision {
+            case .skippedExcluded:
+              await sleepSeconds(config.intervalSeconds)
+              continue
+            case .failed:
+              // “前台窗口”失败：降级为全屏（尽量保证有数据）。
+              captureResult = captureFullScreenForOCR(log: { message in logger.debug(message) })
+            case .captured(let result):
+              captureResult = result
+              let capturedPid = result.metadata.pid
+
+              if let capturedAppName = result.metadata.appName,
+                 !capturedAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              {
+                appName = capturedAppName
+              } else if let capturedPid, capturedPid != context.pid {
+                // 元数据来自 CGWindowList，但前台 app 的 context 可能滞后；避免错贴。
+                appName = nil
+              }
+
+              if let capturedWindowName = result.metadata.windowTitle,
+                 !capturedWindowName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              {
+                windowTitle = capturedWindowName
+              } else if let capturedPid, capturedPid != context.pid {
+                windowTitle = nil
+              }
+
+              // 额外：如果有辅助功能权限，尝试用 AX 拿到“聚焦窗口标题”，通常更准确。
+              if let capturedPid {
+                let axTitle = await MainActor.run {
+                  readFocusedWindowTitle(pid: capturedPid, log: { message in
+                    notices.once(key: "ax-permission") { logger.warn(message) }
+                  })
+                }
+                if let axTitle, !axTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                  windowTitle = axTitle
+                }
+              }
+            }
+          } else {
+            // screen 模式：会把整个屏幕截下来，所以只能做“前台 app 级别”的黑名单过滤。
+            if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
+              logger.debug("命中应用黑名单（跳过采集）：\(appName)")
+              await sleepSeconds(config.intervalSeconds)
+              continue
+            }
+            captureResult = captureFullScreenForOCR(log: { message in logger.debug(message) })
           }
 
-          guard let screenshot = CGDisplayCreateImage(CGMainDisplayID()) else {
+          let key = "\(appName ?? "")\n\(windowTitle ?? "")"
+
+          guard let screenshot = captureResult?.image else {
             notices.once(key: "screen-recording") {
               if launchSource == "app-macos" {
                 logger.warn(
@@ -194,6 +276,14 @@ struct RecapSenseCollectorMain {
             }
             await sleepSeconds(config.intervalSeconds)
             continue
+          }
+
+          if config.captureMode == .window, captureResult?.source == .screenFallback {
+            notices.once(key: "capture-fallback") {
+              logger.warn(
+                "本次截图降级为全屏：前台窗口/窗口裁剪截图失败或不可用（这会显著增加 OCR 噪声）。如持续出现，可尝试 `--capture-mode screen` 验证兼容性。"
+              )
+            }
           }
 
           let hash = try computeDHash64(from: screenshot)
@@ -218,10 +308,22 @@ struct RecapSenseCollectorMain {
             continue
           }
 
-          let tsMs = Int64(Date().timeIntervalSince1970 * 1000)
+          let now = Date()
+          let tsMs = Int64(now.timeIntervalSince1970 * 1000)
+
+          if let ocrDebugLog {
+            let localTs = formatLocalTimestamp(now)
+            let lines = ocrText.split(separator: "\n").count
+            let header =
+              "[\(localTs)] tsMs=\(tsMs) app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") phash=\(hash.stringValue) ocrLines=\(lines) ocrChars=\(ocrText.count)\n"
+            let body =
+              "----- OCR BEGIN -----\n\(ocrText)\n----- OCR END -----\n\n"
+            ocrDebugLog.append(header + body)
+          }
+
           var thumbnailPath: String? = nil
           if config.thumbnailEnabled {
-            let localDate = formatLocalDate(Date())
+            let localDate = formatLocalDate(now)
             let filename = "\(tsMs)_\(hash.stringValue.replacingOccurrences(of: ":", with: "_")).jpg"
             let rel = paths.thumbnailRelativePath(date: localDate, filename: filename)
             let abs = paths.thumbnailAbsoluteURL(relativePath: rel)
@@ -248,10 +350,19 @@ struct RecapSenseCollectorMain {
 
           if config.dryRun {
             let preview = String(ocrText.prefix(220))
-            logger.info("dry-run frame：app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") text=\(preview)")
+            let lines = ocrText.split(separator: "\n").count
+            logger.info(
+              "dry-run frame：app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocrLines=\(lines) ocrChars=\(ocrText.count) text=\(preview)"
+            )
           } else {
             let id = try await client.ingestFrame(payload)
-            logger.info("写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown")")
+            let lines = ocrText.split(separator: "\n").count
+            var message =
+              "写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocrLines=\(lines) ocrChars=\(ocrText.count)"
+            if config.verbose {
+              message += " title=\(windowTitle ?? "-")"
+            }
+            logger.info(message)
           }
 
           await dedupeState.updateAccepted(key: key, hash: hash, ocrText: ocrText)
@@ -281,8 +392,10 @@ struct RecapSenseCollectorMain {
 private func parseConfig(args: [String]) -> CollectorConfig {
   var intervalSeconds: Double = 5
   var dedupeThreshold: Int = 2
+  var captureMode: CaptureMode = .window
   var ocrLevel: OCRLevel = .fast
   var ocrLanguages: [String] = ["zh-Hans", "en-US"]
+  var ocrLogEnabled = false
   var thumbnailEnabled = true
   var thumbnailMaxWidth = 420
   var excludedApps: [String] = []
@@ -308,6 +421,13 @@ private func parseConfig(args: [String]) -> CollectorConfig {
       } else {
         printUsageAndExit("参数 --dedupe-threshold 需要一个整数")
       }
+    case "--capture-mode":
+      if i + 1 < args.count, let v = CaptureMode(rawValue: args[i + 1]) {
+        captureMode = v
+        i += 2
+      } else {
+        printUsageAndExit("参数 --capture-mode 只能是 window 或 screen")
+      }
     case "--ocr-level":
       if i + 1 < args.count, let v = OCRLevel(rawValue: args[i + 1]) {
         ocrLevel = v
@@ -315,6 +435,9 @@ private func parseConfig(args: [String]) -> CollectorConfig {
       } else {
         printUsageAndExit("参数 --ocr-level 只能是 fast 或 accurate")
       }
+    case "--ocr-log":
+      ocrLogEnabled = true
+      i += 1
     case "--ocr-lang":
       if i + 1 < args.count {
         let raw = args[i + 1]
@@ -377,8 +500,10 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   return CollectorConfig(
     intervalSeconds: intervalSeconds,
     dedupeThreshold: dedupeThreshold,
+    captureMode: captureMode,
     ocrLevel: ocrLevel,
     ocrLanguages: ocrLanguages,
+    ocrLogEnabled: ocrLogEnabled,
     thumbnailEnabled: thumbnailEnabled,
     thumbnailMaxWidth: thumbnailMaxWidth,
     excludedApps: excludedApps,
@@ -410,7 +535,9 @@ private func printUsageAndExit(_ error: String?) -> Never {
     选项：
       --interval <seconds>           截图间隔（默认 5）
       --dedupe-threshold <int>       dHash 汉明距离阈值（默认 2；越大越激进）
+      --capture-mode <window|screen> 截图范围（默认 window；screen 兼容性最好但更嘈杂）
       --ocr-level <fast|accurate>    OCR 模式（默认 fast）
+      --ocr-log                      输出 OCR 全文到日志（调试用途，体量较大，默认关闭）
       --ocr-lang <a,b,c>             OCR 语言（默认 zh-Hans,en-US）
       --no-thumbnails                不写入缩略图文件
       --thumbnail-width <px>         缩略图最大宽度（默认 420）
@@ -432,6 +559,14 @@ private func printUsageAndExit(_ error: String?) -> Never {
 private func sleepSeconds(_ seconds: Double) async {
   let ns = UInt64(max(0, seconds) * 1_000_000_000)
   try? await Task.sleep(nanoseconds: ns)
+}
+
+private func formatLocalTimestamp(_ date: Date) -> String {
+  let formatter = DateFormatter()
+  formatter.locale = Locale(identifier: "zh_CN")
+  formatter.timeZone = TimeZone.current
+  formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+  return formatter.string(from: date)
 }
 
 private func formatLocalDate(_ date: Date) -> String {

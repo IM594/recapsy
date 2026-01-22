@@ -1,11 +1,18 @@
 import Foundation
 
 struct SupervisorConfig: Equatable {
+  struct NodeInvocation: Equatable {
+    var executable: String
+    var argumentsPrefix: [String]
+  }
+
   var repoRoot: URL
   var dataDir: URL
   var agentUrl: URL
+  var mcpUrl: URL
 
   var agentSocketEnabled: Bool
+  var node: NodeInvocation
 
   var logsDir: URL {
     dataDir.appendingPathComponent("logs", isDirectory: true)
@@ -68,13 +75,28 @@ struct SupervisorConfig: Equatable {
     let agentUrl = URL(string: env["RECAPSENSE_AGENT_URL"] ?? "http://127.0.0.1:4832")
       ?? URL(string: "http://127.0.0.1:4832")!
 
+    let mcpHost = env["RECAPSENSE_MCP_HOST"]?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let resolvedMcpHost = (mcpHost?.isEmpty == false) ? mcpHost! : "127.0.0.1"
+    let mcpPort = Int(env["RECAPSENSE_MCP_PORT"] ?? "") ?? 4833
+    let mcpUrl = URL(string: "http://\(resolvedMcpHost):\(mcpPort)") ?? URL(string: "http://127.0.0.1:4833")!
+
     let agentSocketEnabled = (env["RECAPSENSE_AGENT_SOCKET"] ?? "1") != "0"
+
+    // 解析 node 可执行文件：
+    // - 不依赖 PATH 的隐式解析（Finder/LaunchAgent 启动时 PATH 往往不完整）
+    // - 优先使用 Homebrew 的 node（通常更可控，也更可能带齐 SQLite/FTS 能力）
+    // - 允许通过环境变量强制指定
+    var envForSearch = env
+    envForSearch["PATH"] = augmentPath(envForSearch["PATH"])
+    let node = resolveNodeInvocation(env: envForSearch)
 
     return SupervisorConfig(
       repoRoot: repoRoot,
       dataDir: dataDir,
       agentUrl: agentUrl,
-      agentSocketEnabled: agentSocketEnabled
+      mcpUrl: mcpUrl,
+      agentSocketEnabled: agentSocketEnabled,
+      node: node
     )
   }
 }
@@ -132,6 +154,39 @@ private func augmentPath(_ original: String?) -> String {
   }
 
   return deduped.joined(separator: ":")
+}
+
+private func resolveNodeInvocation(env: [String: String]) -> SupervisorConfig.NodeInvocation {
+  let fm = FileManager.default
+
+  if let override = env["RECAPSENSE_NODE_BIN"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+     !override.isEmpty,
+     fm.fileExists(atPath: override)
+  {
+    return SupervisorConfig.NodeInvocation(executable: override, argumentsPrefix: [])
+  }
+
+  // 1) 常见稳定路径优先（比 PATH 更确定）
+  let preferred = [
+    "/opt/homebrew/bin/node", // Apple Silicon Homebrew
+    "/usr/local/bin/node", // Intel Homebrew
+  ]
+  for candidate in preferred where fm.fileExists(atPath: candidate) {
+    return SupervisorConfig.NodeInvocation(executable: candidate, argumentsPrefix: [])
+  }
+
+  // 2) 在 PATH 中查找 node（兜底）
+  if let path = env["PATH"] {
+    for dir in path.split(separator: ":").map(String.init) where !dir.isEmpty {
+      let candidate = URL(fileURLWithPath: dir).appendingPathComponent("node").path
+      if fm.fileExists(atPath: candidate) {
+        return SupervisorConfig.NodeInvocation(executable: candidate, argumentsPrefix: [])
+      }
+    }
+  }
+
+  // 3) 最后兜底：交给 /usr/bin/env 去解析（可能失败，但错误更直观）
+  return SupervisorConfig.NodeInvocation(executable: "/usr/bin/env", argumentsPrefix: ["node"])
 }
 
 private func nvmNodeBinCandidates(home: String) -> [String] {

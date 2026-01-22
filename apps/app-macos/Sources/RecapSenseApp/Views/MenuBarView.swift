@@ -99,7 +99,7 @@ private struct StatusRow: View {
 
   private var color: Color {
     switch state {
-    case .running:
+    case .running, .runningExternal:
       return .green
     case .starting:
       return .yellow
@@ -118,6 +118,8 @@ private struct StatusRow: View {
       return "启动中"
     case .running(let pid):
       return "运行中（pid \(pid)）"
+    case .runningExternal:
+      return "运行中（外部进程）"
     case .exited(let code):
       return "已退出（code \(code)）"
     case .failed(let message):

@@ -50,10 +50,29 @@ function splitLines(text) {
 function countGoodChars(text) {
   // 允许中英文与数字，作为“这行是不是有意义”的粗判断。
   // 注意：使用 Unicode property escapes，需要 Node 16+（当前项目默认 Node 18+）。
-  const matches = String(text ?? "").match(
-    /[\p{Script=Han}\p{Letter}\p{Number}]/gu
-  );
+  const matches = String(text ?? "").match(/[\p{Script=Han}A-Za-z0-9]/gu);
   return matches ? matches.length : 0;
+}
+
+function countWeirdChars(text) {
+  // “怪字符”过滤（适配本项目：中文 + 英文）。
+  // 背景：OCR 在 UI 图标/阴影/低对比度区域，常会生成一些非 ASCII 且非汉字的字符（例如 È、¥）。
+  // 这些内容对检索价值很低，且会严重污染 chunk 文本与搜索结果。
+  const raw = String(text ?? "");
+  if (!raw) return 0;
+
+  const nonAscii = raw.match(/[^\x00-\x7F]/g)?.length ?? 0;
+  const han = raw.match(/\p{Script=Han}/gu)?.length ?? 0;
+  const weird = nonAscii - han;
+  return weird > 0 ? weird : 0;
+}
+
+function normalizeToken(token) {
+  const raw = String(token ?? "").trim();
+  if (!raw) return "";
+  // 中文不做字母化；英文做简化（去掉非字母数字字符，便于匹配 menu token）。
+  if (/\p{Script=Han}/u.test(raw)) return raw;
+  return raw.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
 function looksLikeMenuBarLine(line) {
@@ -82,11 +101,93 @@ function looksLikeMenuBarLine(line) {
 
   let hit = 0;
   for (const t of tokens) {
-    const normalized = t.toLowerCase().replace(/[^a-z]/g, "");
+    const normalized = normalizeToken(t);
     if (menu.has(normalized)) hit += 1;
   }
 
   return hit / tokens.length >= 0.8;
+}
+
+function looksLikeUiChromeLine(line) {
+  const trimmed = String(line ?? "").trim();
+  if (!trimmed) return false;
+
+  const compact = trimmed.replace(/\s+/g, " ");
+  const tokens = compact.split(" ").filter(Boolean);
+
+  // 1) 单词级别的常见 UI 文本（多 App 通用）
+  // 说明：只在“整行就是一个 token”或“极短”时才过滤，尽量避免误杀正文。
+  const uiTokens = new Set([
+    // 英文
+    "file",
+    "edit",
+    "view",
+    "history",
+    "window",
+    "help",
+    "search",
+    "share",
+    "home",
+    "inbox",
+    "favorites",
+    "settings",
+    "preference",
+    "preferences",
+    "today",
+    "yesterday",
+    // 中文
+    "文件",
+    "编辑",
+    "查看",
+    "历史",
+    "窗口",
+    "帮助",
+    "搜索",
+    "分享",
+    "主页",
+    "首页",
+    "收件箱",
+    "收藏",
+    "设置",
+    "偏好设置",
+  ]);
+
+  if (tokens.length === 1) {
+    const t = tokens[0];
+    const normalized = normalizeToken(t);
+    if (uiTokens.has(normalized) && normalized.length <= 16) return true;
+    if (uiTokens.has(t) && t.length <= 8) return true;
+  }
+
+  // 2) “Warp File”、“Edit View”、“Tab Blocks” 这类：短行由 2~3 个 menu/ui token 组成。
+  // 说明：OCR 常把顶栏菜单项拆成多行；用“短行 + token 命中率”来识别。
+  if (tokens.length >= 2 && tokens.length <= 3) {
+    const normalizedTokens = tokens.map(normalizeToken).filter(Boolean);
+    if (normalizedTokens.length === 0) return false;
+
+    // 补充：一些终端/IDE 会在菜单里出现 tab 之类词（尤其 Warp）。
+    const uiExtended = new Set([...uiTokens, "tab", "tabs", "blocks", "drive"]);
+
+    let hit = 0;
+    for (const t of normalizedTokens) {
+      if (uiExtended.has(t)) hit += 1;
+    }
+
+    // 2 token：>=1 命中就很可疑；3 token：>=2 命中。
+    if (tokens.length === 2 && hit >= 1 && compact.length <= 18) return true;
+    if (tokens.length === 3 && hit >= 2 && compact.length <= 24) return true;
+
+    // “AppName File” 的模式：第一段像 app 名（字母/数字/点/短横线），第二段是 menu token。
+    if (tokens.length === 2) {
+      const a = tokens[0];
+      const b = normalizeToken(tokens[1]);
+      if (uiExtended.has(b) && /^[A-Za-z0-9][A-Za-z0-9._-]{1,24}$/.test(a)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function isLowSignalLine(line) {
@@ -96,16 +197,26 @@ function isLowSignalLine(line) {
   const compact = trimmed.replace(/\s+/g, "");
   if (compact.length < 2) return true;
 
+  // OCR 乱码常出现 “****”、“%%%%” 之类符号块；一般不是用户内容。
+  if (/([^\p{Script=Han}A-Za-z0-9\s])\1{3,}/u.test(trimmed)) return true;
+
   if (looksLikeMenuBarLine(trimmed)) return true;
+  if (looksLikeUiChromeLine(trimmed)) return true;
 
   // 过滤掉几乎全是标点/乱码的行（例如 OCR 抖动产生的符号块）。
   const good = countGoodChars(compact);
   const ratio = good / compact.length;
   if (good < 2) return true;
-  if (ratio < 0.33) return true;
+  if (ratio < 0.40) return true;
+
+  // 非 ASCII 且非汉字占比过高（常见 OCR 噪声）
+  const weird = countWeirdChars(trimmed);
+  if (weird >= 2 && weird / trimmed.length > 0.12) return true;
 
   // 纯数字/页码之类的短行一般意义不大。
   if (/^\d{1,4}$/.test(compact)) return true;
+  // UI 计数徽标（例如 99+ / 199+）通常是噪声。
+  if (/^\d{1,4}\+$/.test(compact)) return true;
 
   return false;
 }
@@ -259,6 +370,20 @@ export function createStore(db, { withTransaction }) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
+  const updateChunkTextStmt = db.prepare(
+    `UPDATE chunks
+     SET text = ?, updated_at = ?
+     WHERE id = ? AND deleted_at IS NULL`
+  );
+
+  const listChunksForRecleanStmt = db.prepare(
+    `SELECT id, text, start_ts
+     FROM chunks
+     WHERE deleted_at IS NULL
+     ORDER BY start_ts DESC
+     LIMIT ?`
+  );
+
   const upsertChunkStmt = db.prepare(
     `INSERT INTO chunks (
         id, start_ts, end_ts, app, window_title, text, created_at, updated_at, deleted_at
@@ -273,19 +398,69 @@ export function createStore(db, { withTransaction }) {
         deleted_at=NULL`
   );
 
-  const ftsMode =
-    process.env.RECAPSENSE_DISABLE_FTS === "1" ? null : detectChunksFtsMode(db);
-  const ftsEnabled = ftsMode === "fts5" || ftsMode === "fts4";
+  function isNoSuchModuleError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("no such module: fts5") || message.includes("no such module: fts4");
+  }
 
-  const deleteChunkFtsStmt = ftsEnabled
-    ? db.prepare(`DELETE FROM chunks_fts WHERE chunk_id = ?`)
-    : null;
+  function isNoSuchTableError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.toLowerCase().includes("no such table: chunks_fts");
+  }
 
-  const insertChunkFtsStmt = ftsEnabled
-    ? db.prepare(
-        `INSERT INTO chunks_fts (chunk_id, text, app, window_title) VALUES (?, ?, ?, ?)`
-      )
-    : null;
+  function probeChunksFtsMode(db) {
+    if (process.env.RECAPSENSE_DISABLE_FTS === "1") return null;
+    const mode = detectChunksFtsMode(db);
+    if (mode !== "fts5" && mode !== "fts4") return null;
+
+    // 关键：sqlite_master 里“存在”不等于“可用”。
+    // 当 SQLite 缺少对应模块时，准备/执行任何访问 chunks_fts 的语句都会抛：
+    //   no such module: fts5
+    // 这种情况必须降级，否则 Agent 会直接启动失败。
+    try {
+      // 触发 virtual table 模块加载（空表也没关系）。
+      db.prepare("SELECT 1 FROM chunks_fts LIMIT 1").get();
+      return mode;
+    } catch (error) {
+      if (isNoSuchModuleError(error) || isNoSuchTableError(error)) {
+        console.warn(
+          "[store] chunks_fts exists but is unusable (missing module/table); falling back to LIKE search.",
+          String(error)
+        );
+        return null;
+      }
+      // 其他错误也不应阻塞启动；保守降级并输出告警。
+      console.warn("[store] chunks_fts probe failed (ignored); falling back to LIKE search:", error);
+      return null;
+    }
+  }
+
+  let ftsMode = probeChunksFtsMode(db);
+  let ftsEnabled = ftsMode === "fts5" || ftsMode === "fts4";
+
+  function safePrepareFts(sql) {
+    if (!ftsEnabled) return null;
+    try {
+      return db.prepare(sql);
+    } catch (error) {
+      if (isNoSuchModuleError(error) || isNoSuchTableError(error)) {
+        console.warn("[store] prepare FTS statement failed; falling back to LIKE search.", String(error));
+      } else {
+        console.warn("[store] prepare FTS statement failed (ignored); falling back to LIKE search:", error);
+      }
+      ftsMode = null;
+      ftsEnabled = false;
+      return null;
+    }
+  }
+
+  const deleteChunkFtsStmt = safePrepareFts(
+    `DELETE FROM chunks_fts WHERE chunk_id = ?`
+  );
+
+  const insertChunkFtsStmt = safePrepareFts(
+    `INSERT INTO chunks_fts (chunk_id, text, app, window_title) VALUES (?, ?, ?, ?)`
+  );
 
   const getChunkStmt = db.prepare(
     `SELECT id, start_ts, end_ts, app, window_title, text
@@ -297,7 +472,7 @@ export function createStore(db, { withTransaction }) {
     if (!ftsEnabled) return null;
 
     if (ftsMode === "fts5") {
-      return db.prepare(
+      const stmt = safePrepareFts(
         `SELECT
             c.id,
             c.start_ts,
@@ -312,10 +487,13 @@ export function createStore(db, { withTransaction }) {
          ORDER BY score
          LIMIT ?`
       );
+      if (stmt) return stmt;
+      // 如果 fts5 的 bm25 等语句准备失败，保守降级到 LIKE（ftsEnabled 已被 safePrepareFts 置为 false）。
+      return null;
     }
 
     // fts4/fts3：没有 bm25，先按时间倒序（更符合“回忆”的直觉）。
-    return db.prepare(
+    return safePrepareFts(
       `SELECT
           c.id,
           c.start_ts,
@@ -497,6 +675,72 @@ export function createStore(db, { withTransaction }) {
     // 降级：没有 FTS 时，使用 LIKE 做最小可用搜索（长远会慢，但能先跑通闭环）。
     const pattern = `%${trimmed}%`;
     return searchChunksLikeStmt.all(pattern, pattern, pattern, safeLimit);
+  }
+
+  function recleanChunks({ limit = 500, dryRun = false } = {}) {
+    // 说明：
+    // - 这是一个“维护/修复”能力：当我们升级了 OCR 清洗规则后，历史 chunks 里的文本仍然是旧规则生成的。
+    // - 该函数会在 chunks 表上就地重写 text（并尽力更新 FTS 索引），让搜索结果立刻变干净。
+    // - 默认限制处理数量，避免一次性操作过大；需要全量修复时可以多次调用。
+    const rawLimit = Number(limit);
+    const safeLimit = Number.isFinite(rawLimit)
+      ? Math.max(1, Math.min(50_000, rawLimit))
+      : 500;
+
+    const rows = listChunksForRecleanStmt.all(safeLimit);
+    if (rows.length === 0) {
+      return {
+        processed: 0,
+        updated: 0,
+        skippedEmpty: 0,
+        dryRun: Boolean(dryRun),
+      };
+    }
+
+    let processed = 0;
+    let updated = 0;
+    let skippedEmpty = 0;
+    const now = Date.now();
+
+    const apply = () => {
+      for (const row of rows) {
+        processed += 1;
+
+        const original = String(row.text ?? "");
+        const lines = cleanOcrLinesForChunk(original);
+        const next = normalizeText(lines.join("\n"));
+
+        if (!next) {
+          skippedEmpty += 1;
+          continue;
+        }
+
+        if (next === normalizeText(original)) {
+          continue;
+        }
+
+        updated += 1;
+
+        if (dryRun) continue;
+
+        updateChunkTextStmt.run(next, now, row.id);
+
+        if (ftsEnabled && deleteChunkFtsStmt && insertChunkFtsStmt) {
+          deleteChunkFtsStmt.run(row.id);
+          // 注意：这里不回填 app/window_title（它们仍然在 chunks 表里），FTS 仅用于文本匹配与排序。
+          // 未来如需更精准的 app/title 过滤，可以扩展 API 走结构化字段筛选。
+          insertChunkFtsStmt.run(row.id, next, "", "");
+        }
+      }
+    };
+
+    if (dryRun) {
+      apply();
+      return { processed, updated, skippedEmpty, dryRun: true };
+    }
+
+    withTransaction(db, apply);
+    return { processed, updated, skippedEmpty, dryRun: false };
   }
 
   function getDailySummary(dateStr) {
@@ -795,12 +1039,19 @@ export function createStore(db, { withTransaction }) {
         return;
       }
 
-      // 过滤“几乎每一帧都出现”的短行（侧边栏/菜单/固定 UI 组件），降低碎片与噪声。
-      const threshold = Math.ceil(cleanedPerFrame.length * 0.9);
+      // 过滤“高频出现”的短行（侧边栏/菜单/固定 UI 组件），降低碎片与噪声。
+      // 说明：
+      // - OCR 会有抖动（同一行偶尔识别成不同字符），如果阈值过高（例如 90%），
+      //   很多“稳定 UI 噪声”反而无法被识别为高频行，导致 chunk 文本被顶栏/侧边栏污染。
+      // - 但当帧数太少时（例如只有 1~2 帧），基于“频率”的过滤容易误杀，甚至导致 chunk 变空。
+      //   所以这里仅在帧数足够（>=4）时启用该过滤。
       const frequentShortLines = new Set();
-      for (const [line, count] of lineCounts.entries()) {
-        if (count >= threshold && line.length <= 32) {
-          frequentShortLines.add(line);
+      if (cleanedPerFrame.length >= 4) {
+        const threshold = Math.ceil(cleanedPerFrame.length * 0.7);
+        for (const [line, count] of lineCounts.entries()) {
+          if (count >= threshold && line.length <= 32) {
+            frequentShortLines.add(line);
+          }
         }
       }
 
@@ -1059,6 +1310,7 @@ export function createStore(db, { withTransaction }) {
     upsertChunk,
     getChunk,
     searchChunks,
+    recleanChunks,
     getDailySummary,
     ensureDailySummary,
     compactFramesToChunks,
