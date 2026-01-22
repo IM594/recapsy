@@ -3,6 +3,8 @@ import { promisify } from "util";
 import path from "path";
 import fs from "fs/promises";
 import { getConfig } from "../config";
+import logger from "./logger";
+import type { CommitInfo, DailyCommitData, FileChange } from "./types";
 
 const execAsync = promisify(exec);
 
@@ -11,17 +13,108 @@ export interface GitRepo {
   path: string;
 }
 
+const GIT_FIND_MAX_DEPTH = 3;
+
+const MAX_BUFFER_DIFFS = 1024 * 1024 * 10;
+const MAX_BUFFER_COMMITS = 1024 * 1024 * 50;
+const MAX_BUFFER_COMMIT_DIFF = 1024 * 1024 * 5;
+
+const warnedOnce = new Set<string>();
+
+function asError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  return new Error(typeof error === "string" ? error : JSON.stringify(error));
+}
+
+function warnOnce(key: string, message: string, details?: Record<string, unknown>) {
+  if (warnedOnce.has(key)) return;
+  warnedOnce.add(key);
+  logger.warn(message);
+  if (details) logger.debug("details", details);
+}
+
+const EXCLUDE_SPECS = {
+  logPatch: [
+    // Lock files
+    "':(exclude)package-lock.json'",
+    "':(exclude)pnpm-lock.yaml'",
+    "':(exclude)yarn.lock'",
+    "':(exclude)*.lock'",
+    // Binary / media files
+    "':(exclude)*.svg'",
+    "':(exclude)*.png'",
+    "':(exclude)*.jpg'",
+    "':(exclude)*.jpeg'",
+    "':(exclude)*.gif'",
+    "':(exclude)*.ico'",
+    "':(exclude)*.woff'",
+    "':(exclude)*.woff2'",
+    "':(exclude)*.ttf'",
+    "':(exclude)*.eot'",
+    "':(exclude)*.pdf'",
+    "':(exclude)*.mp3'",
+    "':(exclude)*.mp4'",
+    "':(exclude)*.webp'",
+    // Build output
+    "':(exclude)dist/*'",
+    "':(exclude)build/*'",
+    "':(exclude).next/*'",
+    "':(exclude).nuxt/*'",
+    "':(exclude).output/*'",
+    "':(exclude)out/*'",
+    "':(exclude)node_modules/*'",
+    // Minified / bundled
+    "':(exclude)*.min.js'",
+    "':(exclude)*.min.css'",
+    "':(exclude)*.bundle.js'",
+    "':(exclude)*.bundle.css'",
+    "':(exclude)*.map'",
+    // Generated / auto
+    "':(exclude)*.generated.*'",
+    "':(exclude)*.auto.*'",
+    "':(exclude)*.d.ts'",
+    // Test / coverage / snapshots
+    "':(exclude)*.test.ts'",
+    "':(exclude)*.test.tsx'",
+    "':(exclude)*.spec.ts'",
+    "':(exclude)*.spec.tsx'",
+    "':(exclude)__snapshots__/*'",
+    "':(exclude)coverage/*'",
+    // Config templates
+    "':(exclude).env.example'",
+    "':(exclude).env.local'",
+    "':(exclude).env.*.local'",
+    // Cache / temp
+    "':(exclude).turbo/*'",
+    "':(exclude).cache/*'",
+    "':(exclude).temp/*'",
+  ],
+  showPatch: [
+    "':(exclude)package-lock.json'",
+    "':(exclude)pnpm-lock.yaml'",
+    "':(exclude)yarn.lock'",
+    "':(exclude)*.lock'",
+    "':(exclude)*.min.js'",
+    "':(exclude)*.min.css'",
+    "':(exclude)*.map'",
+    "':(exclude)*.d.ts'",
+    "':(exclude)dist/*'",
+    "':(exclude)build/*'",
+    "':(exclude)node_modules/*'",
+  ],
+} as const;
+
 /**
  * Find all git repositories in the given root directory.
  * Uses `find` command for performance.
  */
 export async function findRepositories(rootDir: string): Promise<GitRepo[]> {
   try {
-    // 验证路径,避免扫描系统根目录或敏感目录
+    // Validate path to avoid scanning system root or sensitive directories.
     const normalizedPath = path.resolve(rootDir);
-    console.log(`[Git] 扫描路径: ${normalizedPath}`);
+    logger.debug("git.findRepositories.rootDir", normalizedPath);
 
-    // 禁止扫描系统根目录和系统关键目录
+    // Refuse scanning system root and key system directories.
     const forbiddenPaths = [
       "/",
       "/System",
@@ -33,23 +126,25 @@ export async function findRepositories(rootDir: string): Promise<GitRepo[]> {
       "/var",
     ];
     if (forbiddenPaths.includes(normalizedPath) || normalizedPath.length < 5) {
-      console.warn(`拒绝扫描系统目录: ${normalizedPath}`);
+      logger.warn(`git.findRepositories: refused to scan forbidden path`);
+      logger.debug("path", normalizedPath);
       return [];
     }
 
-    // 检查目录是否存在
+    // Check directory exists
     try {
       await fs.access(normalizedPath);
-    } catch {
-      console.warn(`目录不存在: ${normalizedPath}`);
+    } catch (error) {
+      logger.warn("git.findRepositories: rootDir does not exist");
+      logger.debug("rootDir", normalizedPath);
+      logger.error("git.findRepositories: fs.access failed", asError(error));
       return [];
     }
 
     // Find directories containing .git
     // -maxdepth 3 to avoid scanning too deep (adjust as needed)
-    const command = `find "${normalizedPath}" -name ".git" -type d -maxdepth 3 -prune 2>/dev/null`;
+    const command = `find "${normalizedPath}" -name ".git" -type d -maxdepth ${GIT_FIND_MAX_DEPTH} -prune 2>/dev/null`;
     const { stdout } = await execAsync(command);
-    console.log("[Git] find 命令执行完成");
 
     const repos = stdout
       .split("\n")
@@ -62,9 +157,10 @@ export async function findRepositories(rootDir: string): Promise<GitRepo[]> {
         };
       });
 
+    logger.debug("git.findRepositories.found", { count: repos.length });
     return repos.sort((a, b) => a.name.localeCompare(b.name));
   } catch (error) {
-    console.error("Error finding repositories:", error);
+    logger.error("git.findRepositories: failed", asError(error));
     return [];
   }
 }
@@ -75,15 +171,18 @@ export async function findRepositories(rootDir: string): Promise<GitRepo[]> {
 export async function getRepoCommits(
   repoPath: string,
   authorPattern: string,
-  since: string = "yesterday", // Default to过去24小时
+  since: string = "yesterday",
   until: string = ""
 ): Promise<string> {
   try {
-    // 先同步最新远端记录（静默执行）
+    // Sync remote refs best-effort (allowed to degrade).
     try {
       await execAsync("git fetch --all --prune", { cwd: repoPath });
     } catch (fetchErr) {
-      // 忽略 fetch 错误
+      warnOnce("git.fetch.failed:" + repoPath, "git.fetch failed (ignored)", {
+        repoPath,
+        error: asError(fetchErr).message,
+      });
     }
 
     // git log -E --author "pattern" --since="since" --pretty=format:"%h - %s (%an)"
@@ -178,8 +277,10 @@ export async function getRepoCommits(
 
     return filteredOutput.trim();
   } catch (error) {
-    // Ignore errors (e.g. not a git repo, no commits)
-    console.warn(`[Git] 获取提交失败: ${error}`);
+    // Return empty string on failure (caller treats it as "no commits").
+    logger.warn("git.getRepoCommits failed; returning empty");
+    logger.error("git.getRepoCommits error", asError(error));
+    logger.debug("params", { repoPath, since, until, hasAuthorPattern: Boolean(authorPattern) });
     return "";
   }
 }
@@ -209,71 +310,14 @@ export async function getRepoDiffs(
     // Better approach: `git log` to find commits, then `git show`? No, too many calls.
     // Use `git log -p` and strict parsing.
 
-    // Add pathspec exclusions to git log directly (efficient)
-    const excludeSpecs = [
-      // Lock files
-      "':(exclude)package-lock.json'",
-      "':(exclude)pnpm-lock.yaml'",
-      "':(exclude)yarn.lock'",
-      "':(exclude)*.lock'",
-      // Binary / media files
-      "':(exclude)*.svg'",
-      "':(exclude)*.png'",
-      "':(exclude)*.jpg'",
-      "':(exclude)*.jpeg'",
-      "':(exclude)*.gif'",
-      "':(exclude)*.ico'",
-      "':(exclude)*.woff'",
-      "':(exclude)*.woff2'",
-      "':(exclude)*.ttf'",
-      "':(exclude)*.eot'",
-      "':(exclude)*.pdf'",
-      "':(exclude)*.mp3'",
-      "':(exclude)*.mp4'",
-      "':(exclude)*.webp'",
-      // Build output
-      "':(exclude)dist/*'",
-      "':(exclude)build/*'",
-      "':(exclude).next/*'",
-      "':(exclude).nuxt/*'",
-      "':(exclude).output/*'",
-      "':(exclude)out/*'",
-      "':(exclude)node_modules/*'",
-      // Minified / bundled
-      "':(exclude)*.min.js'",
-      "':(exclude)*.min.css'",
-      "':(exclude)*.bundle.js'",
-      "':(exclude)*.bundle.css'",
-      "':(exclude)*.map'",
-      // Generated / auto
-      "':(exclude)*.generated.*'",
-      "':(exclude)*.auto.*'",
-      "':(exclude)*.d.ts'",
-      // Test / coverage / snapshots
-      "':(exclude)*.test.ts'",
-      "':(exclude)*.test.tsx'",
-      "':(exclude)*.spec.ts'",
-      "':(exclude)*.spec.tsx'",
-      "':(exclude)__snapshots__/*'",
-      "':(exclude)coverage/*'",
-      // Config templates
-      "':(exclude).env.example'",
-      "':(exclude).env.local'",
-      "':(exclude).env.*.local'",
-      // Cache / temp
-      "':(exclude).turbo/*'",
-      "':(exclude).cache/*'",
-      "':(exclude).temp/*'",
-    ];
-
-    const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} -p --no-color --date=iso-strict ${excludeSpecs.join(
+    const cmd = `git log -E --all ${authorClause} --since="${since}" ${untilClause} -p --no-color --date=iso-strict ${EXCLUDE_SPECS.logPatch.join(
       " "
     )}`;
 
     // Increase buffer size for large diffs
     const { stdout } = await execAsync(cmd, {
       cwd: repoPath,
-      maxBuffer: 1024 * 1024 * 10,
+      maxBuffer: MAX_BUFFER_DIFFS,
     });
 
     // 2. Parse the massive diff output
@@ -367,14 +411,14 @@ export async function getRepoDiffs(
       (a, b) => b.tokenCount - a.tokenCount
     ); // Sort by size descending
   } catch (error) {
-    console.warn(`[Git] 获取 Diff 失败: ${error}`);
+    logger.warn("git.getRepoDiffs failed; returning empty");
+    logger.error("git.getRepoDiffs error", asError(error));
+    logger.debug("params", { repoPath, since, until, hasAuthorPattern: Boolean(authorPattern) });
     return [];
   }
 }
 
 // ============ Year-End Summary Functions ============
-
-import type { CommitInfo, DailyCommitData, FileChange } from "./types";
 
 /**
  * Get commits from multiple repos, grouped by date AND repo.
@@ -411,14 +455,19 @@ export async function getCommitsByDay(
     repoPaths.map(async (repoPath) => {
       const repoName = path.basename(repoPath);
       onProgress?.(repoName, completedCount, totalRepos);
-      console.log(`[Git] Collecting commits from ${repoName}...`);
+
+      logger.debug("git.getCommitsByDay.collecting", { repoName });
 
       try {
         // Fetch latest
         try {
           await execAsync("git fetch --all --prune", { cwd: repoPath });
-        } catch {
-          // Ignore fetch errors
+        } catch (error) {
+          warnOnce("git.fetch.failed:" + repoPath, "git.fetch failed (ignored)", {
+            repoName,
+            repoPath,
+            error: asError(error).message,
+          });
         }
 
         const authorClause = authorPattern ? `--author "${authorPattern}"` : "";
@@ -431,14 +480,15 @@ export async function getCommitsByDay(
 
         const { stdout } = await execAsync(cmd, {
           cwd: repoPath,
-          maxBuffer: 1024 * 1024 * 50, // 50MB buffer for large repos
+          maxBuffer: MAX_BUFFER_COMMITS, // buffer for large repos
         });
 
         if (!stdout.trim()) {
-          console.log(`[Git] ${repoName}: no commits found`);
+          logger.debug("git.getCommitsByDay.noCommits", { repoName });
           return { repoName, commits: [] };
         }
 
+        let warnedCommitStats = false;
         const lines = stdout.trim().split("\n");
         const repoCommits: Array<{
           dateOnly: string;
@@ -486,27 +536,12 @@ export async function getCommitsByDay(
 
             // Get diff if requested
             if (includeDiffs && files.length > 0) {
-              // Build exclusion pathspec
-              const excludeSpecs = [
-                "':(exclude)package-lock.json'",
-                "':(exclude)pnpm-lock.yaml'",
-                "':(exclude)yarn.lock'",
-                "':(exclude)*.lock'",
-                "':(exclude)*.min.js'",
-                "':(exclude)*.min.css'",
-                "':(exclude)*.map'",
-                "':(exclude)*.d.ts'",
-                "':(exclude)dist/*'",
-                "':(exclude)build/*'",
-                "':(exclude)node_modules/*'",
-              ];
-
-              const diffCmd = `git show ${hash} --no-color -p ${excludeSpecs.join(
+              const diffCmd = `git show ${hash} --no-color -p ${EXCLUDE_SPECS.showPatch.join(
                 " "
               )}`;
               const { stdout: diffOut } = await execAsync(diffCmd, {
                 cwd: repoPath,
-                maxBuffer: 1024 * 1024 * 5, // 5MB per commit
+                maxBuffer: MAX_BUFFER_COMMIT_DIFF,
               });
 
               // Truncate diff if too long
@@ -520,8 +555,13 @@ export async function getCommitsByDay(
                 diffContent = diffOut;
               }
             }
-          } catch {
-            // Ignore errors getting file stats
+          } catch (error) {
+            if (!warnedCommitStats) {
+              warnedCommitStats = true;
+              logger.warn("git.getCommitsByDay: failed to collect commit stats/diff (partial data)");
+              logger.error("git.getCommitsByDay commit stats error", asError(error));
+              logger.debug("context", { repoName, repoPath, commit: hash.substring(0, 8) });
+            }
           }
 
           const commitInfo: CommitInfo = {
@@ -536,12 +576,14 @@ export async function getCommitsByDay(
           repoCommits.push({ dateOnly, commitInfo });
         }
 
-        console.log(`[Git] ${repoName}: collected ${lines.length} commits`);
+        logger.debug("git.getCommitsByDay.collected", { repoName, count: lines.length });
         completedCount++;
         onProgress?.(repoName, completedCount, totalRepos);
         return { repoName, commits: repoCommits };
       } catch (error) {
-        console.warn(`[Git] Error collecting from ${repoName}:`, error);
+        logger.warn("git.getCommitsByDay: failed to collect commits; returning empty");
+        logger.error("git.getCommitsByDay error", asError(error));
+        logger.debug("context", { repoName, repoPath, since, until, hasAuthorPattern: Boolean(authorPattern) });
         completedCount++;
         onProgress?.(repoName, completedCount, totalRepos);
         return { repoName, commits: [] };
@@ -595,6 +637,6 @@ export async function getCommitsByDay(
     return a.repo.localeCompare(b.repo);
   });
 
-  console.log(`[Git] Total: ${resultArray.length} date-repo entries`);
+  logger.debug("git.getCommitsByDay.totalEntries", { count: resultArray.length });
   return resultArray;
 }
