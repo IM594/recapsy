@@ -1,6 +1,6 @@
 # TODO
 
-> Last updated: 2026-01-23 01:57
+> Last updated: 2026-01-23 02:40
 >
 > 使用规则：
 > - 每完成一项任务，把它从 `In Progress/Next` 移到 `Done`，并更新上面的时间。
@@ -14,7 +14,7 @@
 - **架构边界**：UI 组件只负责渲染与最少交互胶水；业务逻辑必须下沉到 hook/service（或 domain 层）；尽量减少 props drilling，保持数据流清晰。
 
 ## In Progress（P0，一致性优先）
-- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes、HTTP/query/body keys、summary types、workflow step/phase、ErrorResponse 结构；继续清理散落 magic string（尤其是 query keys / event names / config keys）
+- [ ] C-003 常量集中（shared 包）：统一并集中 API mounts/paths、SSE 事件名、storage keys、error codes、HTTP/query/body keys、summary types、workflow step/phase、date/week utils（ISO week）、ErrorResponse 结构；继续清理散落 magic string（尤其是 query keys / event names / config keys）
 
 ## Next（P0）
 - [ ] C-002 Electron prod 冒烟：`pnpm build:app` 后验证后端可启动、UI 可用、输出目录可写（记录步骤与预期）
@@ -26,6 +26,8 @@
 - [ ] L-002 为 i18n 设计 `t()`/语言包结构（en 先行）
 
 ## Done (recent)
+- [x] Backend patterns 对齐：抽 `backend/src/services/summary-service.ts` / `backend/src/services/summary-regeneration.ts`，`backend/src/api/routes/summary.ts` 只做校验与转发；补齐 `backend/src/api/validators/summary.ts`；统一周计算到 `shared/src/lib/date.ts`
+- [x] 后端日志单一入口：移除 `backend/src/api/server.ts` / `backend/src/lib/workflow-runner.ts` 的直接 `console.*`，统一走 `backend/src/lib/logger.ts`；新增 `DEBUG_HTTP` / `DEBUG_WORKFLOW_PROGRESS` 噪声开关（`backend/src/config/constants.ts`）
 - [x] C-008 ESLint 一致性护栏（frontend）：开启 `no-console`、`no-empty`、`@typescript-eslint/no-floating-promises`（src 范围）；修复存量 floating promises；`src/lib/logger.ts` 允许 console
 - [x] B-004 YearEndGenerator 收敛：workflow step→UI step 映射集中到 `frontend/src/constants/workflow.ts`；phase 判断统一使用 `WORKFLOW_PHASES`；补齐 effect deps / 避免潜在 floating promise
 - [x] B-002 UnifiedBoard 下沉：新增 `frontend/src/hooks/useUnifiedBoard.ts` 承担数据拼装、选择加载、repo 选择；组件只保留渲染与最少交互胶水

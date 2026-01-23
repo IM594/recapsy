@@ -17,6 +17,9 @@ import * as path from "path";
 import { getWorkflowDebugLogPath } from "./paths";
 import { SSE_EVENTS, WORKFLOW_PHASES, WORKFLOW_STEP_IDS, type WorkflowPhase } from "@recaply/shared";
 import logger from "./logger";
+import { ENV_KEYS } from "../config/constants";
+
+const DEBUG_WORKFLOW_PROGRESS = process.env[ENV_KEYS.debugWorkflowProgress] === "1";
 
 export interface RuntimeStatus {
   isRunning: boolean;
@@ -43,6 +46,7 @@ export class WorkflowRunner extends EventEmitter {
   private year: number;
   private logFilePath: string;
   private fileLoggingEnabled = true;
+  private lastConsoleLog: { nodeId: string; percent: number } | null = null;
   private status: RuntimeStatus = {
     isRunning: false,
     progress: 0,
@@ -88,6 +92,23 @@ export class WorkflowRunner extends EventEmitter {
       );
       logger.debug("logFilePath", this.logFilePath);
     }
+  }
+
+  private maybeLogProgressToConsole(nodeId: string, progress: number, message?: string) {
+    const percent = Math.floor(progress);
+
+    const shouldLog =
+      DEBUG_WORKFLOW_PROGRESS ||
+      !this.lastConsoleLog ||
+      this.lastConsoleLog.nodeId !== nodeId ||
+      (percent !== this.lastConsoleLog.percent &&
+        (percent === 0 || percent === 100 || percent % 10 === 0));
+
+    if (!shouldLog) return;
+    this.lastConsoleLog = { nodeId, percent };
+
+    const suffix = message ? ` - ${message}` : "";
+    logger.info(`[WorkflowRunner] Progress: ${nodeId} (${percent}%)${suffix}`);
   }
 
   // ============ Runtime State ============
@@ -157,9 +178,10 @@ export class WorkflowRunner extends EventEmitter {
 
     // Log sparingly to avoid flooding (only every 10% or on complete)
     // But for now detailed log is requested
-    const logMsg = `[WorkflowRunner] Emitting progress: ${nodeId} (${progress}%) - ${message}`;
-    console.log(logMsg);
-    this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
+    this.maybeLogProgressToConsole(nodeId, progress, message);
+    this.logToFile(
+      `[${new Date().toISOString()}] [WorkflowRunner] Progress: ${nodeId} (${Math.floor(progress)}%)${message ? ` - ${message}` : ""}`
+    );
 
     this.emit(SSE_EVENTS.progress, event);
   }
@@ -175,8 +197,8 @@ export class WorkflowRunner extends EventEmitter {
       phase: WORKFLOW_PHASES.complete,
     };
 
-    const logMsg = "[WorkflowRunner] Emitting complete";
-    console.log(logMsg);
+    const logMsg = "[WorkflowRunner] Complete";
+    logger.info(logMsg);
     this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
     this.emit(SSE_EVENTS.complete, {
@@ -202,8 +224,8 @@ export class WorkflowRunner extends EventEmitter {
       error: errorMessage,
     };
 
-    const logMsg = `[WorkflowRunner] Emitting error: ${errorMessage}`;
-    console.error(logMsg);
+    const logMsg = `[WorkflowRunner] Error: ${errorMessage}`;
+    logger.error(logMsg);
     this.logToFile(`[${new Date().toISOString()}] ${logMsg}`);
 
     this.emit(SSE_EVENTS.workflowError, {

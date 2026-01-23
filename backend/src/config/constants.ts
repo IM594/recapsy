@@ -1,6 +1,8 @@
 export const ENV_KEYS = {
   port: "PORT",
   debugStartup: "DEBUG_STARTUP",
+  debugHttp: "DEBUG_HTTP",
+  debugWorkflowProgress: "DEBUG_WORKFLOW_PROGRESS",
   projectsRoot: "PROJECTS_ROOT",
   gitIncludeStat: "GIT_INCLUDE_STAT",
   recaplyEnvPath: "RECAPLY_ENV_PATH",
@@ -13,4 +15,3 @@ export const DEFAULTS = {
   scheduleTimezone: "Asia/Shanghai",
   outputDirectory: "outputs",
 } as const;
-

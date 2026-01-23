@@ -14,68 +14,43 @@ import { errorHandler } from "./middleware/error-handler";
 const config = getConfig();
 
 const DEBUG_STARTUP = process.env[ENV_KEYS.debugStartup] === "1";
+const DEBUG_HTTP = process.env[ENV_KEYS.debugHttp] === "1";
 
 function flag(value: unknown): string {
   return value ? "yes" : "no";
 }
 
 if (DEBUG_STARTUP) {
-  console.log("======================================");
-  console.log("LLM Configuration");
-  console.log("  Fallback:");
-  console.log(
-    `    ${LLM_ENV_KEYS.modelName}: ${
-      process.env[LLM_ENV_KEYS.modelName] || "(unset)"
-    }`
-  );
-  console.log(
-    `    ${LLM_ENV_KEYS.openaiBaseUrl}: ${flag(
-      process.env[LLM_ENV_KEYS.openaiBaseUrl]
-    )}`
-  );
-  console.log(
-    `    ${LLM_ENV_KEYS.openaiApiKey}: ${flag(
-      process.env[LLM_ENV_KEYS.openaiApiKey]
-    )}`
-  );
-  console.log("  Fast (Daily):");
-  console.log(
-    `    ${LLM_ENV_KEYS.modelFast}: ${
-      process.env[LLM_ENV_KEYS.modelFast] || "(fallback)"
-    }`
-  );
-  console.log(
-    `    ${LLM_ENV_KEYS.baseUrlFast}: ${flag(
-      process.env[LLM_ENV_KEYS.baseUrlFast]
-    )}`
-  );
-  console.log("  Balanced (Weekly):");
-  console.log(
-    `    ${LLM_ENV_KEYS.modelBalanced}: ${
-      process.env[LLM_ENV_KEYS.modelBalanced] || "(fallback)"
-    }`
-  );
-  console.log(
-    `    ${LLM_ENV_KEYS.baseUrlBalanced}: ${flag(
-      process.env[LLM_ENV_KEYS.baseUrlBalanced]
-    )}`
-  );
-  console.log("  Quality (Monthly/Yearly):");
-  console.log(
-    `    ${LLM_ENV_KEYS.modelQuality}: ${
-      process.env[LLM_ENV_KEYS.modelQuality] || "(fallback)"
-    }`
-  );
-  console.log(
-    `    ${LLM_ENV_KEYS.baseUrlQuality}: ${flag(
-      process.env[LLM_ENV_KEYS.baseUrlQuality]
-    )}`
-  );
-  console.log("Config Files");
-  console.log(`  envPath: ${config.paths.envPath || "(not found)"}`);
-  console.log(`  configPath: ${config.paths.configPath}`);
-  console.log(`  outputDir: ${config.paths.outputDir}`);
-  console.log("======================================");
+  logger.taskStart("Startup Configuration");
+
+  logger.step("🤖", "LLM Fallback", {
+    [LLM_ENV_KEYS.modelName]: process.env[LLM_ENV_KEYS.modelName] || "(unset)",
+    [LLM_ENV_KEYS.openaiBaseUrl]: flag(process.env[LLM_ENV_KEYS.openaiBaseUrl]),
+    [LLM_ENV_KEYS.openaiApiKey]: flag(process.env[LLM_ENV_KEYS.openaiApiKey]),
+  });
+
+  logger.step("⚡", "LLM Fast (Daily)", {
+    [LLM_ENV_KEYS.modelFast]: process.env[LLM_ENV_KEYS.modelFast] || "(fallback)",
+    [LLM_ENV_KEYS.baseUrlFast]: flag(process.env[LLM_ENV_KEYS.baseUrlFast]),
+  });
+
+  logger.step("⚖️", "LLM Balanced (Weekly)", {
+    [LLM_ENV_KEYS.modelBalanced]: process.env[LLM_ENV_KEYS.modelBalanced] || "(fallback)",
+    [LLM_ENV_KEYS.baseUrlBalanced]: flag(process.env[LLM_ENV_KEYS.baseUrlBalanced]),
+  });
+
+  logger.step("🏔️", "LLM Quality (Monthly/Yearly)", {
+    [LLM_ENV_KEYS.modelQuality]: process.env[LLM_ENV_KEYS.modelQuality] || "(fallback)",
+    [LLM_ENV_KEYS.baseUrlQuality]: flag(process.env[LLM_ENV_KEYS.baseUrlQuality]),
+  });
+
+  logger.step("📄", "Config Files", {
+    envPath: config.paths.envPath || "(not found)",
+    configPath: config.paths.configPath,
+    outputDir: config.paths.outputDir,
+  });
+
+  logger.taskEnd("Startup Configuration");
 }
 
 try {
@@ -95,9 +70,11 @@ app.use(express.json({ limit: "50mb" }));
 
 // Simple request logging (avoid spamming for SSE)
 app.use((req, res, next) => {
-  if (!req.originalUrl.includes("/api/summary/events")) {
+  if (DEBUG_HTTP && !req.originalUrl.includes("/api/summary/events")) {
     const requestId = res.locals.requestId as string | undefined;
-    console.log(`[HTTP] ${req.method} ${req.originalUrl}${requestId ? ` (${requestId})` : ""}`);
+    logger.info(
+      `[HTTP] ${req.method} ${req.originalUrl}${requestId ? ` (${requestId})` : ""}`
+    );
   }
   next();
 });
@@ -125,7 +102,7 @@ export function startServer(port?: number): Promise<number> {
   return new Promise((resolve) => {
     const actualPort = port || PORT;
     server = app.listen(actualPort, () => {
-      console.log(`Server listening at http://localhost:${actualPort}`);
+      logger.info(`Server listening at http://localhost:${actualPort}`);
       resolve(actualPort);
     });
   });
@@ -136,7 +113,7 @@ export function stopServer(): Promise<void> {
   return new Promise((resolve) => {
     if (server) {
       server.close(() => {
-        console.log("Server stopped");
+        logger.info("Server stopped");
         server = null;
         resolve();
       });
