@@ -4,7 +4,7 @@ import logger from "../../lib/logger";
 import { getConfig } from "../../config";
 import { API_ROUTES, QUERY_KEYS } from "@recaply/shared";
 import { asyncHandler } from "../middleware/async-handler";
-import { badRequest } from "../errors";
+import { badRequest } from "../../lib/errors";
 
 const router = Router();
 

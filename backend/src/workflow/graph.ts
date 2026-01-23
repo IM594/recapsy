@@ -15,22 +15,7 @@ import type {
 } from "../lib/types";
 import logger from "../lib/logger";
 import { WorkflowRunner } from "../lib/workflow-runner";
-import { SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
-
-// Helper functions for date calculations
-function getWeekStart(dateStr: string): string {
-  const d = new Date(dateStr);
-  const day = d.getDay();
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d.setDate(diff));
-  return monday.toISOString().slice(0, 10);
-}
-
-function getWeekEnd(weekStart: string): string {
-  const d = new Date(weekStart);
-  d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
-}
+import { getIsoWeekEndYmd, getIsoWeekStartYmd, isYmd, SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
 
 /**
  * Setup Node
@@ -209,7 +194,12 @@ async function fanOutWeeklyNode(
 
   const weeklyGroups = new Map<string, DailySummary[]>();
   for (const daily of dailySummaries) {
-    const weekStart = getWeekStart(daily.date);
+    if (!isYmd(daily.date)) {
+      logger.warn("weekly: invalid daily date; skipping");
+      logger.debug("daily", { date: daily.date, repo: daily.repo, year });
+      continue;
+    }
+    const weekStart = getIsoWeekStartYmd(daily.date);
     if (!weeklyGroups.has(weekStart)) weeklyGroups.set(weekStart, []);
     weeklyGroups.get(weekStart)!.push(daily);
   }
@@ -285,7 +275,7 @@ async function processSingleWeeklyNode(
   try {
     const summary = await processWeeklySummary(
       weekStart,
-      getWeekEnd(weekStart),
+      getIsoWeekEndYmd(weekStart),
       dailies
     );
     await checkpoint.saveWeeklySummary(summary);

@@ -1,7 +1,7 @@
 import type { ErrorRequestHandler } from "express";
 import { ERROR_CODES } from "@recaply/shared";
 import logger from "../../lib/logger";
-import { isAppError } from "../errors";
+import { isAppError } from "../../lib/errors";
 
 function safeString(value: unknown): string {
   if (typeof value === "string" && value.trim()) return value;

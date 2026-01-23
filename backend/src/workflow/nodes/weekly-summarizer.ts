@@ -7,28 +7,7 @@ import { WorkflowState } from "../state";
 import { SummaryStore } from "../../lib/summary-store";
 import type { WeeklySummary, DailySummary } from "../../lib/types";
 import logger from "../../lib/logger";
-import { SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
-
-/**
- * Get the Monday of the week for a given date
- */
-function getWeekStart(dateStr: string): string {
-  const d = new Date(dateStr);
-  const day = d.getDay();
-  // If Sunday (0), subtract 6 days. Else subtract day-1
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-  const monday = new Date(d.setDate(diff));
-  return monday.toISOString().slice(0, 10);
-}
-
-/**
- * Get the Sunday of the week for a given start date
- */
-function getWeekEnd(weekStart: string): string {
-  const d = new Date(weekStart);
-  d.setDate(d.getDate() + 6);
-  return d.toISOString().slice(0, 10);
-}
+import { getIsoWeekEndYmd, getIsoWeekStartYmd, isYmd, SUMMARY_TYPES, WORKFLOW_STEP_IDS } from "@recaply/shared";
 
 /**
  * Process weekly summary from daily summaries
@@ -103,7 +82,12 @@ export async function processAllWeeklySummaries(
   const weeklyGroups = new Map<string, DailySummary[]>();
 
   for (const daily of dailySummaries) {
-    const weekStart = getWeekStart(daily.date);
+    if (!isYmd(daily.date)) {
+      logger.warn("weekly: invalid daily date; skipping");
+      logger.debug("daily", { date: daily.date, repo: daily.repo });
+      continue;
+    }
+    const weekStart = getIsoWeekStartYmd(daily.date);
     if (!weeklyGroups.has(weekStart)) {
       weeklyGroups.set(weekStart, []);
     }
@@ -124,7 +108,7 @@ export async function processAllWeeklySummaries(
     const chunkResults = await Promise.allSettled(
       chunk.map(async (weekStart) => {
         const dailies = weeklyGroups.get(weekStart)!;
-        const weekEnd = getWeekEnd(weekStart);
+        const weekEnd = getIsoWeekEndYmd(weekStart);
 
         processingIndex++; // Increment for each item as we schedule it
         const currentIndex = processingIndex;
@@ -199,7 +183,12 @@ export async function weeklySummarizerNode(
   // Check which weeks we already have
   const weeklyGroups = new Map<string, DailySummary[]>();
   for (const daily of dailySummaries) {
-    const weekStart = getWeekStart(daily.date);
+    if (!isYmd(daily.date)) {
+      logger.warn("weekly: invalid daily date; skipping");
+      logger.debug("daily", { date: daily.date, repo: daily.repo });
+      continue;
+    }
+    const weekStart = getIsoWeekStartYmd(daily.date);
     if (!weeklyGroups.has(weekStart)) weeklyGroups.set(weekStart, []);
     weeklyGroups.get(weekStart)!.push(daily);
   }
@@ -236,7 +225,7 @@ export async function weeklySummarizerNode(
       const percent = Math.floor((completed / total) * 100);
 
       runner.updateProgress(
-        "weekly_summarizer",
+        WORKFLOW_STEP_IDS.weeklySummarizer,
         percent,
         `Processing Week ${weekStart} (${completed}/${total})...`
       );
