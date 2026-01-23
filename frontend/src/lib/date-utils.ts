@@ -76,17 +76,6 @@ export function toMonthString(date: Date): string {
 }
 
 /**
- * Get ISO week number for the given date.
- * ISO weeks start on Monday and week 1 is the week with the year's first Thursday.
- */
-export function getIsoWeekNumber(date: Date): number {
-  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-}
-
-/**
  * Calculate date range for different summary types
  */
 export function getDateRangeForType(

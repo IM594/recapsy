@@ -4,10 +4,9 @@ import { toast } from "sonner";
 import { COPY } from "@/constants/copy";
 import { isAbortError } from "@/lib/lifecycle";
 import { logError } from "@/lib/logger";
-import { getIsoWeekNumber } from "@/lib/date-utils";
 import { useSummary } from "@/hooks/useSummary";
 import { regenerateSummary } from "@/services/summary";
-import { SUMMARY_TYPES } from "@recaply/shared";
+import { getIsoWeekNumber, SUMMARY_TYPES } from "@recaply/shared";
 
 import type {
   DailyInfo,
@@ -106,7 +105,7 @@ export function useUnifiedBoard(year: number) {
               weekEnd: w.weekEnd,
               hasSummary: Boolean(w.summary),
               title: COPY.unifiedBoard.weekTitle(
-                getIsoWeekNumber(new Date(w.weekStart))
+                getIsoWeekNumber(w.weekStart)
               ),
             }))
             .sort((a, b) => a.weekStart.localeCompare(b.weekStart)),
