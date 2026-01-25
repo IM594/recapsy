@@ -1,4 +1,5 @@
 import http from "node:http";
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -93,6 +94,107 @@ async function removeFileIfExists(filePath) {
     if (error && typeof error === "object" && error.code === "ENOENT") return;
     throw error;
   }
+}
+
+function isPidAlive(pid) {
+  const value = Number(pid);
+  if (!Number.isFinite(value) || value <= 1) return false;
+  try {
+    process.kill(value, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && error.code === "ESRCH") return false;
+    // EPERM：存在但无权限；保守视为仍在运行。
+    return true;
+  }
+}
+
+function parsePidFromLockPayload(raw) {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return null;
+
+  const json = parseJsonSafe(trimmed);
+  if (json && typeof json === "object") {
+    const pid = Number(json.pid);
+    if (Number.isFinite(pid)) return pid;
+  }
+
+  const pid = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(pid)) return pid;
+  return null;
+}
+
+async function acquireDataDirLock({ dataDir, label }) {
+  const lockFile = path.join(dataDir, "run", `${label}.lock`);
+  await fs.mkdir(path.dirname(lockFile), { recursive: true });
+
+  const payload = JSON.stringify(
+    { pid: process.pid, service: SERVICE_NAME, startedAt: Date.now() },
+    null,
+    2
+  );
+
+  try {
+    await fs.writeFile(lockFile, `${payload}\n`, { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if (!(error && typeof error === "object" && error.code === "EEXIST")) {
+      throw error;
+    }
+
+    const existingRaw = await fs.readFile(lockFile, "utf8").catch(() => "");
+    const existingPid = parsePidFromLockPayload(existingRaw);
+
+    if (existingPid != null && isPidAlive(existingPid)) {
+      throw new Error(
+        `[agent] 检测到已有 Agent 正在使用同一数据目录（pid=${existingPid} lock=${lockFile}），为避免多实例，本进程退出`
+      );
+    }
+
+    // 锁文件存在但 pid 不存活：视为遗留，清理后重试一次。
+    await removeFileIfExists(lockFile);
+    await fs.writeFile(lockFile, `${payload}\n`, { encoding: "utf8", flag: "wx" });
+  }
+
+  const cleanupSync = () => {
+    try {
+      fsSync.unlinkSync(lockFile);
+    } catch {
+      // ignore
+    }
+  };
+
+  process.once("exit", cleanupSync);
+  process.once("SIGINT", () => {
+    cleanupSync();
+    process.exit(0);
+  });
+  process.once("SIGTERM", () => {
+    cleanupSync();
+    process.exit(0);
+  });
+
+  return { lockFile };
+}
+
+async function writeAgentRunInfo({ dataDir, host, port, disableTcp, socketPath, tcpOk, socketOk }) {
+  const filePath = path.join(dataDir, "run", "agent.json");
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+  const tcpUrl = tcpOk && !disableTcp ? `http://${host}:${port}` : null;
+
+  const payload = {
+    service: SERVICE_NAME,
+    pid: process.pid,
+    dataDir,
+    startedAt: new Date().toISOString(),
+    listeners: {
+      tcp: tcpOk && !disableTcp ? { host, port, url: tcpUrl } : null,
+      socket: socketOk && socketPath ? { path: socketPath } : null,
+    },
+  };
+
+  await fs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return filePath;
 }
 
 function formatLocalDate(date) {
@@ -213,6 +315,19 @@ async function main() {
   );
   const socketPath = resolveSocketPath(dataDir);
 
+  // 单实例锁（按 dataDir）：避免多个 Agent 同时写同一个 SQLite（风险极高）。
+  try {
+    await acquireDataDirLock({ dataDir, label: "agent" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // dataDir 已被占用：视为“正常退出”，不标记 fatal。
+    if (message.includes("同一数据目录")) {
+      console.warn(message);
+      return;
+    }
+    throw error;
+  }
+
   const existing = await detectExistingAgent({
     host,
     port,
@@ -227,36 +342,7 @@ async function main() {
   }
 
   const token = await loadOrCreateApiToken(dataDir);
-  const { db, withTransaction } = await openDatabase(dataDir);
-  const store = createStore(db, { withTransaction });
-
-  // 尽力而为的后台压实任务（frames → chunks），失败不影响主流程。
-  const compactionIntervalMs = 30_000;
-  const compactionTimer = setInterval(() => {
-    try {
-      const { createdChunks } = store.compactFramesToChunks();
-      if (createdChunks > 0) {
-        console.log(`[agent] compacted frames -> ${createdChunks} chunks`);
-      }
-    } catch (error) {
-      console.warn("[agent] compaction error:", error);
-    }
-  }, compactionIntervalMs);
-  compactionTimer.unref();
-
-  // 尽力而为的日总结生成（纯文本 heuristic），失败不影响主流程。
-  const dailySummaryIntervalMs = 10 * 60_000;
-  const dailySummaryTimer = setInterval(() => {
-    try {
-      const today = formatLocalDate(new Date());
-      const yesterday = formatLocalDate(new Date(Date.now() - 24 * 60 * 60_000));
-      store.ensureDailySummary(today);
-      store.ensureDailySummary(yesterday);
-    } catch (error) {
-      console.warn("[agent] daily summary error:", error);
-    }
-  }, dailySummaryIntervalMs);
-  dailySummaryTimer.unref();
+  let store = null;
 
   function resolveSafePath(maybeRelativePath) {
     const raw = String(maybeRelativePath ?? "").trim();
@@ -385,8 +471,6 @@ async function main() {
     timer.unref();
   };
 
-  scheduleEvidenceCleanup();
-
   console.log(`[agent] dataDir: ${dataDir}`);
   console.log(`[agent] tokenFile: ${dataDir}/secret/token`);
   console.log(`[agent] tokenHint: ****${token.slice(-6)}`);
@@ -408,6 +492,10 @@ async function main() {
       }
 
       requireAuth(req, token);
+
+      if (!store) {
+        return sendJson(res, 503, { error: "Agent is starting" });
+      }
 
       if (req.method === "GET" && url.pathname === "/v1/settings") {
         const settings = store.getSettings();
@@ -445,6 +533,9 @@ async function main() {
       if (req.method === "POST" && url.pathname === "/v1/ingest/frame") {
         const body = await readJson(req);
         const result = store.ingestFrame(body ?? {});
+        if (result && result.skipped) {
+          return sendJson(res, 202, { frame: result });
+        }
         return sendJson(res, 200, { frame: result });
       }
 
@@ -578,9 +669,44 @@ async function main() {
   if (disableTcp && !socketOk) {
     throw new Error("No listeners started (tcp disabled but unix socket failed)");
   }
+
+  // listeners 已就绪：再打开 DB 与启动后台任务（避免“端口冲突时仍抢占 DB”）。
+  const { db, withTransaction } = await openDatabase(dataDir);
+  store = createStore(db, { withTransaction });
+
+  // 尽力而为的后台压实任务（frames → chunks），失败不影响主流程。
+  const compactionIntervalMs = 30_000;
+  const compactionTimer = setInterval(() => {
+    try {
+      const { createdChunks } = store.compactFramesToChunks();
+      if (createdChunks > 0) {
+        console.log(`[agent] compacted frames -> ${createdChunks} chunks`);
+      }
+    } catch (error) {
+      console.warn("[agent] compaction error:", error);
+    }
+  }, compactionIntervalMs);
+  compactionTimer.unref();
+
+  // 尽力而为的日总结生成（纯文本 heuristic），失败不影响主流程。
+  const dailySummaryIntervalMs = 10 * 60_000;
+  const dailySummaryTimer = setInterval(() => {
+    try {
+      const today = formatLocalDate(new Date());
+      const yesterday = formatLocalDate(new Date(Date.now() - 24 * 60 * 60_000));
+      store.ensureDailySummary(today);
+      store.ensureDailySummary(yesterday);
+    } catch (error) {
+      console.warn("[agent] daily summary error:", error);
+    }
+  }, dailySummaryIntervalMs);
+  dailySummaryTimer.unref();
+
+  scheduleEvidenceCleanup();
+  await writeAgentRunInfo({ dataDir, host, port, disableTcp, socketPath, tcpOk, socketOk });
 }
 
 main().catch((error) => {
   console.error("[agent] fatal:", error);
-  process.exitCode = 1;
+  process.exit(1);
 });

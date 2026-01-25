@@ -40,6 +40,31 @@ function normalizeText(text) {
     .trim();
 }
 
+function normalizeForExcludedAppMatch(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+function isExcludedApp(appName, excludedApps) {
+  const normalized = normalizeForExcludedAppMatch(appName);
+  if (!normalized) return false;
+
+  for (const raw of excludedApps ?? []) {
+    const rule = normalizeForExcludedAppMatch(raw);
+    if (!rule) continue;
+    if (rule === normalized) return true;
+
+    // 用户友好：允许用“部分关键词”匹配（例如 `chrome` 命中 `Google Chrome`）。
+    // 为避免误杀，要求规则长度至少 3。
+    if (rule.length >= 3 && normalized.includes(rule)) return true;
+  }
+
+  return false;
+}
+
 function splitLines(text) {
   return String(text ?? "")
     .split("\n")
@@ -604,6 +629,12 @@ export function createStore(db, { withTransaction }) {
     const ocrText = normalizeText(frame.ocrText ?? "");
     if (!ocrText) {
       throw new Error("ocrText is required");
+    }
+
+    // 最终兜底：Agent 写库前再次应用“应用黑名单”，确保任何 collector 漏判也不会写入。
+    const settings = getSettings();
+    if (frame.app && isExcludedApp(frame.app, settings.collector.excludedApps)) {
+      return { skipped: true, reason: "excluded-app" };
     }
 
     const info = insertFrameStmt.run(

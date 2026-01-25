@@ -77,6 +77,56 @@ struct SettingsView: View {
         }
 
         Section("采集（Collector）") {
+          LabeledContent("采集开关（本机）") {
+            Text(supervisor.collectorEnabled ? "已开启" : "已关闭")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          LabeledContent("托管 PID（本 App 拉起）") {
+            Text(supervisor.collectorDiagnostics.managedPid.map(String.init) ?? "—")
+              .font(.caption)
+              .textSelection(.enabled)
+          }
+
+          LabeledContent("锁文件 PID（dataDir/run/collector.lock）") {
+            Text(supervisor.collectorDiagnostics.lockPid.map(String.init) ?? "—")
+              .font(.caption)
+              .textSelection(.enabled)
+          }
+
+          LabeledContent("检测到的 collector 实例数") {
+            Text(String(supervisor.collectorDiagnostics.relatedCount))
+              .font(.caption)
+              .textSelection(.enabled)
+          }
+
+          if supervisor.collectorDiagnostics.hasMultipleInstances {
+            Text("警告：检测到多个 collector 实例。为避免黑名单/日志错乱，App 会自动尝试修复。")
+              .font(.caption)
+              .foregroundStyle(.red)
+          }
+
+          if supervisor.collectorDiagnostics.autoFixing {
+            Text("正在自动修复 collector 多实例/残留进程…")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else if let message = supervisor.collectorDiagnostics.lastAutoFixMessage {
+            Text(message)
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          if !supervisor.collectorDiagnostics.processes.isEmpty {
+            ForEach(supervisor.collectorDiagnostics.processes) { proc in
+              Text("pid \(proc.pid)：\(proc.path)")
+                .font(.caption)
+                .textSelection(.enabled)
+            }
+          }
+
+          Divider()
+
           Stepper(
             value: $draft.collector.intervalSeconds,
             in: 0.5...60,

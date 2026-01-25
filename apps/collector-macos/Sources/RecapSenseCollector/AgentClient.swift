@@ -16,6 +16,12 @@ struct IngestFrameRequestBody: Encodable {
   let thumbnailPath: String?
 }
 
+struct IngestFrameResult: Equatable {
+  let id: Int64?
+  let skipped: Bool
+  let reason: String?
+}
+
 enum AgentClientError: Error, CustomStringConvertible {
   case invalidURL(String)
   case requestFailed(String)
@@ -46,7 +52,7 @@ final class AgentClient {
     self.session = URLSession(configuration: sessionConfig)
   }
 
-  func ingestFrame(_ body: IngestFrameRequestBody) async throws -> Int64? {
+  func ingestFrame(_ body: IngestFrameRequestBody) async throws -> IngestFrameResult {
     let url = config.baseURL.appendingPathComponent("/v1/ingest/frame")
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
@@ -63,15 +69,24 @@ final class AgentClient {
       throw AgentClientError.serverError(status: status, message: message)
     }
 
-    // 返回形如：{ frame: { id: 123 } }
+    // 返回形如：
+    // - 成功：{ frame: { id: 123 } }
+    // - 被 Agent 丢弃：HTTP 202 { frame: { skipped: true, reason: "excluded-app" } }
     struct ResponseBody: Decodable {
-      struct Frame: Decodable { let id: Int64 }
+      struct Frame: Decodable {
+        let id: Int64?
+        let skipped: Bool?
+        let reason: String?
+      }
       let frame: Frame?
     }
-    if let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data) {
-      return decoded.frame?.id
-    }
-    return nil
+
+    let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data)
+    let frame = decoded?.frame
+
+    // 兼容：如果 body 无法解析，但 status=202，我们仍视为 skipped。
+    let skipped = frame?.skipped ?? (status == 202)
+    return IngestFrameResult(id: frame?.id, skipped: skipped, reason: frame?.reason)
   }
 
   private func decodeJsonErrorMessage(from data: Data) -> String? {
@@ -80,4 +95,3 @@ final class AgentClient {
     return decoded.error
   }
 }
-

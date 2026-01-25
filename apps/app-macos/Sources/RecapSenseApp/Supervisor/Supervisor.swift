@@ -16,12 +16,21 @@ final class Supervisor: ObservableObject {
   @Published var config = SupervisorConfig.loadFromEnvironment()
   @Published private(set) var settings: RecapSenseSettings = .defaults
   @Published private(set) var collectorPauseState: CollectorPauseState = .none
+  @Published var collectorEnabled: Bool = true
+  @Published private(set) var collectorDiagnostics = CollectorProcessDiagnostics()
 
   private var cancellables: Set<AnyCancellable> = []
   private var hasAutoStarted = false
   private var collectorResumeTask: Task<Void, Never>? = nil
   private var agentStartTask: Task<Void, Never>? = nil
   private var mcpStartTask: Task<Void, Never>? = nil
+  private var collectorDiagnosticsTask: Task<Void, Never>? = nil
+  private var collectorAutoRestartTask: Task<Void, Never>? = nil
+  private var collectorStabilityTask: Task<Void, Never>? = nil
+  private var collectorAutoRestartSuppressed = false
+  private var collectorAutoRestartAttempt = 0
+  private var collectorFixTask: Task<Void, Never>? = nil
+  private var collectorEverStarted = false
 
   init(autoStart: Bool = true) {
     // 把子进程对象的变更（state/logFile/lastErrorMessage）透传给 Supervisor，
@@ -33,6 +42,14 @@ final class Supervisor: ObservableObject {
         }
         .store(in: &cancellables)
     }
+
+    collector.$state
+      .sink { [weak self] _ in
+        self?.handleCollectorStateChange()
+      }
+      .store(in: &cancellables)
+
+    startCollectorDiagnosticsLoop()
 
     if autoStart {
       // 约定：当前版本默认“启动后端 + 启动采集”，让安装后体验尽量接近“开箱即用”。
@@ -53,6 +70,176 @@ final class Supervisor: ObservableObject {
         startCollector()
       } else {
         // Agent 启动失败/过慢：仍然让 UI 可用，用户可以手动重试。
+      }
+    }
+  }
+
+  private func startCollectorDiagnosticsLoop() {
+    collectorDiagnosticsTask?.cancel()
+    collectorDiagnosticsTask = Task { @MainActor in
+      while !Task.isCancelled {
+        refreshCollectorDiagnosticsNow()
+        ensureCollectorProcessIntent()
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+      }
+    }
+  }
+
+  private func refreshCollectorDiagnosticsNow() {
+    let managedPid: Int32?
+    if case .running(let pid) = collector.state {
+      managedPid = pid
+    } else {
+      managedPid = nil
+    }
+
+    let lockFile = config.dataDir.appendingPathComponent("run/collector.lock")
+    let lockPid = ProcessInspector.readPidFromLockFile(lockFile)
+    let processes = ProcessInspector.collectorProcesses(repoRoot: config.repoRoot, dataDir: config.dataDir)
+
+    collectorDiagnostics.lastScanAt = Date()
+    collectorDiagnostics.managedPid = managedPid
+    collectorDiagnostics.lockPid = lockPid
+    collectorDiagnostics.processes = processes
+  }
+
+  private func handleCollectorStateChange() {
+    refreshCollectorDiagnosticsNow()
+
+    switch collector.state {
+    case .running(let pid):
+      collectorAutoRestartTask?.cancel()
+      collectorAutoRestartTask = nil
+      collectorDiagnostics.autoRestarting = false
+      collectorDiagnostics.nextAutoRestartAt = nil
+      scheduleCollectorStabilityReset(pid: pid)
+    case .stopped, .exited, .failed:
+      if shouldAutoRestartCollector() {
+        scheduleCollectorAutoRestart()
+      } else {
+        collectorAutoRestartTask?.cancel()
+        collectorAutoRestartTask = nil
+        collectorDiagnostics.autoRestarting = false
+        collectorDiagnostics.nextAutoRestartAt = nil
+      }
+    case .starting, .runningExternal:
+      break
+    }
+  }
+
+  private func shouldAutoRestartCollector() -> Bool {
+    if collectorAutoRestartSuppressed { return false }
+    if !collectorEverStarted { return false }
+    if !collectorEnabled { return false }
+    if collectorPauseState != .none { return false }
+    return true
+  }
+
+  private func scheduleCollectorAutoRestart() {
+    collectorAutoRestartTask?.cancel()
+
+    collectorAutoRestartAttempt += 1
+    let backoffSeconds = min(60.0, pow(2.0, Double(max(0, collectorAutoRestartAttempt - 1))))
+
+    collectorDiagnostics.autoRestarting = true
+    collectorDiagnostics.autoRestartAttempt = collectorAutoRestartAttempt
+    collectorDiagnostics.nextAutoRestartAt = Date().addingTimeInterval(backoffSeconds)
+
+    collectorAutoRestartTask = Task { @MainActor in
+      let ns = UInt64(backoffSeconds * 1_000_000_000)
+      try? await Task.sleep(nanoseconds: ns)
+      if Task.isCancelled { return }
+
+      collectorDiagnostics.autoRestarting = false
+      collectorDiagnostics.nextAutoRestartAt = nil
+
+      guard shouldAutoRestartCollector() else { return }
+      guard !collector.state.isRunning else { return }
+
+      startCollector()
+    }
+  }
+
+  private func scheduleCollectorStabilityReset(pid: Int32) {
+    collectorStabilityTask?.cancel()
+    collectorStabilityTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 30_000_000_000)
+      if Task.isCancelled { return }
+      guard collector.state == .running(pid: pid) else { return }
+
+      collectorAutoRestartAttempt = 0
+      collectorDiagnostics.autoRestartAttempt = 0
+      collectorDiagnostics.nextAutoRestartAt = nil
+    }
+  }
+
+  private func ensureCollectorProcessIntent() {
+    // 语义：
+    // - collectorEnabled=false：用户期望“完全不采集”（即便有外部 collector，也应被视为异常）。
+    // - collectorPauseState!=none：用户期望“暂时不采集”（应确保没有 collector 在跑）。
+    // - enabled 且未暂停：只允许 1 个 collector 实例（否则会导致黑名单/日志错乱）。
+    guard collectorFixTask == nil else { return }
+
+    let processes = collectorDiagnostics.processes
+    if processes.isEmpty { return }
+
+    let shouldHaveNoCollector = (!collectorEnabled) || (collectorPauseState != .none)
+    if shouldHaveNoCollector {
+      let pids = processes.map(\.pid)
+      collectorFixTask = Task { @MainActor in
+        defer { collectorFixTask = nil }
+        collectorDiagnostics.autoFixing = true
+        defer { collectorDiagnostics.autoFixing = false }
+
+        for pid in pids {
+          _ = await ProcessInspector.terminate(pid: pid)
+        }
+
+        collectorDiagnostics.lastAutoFixAt = Date()
+        collectorDiagnostics.lastAutoFixMessage = "采集未启用/已暂停：已停止检测到的后台 collector"
+        refreshCollectorDiagnosticsNow()
+      }
+      return
+    }
+
+    // enabled 且未暂停：确保只有一个 collector，并优先保留“本 App 托管”的实例。
+    let managedPid = collectorDiagnostics.managedPid
+    let runningPids = Set(processes.map(\.pid))
+    let hasManaged: Bool = {
+      guard let managedPid else { return false }
+      guard runningPids.contains(managedPid) else { return false }
+      return ProcessInspector.isPidAlive(managedPid)
+    }()
+
+    // 已经是“单实例 + 托管实例”时，不做任何事。
+    if hasManaged, processes.count <= 1 { return }
+
+    collectorFixTask = Task { @MainActor in
+      defer { collectorFixTask = nil }
+      collectorDiagnostics.autoFixing = true
+      defer { collectorDiagnostics.autoFixing = false }
+
+      if hasManaged, let managedPid {
+        for pid in processes.map(\.pid) where pid != managedPid {
+          _ = await ProcessInspector.terminate(pid: pid)
+        }
+        collectorDiagnostics.lastAutoFixAt = Date()
+        collectorDiagnostics.lastAutoFixMessage = "检测到多个实例：已保留本 App 托管的 collector，并停止其余实例"
+        refreshCollectorDiagnosticsNow()
+        return
+      }
+
+      // 没有可保留的托管实例：先清空，再由 Supervisor 拉起一个“可控实例”。
+      for pid in processes.map(\.pid) {
+        _ = await ProcessInspector.terminate(pid: pid)
+      }
+
+      collectorDiagnostics.lastAutoFixAt = Date()
+      collectorDiagnostics.lastAutoFixMessage = "检测到外部/多实例：已停止现有 collector，准备拉起一个新 collector"
+      refreshCollectorDiagnosticsNow()
+
+      if shouldAutoRestartCollector() && !collector.state.isRunning {
+        startCollector()
       }
     }
   }
@@ -167,8 +354,10 @@ final class Supervisor: ObservableObject {
   }
 
   func startCollector() {
+    guard collectorEnabled else { return }
     // 如果用户处于“暂停”状态，就不自动拉起采集（避免出现“我刚暂停怎么又起来了”）。
     guard collectorPauseState == .none else { return }
+    collectorEverStarted = true
 
     if !agent.state.isRunning {
       // Collector 需要写入 Agent。开发期体验：用户只要点“开始采集”，Agent 会被自动拉起。
@@ -229,13 +418,21 @@ final class Supervisor: ObservableObject {
   }
 
   func stopCollectorFully() {
+    collectorEnabled = false
     collectorPauseState = .none
     collectorResumeTask?.cancel()
     collectorResumeTask = nil
+    collectorAutoRestartTask?.cancel()
+    collectorAutoRestartTask = nil
+    collectorDiagnostics.autoRestarting = false
+    collectorDiagnostics.nextAutoRestartAt = nil
+    collectorAutoRestartAttempt = 0
+    collectorDiagnostics.autoRestartAttempt = 0
     stopCollector()
   }
 
   func pauseCollectorManually() {
+    collectorEnabled = true
     collectorPauseState = .manual
     collectorResumeTask?.cancel()
     collectorResumeTask = nil
@@ -243,6 +440,7 @@ final class Supervisor: ObservableObject {
   }
 
   func pauseCollector(forSeconds seconds: Double) {
+    collectorEnabled = true
     let until = Date().addingTimeInterval(max(1, seconds))
     collectorPauseState = .until(until)
     collectorResumeTask?.cancel()
@@ -265,13 +463,27 @@ final class Supervisor: ObservableObject {
   }
 
   func resumeCollector() {
+    collectorEnabled = true
+    collectorAutoRestartSuppressed = false
     collectorPauseState = .none
     collectorResumeTask?.cancel()
     collectorResumeTask = nil
+    collectorAutoRestartTask?.cancel()
+    collectorAutoRestartTask = nil
+    collectorDiagnostics.autoRestarting = false
+    collectorDiagnostics.nextAutoRestartAt = nil
+    collectorAutoRestartAttempt = 0
+    collectorDiagnostics.autoRestartAttempt = 0
     startCollector()
   }
 
   func stopAll() {
+    collectorEnabled = false
+    collectorAutoRestartSuppressed = true
+    collectorAutoRestartTask?.cancel()
+    collectorAutoRestartTask = nil
+    collectorDiagnostics.autoRestarting = false
+    collectorDiagnostics.nextAutoRestartAt = nil
     collectorResumeTask?.cancel()
     collectorResumeTask = nil
     collector.stop()
@@ -298,13 +510,18 @@ final class Supervisor: ObservableObject {
     settings = saved
 
     // 应用到 collector：最简单的方式是重启（collector 是独立进程，不做热更新）。
-    if collector.state.isRunning {
+    if collectorEnabled && collectorPauseState == .none {
       await restartCollector()
     }
   }
 
   func dangerDelete(scope: String) async throws -> DangerDeleteResult {
-    let shouldResume = (collectorPauseState == .none && collector.state.isRunning)
+    let shouldResume = (collectorEnabled && collectorPauseState == .none)
+
+    collectorAutoRestartSuppressed = true
+    collectorAutoRestartTask?.cancel()
+    collectorAutoRestartTask = nil
+    defer { collectorAutoRestartSuppressed = false }
     stopCollector()
 
     let client = try AgentHttpClient()
@@ -315,6 +532,7 @@ final class Supervisor: ObservableObject {
     try? await refreshSettingsFromAgent()
 
     if shouldResume {
+      collectorAutoRestartSuppressed = false
       startCollector()
     }
 
@@ -322,6 +540,15 @@ final class Supervisor: ObservableObject {
   }
 
   private func restartCollector() async {
+    let shouldStartAfter = (collectorEnabled && collectorPauseState == .none)
+
+    collectorAutoRestartSuppressed = true
+    defer { collectorAutoRestartSuppressed = false }
+    collectorAutoRestartTask?.cancel()
+    collectorAutoRestartTask = nil
+    collectorDiagnostics.autoRestarting = false
+    collectorDiagnostics.nextAutoRestartAt = nil
+
     stopCollector()
 
     // 等待进程退出（避免 start() 因 process!=nil 而被忽略）
@@ -330,7 +557,10 @@ final class Supervisor: ObservableObject {
       try? await Task.sleep(nanoseconds: 100_000_000)
     }
 
-    startCollector()
+    if shouldStartAfter {
+      collectorAutoRestartSuppressed = false
+      startCollector()
+    }
   }
 
   private func waitUntilAllStopped(timeoutSeconds: Double) async {

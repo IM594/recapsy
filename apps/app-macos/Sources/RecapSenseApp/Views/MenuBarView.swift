@@ -42,7 +42,7 @@ struct MenuBarView: View {
       Toggle(
         "采集（Collector）",
         isOn: Binding(
-          get: { supervisor.collector.state.isRunning },
+          get: { supervisor.collectorEnabled },
           set: { on in
             if on {
               supervisor.resumeCollector()
@@ -56,6 +56,12 @@ struct MenuBarView: View {
 
       if supervisor.collectorPauseState.isPaused {
         Text("采集状态：\(supervisor.collectorPauseState.label)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      if supervisor.collectorDiagnostics.autoRestarting {
+        Text("采集器异常，正在自动恢复…")
           .font(.caption)
           .foregroundStyle(.secondary)
       }

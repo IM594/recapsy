@@ -31,6 +31,20 @@ async function fileExists(filePath) {
   }
 }
 
+async function readAgentUrlFromRunInfo(dataDir) {
+  const runInfo = path.join(dataDir, "run", "agent.json");
+  if (!(await fileExists(runInfo))) return null;
+  try {
+    const raw = await fs.readFile(runInfo, "utf8");
+    const parsed = JSON.parse(raw);
+    const url = parsed?.listeners?.tcp?.url;
+    if (typeof url === "string" && url.trim() !== "") return url.trim();
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 function resolveRepoRoot() {
   // 约定：从仓库根目录执行 `npm run dev:collector`
   return process.cwd();
@@ -39,7 +53,10 @@ function resolveRepoRoot() {
 async function main() {
   const repoRoot = resolveRepoRoot();
   const dataDir = process.env.RECAPSENSE_DATA_DIR ?? path.join(repoRoot, ".recapsense");
-  const agentUrl = process.env.RECAPSENSE_AGENT_URL ?? "http://127.0.0.1:4832";
+  const agentUrl =
+    process.env.RECAPSENSE_AGENT_URL ??
+    (await readAgentUrlFromRunInfo(dataDir)) ??
+    "http://127.0.0.1:4832";
 
   const packagePath = path.join(repoRoot, "apps", "collector-macos");
   const binaryPath = path.join(
@@ -68,6 +85,8 @@ async function main() {
       ...process.env,
       RECAPSENSE_DATA_DIR: dataDir,
       RECAPSENSE_AGENT_URL: agentUrl,
+      // 让 collector 在父进程（本脚本）退出时自动退出，避免残留后台多实例。
+      RECAPSENSE_PARENT_PID: String(process.pid),
     },
   });
 }
@@ -76,4 +95,3 @@ main().catch((error) => {
   log(`fatal: ${String(error)}`);
   process.exitCode = 1;
 });
-

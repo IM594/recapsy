@@ -126,6 +126,11 @@ struct RecapSenseCollectorMain {
 
     do {
       let dataDir = resolveDataDir()
+      let instanceLock = try CollectorInstanceLock(
+        lockFile: dataDir.appendingPathComponent("run/collector.lock")
+      )
+      defer { _ = instanceLock }
+
       let token = try loadToken(dataDir: dataDir)
       let agentURL = try resolveAgentBaseURL()
 
@@ -145,6 +150,11 @@ struct RecapSenseCollectorMain {
       logger.info("OCR：level=\(config.ocrLevel.rawValue)，languages=\(config.ocrLanguages.joined(separator: ","))")
       logger.info("缩略图：enabled=\(config.thumbnailEnabled)，maxWidth=\(config.thumbnailMaxWidth)px")
       logger.info("OCR 全文日志：\(config.ocrLogEnabled ? "enabled" : "disabled")（调试用途，文件：logs/collector-ocr.log）")
+      if config.excludedApps.isEmpty {
+        logger.info("应用黑名单：无")
+      } else {
+        logger.info("应用黑名单：\(config.excludedApps.joined(separator: ", "))")
+      }
       if config.dryRun {
         logger.warn("当前为 dry-run：不会写入 Agent（仅本地打印摘要）")
       }
@@ -204,6 +214,13 @@ struct RecapSenseCollectorMain {
           var windowTitle = context.windowTitle
           var captureResult: ScreenCaptureResult? = nil
 
+          // 黑名单第一道闸门：按“前台应用”（NSWorkspace）过滤。
+          if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
+            logger.debug("命中应用黑名单（跳过采集）：\(appName)")
+            await sleepSeconds(config.intervalSeconds)
+            continue
+          }
+
           if config.captureMode == .window {
             let decision = captureFrontmostWindowForOCR(
               excludedApps: config.excludedApps,
@@ -251,13 +268,14 @@ struct RecapSenseCollectorMain {
               }
             }
           } else {
-            // screen 模式：会把整个屏幕截下来，所以只能做“前台 app 级别”的黑名单过滤。
-            if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
-              logger.debug("命中应用黑名单（跳过采集）：\(appName)")
-              await sleepSeconds(config.intervalSeconds)
-              continue
-            }
             captureResult = captureFullScreenForOCR(log: { message in logger.debug(message) })
+          }
+
+          // 黑名单第二道闸门：按“最终写入的 appName”（可能来自 window 元数据）再过滤一次。
+          if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
+            logger.debug("命中应用黑名单（跳过采集）：\(appName)")
+            await sleepSeconds(config.intervalSeconds)
+            continue
           }
 
           let key = "\(appName ?? "")\n\(windowTitle ?? "")"
@@ -377,14 +395,27 @@ struct RecapSenseCollectorMain {
               "dry-run frame：app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count) text=\(preview)"
             )
           } else {
-            let id = try await client.ingestFrame(payload)
-            let lines = ocrText.split(separator: "\n").count
-            var message =
-              "写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count)"
-            if config.verbose {
-              message += " title=\(windowTitle ?? "-")"
+            let result = try await client.ingestFrame(payload)
+            if result.skipped {
+              if let thumbnailPath {
+                let abs = paths.thumbnailAbsoluteURL(relativePath: thumbnailPath)
+                try? FileManager.default.removeItem(at: abs)
+              }
+
+              let reason = result.reason ?? "unknown"
+              notices.once(key: "agent-skipped:\(reason):\(appName ?? "Unknown")") {
+                logger.warn("Agent 兜底丢弃 frame（reason=\(reason)，app=\(appName ?? "Unknown")）")
+              }
+            } else {
+              let id = result.id
+              let lines = ocrText.split(separator: "\n").count
+              var message =
+                "写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count)"
+              if config.verbose {
+                message += " title=\(windowTitle ?? "-")"
+              }
+              logger.info(message)
             }
-            logger.info(message)
           }
 
           await dedupeState.updateAccepted(key: key, hash: hash, ocrText: ocrText)
@@ -537,12 +568,28 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   )
 }
 
+private func normalizeForExcludedAppMatch(_ value: String) -> String {
+  let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  if trimmed.isEmpty { return "" }
+
+  let replaced = trimmed
+    .replacingOccurrences(of: "_", with: " ")
+    .replacingOccurrences(of: "-", with: " ")
+
+  return replaced.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+}
+
 private func isExcludedApp(_ appName: String, excludedApps: [String]) -> Bool {
   if excludedApps.isEmpty { return false }
-  let normalized = appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  let normalized = normalizeForExcludedAppMatch(appName)
   if normalized.isEmpty { return false }
+
   return excludedApps.contains { item in
-    item.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+    let rule = normalizeForExcludedAppMatch(item)
+    if rule.isEmpty { return false }
+    if rule == normalized { return true }
+    if rule.count >= 3, normalized.contains(rule) { return true }
+    return false
   }
 }
 

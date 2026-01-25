@@ -307,11 +307,27 @@ private func toMetadata(_ candidate: WindowCandidate) -> ScreenCaptureMetadata {
   )
 }
 
+private func normalizeForExcludedAppMatch(_ value: String) -> String {
+  let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  if trimmed.isEmpty { return "" }
+
+  let replaced = trimmed
+    .replacingOccurrences(of: "_", with: " ")
+    .replacingOccurrences(of: "-", with: " ")
+
+  return replaced.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+}
+
 private func isExcludedApp(_ appName: String, excludedApps: [String]) -> Bool {
   if excludedApps.isEmpty { return false }
-  let normalized = appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+  let normalized = normalizeForExcludedAppMatch(appName)
   if normalized.isEmpty { return false }
+
   return excludedApps.contains { item in
-    item.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalized
+    let rule = normalizeForExcludedAppMatch(item)
+    if rule.isEmpty { return false }
+    if rule == normalized { return true }
+    if rule.count >= 3, normalized.contains(rule) { return true }
+    return false
   }
 }
