@@ -60,10 +60,25 @@ struct MenuBarView: View {
           .foregroundStyle(.secondary)
       }
 
-      if supervisor.collectorDiagnostics.autoRestarting {
-        Text("采集器异常，正在自动恢复…")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+      let shouldShowAutoRecoverHint: Bool = {
+        if !supervisor.collectorEnabled { return false }
+        if supervisor.collectorPauseState.isPaused { return false }
+        switch supervisor.collector.state {
+        case .starting, .running, .runningExternal:
+          return false
+        case .stopped, .exited, .failed:
+          return true
+        }
+      }()
+
+      if shouldShowAutoRecoverHint {
+        Text(
+          supervisor.collectorDiagnostics.autoRestarting
+            ? "采集器异常，正在自动恢复…"
+            : "采集器已停止，将自动恢复…"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
 
       Menu("暂停采集…") {

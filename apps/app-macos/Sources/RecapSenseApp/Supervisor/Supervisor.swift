@@ -30,7 +30,7 @@ final class Supervisor: ObservableObject {
   private var collectorAutoRestartSuppressed = false
   private var collectorAutoRestartAttempt = 0
   private var collectorFixTask: Task<Void, Never>? = nil
-  private var collectorEverStarted = false
+  private var collectorAutoRestartToken: UUID? = nil
 
   init(autoStart: Bool = true) {
     // 把子进程对象的变更（state/logFile/lastErrorMessage）透传给 Supervisor，
@@ -129,7 +129,6 @@ final class Supervisor: ObservableObject {
 
   private func shouldAutoRestartCollector() -> Bool {
     if collectorAutoRestartSuppressed { return false }
-    if !collectorEverStarted { return false }
     if !collectorEnabled { return false }
     if collectorPauseState != .none { return false }
     return true
@@ -141,11 +140,21 @@ final class Supervisor: ObservableObject {
     collectorAutoRestartAttempt += 1
     let backoffSeconds = min(60.0, pow(2.0, Double(max(0, collectorAutoRestartAttempt - 1))))
 
+    let token = UUID()
+    collectorAutoRestartToken = token
     collectorDiagnostics.autoRestarting = true
     collectorDiagnostics.autoRestartAttempt = collectorAutoRestartAttempt
     collectorDiagnostics.nextAutoRestartAt = Date().addingTimeInterval(backoffSeconds)
 
     collectorAutoRestartTask = Task { @MainActor in
+      defer {
+        // 如果任务自然结束且没被新的重启任务替换，清空引用，允许后续重新安排。
+        if self.collectorAutoRestartToken == token {
+          self.collectorAutoRestartTask = nil
+          self.collectorAutoRestartToken = nil
+        }
+      }
+
       let ns = UInt64(backoffSeconds * 1_000_000_000)
       try? await Task.sleep(nanoseconds: ns)
       if Task.isCancelled { return }
@@ -180,11 +189,10 @@ final class Supervisor: ObservableObject {
     // - enabled 且未暂停：只允许 1 个 collector 实例（否则会导致黑名单/日志错乱）。
     guard collectorFixTask == nil else { return }
 
-    let processes = collectorDiagnostics.processes
-    if processes.isEmpty { return }
-
     let shouldHaveNoCollector = (!collectorEnabled) || (collectorPauseState != .none)
     if shouldHaveNoCollector {
+      let processes = collectorDiagnostics.processes
+      if processes.isEmpty { return }
       let pids = processes.map(\.pid)
       collectorFixTask = Task { @MainActor in
         defer { collectorFixTask = nil }
@@ -202,7 +210,23 @@ final class Supervisor: ObservableObject {
       return
     }
 
+    // enabled 且未暂停：如果 collector 已经消失（进程不存在 + state 非 running），安排自动恢复。
+    // 说明：这里是“兜底”，避免某些极端情况下 state 回调没触发，导致无法自愈。
+    if !collector.state.isRunning {
+      if case .starting = collector.state {
+        // 正在启动：不干预
+      } else {
+        let processes = collectorDiagnostics.processes
+        if processes.isEmpty, shouldAutoRestartCollector(), collectorAutoRestartTask == nil {
+          scheduleCollectorAutoRestart()
+          return
+        }
+      }
+    }
+
     // enabled 且未暂停：确保只有一个 collector，并优先保留“本 App 托管”的实例。
+    let processes = collectorDiagnostics.processes
+    if processes.isEmpty { return }
     let managedPid = collectorDiagnostics.managedPid
     let runningPids = Set(processes.map(\.pid))
     let hasManaged: Bool = {
@@ -357,7 +381,6 @@ final class Supervisor: ObservableObject {
     guard collectorEnabled else { return }
     // 如果用户处于“暂停”状态，就不自动拉起采集（避免出现“我刚暂停怎么又起来了”）。
     guard collectorPauseState == .none else { return }
-    collectorEverStarted = true
 
     if !agent.state.isRunning {
       // Collector 需要写入 Agent。开发期体验：用户只要点“开始采集”，Agent 会被自动拉起。
