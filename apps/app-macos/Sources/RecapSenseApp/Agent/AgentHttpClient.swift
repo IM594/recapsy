@@ -4,19 +4,14 @@ struct AgentHttpClient {
   private let baseURL: URL
   private let token: String
 
-  init() throws {
-    let env = ProcessInfo.processInfo.environment
-
-    let baseURL = URL(string: env["RECAPSENSE_AGENT_URL"] ?? "http://127.0.0.1:4832")
-      ?? URL(string: "http://127.0.0.1:4832")!
-
-    let repoRoot = URL(fileURLWithPath: env["RECAPSENSE_REPO_ROOT"] ?? FileManager.default.currentDirectoryPath)
-    let dataDir = URL(fileURLWithPath: env["RECAPSENSE_DATA_DIR"] ?? repoRoot.appendingPathComponent(".recapsense").path)
-
-    let token = try Self.loadToken(dataDir: dataDir)
-
+  init(baseURL: URL, token: String) {
     self.baseURL = baseURL
     self.token = token
+  }
+
+  init(config: SupervisorConfig = SupervisorConfig.loadFromEnvironment()) throws {
+    self.baseURL = config.agentUrl
+    self.token = try Self.loadToken(dataDir: config.dataDir)
   }
 
   func getSettings() async throws -> RecapSenseSettings {

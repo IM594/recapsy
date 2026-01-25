@@ -26,7 +26,7 @@ struct MenuBarView: View {
       Toggle(
         "Agent",
         isOn: Binding(
-          get: { supervisor.agent.state.isRunning },
+          get: { supervisor.agentEnabled },
           set: { on in on ? supervisor.startAgent() : supervisor.stopAgent() }
         )
       )
@@ -76,6 +76,26 @@ struct MenuBarView: View {
             .foregroundStyle(.secondary)
           Button("打开系统设置：辅助功能") { PrivacyPane.openAccessibility() }
         }
+      }
+
+      let shouldShowAgentAutoRecoverHint: Bool = {
+        if !supervisor.agentEnabled { return false }
+        switch supervisor.agent.state {
+        case .starting, .running, .runningExternal:
+          return false
+        case .stopped, .exited, .failed:
+          return true
+        }
+      }()
+
+      if shouldShowAgentAutoRecoverHint {
+        Text(
+          supervisor.agentDiagnostics.autoRestarting
+            ? "Agent 异常，正在自动恢复…"
+            : "Agent 已停止，将自动恢复…"
+        )
+        .font(.caption)
+        .foregroundStyle(.secondary)
       }
 
       let shouldShowAutoRecoverHint: Bool = {

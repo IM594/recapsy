@@ -15,8 +15,10 @@ final class Supervisor: ObservableObject {
 
   @Published var config = SupervisorConfig.loadFromEnvironment()
   @Published private(set) var settings: RecapSenseSettings = .defaults
+  @Published var agentEnabled: Bool = true
   @Published private(set) var collectorPauseState: CollectorPauseState = .none
   @Published var collectorEnabled: Bool = true
+  @Published private(set) var agentDiagnostics = AgentProcessDiagnostics()
   @Published private(set) var collectorDiagnostics = CollectorProcessDiagnostics()
   @Published private(set) var collectorPermissionDiagnostics = CollectorPermissionDiagnostics()
 
@@ -28,10 +30,15 @@ final class Supervisor: ObservableObject {
   private var collectorDiagnosticsTask: Task<Void, Never>? = nil
   private var collectorAutoRestartTask: Task<Void, Never>? = nil
   private var collectorStabilityTask: Task<Void, Never>? = nil
+  private var agentAutoRestartTask: Task<Void, Never>? = nil
+  private var agentStabilityTask: Task<Void, Never>? = nil
   private var collectorAutoRestartSuppressed = false
   private var collectorAutoRestartAttempt = 0
+  private var agentAutoRestartSuppressed = false
+  private var agentAutoRestartAttempt = 0
   private var collectorFixTask: Task<Void, Never>? = nil
   private var collectorAutoRestartToken: UUID? = nil
+  private var agentAutoRestartToken: UUID? = nil
   private var collectorPermissionCheckTask: Task<Void, Never>? = nil
 
   init(autoStart: Bool = true) {
@@ -45,11 +52,25 @@ final class Supervisor: ObservableObject {
         .store(in: &cancellables)
     }
 
+    agent.$state
+      .sink { [weak self] _ in
+        self?.handleAgentStateChange()
+      }
+      .store(in: &cancellables)
+
     collector.$state
       .sink { [weak self] _ in
         self?.handleCollectorStateChange()
       }
       .store(in: &cancellables)
+
+    if !autoStart {
+      // 例如：重复启动（单实例锁失败）时，我们会阻止自动拉起服务，避免端口占用/状态错乱。
+      agentEnabled = false
+      agentAutoRestartSuppressed = true
+      collectorEnabled = false
+      collectorAutoRestartSuppressed = true
+    }
 
     startCollectorDiagnosticsLoop()
 
@@ -82,6 +103,7 @@ final class Supervisor: ObservableObject {
       while !Task.isCancelled {
         refreshCollectorDiagnosticsNow()
         ensureCollectorProcessIntent()
+        await ensureAgentProcessIntent()
         scheduleCollectorPermissionCheckIfNeeded()
         try? await Task.sleep(nanoseconds: 2_000_000_000)
       }
@@ -153,6 +175,89 @@ final class Supervisor: ObservableObject {
     collectorDiagnostics.managedPid = managedPid
     collectorDiagnostics.lockPid = lockPid
     collectorDiagnostics.processes = processes
+  }
+
+  private func handleAgentStateChange() {
+    switch agent.state {
+    case .running, .runningExternal:
+      agentAutoRestartTask?.cancel()
+      agentAutoRestartTask = nil
+      agentDiagnostics.autoRestarting = false
+      agentDiagnostics.nextAutoRestartAt = nil
+      scheduleAgentStabilityReset()
+    case .stopped, .exited, .failed:
+      if shouldAutoRestartAgent() {
+        scheduleAgentAutoRestart()
+      } else {
+        agentAutoRestartTask?.cancel()
+        agentAutoRestartTask = nil
+        agentDiagnostics.autoRestarting = false
+        agentDiagnostics.nextAutoRestartAt = nil
+      }
+    case .starting:
+      break
+    }
+  }
+
+  private func shouldAutoRestartAgent() -> Bool {
+    if agentAutoRestartSuppressed { return false }
+    if !agentEnabled { return false }
+
+    // 明确不可自愈的场景：避免无意义的重试循环。
+    if case .failed(let message) = agent.state {
+      if message.contains("端口已被占用") { return false }
+      if message.contains("找不到 node") { return false }
+    }
+
+    return true
+  }
+
+  private func scheduleAgentAutoRestart() {
+    agentAutoRestartTask?.cancel()
+
+    agentAutoRestartAttempt += 1
+    let backoffSeconds = min(60.0, pow(2.0, Double(max(0, agentAutoRestartAttempt - 1))))
+
+    let token = UUID()
+    agentAutoRestartToken = token
+    agentDiagnostics.autoRestarting = true
+    agentDiagnostics.autoRestartAttempt = agentAutoRestartAttempt
+    agentDiagnostics.nextAutoRestartAt = Date().addingTimeInterval(backoffSeconds)
+
+    agentAutoRestartTask = Task { @MainActor in
+      defer {
+        // 如果任务自然结束且没被新的重启任务替换，清空引用，允许后续重新安排。
+        if self.agentAutoRestartToken == token {
+          self.agentAutoRestartTask = nil
+          self.agentAutoRestartToken = nil
+        }
+      }
+
+      let ns = UInt64(backoffSeconds * 1_000_000_000)
+      try? await Task.sleep(nanoseconds: ns)
+      if Task.isCancelled { return }
+
+      agentDiagnostics.autoRestarting = false
+      agentDiagnostics.nextAutoRestartAt = nil
+
+      guard shouldAutoRestartAgent() else { return }
+      guard !agent.state.isRunning else { return }
+
+      startAgent()
+    }
+  }
+
+  private func scheduleAgentStabilityReset() {
+    agentStabilityTask?.cancel()
+    agentStabilityTask = Task { @MainActor in
+      try? await Task.sleep(nanoseconds: 30_000_000_000)
+      if Task.isCancelled { return }
+      guard agent.state.isRunning else { return }
+
+      agentAutoRestartAttempt = 0
+      agentDiagnostics.autoRestartAttempt = 0
+      agentDiagnostics.nextAutoRestartAt = nil
+    }
   }
 
   private func handleCollectorStateChange() {
@@ -231,6 +336,29 @@ final class Supervisor: ObservableObject {
       collectorAutoRestartAttempt = 0
       collectorDiagnostics.autoRestartAttempt = 0
       collectorDiagnostics.nextAutoRestartAt = nil
+    }
+  }
+
+  private func ensureAgentProcessIntent() async {
+    guard shouldAutoRestartAgent() else { return }
+
+    switch agent.state {
+    case .runningExternal:
+      let healthUrl = config.agentUrl.appendingPathComponent("health")
+      let probe = await probeHealth(url: healthUrl, timeoutSeconds: 0.35)
+      if probe.ok { return }
+
+      // “外部 Agent”消失：把状态置回 stopped，让后续自愈逻辑接管。
+      agent.markStoppedIfExternal()
+      if agentAutoRestartTask == nil {
+        scheduleAgentAutoRestart()
+      }
+    case .stopped, .exited, .failed:
+      if agentAutoRestartTask == nil {
+        scheduleAgentAutoRestart()
+      }
+    case .starting, .running:
+      break
     }
   }
 
@@ -321,6 +449,8 @@ final class Supervisor: ObservableObject {
   }
 
   func startAgent() {
+    agentEnabled = true
+    agentAutoRestartSuppressed = false
     guard !agent.state.isRunning else { return }
     guard agentStartTask == nil else { return }
 
@@ -357,6 +487,20 @@ final class Supervisor: ObservableObject {
   }
 
   func stopAgent() {
+    agentEnabled = false
+    agentAutoRestartSuppressed = true
+    agentAutoRestartTask?.cancel()
+    agentAutoRestartTask = nil
+    agentAutoRestartToken = nil
+    agentDiagnostics.autoRestarting = false
+    agentDiagnostics.nextAutoRestartAt = nil
+    agentAutoRestartAttempt = 0
+    agentDiagnostics.autoRestartAttempt = 0
+
+    // Agent 是 Collector/MCP 的依赖：用户关闭 Agent 时，同时关闭其余后端，避免“采集中但写不进去”的迷惑状态。
+    stopCollectorFully()
+    stopMcpSse()
+
     if case .runningExternal = agent.state {
       Task { @MainActor in
         do {
@@ -553,6 +697,16 @@ final class Supervisor: ObservableObject {
   }
 
   func stopAll() {
+    agentEnabled = false
+    agentAutoRestartSuppressed = true
+    agentAutoRestartTask?.cancel()
+    agentAutoRestartTask = nil
+    agentAutoRestartToken = nil
+    agentDiagnostics.autoRestarting = false
+    agentDiagnostics.nextAutoRestartAt = nil
+    agentAutoRestartAttempt = 0
+    agentDiagnostics.autoRestartAttempt = 0
+
     collectorEnabled = false
     collectorAutoRestartSuppressed = true
     collectorAutoRestartTask?.cancel()
@@ -561,6 +715,12 @@ final class Supervisor: ObservableObject {
     collectorDiagnostics.nextAutoRestartAt = nil
     collectorResumeTask?.cancel()
     collectorResumeTask = nil
+
+    agentStartTask?.cancel()
+    agentStartTask = nil
+    mcpStartTask?.cancel()
+    mcpStartTask = nil
+
     collector.stop()
     mcp.stop()
     agent.stop()
@@ -788,11 +948,8 @@ private func probeHealth(url: URL, timeoutSeconds: Double) async -> HealthProbeR
 @MainActor
 private func waitForAgentGone(timeoutSeconds: Double) async -> Bool {
   let start = Date()
-  let env = ProcessInfo.processInfo.environment
-
-  let baseURL = URL(string: env["RECAPSENSE_AGENT_URL"] ?? "http://127.0.0.1:4832")
-    ?? URL(string: "http://127.0.0.1:4832")!
-  let healthUrl = baseURL.appendingPathComponent("health")
+  let cfg = SupervisorConfig.loadFromEnvironment()
+  let healthUrl = cfg.agentUrl.appendingPathComponent("health")
 
   while Date().timeIntervalSince(start) < timeoutSeconds {
     let probe = await probeHealth(url: healthUrl, timeoutSeconds: 0.25)
@@ -805,18 +962,14 @@ private func waitForAgentGone(timeoutSeconds: Double) async -> Bool {
 
 @MainActor
 private func shutdownMcpSse() async throws {
-  let env = ProcessInfo.processInfo.environment
-
-  let mcpHost = env["RECAPSENSE_MCP_HOST"]?.trimmingCharacters(in: .whitespacesAndNewlines)
-  let resolvedMcpHost = (mcpHost?.isEmpty == false) ? mcpHost! : "127.0.0.1"
-  let mcpPort = Int(env["RECAPSENSE_MCP_PORT"] ?? "") ?? 4833
-  let baseURL = URL(string: "http://\(resolvedMcpHost):\(mcpPort)") ?? URL(string: "http://127.0.0.1:4833")!
-
-  let repoRoot = URL(fileURLWithPath: env["RECAPSENSE_REPO_ROOT"] ?? FileManager.default.currentDirectoryPath)
-  let dataDir = URL(fileURLWithPath: env["RECAPSENSE_DATA_DIR"] ?? repoRoot.appendingPathComponent(".recapsense").path)
-  let tokenFile = dataDir.appendingPathComponent("secret/token")
+  let cfg = SupervisorConfig.loadFromEnvironment()
+  let baseURL = cfg.mcpUrl
+  let tokenFile = cfg.dataDir.appendingPathComponent("secret/token")
   let raw = try String(contentsOf: tokenFile, encoding: .utf8)
   let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+  if token.isEmpty {
+    throw NSError(domain: "Supervisor", code: -2, userInfo: [NSLocalizedDescriptionKey: "token 为空：\(tokenFile.path)"])
+  }
 
   let url = baseURL.appendingPathComponent("shutdown")
   var request = URLRequest(url: url)

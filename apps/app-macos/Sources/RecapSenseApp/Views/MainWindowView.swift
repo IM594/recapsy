@@ -5,6 +5,25 @@ struct MainWindowView: View {
 
   var body: some View {
     VStack(spacing: 0) {
+      let shouldShowAgentBanner: Bool = {
+        if !supervisor.agentEnabled { return false }
+        switch supervisor.agent.state {
+        case .starting, .running, .runningExternal:
+          return false
+        case .stopped, .exited, .failed:
+          return true
+        }
+      }()
+
+      if shouldShowAgentBanner {
+        PermissionBannerView(
+          title: supervisor.agentDiagnostics.autoRestarting ? "后端异常，正在自动恢复…" : "后端已停止",
+          message: "RecapSense 需要后端服务（Agent）来存储与搜索内容。如果长时间无法恢复，可以点击下方按钮重启。",
+          buttonTitle: "重启后端",
+          action: { supervisor.startAgent() }
+        )
+      }
+
       if supervisor.collectorEnabled,
          supervisor.collectorPauseState == .none,
          supervisor.collectorPermissionDiagnostics.isScreenRecordingMissing
