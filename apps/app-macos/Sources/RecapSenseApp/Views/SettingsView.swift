@@ -354,7 +354,15 @@ struct SettingsView: View {
     let app = NSWorkspace.shared.frontmostApplication
     let bundleId = app?.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     if bundleId.isEmpty {
-      message = "添加失败：无法识别当前前台应用的 Bundle ID。"
+      // 开发期：SwiftPM 可执行程序形态的 RecapSense 没有 bundle id（不是标准 .app bundle），
+      // 用户在设置页点击时“前台应用”也必然是 RecapSense 本身。
+      if app?.processIdentifier == getpid() {
+        message = "无需添加：RecapSense 会自动排除自身窗口（开发版没有 Bundle ID）。"
+        return
+      }
+
+      let name = app?.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+      message = "添加失败：\(name?.isEmpty == false ? name! : "当前前台应用") 没有 Bundle ID，无法加入黑名单。可改用“从正在运行的应用添加…”，或手动输入 Bundle ID。"
       return
     }
     addExcludedBundleId(bundleId)

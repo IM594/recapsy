@@ -114,6 +114,24 @@ private func shouldExitBecauseParentMissing() -> Bool {
   return false
 }
 
+private func resolveParentPidFromEnv() -> Int32? {
+  let env = ProcessInfo.processInfo.environment
+  guard let raw = env["RECAPSENSE_PARENT_PID"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !raw.isEmpty,
+        let pid = Int32(raw),
+        pid > 1
+  else {
+    return nil
+  }
+  return pid
+}
+
+private func isLauncherAppPid(_ pid: pid_t?) -> Bool {
+  guard let pid else { return false }
+  guard let parentPid = resolveParentPidFromEnv() else { return false }
+  return Int32(pid) == parentPid
+}
+
 @main
 struct RecapSenseCollectorMain {
   static func main() async {
@@ -232,6 +250,20 @@ struct RecapSenseCollectorMain {
             readFrontmostAppContext(log: { message in
               notices.once(key: "ax-permission") { logger.warn(message) }
             })
+          }
+
+          // RecapSense 自身窗口：自动跳过采集。
+          //
+          // 说明：
+          // - 开发期（SwiftPM 可执行程序）RecapSense 没有 bundle id，无法通过“Bundle ID 黑名单”排除；
+          // - 但 collector 是由 RecapSense App 拉起的，知道 launcher 的 pid（RECAPSENSE_PARENT_PID），
+          //   因此可以用 pid 精确识别“当前前台就是 RecapSense 自己”，避免记录自身 UI。
+          if launchSource == "app-macos", isLauncherAppPid(context.pid) {
+            notices.once(key: "skip-self") {
+              logger.info("前台为 RecapSense 自身窗口，已自动跳过采集（无需加入黑名单）。")
+            }
+            await sleepSeconds(config.intervalSeconds)
+            continue
           }
 
           var appName = context.appName
