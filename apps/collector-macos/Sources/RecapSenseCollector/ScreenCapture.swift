@@ -72,21 +72,14 @@ private struct WindowCandidate {
 
 enum ScreenCaptureDecision {
   case captured(ScreenCaptureResult)
-  case skippedExcluded(appName: String)
   case failed
 }
 
 func captureFrontmostWindowForOCR(
-  excludedApps: [String],
   log: (String) -> Void
 ) -> ScreenCaptureDecision {
   guard let candidate = findFrontmostOnScreenWindow() else {
     return .failed
-  }
-
-  if let ownerName = candidate.ownerName, isExcludedApp(ownerName, excludedApps: excludedApps) {
-    log("命中应用黑名单（跳过采集）：\(ownerName)")
-    return .skippedExcluded(appName: ownerName)
   }
 
     let options: CGWindowImageOption = [.bestResolution, .boundsIgnoreFraming]
@@ -125,11 +118,6 @@ func captureFrontmostWindowForOCR(
     let probePoint = CGPoint(x: candidate.bounds.midX, y: candidate.bounds.midY)
     let topAtProbe = findTopmostOnScreenWindow(containing: probePoint)
     let cropTarget = chooseCropTarget(original: candidate, top: topAtProbe)
-
-    if let ownerName = cropTarget.ownerName, isExcludedApp(ownerName, excludedApps: excludedApps) {
-      log("窗口裁剪命中应用黑名单（跳过采集）：\(ownerName)")
-      return .skippedExcluded(appName: ownerName)
-    }
 
     let cropAlphaStr = cropTarget.alpha.map { String(format: "%.3f", $0) } ?? "-"
     let cropSharingStr = cropTarget.sharingState.map { String($0) } ?? "-"
@@ -305,29 +293,4 @@ private func toMetadata(_ candidate: WindowCandidate) -> ScreenCaptureMetadata {
     windowID: candidate.windowID,
     bounds: candidate.bounds
   )
-}
-
-private func normalizeForExcludedAppMatch(_ value: String) -> String {
-  let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-  if trimmed.isEmpty { return "" }
-
-  let replaced = trimmed
-    .replacingOccurrences(of: "_", with: " ")
-    .replacingOccurrences(of: "-", with: " ")
-
-  return replaced.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-}
-
-private func isExcludedApp(_ appName: String, excludedApps: [String]) -> Bool {
-  if excludedApps.isEmpty { return false }
-  let normalized = normalizeForExcludedAppMatch(appName)
-  if normalized.isEmpty { return false }
-
-  return excludedApps.contains { item in
-    let rule = normalizeForExcludedAppMatch(item)
-    if rule.isEmpty { return false }
-    if rule == normalized { return true }
-    if rule.count >= 3, normalized.contains(rule) { return true }
-    return false
-  }
 }

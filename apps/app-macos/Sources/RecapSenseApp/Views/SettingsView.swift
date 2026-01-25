@@ -147,7 +147,7 @@ struct SettingsView: View {
 
           Divider()
 
-          Text("应用黑名单（不采集）")
+          Text("应用黑名单（按身份，不采集）")
             .font(.subheadline)
 
           if draft.collector.excludedApps.isEmpty {
@@ -157,8 +157,14 @@ struct SettingsView: View {
           } else {
             ForEach(draft.collector.excludedApps, id: \.self) { app in
               HStack {
-                Text(app)
-                  .font(.caption)
+                VStack(alignment: .leading, spacing: 2) {
+                  Text(resolveAppName(bundleId: app) ?? "未知应用")
+                    .font(.caption)
+                  Text(app)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                }
                 Spacer()
                 Button("移除") {
                   draft.collector.excludedApps.removeAll { $0 == app }
@@ -169,13 +175,26 @@ struct SettingsView: View {
           }
 
           HStack {
-            TextField("例如：Google Chrome", text: $excludedAppInput)
-            Button("添加") { addExcludedApp(excludedAppInput) }
-              .disabled(excludedAppInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             Button("添加当前前台应用") { addFrontmostAppToBlacklist() }
+            Menu("从正在运行的应用添加…") {
+              let items = runningUserApps()
+              if items.isEmpty {
+                Text("暂无可选应用")
+              } else {
+                ForEach(items, id: \.bundleId) { item in
+                  Button(item.name) { addExcludedBundleId(item.bundleId) }
+                }
+              }
+            }
           }
 
-          Text("提示：这里填写的是 macOS 显示的应用名称（菜单栏左上角的 App 名称）。")
+          HStack {
+            TextField("（高级）输入 Bundle ID，例如 com.google.Chrome", text: $excludedAppInput)
+            Button("添加") { addExcludedBundleId(excludedAppInput) }
+              .disabled(excludedAppInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+          }
+
+          Text("提示：黑名单按应用身份（Bundle ID）生效，更稳定。推荐：切换到要排除的应用 → 点击“添加当前前台应用”。")
             .font(.caption)
             .foregroundStyle(.secondary)
         }
@@ -295,18 +314,110 @@ struct SettingsView: View {
   }
 
   private func addExcludedApp(_ raw: String) {
-    let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !name.isEmpty else { return }
-    if !draft.collector.excludedApps.contains(name) {
-      draft.collector.excludedApps.append(name)
+    // 兼容旧调用点：保留函数名，但语义升级为 Bundle ID。
+    addExcludedBundleId(raw)
+  }
+
+  private func addFrontmostAppToBlacklist() {
+    let app = NSWorkspace.shared.frontmostApplication
+    let bundleId = app?.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if bundleId.isEmpty {
+      message = "添加失败：无法识别当前前台应用的 Bundle ID。"
+      return
+    }
+    addExcludedBundleId(bundleId)
+  }
+
+  private struct RunningAppItem: Identifiable {
+    let bundleId: String
+    let name: String
+    var id: String { bundleId }
+  }
+
+  private func runningUserApps() -> [RunningAppItem] {
+    // 展示“用户可见应用”（排除后台 daemon/服务），并按名字排序。
+    let apps = NSWorkspace.shared.runningApplications
+      .filter { $0.activationPolicy != .prohibited }
+      .compactMap { app -> RunningAppItem? in
+        guard let bundleId = app.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines), !bundleId.isEmpty else {
+          return nil
+        }
+        let name = app.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return RunningAppItem(bundleId: bundleId, name: (name?.isEmpty == false) ? name! : bundleId)
+      }
+
+    // 去重：同一个 bundleId 可能有多个进程（helper）。
+    var seen: Set<String> = []
+    var deduped: [RunningAppItem] = []
+    deduped.reserveCapacity(apps.count)
+    for item in apps {
+      if seen.contains(item.bundleId) { continue }
+      seen.insert(item.bundleId)
+      deduped.append(item)
+    }
+
+    return deduped.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+  }
+
+  private func resolveAppName(bundleId: String) -> String? {
+    let trimmed = bundleId.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    // 1) 优先：正在运行的应用（拿到的名字通常更接近用户认知）
+    if let running = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == trimmed }) {
+      if let name = running.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+        return name
+      }
+    }
+
+    // 2) 其次：从 Bundle 读取显示名（即便未运行也可解析）
+    if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: trimmed),
+       let bundle = Bundle(url: url)
+    {
+      let displayName =
+        (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if let displayName, !displayName.isEmpty {
+        return displayName
+      }
+
+      let name =
+        (bundle.object(forInfoDictionaryKey: kCFBundleNameKey as String) as? String)?
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+      if let name, !name.isEmpty {
+        return name
+      }
+    }
+
+    return nil
+  }
+
+  private func addExcludedBundleId(_ raw: String) {
+    let bundleId = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !bundleId.isEmpty else { return }
+
+    // 轻量校验：Bundle ID 一般是反向域名（包含至少一个 '.'，且不包含空格）。
+    if !isLikelyBundleId(bundleId) {
+      message = "添加失败：黑名单现在按应用身份（Bundle ID）生效。请使用“添加当前前台应用”。"
+      return
+    }
+
+    if !draft.collector.excludedApps.contains(bundleId) {
+      draft.collector.excludedApps.append(bundleId)
       draft.collector.excludedApps.sort()
     }
     excludedAppInput = ""
   }
 
-  private func addFrontmostAppToBlacklist() {
-    let name = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
-    addExcludedApp(name)
+  private func isLikelyBundleId(_ value: String) -> Bool {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return false }
+    if trimmed.contains(where: { $0.isWhitespace }) { return false }
+    if !trimmed.contains(".") { return false }
+
+    // 允许：字母/数字/点/下划线/连字符（对常见 Bundle ID 足够）
+    let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+    return trimmed.unicodeScalars.allSatisfy { allowed.contains($0) }
   }
 }
 

@@ -9,6 +9,7 @@ struct AgentClientConfig {
 struct IngestFrameRequestBody: Encodable {
   let ts: Int64
   let app: String?
+  let appBundleId: String?
   let windowTitle: String?
   let ocrText: String
   let phash: String?

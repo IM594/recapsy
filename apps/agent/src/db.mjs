@@ -154,6 +154,7 @@ export async function migrate(db) {
     { version: 2, sql: () => loadMigrationSql("./migrations/0002_vision.sql") },
     { version: 3, sql: () => loadMigrationSql("./migrations/0003_settings.sql") },
     { version: 4, sql: () => loadMigrationSql("./migrations/0004_thumbnail_width.sql") },
+    { version: 5, sql: () => loadMigrationSql("./migrations/0005_app_bundle_id.sql") },
   ];
 
   for (const migration of migrations) {

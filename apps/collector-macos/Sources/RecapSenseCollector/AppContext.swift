@@ -3,6 +3,7 @@ import ApplicationServices
 
 struct AppContext {
   let appName: String?
+  let bundleId: String?
   let pid: pid_t?
   let windowTitle: String?
 }
@@ -21,13 +22,14 @@ enum AccessibilityError: Error, CustomStringConvertible {
 @MainActor
 func readFrontmostAppContext(log: (String) -> Void) -> AppContext {
   guard let app = NSWorkspace.shared.frontmostApplication else {
-    return AppContext(appName: nil, pid: nil, windowTitle: nil)
+    return AppContext(appName: nil, bundleId: nil, pid: nil, windowTitle: nil)
   }
 
-  let appName = app.localizedName ?? app.bundleIdentifier
+  let bundleId = app.bundleIdentifier
+  let appName = app.localizedName ?? bundleId
   let pid = app.processIdentifier
   let windowTitle = readFocusedWindowTitle(pid: pid, log: log)
-  return AppContext(appName: appName, pid: pid, windowTitle: windowTitle)
+  return AppContext(appName: appName, bundleId: bundleId, pid: pid, windowTitle: windowTitle)
 }
 
 @MainActor

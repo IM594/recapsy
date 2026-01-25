@@ -40,26 +40,43 @@ function normalizeText(text) {
     .trim();
 }
 
-function normalizeForExcludedAppMatch(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ");
+function normalizeBundleId(value) {
+  return String(value ?? "").trim().toLowerCase();
 }
 
-function isExcludedApp(appName, excludedApps) {
-  const normalized = normalizeForExcludedAppMatch(appName);
+function isLikelyBundleId(value) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return false;
+  if (/\s/.test(trimmed)) return false;
+  if (!trimmed.includes(".")) return false;
+  return /^[A-Za-z0-9._-]+$/.test(trimmed);
+}
+
+function dedupeBundleIds(bundleIds) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of bundleIds ?? []) {
+    const id = String(raw ?? "").trim();
+    if (!id) continue;
+    if (!isLikelyBundleId(id)) continue;
+    const norm = normalizeBundleId(id);
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(id);
+  }
+  // 统一排序（稳定且便于 diff / 配置可读性）
+  out.sort((a, b) => normalizeBundleId(a).localeCompare(normalizeBundleId(b)));
+  return out;
+}
+
+function isExcludedBundleId(appBundleId, excludedBundleIds) {
+  const normalized = normalizeBundleId(appBundleId);
   if (!normalized) return false;
 
-  for (const raw of excludedApps ?? []) {
-    const rule = normalizeForExcludedAppMatch(raw);
+  for (const raw of excludedBundleIds ?? []) {
+    const rule = normalizeBundleId(raw);
     if (!rule) continue;
     if (rule === normalized) return true;
-
-    // 用户友好：允许用“部分关键词”匹配（例如 `chrome` 命中 `Google Chrome`）。
-    // 为避免误杀，要求规则长度至少 3。
-    if (rule.length >= 3 && normalized.includes(rule)) return true;
   }
 
   return false;
@@ -311,9 +328,9 @@ export function createStore(db, { withTransaction }) {
 
   const insertFrameStmt = db.prepare(
     `INSERT INTO frames (
-        ts, app, window_title, ocr_text, phash,
+        ts, app, app_bundle_id, window_title, ocr_text, phash,
         screenshot_path, thumbnail_path, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
 
   const listUnchunkedFramesStmt = db.prepare(
@@ -631,15 +648,19 @@ export function createStore(db, { withTransaction }) {
       throw new Error("ocrText is required");
     }
 
-    // 最终兜底：Agent 写库前再次应用“应用黑名单”，确保任何 collector 漏判也不会写入。
+    // 最终兜底：Agent 写库前再次应用“应用黑名单（按 Bundle ID）”，确保任何 collector 漏判也不会写入。
     const settings = getSettings();
-    if (frame.app && isExcludedApp(frame.app, settings.collector.excludedApps)) {
+    if (
+      frame.appBundleId &&
+      isExcludedBundleId(frame.appBundleId, settings.collector.excludedApps)
+    ) {
       return { skipped: true, reason: "excluded-app" };
     }
 
     const info = insertFrameStmt.run(
       ts,
       frame.app ?? null,
+      frame.appBundleId ?? null,
       frame.windowTitle ?? null,
       ocrText,
       frame.phash ?? null,
@@ -880,9 +901,7 @@ export function createStore(db, { withTransaction }) {
       }
       case "collector.excludedApps": {
         if (Array.isArray(parsed)) {
-          const apps = parsed
-            .map((x) => String(x).trim())
-            .filter((x) => x);
+          const apps = dedupeBundleIds(parsed);
           // 允许清空（空数组），表示“不排除任何应用”
           settings.collector.excludedApps = apps;
         }
@@ -966,12 +985,22 @@ export function createStore(db, { withTransaction }) {
         if (!Array.isArray(c.excludedApps)) {
           throw new Error("collector.excludedApps must be an array of strings");
         }
-        const apps = c.excludedApps
+        const rawApps = c.excludedApps
           .map((x) => String(x).trim())
           .filter((x) => x);
-        if (apps.length > 200) {
+        if (rawApps.length > 200) {
           throw new Error("collector.excludedApps is too large");
         }
+
+        // 黑名单按应用身份匹配：只接受 Bundle ID（反向域名风格），避免“名字不稳定/多语言/错配”。
+        const invalid = rawApps.filter((id) => !isLikelyBundleId(id));
+        if (invalid.length > 0) {
+          throw new Error(
+            `collector.excludedApps 只能包含应用 Bundle ID（例如 com.google.Chrome），无效项：${invalid[0]}`
+          );
+        }
+
+        const apps = dedupeBundleIds(rawApps);
         updates.push(["collector.excludedApps", JSON.stringify(apps)]);
       }
     }

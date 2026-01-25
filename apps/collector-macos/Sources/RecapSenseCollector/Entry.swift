@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Darwin
 import Foundation
@@ -151,9 +152,9 @@ struct RecapSenseCollectorMain {
       logger.info("缩略图：enabled=\(config.thumbnailEnabled)，maxWidth=\(config.thumbnailMaxWidth)px")
       logger.info("OCR 全文日志：\(config.ocrLogEnabled ? "enabled" : "disabled")（调试用途，文件：logs/collector-ocr.log）")
       if config.excludedApps.isEmpty {
-        logger.info("应用黑名单：无")
+        logger.info("应用黑名单（Bundle ID）：无")
       } else {
-        logger.info("应用黑名单：\(config.excludedApps.joined(separator: ", "))")
+        logger.info("应用黑名单（Bundle ID）：\(config.excludedApps.joined(separator: ", "))")
       }
       if config.dryRun {
         logger.warn("当前为 dry-run：不会写入 Agent（仅本地打印摘要）")
@@ -211,26 +212,23 @@ struct RecapSenseCollectorMain {
           }
 
           var appName = context.appName
+          var appBundleId = context.bundleId
           var windowTitle = context.windowTitle
           var captureResult: ScreenCaptureResult? = nil
 
-          // 黑名单第一道闸门：按“前台应用”（NSWorkspace）过滤。
-          if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
-            logger.debug("命中应用黑名单（跳过采集）：\(appName)")
+          // 黑名单第一道闸门：按“前台应用 Bundle ID”（NSWorkspace）过滤。
+          if let appBundleId, isExcludedAppBundleId(appBundleId, excludedBundleIds: config.excludedApps) {
+            logger.debug("命中应用黑名单（跳过采集）：\(appName ?? appBundleId)")
             await sleepSeconds(config.intervalSeconds)
             continue
           }
 
           if config.captureMode == .window {
             let decision = captureFrontmostWindowForOCR(
-              excludedApps: config.excludedApps,
               log: { message in logger.debug(message) }
             )
 
             switch decision {
-            case .skippedExcluded:
-              await sleepSeconds(config.intervalSeconds)
-              continue
             case .failed:
               // “前台窗口”失败：降级为全屏（尽量保证有数据）。
               captureResult = captureFullScreenForOCR(log: { message in logger.debug(message) })
@@ -238,13 +236,24 @@ struct RecapSenseCollectorMain {
               captureResult = result
               let capturedPid = result.metadata.pid
 
-              if let capturedAppName = result.metadata.appName,
-                 !capturedAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-              {
-                appName = capturedAppName
-              } else if let capturedPid, capturedPid != context.pid {
-                // 元数据来自 CGWindowList，但前台 app 的 context 可能滞后；避免错贴。
-                appName = nil
+              if let capturedPid {
+                let identity = await MainActor.run { resolveRunningAppIdentity(pid: capturedPid) }
+                if let bundleId = identity.bundleId {
+                  appBundleId = bundleId
+                } else if capturedPid != context.pid {
+                  appBundleId = nil
+                }
+
+                if let name = identity.name {
+                  appName = name
+                } else if let capturedAppName = result.metadata.appName,
+                          !capturedAppName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                {
+                  appName = capturedAppName
+                } else if capturedPid != context.pid {
+                  // 元数据来自 CGWindowList，但前台 app 的 context 可能滞后；避免错贴。
+                  appName = nil
+                }
               }
 
               if let capturedWindowName = result.metadata.windowTitle,
@@ -271,14 +280,15 @@ struct RecapSenseCollectorMain {
             captureResult = captureFullScreenForOCR(log: { message in logger.debug(message) })
           }
 
-          // 黑名单第二道闸门：按“最终写入的 appName”（可能来自 window 元数据）再过滤一次。
-          if let appName, isExcludedApp(appName, excludedApps: config.excludedApps) {
-            logger.debug("命中应用黑名单（跳过采集）：\(appName)")
+          // 黑名单第二道闸门：按“最终 appBundleId”（可能来自 window pid）再过滤一次。
+          if let appBundleId, isExcludedAppBundleId(appBundleId, excludedBundleIds: config.excludedApps) {
+            logger.debug("命中应用黑名单（跳过采集）：\(appName ?? appBundleId)")
             await sleepSeconds(config.intervalSeconds)
             continue
           }
 
-          let key = "\(appName ?? "")\n\(windowTitle ?? "")"
+          let keyApp = appBundleId ?? appName ?? ""
+          let key = "\(keyApp)\n\(windowTitle ?? "")"
 
           guard let screenshot = captureResult?.image else {
             notices.once(key: "screen-recording") {
@@ -355,7 +365,7 @@ struct RecapSenseCollectorMain {
             let localTs = formatLocalTimestamp(now)
             let lines = ocrText.split(separator: "\n").count
             let header =
-              "[\(localTs)] tsMs=\(tsMs) app=\(appName ?? "Unknown") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) phash=\(hash.stringValue) ocrLines=\(lines) ocrChars=\(ocrText.count)\n"
+              "[\(localTs)] tsMs=\(tsMs) app=\(appName ?? "Unknown") bundle=\(appBundleId ?? "-") title=\(windowTitle ?? "-") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) phash=\(hash.stringValue) ocrLines=\(lines) ocrChars=\(ocrText.count)\n"
             let body =
               "----- OCR BEGIN -----\n\(ocrText)\n----- OCR END -----\n\n"
             ocrDebugLog.append(header + body)
@@ -381,6 +391,7 @@ struct RecapSenseCollectorMain {
           let payload = IngestFrameRequestBody(
             ts: tsMs,
             app: appName,
+            appBundleId: appBundleId,
             windowTitle: windowTitle,
             ocrText: ocrText,
             phash: hash.stringValue,
@@ -522,7 +533,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
         }
         i += 2
       } else {
-        printUsageAndExit("参数 --exclude-app 需要一个应用名称")
+        printUsageAndExit("参数 --exclude-app 需要一个应用 Bundle ID（例如 com.google.Chrome）")
       }
     case "--exclude-apps":
       if i + 1 < args.count {
@@ -534,7 +545,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
         }
         i += 2
       } else {
-        printUsageAndExit("参数 --exclude-apps 需要一个用逗号分隔的应用列表")
+        printUsageAndExit("参数 --exclude-apps 需要一个用逗号分隔的应用 Bundle ID 列表")
       }
     case "--dry-run":
       dryRun = true
@@ -568,29 +579,31 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   )
 }
 
-private func normalizeForExcludedAppMatch(_ value: String) -> String {
-  let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-  if trimmed.isEmpty { return "" }
-
-  let replaced = trimmed
-    .replacingOccurrences(of: "_", with: " ")
-    .replacingOccurrences(of: "-", with: " ")
-
-  return replaced.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+private func normalizeBundleId(_ value: String) -> String {
+  value
+    .trimmingCharacters(in: .whitespacesAndNewlines)
+    .lowercased()
 }
 
-private func isExcludedApp(_ appName: String, excludedApps: [String]) -> Bool {
-  if excludedApps.isEmpty { return false }
-  let normalized = normalizeForExcludedAppMatch(appName)
+private func isExcludedAppBundleId(_ bundleId: String, excludedBundleIds: [String]) -> Bool {
+  if excludedBundleIds.isEmpty { return false }
+  let normalized = normalizeBundleId(bundleId)
   if normalized.isEmpty { return false }
 
-  return excludedApps.contains { item in
-    let rule = normalizeForExcludedAppMatch(item)
-    if rule.isEmpty { return false }
-    if rule == normalized { return true }
-    if rule.count >= 3, normalized.contains(rule) { return true }
-    return false
+  return excludedBundleIds.contains { item in
+    normalizeBundleId(item) == normalized
   }
+}
+
+@MainActor
+private func resolveRunningAppIdentity(pid: pid_t) -> (bundleId: String?, name: String?) {
+  let app = NSRunningApplication(processIdentifier: pid)
+  let bundleId = app?.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines)
+  let name = app?.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+  let normalizedBundleId = (bundleId?.isEmpty == false) ? bundleId : nil
+  let normalizedName = (name?.isEmpty == false) ? name : normalizedBundleId
+  return (bundleId: normalizedBundleId, name: normalizedName)
 }
 
 private func printUsageAndExit(_ error: String?) -> Never {
@@ -611,9 +624,9 @@ private func printUsageAndExit(_ error: String?) -> Never {
       --ocr-log                      输出 OCR 全文到日志（调试用途，体量较大，默认关闭）
       --ocr-lang <a,b,c>             OCR 语言（默认 zh-Hans,en-US）
       --no-thumbnails                不写入缩略图文件
-      --thumbnail-width <px>         缩略图最大宽度（默认 420）
-      --exclude-app <name>           应用黑名单（遇到该应用则跳过采集；可重复传入）
-      --exclude-apps <a,b,c>         应用黑名单（逗号分隔；等价于多次 --exclude-app）
+      --thumbnail-width <px>         缩略图最大宽度（默认 720）
+      --exclude-app <bundleId>       应用黑名单（Bundle ID；遇到该应用则跳过采集；可重复传入）
+      --exclude-apps <a,b,c>         应用黑名单（Bundle ID；逗号分隔；等价于多次 --exclude-app）
       --dry-run                      不写入 Agent，仅打印 OCR 摘要
       --once                         只采集一次就退出
       --verbose                      输出更多调试日志
