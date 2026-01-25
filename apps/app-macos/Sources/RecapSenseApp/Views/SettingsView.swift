@@ -52,11 +52,43 @@ struct SettingsView: View {
         }
 
         Section("权限（macOS）") {
+          LabeledContent("采集器屏幕录制") {
+            PermissionStatusView(
+              granted: supervisor.collectorPermissionDiagnostics.screenRecordingGranted,
+              missingText: "未授权（无法采集）"
+            )
+          }
+
+          LabeledContent("采集器辅助功能") {
+            PermissionStatusView(
+              granted: supervisor.collectorPermissionDiagnostics.accessibilityGranted,
+              missingText: "未授权（标题可能不准确）"
+            )
+          }
+
+          if supervisor.collectorPermissionDiagnostics.checking {
+            Text("正在检查采集器权限…")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else if let error = supervisor.collectorPermissionDiagnostics.lastErrorMessage, !error.isEmpty {
+            Text("权限检查失败：\(error)")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          } else if let checkedAt = supervisor.collectorPermissionDiagnostics.lastCheckedAt {
+            Text("上次检查：\(checkedAt.formatted(date: .numeric, time: .standard))")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+
+          Button("立即检查采集器权限") {
+            supervisor.checkCollectorPermissionsNow()
+          }
+
           Button("打开系统设置：屏幕录制") {
-            openPrivacyPane(anchor: "Privacy_ScreenCapture")
+            PrivacyPane.openScreenCapture()
           }
           Button("打开系统设置：辅助功能") {
-            openPrivacyPane(anchor: "Privacy_Accessibility")
+            PrivacyPane.openAccessibility()
           }
 
           Text("提示：如果 Collector 提示“无法截屏”，通常需要在这里给对应进程授权（可能是 recapsense-collector，也可能是启动它的 App）。")
@@ -421,9 +453,24 @@ struct SettingsView: View {
   }
 }
 
-private func openPrivacyPane(anchor: String) {
-  guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)") else {
-    return
+private struct PermissionStatusView: View {
+  let granted: Bool?
+  let missingText: String
+
+  var body: some View {
+    switch granted {
+    case .some(true):
+      Label("已授权", systemImage: "checkmark.circle.fill")
+        .foregroundStyle(.green)
+        .font(.caption)
+    case .some(false):
+      Label(missingText, systemImage: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
+        .font(.caption)
+    case .none:
+      Label("未检查", systemImage: "questionmark.circle")
+        .foregroundStyle(.secondary)
+        .font(.caption)
+    }
   }
-  NSWorkspace.shared.open(url)
 }

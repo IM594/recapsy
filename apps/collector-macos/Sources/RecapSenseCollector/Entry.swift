@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 import Darwin
 import Foundation
@@ -15,6 +16,7 @@ struct CollectorConfig {
   let excludedApps: [String]
   let dryRun: Bool
   let once: Bool
+  let checkPermissionsOnly: Bool
   let verbose: Bool
 }
 
@@ -118,6 +120,27 @@ struct RecapSenseCollectorMain {
     let config = parseConfig(args: CommandLine.arguments)
     let logger = Logger(verbose: config.verbose)
     let notices = OneTimeNotice()
+
+    if config.checkPermissionsOnly {
+      let screenRecordingGranted = CGPreflightScreenCaptureAccess()
+      let accessibilityGranted = AXIsProcessTrusted()
+      let payload: [String: Any] = [
+        "screenRecording": screenRecordingGranted,
+        "accessibility": accessibilityGranted,
+        "checkedExecutable": CommandLine.arguments.first ?? "",
+        "timestampMs": Int64(Date().timeIntervalSince1970 * 1000),
+      ]
+
+      if let data = try? JSONSerialization.data(withJSONObject: payload, options: []),
+         let text = String(data: data, encoding: .utf8)
+      {
+        print(text)
+      } else {
+        print("{\"screenRecording\":\(screenRecordingGranted),\"accessibility\":\(accessibilityGranted)}")
+      }
+      fflush(stdout)
+      exit(0)
+    }
 
     let sep = String(repeating: "=", count: 78)
     logger.info(sep)
@@ -467,6 +490,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   var excludedApps: [String] = []
   var dryRun = false
   var once = false
+  var checkPermissionsOnly = false
   var verbose = false
 
   var i = 1
@@ -553,6 +577,9 @@ private func parseConfig(args: [String]) -> CollectorConfig {
     case "--once":
       once = true
       i += 1
+    case "--check-permissions":
+      checkPermissionsOnly = true
+      i += 1
     case "--verbose":
       verbose = true
       i += 1
@@ -575,6 +602,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
     excludedApps: excludedApps,
     dryRun: dryRun,
     once: once,
+    checkPermissionsOnly: checkPermissionsOnly,
     verbose: verbose
   )
 }
@@ -629,6 +657,7 @@ private func printUsageAndExit(_ error: String?) -> Never {
       --exclude-apps <a,b,c>         应用黑名单（Bundle ID；逗号分隔；等价于多次 --exclude-app）
       --dry-run                      不写入 Agent，仅打印 OCR 摘要
       --once                         只采集一次就退出
+      --check-permissions            仅检查“屏幕录制/辅助功能”权限并输出 JSON（不会采集/不会写入）
       --verbose                      输出更多调试日志
 
     环境变量：

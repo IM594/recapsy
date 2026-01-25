@@ -60,6 +60,24 @@ struct MenuBarView: View {
           .foregroundStyle(.secondary)
       }
 
+      if supervisor.collectorEnabled && !supervisor.collectorPauseState.isPaused {
+        if supervisor.collectorPermissionDiagnostics.checking {
+          Text("正在检查采集器权限…")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else if supervisor.collectorPermissionDiagnostics.isScreenRecordingMissing {
+          Label("未授权“屏幕录制”，无法采集", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.red)
+          Button("打开系统设置：屏幕录制") { PrivacyPane.openScreenCapture() }
+        } else if supervisor.collectorPermissionDiagnostics.isAccessibilityMissing {
+          Label("未授权“辅助功能”，标题可能不准确", systemImage: "exclamationmark.triangle.fill")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+          Button("打开系统设置：辅助功能") { PrivacyPane.openAccessibility() }
+        }
+      }
+
       let shouldShowAutoRecoverHint: Bool = {
         if !supervisor.collectorEnabled { return false }
         if supervisor.collectorPauseState.isPaused { return false }
@@ -100,6 +118,9 @@ struct MenuBarView: View {
       }
     }
     .padding(12)
+    .onAppear {
+      supervisor.checkCollectorPermissionsNow()
+    }
   }
 }
 

@@ -18,6 +18,7 @@ final class Supervisor: ObservableObject {
   @Published private(set) var collectorPauseState: CollectorPauseState = .none
   @Published var collectorEnabled: Bool = true
   @Published private(set) var collectorDiagnostics = CollectorProcessDiagnostics()
+  @Published private(set) var collectorPermissionDiagnostics = CollectorPermissionDiagnostics()
 
   private var cancellables: Set<AnyCancellable> = []
   private var hasAutoStarted = false
@@ -31,6 +32,7 @@ final class Supervisor: ObservableObject {
   private var collectorAutoRestartAttempt = 0
   private var collectorFixTask: Task<Void, Never>? = nil
   private var collectorAutoRestartToken: UUID? = nil
+  private var collectorPermissionCheckTask: Task<Void, Never>? = nil
 
   init(autoStart: Bool = true) {
     // 把子进程对象的变更（state/logFile/lastErrorMessage）透传给 Supervisor，
@@ -80,7 +82,57 @@ final class Supervisor: ObservableObject {
       while !Task.isCancelled {
         refreshCollectorDiagnosticsNow()
         ensureCollectorProcessIntent()
+        scheduleCollectorPermissionCheckIfNeeded()
         try? await Task.sleep(nanoseconds: 2_000_000_000)
+      }
+    }
+  }
+
+  func checkCollectorPermissionsNow() {
+    scheduleCollectorPermissionCheckIfNeeded(force: true)
+  }
+
+  private func scheduleCollectorPermissionCheckIfNeeded(force: Bool = false) {
+    if collectorPermissionCheckTask != nil { return }
+
+    // 自动检查仅在“用户期望采集”的状态下运行，避免无意义的后台探测。
+    let shouldAutoCheck = collectorEnabled && collectorPauseState == .none
+    if !force && !shouldAutoCheck { return }
+
+    let minIntervalSeconds: TimeInterval = 15
+    if !force, let last = collectorPermissionDiagnostics.lastCheckedAt {
+      if Date().timeIntervalSince(last) < minIntervalSeconds {
+        return
+      }
+    }
+
+    // 确保我们检查的是“实际运行的稳定路径”（dataDir/bin），避免用户授权了 A 但我们跑的是 B。
+    let binaryPath = ensureCollectorInstalled()
+    collectorPermissionDiagnostics.checking = true
+    collectorPermissionDiagnostics.lastErrorMessage = nil
+    collectorPermissionDiagnostics.checkedExecutable = binaryPath
+
+    collectorPermissionCheckTask = Task.detached(priority: .utility) {
+      let result = runCollectorPermissionProbe(executablePath: binaryPath)
+      await MainActor.run {
+        self.collectorPermissionDiagnostics.checking = false
+        self.collectorPermissionDiagnostics.lastCheckedAt = Date()
+
+        switch result {
+        case .success(let probe):
+          self.collectorPermissionDiagnostics.screenRecordingGranted = probe.screenRecording
+          self.collectorPermissionDiagnostics.accessibilityGranted = probe.accessibility
+          if let checked = probe.checkedExecutable, !checked.isEmpty {
+            self.collectorPermissionDiagnostics.checkedExecutable = checked
+          }
+          self.collectorPermissionDiagnostics.lastErrorMessage = nil
+        case .failure(let error):
+          self.collectorPermissionDiagnostics.screenRecordingGranted = nil
+          self.collectorPermissionDiagnostics.accessibilityGranted = nil
+          self.collectorPermissionDiagnostics.lastErrorMessage = String(describing: error)
+        }
+
+        self.collectorPermissionCheckTask = nil
       }
     }
   }
@@ -658,6 +710,50 @@ final class Supervisor: ObservableObject {
     return false
   }
 }
+
+private struct CollectorPermissionProbeOutput: Decodable {
+  let screenRecording: Bool
+  let accessibility: Bool
+  let checkedExecutable: String?
+  let timestampMs: Int64?
+}
+
+private func runCollectorPermissionProbe(executablePath: String) -> Result<CollectorPermissionProbeOutput, Error> {
+  let url = URL(fileURLWithPath: executablePath)
+  guard FileManager.default.fileExists(atPath: url.path) else {
+    return .failure(NSError(domain: "Supervisor", code: 1, userInfo: [NSLocalizedDescriptionKey: "Collector 可执行文件不存在：\(url.path)"]))
+  }
+
+  let process = Process()
+  process.executableURL = url
+  process.arguments = ["--check-permissions"]
+
+  let outPipe = Pipe()
+  let errPipe = Pipe()
+  process.standardOutput = outPipe
+  process.standardError = errPipe
+
+  do {
+    try process.run()
+    process.waitUntilExit()
+
+    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+
+    // 兼容：即便退出码非 0，也尽力解析 stdout（某些环境里 stderr 为空）。
+    if let decoded = try? JSONDecoder().decode(CollectorPermissionProbeOutput.self, from: outData) {
+      return .success(decoded)
+    }
+
+    let stderrText = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let stdoutText = String(data: outData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let message = stderrText.isEmpty ? stdoutText : stderrText
+    return .failure(NSError(domain: "Supervisor", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: message.isEmpty ? "Collector 权限检查失败" : message]))
+  } catch {
+    return .failure(error)
+  }
+}
+
 
 // MARK: - Health / shutdown helpers
 
