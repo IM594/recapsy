@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Combine
 import Darwin
@@ -16,6 +17,7 @@ final class Supervisor: ObservableObject {
   @Published var config = SupervisorConfig.loadFromEnvironment()
   @Published private(set) var settings: RecapSenseSettings = .defaults
   @Published var agentEnabled: Bool = true
+  @Published private(set) var lastFrontmostApp: FrontmostAppInfo? = nil
   @Published private(set) var collectorPauseState: CollectorPauseState = .none
   @Published var collectorEnabled: Bool = true
   @Published private(set) var agentDiagnostics = AgentProcessDiagnostics()
@@ -64,6 +66,21 @@ final class Supervisor: ObservableObject {
       }
       .store(in: &cancellables)
 
+    // 记录“最后一个非本 App 的前台应用”，用于菜单栏里实现“小白也能一键排除当前应用”。
+    // 说明：当用户打开菜单栏时，前台可能会短暂变成 RecapSense；因此我们要忽略自身 pid。
+    NotificationCenter.default.publisher(for: NSWorkspace.didActivateApplicationNotification)
+      .receive(on: RunLoop.main)
+      .sink { [weak self] notification in
+        guard let self else { return }
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        self.recordFrontmostApp(app)
+      }
+      .store(in: &cancellables)
+
+    if let app = NSWorkspace.shared.frontmostApplication {
+      recordFrontmostApp(app)
+    }
+
     if !autoStart {
       // 例如：重复启动（单实例锁失败）时，我们会阻止自动拉起服务，避免端口占用/状态错乱。
       agentEnabled = false
@@ -78,6 +95,21 @@ final class Supervisor: ObservableObject {
       // 约定：当前版本默认“启动后端 + 启动采集”，让安装后体验尽量接近“开箱即用”。
       autoStartAllIfNeeded()
     }
+  }
+
+  private func recordFrontmostApp(_ app: NSRunningApplication) {
+    // 只记录“用户可见应用”（排除后台 daemon/服务）。
+    if app.activationPolicy == .prohibited { return }
+
+    // 忽略本进程：用户点开菜单栏时，前台可能会变成 RecapSense 自己。
+    if app.processIdentifier == getpid() { return }
+
+    lastFrontmostApp = FrontmostAppInfo(
+      pid: app.processIdentifier,
+      bundleId: app.bundleIdentifier,
+      name: app.localizedName,
+      activatedAt: Date()
+    )
   }
 
   func autoStartAllIfNeeded() {
@@ -731,6 +763,54 @@ final class Supervisor: ObservableObject {
     await waitUntilAllStopped(timeoutSeconds: timeoutSeconds)
   }
 
+  func excludeCurrentFrontmostAppFromCollection() {
+    Task { @MainActor in
+      do {
+        // 优先使用“记录到的前台应用”（打开菜单栏时更稳定）；如果没有记录则 fallback 到实时读取。
+        let runtime = NSWorkspace.shared.frontmostApplication
+        let candidate: NSRunningApplication? = {
+          if let runtime, runtime.processIdentifier != getpid() { return runtime }
+          if let info = lastFrontmostApp {
+            return NSRunningApplication(processIdentifier: info.pid)
+          }
+          return nil
+        }()
+
+        guard let app = candidate else {
+          throw NSError(domain: "Supervisor", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法识别当前应用。请先切换到要排除的应用后再试。"])
+        }
+
+        let bundleId = app.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if bundleId.isEmpty {
+          // 开发期：RecapSense 自己没有 bundle id；我们已经在 collector 侧自动跳过自身窗口。
+          if app.processIdentifier == getpid() {
+            presentAlert(title: "无需添加", message: "RecapSense 会自动排除自身窗口（开发版没有 Bundle ID）。")
+            return
+          }
+          let name = app.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+          throw NSError(
+            domain: "Supervisor",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "\(name?.isEmpty == false ? name! : "该应用") 没有 Bundle ID，无法加入黑名单。"]
+          )
+        }
+
+        let client = try AgentHttpClient(config: config)
+        let current = try await client.getSettings()
+        var next = current
+
+        if !next.collector.excludedApps.contains(bundleId) {
+          next.collector.excludedApps.append(bundleId)
+          next.collector.excludedApps.sort()
+        }
+
+        try await saveSettingsAndApply(next)
+      } catch {
+        presentAlert(title: "添加黑名单失败", message: String(describing: error))
+      }
+    }
+  }
+
   func refreshSettingsFromAgent() async throws {
     // 这里不强制要求 agent state 为 running：
     // - 允许 UI 里用户先点“刷新”，如果 agent 没开，会得到更直观的错误。
@@ -772,6 +852,15 @@ final class Supervisor: ObservableObject {
     }
 
     return result
+  }
+
+  private func presentAlert(title: String, message: String) {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "好的")
+    alert.runModal()
   }
 
   private func restartCollector() async {

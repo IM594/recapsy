@@ -130,6 +130,12 @@ struct MenuBarView: View {
         }
       }
 
+      let excludedLabel = supervisor.lastFrontmostApp?.displayName ?? "—"
+      Button("排除当前应用 — \(excludedLabel)") {
+        supervisor.excludeCurrentFrontmostAppFromCollection()
+      }
+      .disabled((supervisor.lastFrontmostApp?.bundleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty)
+
       Divider()
 
       Button("退出并停止全部") {
