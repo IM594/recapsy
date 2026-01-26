@@ -27,13 +27,23 @@ export function toolList() {
     {
       name: "recapsense_search",
       description:
-        "在本机 RecapSense 记忆（chunks）中搜索。适合按关键词找回过去的内容；query 为空时返回最近的 chunks。",
+        "在本机 RecapSense 记忆（chunks）中搜索。适合按关键词找回过去的内容；query 为空时返回最近的 chunks（可选按 app 与 scope 过滤）。",
       inputSchema: {
         type: "object",
         properties: {
           query: {
             type: "string",
             description: "搜索关键词（FTS）。空字符串表示返回最近 chunks。",
+          },
+          app: {
+            type: "string",
+            description: "（可选）只返回 app 匹配的 chunks（大小写不敏感，按值精确匹配）。",
+          },
+          scope: {
+            type: "string",
+            enum: ["all", "meta", "text"],
+            description:
+              "（可选）搜索范围：all=正文+标题+app（默认）；meta=只匹配 app/窗口标题；text=只匹配正文。",
           },
           limit: {
             type: "integer",
@@ -165,10 +175,12 @@ export function resolveAgentSocketPath() {
   return resolveSocketPathFromDataDir(dataDir);
 }
 
-async function callAgentSearchViaHttp({ agentUrl, token, query, limit }) {
+async function callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scope }) {
   const url = new URL("/v1/search", agentUrl);
   url.searchParams.set("q", query ?? "");
   url.searchParams.set("limit", String(limit ?? 10));
+  if (app != null && String(app).trim() !== "") url.searchParams.set("app", String(app).trim());
+  if (scope != null && String(scope).trim() !== "") url.searchParams.set("scope", String(scope).trim());
 
   const response = await fetch(url, {
     method: "GET",
@@ -188,10 +200,12 @@ async function callAgentSearchViaHttp({ agentUrl, token, query, limit }) {
   return payload.results ?? [];
 }
 
-async function callAgentSearchViaSocket({ socketPath, token, query, limit }) {
+async function callAgentSearchViaSocket({ socketPath, token, query, limit, app, scope }) {
   const url = new URL("http://localhost/v1/search");
   url.searchParams.set("q", query ?? "");
   url.searchParams.set("limit", String(limit ?? 10));
+  if (app != null && String(app).trim() !== "") url.searchParams.set("app", String(app).trim());
+  if (scope != null && String(scope).trim() !== "") url.searchParams.set("scope", String(scope).trim());
 
   const responseBody = await new Promise((resolve, reject) => {
     const req = http.request(
@@ -229,10 +243,11 @@ async function callAgentSearchViaSocket({ socketPath, token, query, limit }) {
 
 function makeCallAgentSearch({ agentUrl, token, socketPath }) {
   if (socketPath) {
-    return ({ query, limit }) =>
-      callAgentSearchViaSocket({ socketPath, token, query, limit });
+    return ({ query, limit, app, scope }) =>
+      callAgentSearchViaSocket({ socketPath, token, query, limit, app, scope });
   }
-  return ({ query, limit }) => callAgentSearchViaHttp({ agentUrl, token, query, limit });
+  return ({ query, limit, app, scope }) =>
+    callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scope });
 }
 
 async function callAgentGetChunkViaHttp({ agentUrl, token, id }) {
@@ -416,7 +431,9 @@ export function createMcpRequestHandler({ agentUrl, token, socketPath }) {
         if (name === "recapsense_search") {
           const query = String(args.query ?? "");
           const limit = Number.isFinite(args.limit) ? args.limit : 10;
-          const results = await callAgentSearch({ query, limit });
+          const app = String(args.app ?? "").trim();
+          const scope = String(args.scope ?? "").trim();
+          const results = await callAgentSearch({ query, limit, app, scope });
           text = formatSearchResults(results);
         } else if (name === "recapsense_get_chunk") {
           const chunkId = String(args.id ?? "").trim();

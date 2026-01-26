@@ -39,7 +39,12 @@ token 默认存放在：
 - `GET /health`（无需鉴权）：健康检查
 - `GET /v1/settings`：获取设置（来自 SQLite `settings` 表）
 - `PATCH /v1/settings`：更新设置（写入 SQLite `settings` 表）
-- `GET /v1/search?q=...&limit=...`：搜索 chunks（FTS）；`q` 为空则返回最近 chunks
+- `GET /v1/search?q=...&limit=...&app=...&scope=...`：搜索 chunks（FTS 优先）；`q` 为空则返回最近 chunks
+  - `app`（可选）：只返回 `app` 匹配的 chunks（大小写不敏感，按值精确匹配）
+  - `scope`（可选）：搜索范围（默认 `all`）
+    - `all`：正文 + `app` + `window_title`（与旧行为一致）
+    - `meta`：只在 `app/window_title` 中匹配（适合“按应用/窗口标题找”，减少噪声）
+    - `text`：只在正文 `text` 中匹配
 - `GET /v1/chunks/:id`：按 id 获取 chunk
 - `GET /v1/summaries/daily?date=YYYY-MM-DD`：获取（并尽力自动生成）日总结
 - `POST /v1/ingest/frame`：写入截图 OCR 帧

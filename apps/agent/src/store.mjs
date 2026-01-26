@@ -552,6 +552,48 @@ export function createStore(db, { withTransaction }) {
     );
   })();
 
+  const searchChunksFtsByAppStmt = (() => {
+    if (!ftsEnabled) return null;
+
+    if (ftsMode === "fts5") {
+      const stmt = safePrepareFts(
+        `SELECT
+            c.id,
+            c.start_ts,
+            c.end_ts,
+            c.app,
+            c.window_title,
+            bm25(chunks_fts) AS score,
+            substr(c.text, 1, 240) AS snippet
+         FROM chunks_fts
+         JOIN chunks c ON c.id = chunks_fts.chunk_id
+         WHERE chunks_fts MATCH ? AND c.deleted_at IS NULL
+           AND c.app = ? COLLATE NOCASE
+         ORDER BY score
+         LIMIT ?`
+      );
+      if (stmt) return stmt;
+      return null;
+    }
+
+    return safePrepareFts(
+      `SELECT
+          c.id,
+          c.start_ts,
+          c.end_ts,
+          c.app,
+          c.window_title,
+          NULL AS score,
+          substr(c.text, 1, 240) AS snippet
+       FROM chunks_fts
+       JOIN chunks c ON c.id = chunks_fts.chunk_id
+       WHERE chunks_fts MATCH ? AND c.deleted_at IS NULL
+         AND c.app = ? COLLATE NOCASE
+       ORDER BY c.end_ts DESC
+       LIMIT ?`
+    );
+  })();
+
   const searchChunksLikeStmt = db.prepare(
     `SELECT
         id,
@@ -568,6 +610,89 @@ export function createStore(db, { withTransaction }) {
      LIMIT ?`
   );
 
+  const searchChunksLikeByAppStmt = db.prepare(
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
+     FROM chunks
+     WHERE deleted_at IS NULL
+       AND app = ? COLLATE NOCASE
+       AND (text LIKE ? OR app LIKE ? OR window_title LIKE ?)
+     ORDER BY end_ts DESC
+     LIMIT ?`
+  );
+
+  const searchChunksMetaLikeStmt = db.prepare(
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
+     FROM chunks
+     WHERE deleted_at IS NULL
+       AND (app LIKE ? OR window_title LIKE ?)
+     ORDER BY end_ts DESC
+     LIMIT ?`
+  );
+
+  const searchChunksMetaLikeByAppStmt = db.prepare(
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
+     FROM chunks
+     WHERE deleted_at IS NULL
+       AND app = ? COLLATE NOCASE
+       AND (app LIKE ? OR window_title LIKE ?)
+     ORDER BY end_ts DESC
+     LIMIT ?`
+  );
+
+  const searchChunksTextLikeStmt = db.prepare(
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
+     FROM chunks
+     WHERE deleted_at IS NULL
+       AND text LIKE ?
+     ORDER BY end_ts DESC
+     LIMIT ?`
+  );
+
+  const searchChunksTextLikeByAppStmt = db.prepare(
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
+     FROM chunks
+     WHERE deleted_at IS NULL
+       AND app = ? COLLATE NOCASE
+       AND text LIKE ?
+     ORDER BY end_ts DESC
+     LIMIT ?`
+  );
+
   const listRecentChunksStmt = db.prepare(
     `SELECT
         id,
@@ -579,6 +704,22 @@ export function createStore(db, { withTransaction }) {
         substr(text, 1, 240) AS snippet
      FROM chunks
      WHERE deleted_at IS NULL
+     ORDER BY end_ts DESC
+     LIMIT ?`
+  );
+
+  const listRecentChunksByAppStmt = db.prepare(
+    `SELECT
+        id,
+        start_ts,
+        end_ts,
+        app,
+        window_title,
+        NULL AS score,
+        substr(text, 1, 240) AS snippet
+     FROM chunks
+     WHERE deleted_at IS NULL
+       AND app = ? COLLATE NOCASE
      ORDER BY end_ts DESC
      LIMIT ?`
   );
@@ -715,23 +856,83 @@ export function createStore(db, { withTransaction }) {
     return getChunkStmt.get(id) ?? null;
   }
 
-  function searchChunks({ query, limit = 20 }) {
+  function normalizeSearchScope(value) {
+    const raw = String(value ?? "").trim().toLowerCase();
+    if (raw === "meta") return "meta";
+    if (raw === "text") return "text";
+    return "all";
+  }
+
+  function searchChunks({ query, limit = 20, app, scope = "all" } = {}) {
     const trimmed = String(query ?? "").trim();
-    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(100, limit)) : 20;
+    const safeLimit = Number.isFinite(limit)
+      ? Math.max(1, Math.min(100, limit))
+      : 20;
+
+    const normalizedScope = normalizeSearchScope(scope);
+    const appFilter = String(app ?? "").trim();
+    const hasAppFilter = Boolean(appFilter);
 
     if (!trimmed) {
-      return listRecentChunksStmt.all(safeLimit).map((row) => ({
+      const rows = hasAppFilter
+        ? listRecentChunksByAppStmt.all(appFilter, safeLimit)
+        : listRecentChunksStmt.all(safeLimit);
+      return rows.map((row) => ({
         ...row,
         snippet: normalizeText(row.snippet ?? "").slice(0, 240),
       }));
     }
 
+    // scope=meta：明确只按 app/window_title 查，避免“正文提到某个词”导致的误入。
+    // 说明：这里不走 FTS（即使存在）也完全够用，并且能把 query 当作“普通字符串”处理，
+    //      避免用户输入带 FTS 特殊语法时引发解析错误。
+    if (normalizedScope === "meta") {
+      const pattern = `%${trimmed}%`;
+      if (hasAppFilter) {
+        return searchChunksMetaLikeByAppStmt.all(
+          appFilter,
+          pattern,
+          pattern,
+          safeLimit
+        );
+      }
+      return searchChunksMetaLikeStmt.all(pattern, pattern, safeLimit);
+    }
+
+    if (normalizedScope === "text") {
+      if (ftsEnabled && searchChunksFtsStmt) {
+        const ftsQuery = `text:(${trimmed})`;
+        if (hasAppFilter && searchChunksFtsByAppStmt) {
+          return searchChunksFtsByAppStmt.all(ftsQuery, appFilter, safeLimit);
+        }
+        return searchChunksFtsStmt.all(ftsQuery, safeLimit);
+      }
+
+      const pattern = `%${trimmed}%`;
+      if (hasAppFilter) {
+        return searchChunksTextLikeByAppStmt.all(appFilter, pattern, safeLimit);
+      }
+      return searchChunksTextLikeStmt.all(pattern, safeLimit);
+    }
+
+    // scope=all（默认）：保持现有行为（FTS 优先；失败降级 LIKE）。
     if (ftsEnabled && searchChunksFtsStmt) {
+      if (hasAppFilter && searchChunksFtsByAppStmt) {
+        return searchChunksFtsByAppStmt.all(trimmed, appFilter, safeLimit);
+      }
       return searchChunksFtsStmt.all(trimmed, safeLimit);
     }
 
-    // 降级：没有 FTS 时，使用 LIKE 做最小可用搜索（长远会慢，但能先跑通闭环）。
     const pattern = `%${trimmed}%`;
+    if (hasAppFilter) {
+      return searchChunksLikeByAppStmt.all(
+        appFilter,
+        pattern,
+        pattern,
+        pattern,
+        safeLimit
+      );
+    }
     return searchChunksLikeStmt.all(pattern, pattern, pattern, safeLimit);
   }
 

@@ -511,7 +511,9 @@ async function main() {
       if (req.method === "GET" && url.pathname === "/v1/search") {
         const query = url.searchParams.get("q") ?? "";
         const limit = parseLimit(url.searchParams.get("limit"), 20);
-        const results = store.searchChunks({ query, limit });
+        const app = url.searchParams.get("app") ?? "";
+        const scope = url.searchParams.get("scope") ?? "all";
+        const results = store.searchChunks({ query, limit, app, scope });
         return sendJson(res, 200, { results });
       }
 
