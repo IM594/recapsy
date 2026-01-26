@@ -59,6 +59,31 @@ struct RecapSenseSettings: Codable, Equatable {
   struct Agent: Codable, Equatable {
     var evidenceRetentionDays: Int
     var evidenceCleanupIntervalMinutes: Int
+    var mediaWarnThresholdBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+      case evidenceRetentionDays
+      case evidenceCleanupIntervalMinutes
+      case mediaWarnThresholdBytes
+    }
+
+    init(
+      evidenceRetentionDays: Int,
+      evidenceCleanupIntervalMinutes: Int,
+      mediaWarnThresholdBytes: Int
+    ) {
+      self.evidenceRetentionDays = evidenceRetentionDays
+      self.evidenceCleanupIntervalMinutes = evidenceCleanupIntervalMinutes
+      self.mediaWarnThresholdBytes = mediaWarnThresholdBytes
+    }
+
+    init(from decoder: Decoder) throws {
+      let c = try decoder.container(keyedBy: CodingKeys.self)
+      let defaults = RecapSenseSettings.defaults.agent
+      evidenceRetentionDays = try c.decodeIfPresent(Int.self, forKey: .evidenceRetentionDays) ?? defaults.evidenceRetentionDays
+      evidenceCleanupIntervalMinutes = try c.decodeIfPresent(Int.self, forKey: .evidenceCleanupIntervalMinutes) ?? defaults.evidenceCleanupIntervalMinutes
+      mediaWarnThresholdBytes = try c.decodeIfPresent(Int.self, forKey: .mediaWarnThresholdBytes) ?? defaults.mediaWarnThresholdBytes
+    }
   }
 
   var collector: Collector
@@ -76,8 +101,9 @@ struct RecapSenseSettings: Codable, Equatable {
         excludedApps: []
       ),
       agent: Agent(
-        evidenceRetentionDays: 30,
-        evidenceCleanupIntervalMinutes: 60
+        evidenceRetentionDays: 365,
+        evidenceCleanupIntervalMinutes: 60,
+        mediaWarnThresholdBytes: 10 * 1024 * 1024 * 1024
       )
     )
   }

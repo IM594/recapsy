@@ -37,78 +37,79 @@ struct SettingsView: View {
         .foregroundStyle(.secondary)
       }
 
-      Form {
-        Section("危险区域（Danger Zone）") {
-          Text("删除是不可恢复的。建议先“暂停采集”，再执行删除。")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          Button("删除最近 1 小时") { pendingDangerScope = "lastHour" }
-            .disabled(isLoading)
-          Button("删除最近 24 小时") { pendingDangerScope = "lastDay" }
-            .disabled(isLoading)
-          Button("删除全部数据（清空）") { pendingDangerScope = "all" }
-            .disabled(isLoading)
-        }
-
-        Section("权限（macOS）") {
-          LabeledContent("采集器屏幕录制") {
-            PermissionStatusView(
-              granted: supervisor.collectorPermissionDiagnostics.screenRecordingGranted,
-              missingText: "未授权（无法采集）"
-            )
-          }
-
-          LabeledContent("采集器辅助功能") {
-            PermissionStatusView(
-              granted: supervisor.collectorPermissionDiagnostics.accessibilityGranted,
-              missingText: "未授权（标题可能不准确）"
-            )
-          }
-
-          if supervisor.collectorPermissionDiagnostics.checking {
-            Text("正在检查采集器权限…")
+      ScrollView(.vertical) {
+        Form {
+          Section("危险区域（Danger Zone）") {
+            Text("删除是不可恢复的。建议先“暂停采集”，再执行删除。")
               .font(.caption)
               .foregroundStyle(.secondary)
-          } else if let error = supervisor.collectorPermissionDiagnostics.lastErrorMessage, !error.isEmpty {
-            Text("权限检查失败：\(error)")
+
+            Button("删除最近 1 小时") { pendingDangerScope = "lastHour" }
+              .disabled(isLoading)
+            Button("删除最近 24 小时") { pendingDangerScope = "lastDay" }
+              .disabled(isLoading)
+            Button("删除全部数据（清空）") { pendingDangerScope = "all" }
+              .disabled(isLoading)
+          }
+
+          Section("权限（macOS）") {
+            LabeledContent("采集器屏幕录制") {
+              PermissionStatusView(
+                granted: supervisor.collectorPermissionDiagnostics.screenRecordingGranted,
+                missingText: "未授权（无法采集）"
+              )
+            }
+
+            LabeledContent("采集器辅助功能") {
+              PermissionStatusView(
+                granted: supervisor.collectorPermissionDiagnostics.accessibilityGranted,
+                missingText: "未授权（标题可能不准确）"
+              )
+            }
+
+            if supervisor.collectorPermissionDiagnostics.checking {
+              Text("正在检查采集器权限…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if let error = supervisor.collectorPermissionDiagnostics.lastErrorMessage, !error.isEmpty {
+              Text("权限检查失败：\(error)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else if let checkedAt = supervisor.collectorPermissionDiagnostics.lastCheckedAt {
+              Text("上次检查：\(checkedAt.formatted(date: .numeric, time: .standard))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Button("立即检查采集器权限") {
+              supervisor.checkCollectorPermissionsNow()
+            }
+
+            Button("打开系统设置：屏幕录制") {
+              PrivacyPane.openScreenCapture()
+            }
+            Button("打开系统设置：辅助功能") {
+              PrivacyPane.openAccessibility()
+            }
+
+            Text("提示：如果 Collector 提示“无法截屏”，通常需要在这里给对应进程授权（可能是 recapsense-collector，也可能是启动它的 App）。")
               .font(.caption)
               .foregroundStyle(.secondary)
-          } else if let checkedAt = supervisor.collectorPermissionDiagnostics.lastCheckedAt {
-            Text("上次检查：\(checkedAt.formatted(date: .numeric, time: .standard))")
-              .font(.caption)
-              .foregroundStyle(.secondary)
+
+            LabeledContent("Collector 实际可执行文件") {
+              Text(supervisor.config.collectorBinary.path)
+                .font(.caption)
+                .textSelection(.enabled)
+            }
+
+            LabeledContent("Collector 构建产物路径（开发）") {
+              Text(supervisor.config.collectorBuiltBinary.path)
+                .font(.caption)
+                .textSelection(.enabled)
+            }
           }
 
-          Button("立即检查采集器权限") {
-            supervisor.checkCollectorPermissionsNow()
-          }
-
-          Button("打开系统设置：屏幕录制") {
-            PrivacyPane.openScreenCapture()
-          }
-          Button("打开系统设置：辅助功能") {
-            PrivacyPane.openAccessibility()
-          }
-
-          Text("提示：如果 Collector 提示“无法截屏”，通常需要在这里给对应进程授权（可能是 recapsense-collector，也可能是启动它的 App）。")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-
-          LabeledContent("Collector 实际可执行文件") {
-            Text(supervisor.config.collectorBinary.path)
-              .font(.caption)
-              .textSelection(.enabled)
-          }
-
-          LabeledContent("Collector 构建产物路径（开发）") {
-            Text(supervisor.config.collectorBuiltBinary.path)
-              .font(.caption)
-              .textSelection(.enabled)
-          }
-        }
-
-        Section("采集（Collector）") {
+          Section("采集（Collector）") {
           LabeledContent("采集开关（本机）") {
             Text(supervisor.collectorEnabled ? "已开启" : "已关闭")
               .font(.caption)
@@ -229,31 +230,71 @@ struct SettingsView: View {
           Text("提示：黑名单按应用身份（Bundle ID）生效，更稳定。推荐：切换到要排除的应用 → 点击“添加当前前台应用”。")
             .font(.caption)
             .foregroundStyle(.secondary)
-        }
-
-        Section("证据热窗口（Agent）") {
-          Stepper(value: $draft.agent.evidenceRetentionDays, in: 1...3650) {
-            Text("证据保留：\(draft.agent.evidenceRetentionDays) 天")
           }
 
-          Stepper(value: $draft.agent.evidenceCleanupIntervalMinutes, in: 1...720) {
-            Text("清理任务间隔：\(draft.agent.evidenceCleanupIntervalMinutes) 分钟")
-          }
-        }
-
-        Section("当前环境") {
-          LabeledContent("数据目录") {
-            Text(supervisor.config.dataDir.path)
+          Section("热证据（截图/缩略图）") {
+            Text("说明：frames 的原始文本证据会永久保留（可反悔）；此处仅控制 media（截图/缩略图文件）的保留与提醒阈值。超过阈值只提醒，不会自动清理。")
               .font(.caption)
-              .textSelection(.enabled)
+              .foregroundStyle(.secondary)
+
+            if let stats = supervisor.mediaStats {
+              let used = ByteCountFormatter.string(fromByteCount: stats.totalBytes, countStyle: .file)
+              let threshold = ByteCountFormatter.string(fromByteCount: stats.thresholdBytes, countStyle: .file)
+              LabeledContent("media 占用") {
+                Text("\(used) / \(threshold)")
+                  .font(.caption)
+                  .foregroundStyle(stats.overThreshold ? .red : .secondary)
+              }
+              if stats.overThreshold {
+                Text("已超过提醒阈值。建议尽快备份数据目录（db + media）。")
+                  .font(.caption)
+                  .foregroundStyle(.red)
+              }
+
+              let scannedAt = Date(timeIntervalSince1970: TimeInterval(stats.scannedAt) / 1000)
+              Text("上次扫描：\(scannedAt.formatted(date: .numeric, time: .standard))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } else {
+              Text("media 占用：—")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+
+            Button("刷新 media 占用") {
+              refreshMediaStats(force: true)
+            }
+            .disabled(isLoading)
+
+            Stepper(value: $draft.agent.evidenceRetentionDays, in: 1...3650) {
+              Text("热证据保留：\(draft.agent.evidenceRetentionDays) 天（仅截图/缩略图）")
+            }
+
+            Stepper(value: $draft.agent.evidenceCleanupIntervalMinutes, in: 1...720) {
+              Text("清理任务间隔：\(draft.agent.evidenceCleanupIntervalMinutes) 分钟")
+            }
+
+            Stepper(value: mediaWarnThresholdGbBinding(), in: 1...500) {
+              Text("占用提醒阈值：\(mediaWarnThresholdGbBinding().wrappedValue) GB")
+            }
           }
-          LabeledContent("Agent 地址") {
-            Text(supervisor.config.agentUrl.absoluteString)
-              .font(.caption)
-              .textSelection(.enabled)
+
+          Section("当前环境") {
+            LabeledContent("数据目录") {
+              Text(supervisor.config.dataDir.path)
+                .font(.caption)
+                .textSelection(.enabled)
+            }
+            LabeledContent("Agent 地址") {
+              Text(supervisor.config.agentUrl.absoluteString)
+                .font(.caption)
+                .textSelection(.enabled)
+            }
           }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
     .padding(16)
     .onAppear {
@@ -291,6 +332,32 @@ struct SettingsView: View {
         message = "读取失败：\(String(describing: error))"
       }
     }
+  }
+
+  private func refreshMediaStats(force: Bool) {
+    isLoading = true
+    message = "正在扫描 media 占用…"
+    Task {
+      defer { isLoading = false }
+      do {
+        try await supervisor.refreshMediaStatsFromAgent(refresh: force)
+        message = "已更新 media 占用。"
+      } catch {
+        message = "读取 media 占用失败：\(String(describing: error))"
+      }
+    }
+  }
+
+  private func mediaWarnThresholdGbBinding() -> Binding<Int> {
+    let oneGb = 1024 * 1024 * 1024
+    return Binding(
+      get: {
+        max(1, draft.agent.mediaWarnThresholdBytes / oneGb)
+      },
+      set: { nextGb in
+        draft.agent.mediaWarnThresholdBytes = max(1, nextGb) * oneGb
+      }
+    )
   }
 
   private func saveAndApply() {

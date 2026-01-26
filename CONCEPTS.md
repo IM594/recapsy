@@ -6,7 +6,7 @@
 ## 0. 一句话理解这个项目
 
 RecapSense 是一个 **本地、全天候运行的“记忆”管线**：  
-**屏幕截图 → OCR → 写入 frames（短期热证据） → 压实成 chunks（长期文本） → 搜索/RAG → 通过 HTTP API 与 MCP 暴露给外部工具/LLM。**
+**屏幕截图 → OCR → 写入 frames（文本证据长期保留；截图/缩略图属于热证据） → 压实成 chunks（长期文本） → 搜索/RAG → 通过 HTTP API 与 MCP 暴露给外部工具/LLM。**
 
 核心入口：
 
@@ -31,7 +31,8 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 在 `README.md` / `TODO.md` 里明确的策略：
 
 - **长期保存**：`chunks`、`daily summaries`、（预留）视觉抽取文本等。
-- **热窗口证据**：截图/缩略图等媒体文件，只保留有限天数（默认 30 天，可配置），可清理。
+- **热窗口证据**：截图/缩略图等媒体文件，只保留有限天数（默认 365 天，可配置），可清理。
+- **可反悔底座**：frames 的 `ocr_text` 等原始文本证据长期保留，用于未来重建 chunks/派生索引（图片可备份后长期保存）。
 - **派生索引可重建**：FTS（全文索引）以及未来 embeddings/向量索引属于“派生”，可重建，不强依赖。
 
 相关入口：
@@ -153,7 +154,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 
 当前 schema（MVP）：
 
-- `frames`：短期 OCR 帧（可含热证据路径）
+- `frames`：OCR 原始帧（文本证据长期保留；可包含热证据路径）
 - `chunks`：长期文本片段
 - `summaries_daily`：日总结
 
@@ -549,7 +550,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 - 清理任务只删除 `chunk_id IS NOT NULL` 的 frames（说明它们已被压实进 chunks）
 - 避免删掉还没进入 chunks 的原始证据导致“文本记忆丢失”
 
-入口：`apps/agent/src/store.mjs`（`deleteExpiredEvidenceFrames` 查询条件）
+入口：`apps/agent/src/store.mjs`（`expireChunkedFrameMedia` 查询条件）
 
 ### 9.4 多实例/端口残留治理
 
@@ -604,7 +605,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 - 鉴权：`Authorization`、`Bearer`、`token`
 - 数据库：`DatabaseSync`、`PRAGMA`、`chunks_fts`、`fts5`、`user_version`
 - 压实：`compactFramesToChunks`
-- 清理：`cleanupEvidence`、`deleteExpiredEvidenceFrames`、`danger`
+- 清理：`cleanupEvidence`、`expireChunkedFrameMedia`、`danger`
 - UDS：`RECAPSENSE_AGENT_SOCKET`、`socketPath`
 - MCP：`tools/list`、`tools/call`、`jsonrpc`
 - SSE：`text/event-stream`、`event: endpoint`、`keepalive`

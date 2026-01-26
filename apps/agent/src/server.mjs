@@ -13,6 +13,83 @@ const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4832;
 const SERVICE_NAME = "recapsense-agent";
 
+function formatBytes(bytes) {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const digits = unitIndex === 0 ? 0 : size >= 100 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(digits)} ${units[unitIndex]}`;
+}
+
+async function scanDirectorySize(rootDir, { fileConcurrency = 16 } = {}) {
+  const concurrency = Number.isFinite(fileConcurrency)
+    ? Math.max(1, Math.min(64, Math.floor(fileConcurrency)))
+    : 16;
+
+  let totalBytes = 0;
+  let fileCount = 0;
+
+  const dirStack = [rootDir];
+  while (dirStack.length > 0) {
+    const dir = dirStack.pop();
+
+    let entries = [];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch (error) {
+      if (error && typeof error === "object" && error.code === "ENOENT") {
+        continue;
+      }
+      throw error;
+    }
+
+    const files = [];
+    for (const entry of entries) {
+      if (!entry) continue;
+      if (entry.isDirectory()) {
+        dirStack.push(path.join(dir, entry.name));
+        continue;
+      }
+      if (entry.isFile()) {
+        files.push(path.join(dir, entry.name));
+      }
+    }
+
+    if (files.length === 0) continue;
+
+    let index = 0;
+    const workers = Array.from(
+      { length: Math.min(concurrency, files.length) },
+      async () => {
+        while (index < files.length) {
+          const current = files[index];
+          index += 1;
+
+          try {
+            const stat = await fs.stat(current);
+            totalBytes += Number(stat.size ?? 0);
+            fileCount += 1;
+          } catch (error) {
+            // 文件可能在扫描过程中被清理/移动；尽力而为即可。
+            if (error && typeof error === "object" && error.code === "ENOENT") continue;
+            throw error;
+          }
+        }
+      }
+    );
+
+    await Promise.all(workers);
+  }
+
+  return { totalBytes, fileCount };
+}
+
 function formatLocalTimestamp(date = new Date()) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -357,6 +434,74 @@ async function main() {
     return absolute;
   }
 
+  const mediaDir = path.join(dataDir, "media");
+  const mediaWarnCooldownMs = 24 * 60 * 60_000;
+  const mediaStatsCacheTtlMs = 6 * 60 * 60_000;
+  let mediaStatsCache = null;
+  let mediaStatsInFlight = null;
+  let lastMediaWarnedAt = 0;
+
+  async function getMediaStats({ refresh = false } = {}) {
+    if (!store) {
+      throw new Error("Agent is starting");
+    }
+
+    const now = Date.now();
+    const cachedOk =
+      !refresh &&
+      mediaStatsCache &&
+      Number.isFinite(mediaStatsCache.scannedAt) &&
+      now - mediaStatsCache.scannedAt < mediaStatsCacheTtlMs;
+    if (cachedOk) return mediaStatsCache;
+
+    if (mediaStatsInFlight) return mediaStatsInFlight;
+
+    mediaStatsInFlight = (async () => {
+      const settings = store.getSettings();
+      const thresholdBytes = Number(settings.agent.mediaWarnThresholdBytes ?? 0);
+
+      const { totalBytes, fileCount } = await scanDirectorySize(mediaDir, {
+        fileConcurrency: 16,
+      });
+
+      const stats = {
+        totalBytes,
+        fileCount,
+        thresholdBytes,
+        overThreshold: Number.isFinite(thresholdBytes) && thresholdBytes > 0
+          ? totalBytes >= thresholdBytes
+          : false,
+        scannedAt: now,
+      };
+
+      mediaStatsCache = stats;
+      return stats;
+    })().finally(() => {
+      mediaStatsInFlight = null;
+    });
+
+    return mediaStatsInFlight;
+  }
+
+  async function maybeWarnMediaSize() {
+    if (!store) return;
+
+    const settings = store.getSettings();
+    const thresholdBytes = Number(settings.agent.mediaWarnThresholdBytes ?? 0);
+    if (!Number.isFinite(thresholdBytes) || thresholdBytes <= 0) return;
+
+    const stats = await getMediaStats({ refresh: false });
+    if (!stats.overThreshold) return;
+
+    const now = Date.now();
+    if (lastMediaWarnedAt > 0 && now - lastMediaWarnedAt < mediaWarnCooldownMs) return;
+    lastMediaWarnedAt = now;
+
+    console.warn(
+      `[agent] media 占用已超过阈值：media=${formatBytes(stats.totalBytes)} threshold=${formatBytes(thresholdBytes)}。建议尽快备份数据目录（dataDir=${dataDir}），或调整“热证据保留天数/缩略图开关/阈值”。`
+    );
+  }
+
   async function cleanupEvidence({
     retentionDays,
     maxFramesPerRun = 5000,
@@ -366,7 +511,9 @@ async function main() {
     const retentionMs = Number(effectiveRetentionDays) * 24 * 60 * 60_000;
     const cutoffTs = Date.now() - retentionMs;
 
-    const deleted = store.deleteExpiredEvidenceFrames({
+    // 说明：frames 的原始文本永久保留（可反悔）。
+    // 定时清理只处理“已压实进 chunks 的 frames”的媒体文件（截图/缩略图），并清空路径字段，避免悬挂引用。
+    const expired = store.expireChunkedFrameMedia({
       cutoffTs,
       maxFramesPerRun,
     });
@@ -375,7 +522,7 @@ async function main() {
     let skippedPaths = 0;
     let fileErrors = 0;
 
-    for (const filePath of deleted.filePaths) {
+    for (const filePath of expired.filePaths) {
       const absolute = resolveSafePath(filePath);
       if (!absolute) {
         skippedPaths += 1;
@@ -396,7 +543,9 @@ async function main() {
     return {
       retentionDays: Number(effectiveRetentionDays),
       cutoffTs,
-      deletedFrames: deleted.deletedFrames,
+      // 兼容字段：历史上 cleanup 会删除 frames；现在不再删除，仅清理 media。
+      deletedFrames: 0,
+      clearedFrames: expired.clearedFrames,
       deletedFiles,
       skippedPaths,
       fileErrors,
@@ -450,9 +599,9 @@ async function main() {
     const timer = setTimeout(() => {
       cleanupEvidence()
         .then((result) => {
-          if (result.deletedFrames > 0 || result.deletedFiles > 0) {
+          if (result.clearedFrames > 0 || result.deletedFiles > 0) {
             console.log(
-              `[agent] cleanup evidence: frames=${result.deletedFrames} files=${result.deletedFiles} (retentionDays=${result.retentionDays})`
+              `[agent] cleanup evidence: clearedFrames=${result.clearedFrames} deletedFiles=${result.deletedFiles} (retentionDays=${result.retentionDays})`
             );
           }
           if (result.fileErrors > 0) {
@@ -460,6 +609,9 @@ async function main() {
               `[agent] cleanup evidence had fileErrors=${result.fileErrors}`
             );
           }
+          // 提醒：media 只清理“到期部分”，但用户可能希望“越久越好”并手动备份；
+          // 因此我们提供一个超阈值提醒（不自动清理）。
+          return maybeWarnMediaSize();
         })
         .catch((error) => {
           console.warn("[agent] cleanup evidence error:", error);
@@ -556,6 +708,12 @@ async function main() {
         const maxFramesPerRun = parsePositiveInt(body?.maxFramesPerRun, 5000);
         const result = await cleanupEvidence({ retentionDays, maxFramesPerRun });
         return sendJson(res, 200, { result });
+      }
+
+      if (req.method === "GET" && url.pathname === "/v1/maintenance/media-stats") {
+        const refresh = url.searchParams.get("refresh") === "1";
+        const stats = await getMediaStats({ refresh });
+        return sendJson(res, 200, { stats });
       }
 
       if (req.method === "POST" && url.pathname === "/v1/maintenance/reclean-chunks") {

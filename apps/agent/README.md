@@ -51,11 +51,15 @@ token 默认存放在：
   - body: `{ ts, app, windowTitle, ocrText, phash?, screenshotPath?, thumbnailPath? }`
 - `POST /v1/ingest/chunk`：直接写入/更新 chunk（测试用）
   - body: `{ id?, startTs, endTs, app?, windowTitle?, text }`
-- `POST /v1/maintenance/cleanup`：清理过期“热证据”（frames + 缩略图文件）
-  - 说明：只清理 **已经被压实进 chunks 的 frames**（`chunk_id IS NOT NULL`），避免数据丢失
+- `POST /v1/maintenance/cleanup`：清理过期“热证据”（media 文件）
+  - 说明：
+    - 只清理 **已经被压实进 chunks 的 frames**（`chunk_id IS NOT NULL`）的截图/缩略图文件，避免误删未压实证据
+    - frames 的原始文本（`ocr_text`）**永久保留**（可反悔）；清理时会清空 `screenshot_path/thumbnail_path`，避免悬挂引用
   - body（可选）：`{ retentionDays?: number, maxFramesPerRun?: number }`
     - retentionDays 默认取 `settings.agent.evidenceRetentionDays`
-  - response：`{ result: { deletedFrames, deletedFiles, cutoffTs, ... } }`
+  - response：`{ result: { clearedFrames, deletedFiles, cutoffTs, ... } }`
+- `GET /v1/maintenance/media-stats`：获取 media（热证据目录）占用情况
+  - response：`{ stats: { totalBytes, fileCount, thresholdBytes, overThreshold, scannedAt } }`
 
 ## 预留接口（未实现，仅做协议占位）
 
@@ -147,5 +151,6 @@ token 默认存放在：
 - `collector.dedupeThreshold`：dHash 去重阈值（默认 `2`）
 - `collector.thumbnailEnabled`：是否写入缩略图（默认 `true`）
 - `collector.thumbnailMaxWidth`：缩略图最大宽度（默认 `720`）
-- `agent.evidenceRetentionDays`：热证据保留天数（默认 `30`）
+- `agent.evidenceRetentionDays`：热证据（截图/缩略图文件）保留天数（默认 `365`）；frames 文本永久保留
 - `agent.evidenceCleanupIntervalMinutes`：清理任务间隔分钟数（默认 `60`）
+- `agent.mediaWarnThresholdBytes`：media 占用提醒阈值（字节，默认 `10GB`；只提醒不自动清理）

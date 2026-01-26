@@ -16,6 +16,7 @@ final class Supervisor: ObservableObject {
 
   @Published var config = SupervisorConfig.loadFromEnvironment()
   @Published private(set) var settings: RecapSenseSettings = .defaults
+  @Published private(set) var mediaStats: MediaStatsItem? = nil
   @Published var agentEnabled: Bool = true
   @Published private(set) var lastFrontmostApp: FrontmostAppInfo? = nil
   @Published private(set) var collectorPauseState: CollectorPauseState = .none
@@ -828,12 +829,17 @@ final class Supervisor: ObservableObject {
     let client = try AgentHttpClient()
     let loaded = try await client.getSettings()
     settings = loaded
+
+    // media-stats 是增强能力：失败不阻塞 settings 读取。
+    try? await refreshMediaStatsFromAgent(refresh: false)
   }
 
   func saveSettingsAndApply(_ newSettings: RecapSenseSettings) async throws {
     let client = try AgentHttpClient()
     let saved = try await client.patchSettings(newSettings)
     settings = saved
+
+    try? await refreshMediaStatsFromAgent(refresh: false)
 
     // 应用到 collector：最简单的方式是重启（collector 是独立进程，不做热更新）。
     if collectorEnabled && collectorPauseState == .none {
@@ -863,6 +869,12 @@ final class Supervisor: ObservableObject {
     }
 
     return result
+  }
+
+  func refreshMediaStatsFromAgent(refresh: Bool) async throws {
+    let client = try AgentHttpClient()
+    let stats = try await client.getMediaStats(refresh: refresh)
+    mediaStats = stats
   }
 
   private func presentAlert(title: String, message: String) {

@@ -57,6 +57,33 @@ struct AgentHttpClient {
     return try JSONDecoder().decode(Payload.self, from: data).settings
   }
 
+  func getMediaStats(refresh: Bool = false) async throws -> MediaStatsItem {
+    var url = baseURL.appendingPathComponent("/v1/maintenance/media-stats")
+    if refresh {
+      var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
+      components?.queryItems = [
+        URLQueryItem(name: "refresh", value: "1"),
+      ]
+      url = components?.url ?? url
+    }
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    let payload = try JSONDecoder().decode(MediaStatsResponse.self, from: data)
+    return payload.stats
+  }
+
   func getChunk(id: String) async throws -> ChunkItem {
     let url = baseURL.appendingPathComponent("/v1/chunks/\(id)")
 

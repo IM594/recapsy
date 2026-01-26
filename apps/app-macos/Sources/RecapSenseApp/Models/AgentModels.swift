@@ -41,3 +41,15 @@ struct DangerDeleteResult: Decodable, Equatable {
 struct DangerDeleteResponse: Decodable, Equatable {
   let result: DangerDeleteResult
 }
+
+struct MediaStatsItem: Decodable, Equatable {
+  let totalBytes: Int64
+  let fileCount: Int
+  let thresholdBytes: Int64
+  let overThreshold: Bool
+  let scannedAt: Int64
+}
+
+struct MediaStatsResponse: Decodable, Equatable {
+  let stats: MediaStatsItem
+}

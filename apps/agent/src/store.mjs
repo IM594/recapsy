@@ -26,8 +26,11 @@ function cloneDefaults() {
       excludedApps: [],
     },
     agent: {
-      evidenceRetentionDays: 30,
+      // 说明：当前“热证据”仅包含截图/缩略图文件（media 目录）；
+      // frames 的原始文本（ocr_text）永久保留，用于未来重建 chunks/派生索引。
+      evidenceRetentionDays: 365,
       evidenceCleanupIntervalMinutes: 60,
+      mediaWarnThresholdBytes: 10 * 1024 * 1024 * 1024, // 10GB
     },
   };
 }
@@ -346,12 +349,19 @@ export function createStore(db, { withTransaction }) {
      FROM frames
      WHERE deleted_at IS NULL
        AND chunk_id IS NOT NULL
+       AND (screenshot_path IS NOT NULL OR thumbnail_path IS NOT NULL)
        AND ts < ?
      ORDER BY ts ASC
      LIMIT ?`
   );
 
   const deleteFrameStmt = db.prepare(`DELETE FROM frames WHERE id = ?`);
+  const clearFrameMediaPathsStmt = db.prepare(
+    `UPDATE frames
+     SET screenshot_path = NULL,
+         thumbnail_path = NULL
+     WHERE id = ?`
+  );
 
   const listUnchunkedFrameIdsInRangeStmt = db.prepare(
     `SELECT id, screenshot_path, thumbnail_path
@@ -1118,6 +1128,11 @@ export function createStore(db, { withTransaction }) {
         if (Number.isFinite(value) && value > 0) settings.agent.evidenceCleanupIntervalMinutes = value;
         break;
       }
+      case "agent.mediaWarnThresholdBytes": {
+        const value = Number.parseInt(String(parsed), 10);
+        if (Number.isFinite(value) && value > 0) settings.agent.mediaWarnThresholdBytes = value;
+        break;
+      }
       default:
         break;
       }
@@ -1221,6 +1236,16 @@ export function createStore(db, { withTransaction }) {
           throw new Error("agent.evidenceCleanupIntervalMinutes must be a positive integer");
         }
         updates.push(["agent.evidenceCleanupIntervalMinutes", JSON.stringify(value)]);
+      }
+      if (a.mediaWarnThresholdBytes != null) {
+        const value = Number.parseInt(String(a.mediaWarnThresholdBytes), 10);
+        if (!Number.isFinite(value) || value <= 0) {
+          throw new Error("agent.mediaWarnThresholdBytes must be a positive integer");
+        }
+        if (value > Number.MAX_SAFE_INTEGER) {
+          throw new Error("agent.mediaWarnThresholdBytes is too large");
+        }
+        updates.push(["agent.mediaWarnThresholdBytes", JSON.stringify(value)]);
       }
     }
 
@@ -1413,7 +1438,7 @@ export function createStore(db, { withTransaction }) {
     return { createdChunks, consumedFrames };
   }
 
-  function deleteExpiredEvidenceFrames({
+  function expireChunkedFrameMedia({
     cutoffTs,
     maxFramesPerRun = 5000,
   } = {}) {
@@ -1429,14 +1454,8 @@ export function createStore(db, { withTransaction }) {
 
     const rows = listExpiredChunkedFramesStmt.all(cutoff, safeLimit);
     if (rows.length === 0) {
-      return { deletedFrames: 0, deletedBeforeTs: cutoff, filePaths: [] };
+      return { clearedFrames: 0, deletedFrames: 0, clearedBeforeTs: cutoff, filePaths: [] };
     }
-
-    withTransaction(db, () => {
-      for (const row of rows) {
-        deleteFrameStmt.run(row.id);
-      }
-    });
 
     const fileSet = new Set();
     for (const row of rows) {
@@ -1444,9 +1463,16 @@ export function createStore(db, { withTransaction }) {
       if (row.thumbnail_path) fileSet.add(String(row.thumbnail_path));
     }
 
+    withTransaction(db, () => {
+      for (const row of rows) {
+        clearFrameMediaPathsStmt.run(row.id);
+      }
+    });
+
     return {
-      deletedFrames: rows.length,
-      deletedBeforeTs: cutoff,
+      clearedFrames: rows.length,
+      deletedFrames: 0,
+      clearedBeforeTs: cutoff,
       filePaths: [...fileSet],
     };
   }
@@ -1581,7 +1607,7 @@ export function createStore(db, { withTransaction }) {
     getDailySummary,
     ensureDailySummary,
     compactFramesToChunks,
-    deleteExpiredEvidenceFrames,
+    expireChunkedFrameMedia,
     deleteDangerZone,
   };
 }

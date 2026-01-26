@@ -145,7 +145,8 @@ test("store: settings read + patch", async () => {
   assert.equal(initial.collector.intervalSeconds, 5);
   assert.equal(initial.collector.dedupeThreshold, 2);
   assert.equal(initial.collector.thumbnailEnabled, true);
-  assert.equal(initial.agent.evidenceRetentionDays, 30);
+  assert.equal(initial.agent.evidenceRetentionDays, 365);
+  assert.equal(initial.agent.mediaWarnThresholdBytes, 10 * 1024 * 1024 * 1024);
 
   const updated = store.patchSettings({
     collector: {
@@ -155,6 +156,7 @@ test("store: settings read + patch", async () => {
     },
     agent: {
       evidenceRetentionDays: 7,
+      mediaWarnThresholdBytes: 5 * 1024 * 1024 * 1024,
     },
   });
 
@@ -162,9 +164,81 @@ test("store: settings read + patch", async () => {
   assert.equal(updated.collector.dedupeThreshold, 1);
   assert.equal(updated.collector.thumbnailEnabled, false);
   assert.equal(updated.agent.evidenceRetentionDays, 7);
+  assert.equal(updated.agent.mediaWarnThresholdBytes, 5 * 1024 * 1024 * 1024);
 
   assert.throws(
     () => store.patchSettings({ collector: { intervalSeconds: 0 } }),
     /intervalSeconds/
   );
+});
+
+test("store: expireChunkedFrameMedia keeps frames but clears media paths", async () => {
+  const dataDir = await makeTempDir();
+  const { db, withTransaction } = await openDatabase(dataDir);
+  const store = createStore(db, { withTransaction });
+
+  const baseTs = Date.now() - 10 * 24 * 60 * 60_000;
+  const day = "2000-01-01";
+
+  store.ingestFrame({
+    ts: baseTs,
+    app: "Chrome",
+    windowTitle: "Example",
+    ocrText: "First frame text",
+    phash: "abc",
+    thumbnailPath: `media/thumbnails/${day}/chunked_1.jpg`,
+  });
+
+  store.ingestFrame({
+    ts: baseTs + 5000,
+    app: "Chrome",
+    windowTitle: "Example",
+    ocrText: "Second frame text",
+    phash: "def",
+    thumbnailPath: `media/thumbnails/${day}/chunked_2.jpg`,
+  });
+
+  const { createdChunks, consumedFrames } = store.compactFramesToChunks();
+  assert.equal(createdChunks, 1);
+  assert.equal(consumedFrames, 2);
+
+  const unchunked = store.ingestFrame({
+    ts: baseTs + 10_000,
+    app: "Chrome",
+    windowTitle: "Example",
+    ocrText: "Unchunked frame text",
+    phash: "ghi",
+    thumbnailPath: `media/thumbnails/${day}/unchunked.jpg`,
+  });
+  assert.ok(unchunked.id);
+
+  const beforeCount = db.prepare("SELECT COUNT(1) AS c FROM frames").get().c;
+  assert.equal(beforeCount, 3);
+
+  const result = store.expireChunkedFrameMedia({
+    cutoffTs: Date.now(),
+    maxFramesPerRun: 5000,
+  });
+
+  assert.equal(result.clearedFrames, 2);
+  assert.equal(result.deletedFrames, 0);
+  assert.equal(result.filePaths.length, 2);
+  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/chunked_1.jpg`));
+  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/chunked_2.jpg`));
+  assert.ok(!result.filePaths.includes(`media/thumbnails/${day}/unchunked.jpg`));
+
+  const afterCount = db.prepare("SELECT COUNT(1) AS c FROM frames").get().c;
+  assert.equal(afterCount, 3);
+
+  const chunkedRemaining = db
+    .prepare(
+      "SELECT COUNT(1) AS c FROM frames WHERE chunk_id IS NOT NULL AND thumbnail_path IS NOT NULL"
+    )
+    .get().c;
+  assert.equal(chunkedRemaining, 0);
+
+  const unchunkedRemaining = db
+    .prepare("SELECT thumbnail_path FROM frames WHERE id = ?")
+    .get(Number(unchunked.id)).thumbnail_path;
+  assert.equal(unchunkedRemaining, `media/thumbnails/${day}/unchunked.jpg`);
 });
