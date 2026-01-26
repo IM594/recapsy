@@ -12,6 +12,7 @@
 - `recapsense_search`：在本地记忆 chunks 里做关键词搜索（支持 `app` 过滤与 `scope=all|meta|text`）
 - `recapsense_get_chunk`：按 chunk id 获取完整内容（全文 + app/window/title）
 - `recapsense_get_daily_summary`：按日期获取日总结（当天无数据则为空）
+- `recapsense_get_daily_timeline`：按日期获取当天时间轴（app 用时榜 + sessions/spans，可选 `view=overview|sessions|spans|raw`）
 
 ## 依赖
 
