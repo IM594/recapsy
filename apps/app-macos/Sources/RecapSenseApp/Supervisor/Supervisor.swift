@@ -68,7 +68,7 @@ final class Supervisor: ObservableObject {
 
     // 记录“最后一个非本 App 的前台应用”，用于菜单栏里实现“小白也能一键排除当前应用”。
     // 说明：当用户打开菜单栏时，前台可能会短暂变成 RecapSense；因此我们要忽略自身 pid。
-    NotificationCenter.default.publisher(for: NSWorkspace.didActivateApplicationNotification)
+    NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)
       .receive(on: RunLoop.main)
       .sink { [weak self] notification in
         guard let self else { return }
@@ -110,6 +110,27 @@ final class Supervisor: ObservableObject {
       name: app.localizedName,
       activatedAt: Date()
     )
+  }
+
+  /// 用于菜单栏动作（例如“一键排除当前应用”）的“目标应用”。
+  ///
+  /// 规则：
+  /// - 如果当前前台不是 RecapSense，则直接用当前前台；
+  /// - 否则（例如用户点开菜单栏导致前台短暂切到 RecapSense），使用 `lastFrontmostApp` 作为兜底。
+  var exclusionTargetApp: FrontmostAppInfo? {
+    if let runtime = NSWorkspace.shared.frontmostApplication,
+       runtime.activationPolicy != .prohibited,
+       runtime.processIdentifier != getpid()
+    {
+      return FrontmostAppInfo(
+        pid: runtime.processIdentifier,
+        bundleId: runtime.bundleIdentifier,
+        name: runtime.localizedName,
+        activatedAt: Date()
+      )
+    }
+
+    return lastFrontmostApp
   }
 
   func autoStartAllIfNeeded() {
@@ -766,28 +787,18 @@ final class Supervisor: ObservableObject {
   func excludeCurrentFrontmostAppFromCollection() {
     Task { @MainActor in
       do {
-        // 优先使用“记录到的前台应用”（打开菜单栏时更稳定）；如果没有记录则 fallback 到实时读取。
-        let runtime = NSWorkspace.shared.frontmostApplication
-        let candidate: NSRunningApplication? = {
-          if let runtime, runtime.processIdentifier != getpid() { return runtime }
-          if let info = lastFrontmostApp {
-            return NSRunningApplication(processIdentifier: info.pid)
-          }
-          return nil
-        }()
-
-        guard let app = candidate else {
+        guard let target = exclusionTargetApp else {
           throw NSError(domain: "Supervisor", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法识别当前应用。请先切换到要排除的应用后再试。"])
         }
 
-        let bundleId = app.bundleIdentifier?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let bundleId = target.bundleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if bundleId.isEmpty {
           // 开发期：RecapSense 自己没有 bundle id；我们已经在 collector 侧自动跳过自身窗口。
-          if app.processIdentifier == getpid() {
+          if target.pid == getpid() {
             presentAlert(title: "无需添加", message: "RecapSense 会自动排除自身窗口（开发版没有 Bundle ID）。")
             return
           }
-          let name = app.localizedName?.trimmingCharacters(in: .whitespacesAndNewlines)
+          let name = target.name?.trimmingCharacters(in: .whitespacesAndNewlines)
           throw NSError(
             domain: "Supervisor",
             code: 2,

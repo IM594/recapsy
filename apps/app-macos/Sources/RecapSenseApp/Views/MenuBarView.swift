@@ -130,11 +130,11 @@ struct MenuBarView: View {
         }
       }
 
-      let excludedLabel = supervisor.lastFrontmostApp?.displayName ?? "—"
+      let excludedLabel = supervisor.exclusionTargetApp?.displayName ?? "—"
       Button("排除当前应用 — \(excludedLabel)") {
         supervisor.excludeCurrentFrontmostAppFromCollection()
       }
-      .disabled((supervisor.lastFrontmostApp?.bundleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty)
+      .disabled((supervisor.exclusionTargetApp?.bundleId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty)
 
       Divider()
 
