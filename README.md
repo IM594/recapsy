@@ -160,10 +160,17 @@ npm run dev:collector -- --once
 - 开发默认数据目录：`./.recapsense/`
 - 推荐 macOS app 数据目录：`~/Library/Application Support/RecapSense/`
 
-针对 “B 模式”（长期保存文本记忆；截图/音频只保留热窗口，比如 365 天，超阈值仅提醒不自动清理），迁移很简单：
+针对 “B 模式”（长期保存文本记忆；截图/音频只保留热窗口，比如 365 天，超阈值仅提醒不自动清理），迁移/备份建议优先走“一键导出”，避免 SQLite WAL 带来的不一致风险：
 
-- 把 `db/` 目录下的数据库文件（例如 `db/recapsense.db`）复制到新机器的数据目录。
-- `media/`（如果有）属于热证据数据，可选迁移。
+- 方式 1（推荐）：在 macOS App 的设置页使用「导出备份」
+  - 「导出数据库备份」：导出一个一致的 `db/recapsense.db`
+  - 「导出完整备份（db + media）」：同时拷贝 `media/`（可能很大）
+- 方式 2（开发/脚本）：调用 Agent 的 `GET /v1/backup/db` 下载一致快照，再按需拷贝 `media/`
+- 方式 3（不推荐，手动拷贝 dataDir）：请先停止 Agent/Collector，或确保把 SQLite 的 `-wal/-shm` 一并拷贝
+
+补充：
+
+- `media/` 属于热证据数据，可选迁移；如果你希望未来能引用原始截图，建议尽量长期备份它。
 - `secret/token` 属于本机访问 token，不建议跨机复用；在新机器重新生成即可。
 
 ## 数据模型（高层）

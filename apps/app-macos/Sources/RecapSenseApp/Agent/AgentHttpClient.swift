@@ -84,6 +84,28 @@ struct AgentHttpClient {
     return payload.stats
   }
 
+  /// 下载一个“数据库一致快照”，用于备份（换电脑）。
+  ///
+  /// 注意：这是一个临时文件 URL（由 URLSession 生成），调用方应尽快 move/copy 到目标位置。
+  func downloadDatabaseSnapshot() async throws -> URL {
+    let url = baseURL.appendingPathComponent("/v1/backup/db")
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (fileUrl, response) = try await URLSession.shared.download(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = (try? String(contentsOf: fileUrl, encoding: .utf8)) ?? "HTTP \(http.statusCode)"
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    return fileUrl
+  }
+
   func getChunk(id: String) async throws -> ChunkItem {
     let url = baseURL.appendingPathComponent("/v1/chunks/\(id)")
 

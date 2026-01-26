@@ -10,6 +10,7 @@ struct SettingsView: View {
   @State private var excludedAppInput: String = ""
   @State private var pendingDangerScope: String? = nil
   @State private var lastDangerResult: DangerDeleteResult? = nil
+  @State private var lastBackupPath: String? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -279,6 +280,30 @@ struct SettingsView: View {
             }
           }
 
+          Section("导出与备份") {
+            Text("用于换电脑/手动备份。推荐：导出“数据库 + 热证据”。如果 media 很大（例如 >10GB），拷贝可能需要较长时间。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+
+            Button("导出数据库备份…") {
+              exportBackup(includeMedia: false)
+            }
+            .disabled(isLoading)
+
+            Button("导出完整备份（db + media）…") {
+              exportBackup(includeMedia: true)
+            }
+            .disabled(isLoading)
+
+            if let lastBackupPath {
+              LabeledContent("上次导出") {
+                Text(lastBackupPath)
+                  .font(.caption)
+                  .textSelection(.enabled)
+              }
+            }
+          }
+
           Section("当前环境") {
             LabeledContent("数据目录") {
               Text(supervisor.config.dataDir.path)
@@ -372,6 +397,44 @@ struct SettingsView: View {
         message = "保存失败：\(String(describing: error))"
       }
     }
+  }
+
+  private func exportBackup(includeMedia: Bool) {
+    guard let directory = pickBackupDirectory() else {
+      message = "已取消导出。"
+      return
+    }
+
+    isLoading = true
+    message = includeMedia ? "正在导出完整备份（可能很大）…" : "正在导出数据库备份…"
+    Task {
+      defer { isLoading = false }
+      do {
+        let output = try await supervisor.exportBackup(
+          to: directory,
+          includeMedia: includeMedia
+        )
+        lastBackupPath = output.path
+        message = "备份已导出：\(output.path)"
+      } catch {
+        message = "导出失败：\(String(describing: error))"
+      }
+    }
+  }
+
+  private func pickBackupDirectory() -> URL? {
+    let panel = NSOpenPanel()
+    panel.title = "选择备份保存位置"
+    panel.message = "请选择一个文件夹，RecapSense 会在里面创建备份目录。"
+    panel.prompt = "选择"
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = true
+    panel.allowsMultipleSelection = false
+
+    let result = panel.runModal()
+    guard result == .OK else { return nil }
+    return panel.url
   }
 
   private func runDangerDelete(scope: String) {

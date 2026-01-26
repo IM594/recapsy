@@ -51,6 +51,10 @@ token 默认存放在：
   - body: `{ ts, app, windowTitle, ocrText, phash?, screenshotPath?, thumbnailPath? }`
 - `POST /v1/ingest/chunk`：直接写入/更新 chunk（测试用）
   - body: `{ id?, startTs, endTs, app?, windowTitle?, text }`
+- `GET /v1/backup/db`：下载数据库一致快照（单文件 `.db`），用于备份/换电脑
+  - 说明：
+    - 返回的是“可直接复制/替换”的 SQLite 数据库文件（不需要额外带上 `-wal/-shm`）
+    - 如果你希望保留截图/缩略图，请同时备份 `media/` 目录（体积可能较大）
 - `POST /v1/maintenance/cleanup`：清理过期“热证据”（media 文件）
   - 说明：
     - 只清理 **已经被压实进 chunks 的 frames**（`chunk_id IS NOT NULL`）的截图/缩略图文件，避免误删未压实证据

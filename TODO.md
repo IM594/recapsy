@@ -179,7 +179,8 @@
   - 默认开发：`./.recapsense/`
   - 发布形态：`~/Library/Application Support/RecapSense/`
 - [ ] 导出/导入（换电脑，B 模式优先）
-  - 导出：`chunks + daily summaries + settings + manifest`（热证据可选）
+  - [x] 导出：一键导出数据库一致快照（并可选拷贝 `media/` 热证据）
+  - [ ] 导出增强：`chunks + daily summaries + settings + manifest`（可选只导出“长期层”以减小体积）
   - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
 - [ ] 发布形态下的服务托管（不靠命令行）
   - 背景：开发期可以靠 `npm run`，但最终必须对普通用户隐藏。

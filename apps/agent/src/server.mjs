@@ -6,6 +6,7 @@ import path from "node:path";
 import { resolveDataDir } from "./paths.mjs";
 import { loadOrCreateApiToken } from "./secrets.mjs";
 import { openDatabase } from "./db.mjs";
+import { createDatabaseSnapshot } from "./backup.mjs";
 import { createStore } from "./store.mjs";
 import { readJson, requireAuth, sendJson } from "./http.mjs";
 
@@ -420,6 +421,7 @@ async function main() {
 
   const token = await loadOrCreateApiToken(dataDir);
   let store = null;
+  let dbConn = null;
 
   function resolveSafePath(maybeRelativePath) {
     const raw = String(maybeRelativePath ?? "").trim();
@@ -481,6 +483,53 @@ async function main() {
     });
 
     return mediaStatsInFlight;
+  }
+
+  async function sendFileStream(
+    res,
+    filePath,
+    { filename, contentType = "application/octet-stream", cleanup } = {}
+  ) {
+    const stat = await fs.stat(filePath);
+
+    const headers = {
+      "Content-Type": contentType,
+      "Content-Length": String(stat.size ?? 0),
+      "Cache-Control": "no-store",
+    };
+
+    if (filename && String(filename).trim() !== "") {
+      headers["Content-Disposition"] = `attachment; filename="${filename}"`;
+    }
+
+    res.writeHead(200, headers);
+
+    let cleaned = false;
+    const finalize = () => {
+      if (cleaned) return;
+      cleaned = true;
+      try {
+        cleanup?.();
+      } catch {
+        // ignore cleanup error
+      }
+    };
+
+    res.once("finish", finalize);
+    res.once("close", finalize);
+
+    const stream = fsSync.createReadStream(filePath);
+    stream.once("close", finalize);
+    stream.on("error", (error) => {
+      console.warn("[agent] stream file error:", error);
+      try {
+        res.end();
+      } catch {
+        // ignore
+      }
+      finalize();
+    });
+    stream.pipe(res);
   }
 
   async function maybeWarnMediaSize() {
@@ -716,6 +765,18 @@ async function main() {
         return sendJson(res, 200, { stats });
       }
 
+      if (req.method === "GET" && url.pathname === "/v1/backup/db") {
+        const snapshotPath = await createDatabaseSnapshot({ db: dbConn, dataDir });
+        const filename = `recapsense-backup-${formatLocalDate(new Date())}.db`;
+        return sendFileStream(res, snapshotPath, {
+          filename,
+          contentType: "application/x-sqlite3",
+          cleanup: () => {
+            fs.unlink(snapshotPath).catch(() => {});
+          },
+        });
+      }
+
       if (req.method === "POST" && url.pathname === "/v1/maintenance/reclean-chunks") {
         const body = await readJson(req);
         const limit = parsePositiveInt(body?.limit, 500);
@@ -832,6 +893,7 @@ async function main() {
 
   // listeners 已就绪：再打开 DB 与启动后台任务（避免“端口冲突时仍抢占 DB”）。
   const { db, withTransaction } = await openDatabase(dataDir);
+  dbConn = db;
   store = createStore(db, { withTransaction });
 
   // 尽力而为的后台压实任务（frames → chunks），失败不影响主流程。
