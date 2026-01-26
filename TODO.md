@@ -187,6 +187,13 @@
 
 ## Milestone M3（待做）：RAG（混合检索 + 引用）
 
+- [ ] 把 RAG 接到“用户可用入口”（MCP `recapsense_ask` / 主窗口聊天）
+  - 背景：当前 MCP 只有 `recapsense_search`（关键词检索），没有“提问 → 检索 → 生成答案 + 引用”的闭环；对用户来说等于“数据存下来了但还不会用”。
+  - 验收：
+    - MCP：新增 `recapsense_ask`，输入 question（可选 timeRange/limit），输出 answer + 引用（chunk id + 时间戳 + app/window）
+    - UI：主窗口「聊天」页从占位变为可用（至少支持一次提问，并展示引用列表，可点击打开 chunk）
+    - Agent：提供 `/v1/ask`（或等价内部能力），作为 MCP/UI 的统一后端入口（避免两套逻辑）
+
 - [ ] Embeddings 管线（只对 chunk 级别）
   - 增量计算：只对新增/变更 chunk 算 embedding
 - [ ] 混合检索：FTS（精确）+ 向量（语义）+ 时间过滤
