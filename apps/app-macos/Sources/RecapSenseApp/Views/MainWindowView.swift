@@ -43,6 +43,9 @@ struct MainWindowView: View {
         DailySummaryView()
           .tabItem { Label("日总结", systemImage: "calendar") }
 
+        TimelineView()
+          .tabItem { Label("时间轴", systemImage: "clock") }
+
         LogsView()
           .tabItem { Label("日志", systemImage: "doc.text") }
 

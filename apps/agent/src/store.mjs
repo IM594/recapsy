@@ -43,6 +43,30 @@ function normalizeText(text) {
     .trim();
 }
 
+function escapeRegExp(input) {
+  return String(input ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeWindowTitleForTimeline(windowTitle, app) {
+  let title = String(windowTitle ?? "").trim();
+  if (!title) return "";
+
+  title = title.replace(/\s+/g, " ");
+  title = title.replace(/\s*[\(\[]\d+[\)\]]\s*$/, "");
+
+  const appName = String(app ?? "").trim();
+  if (!appName) return title;
+
+  // 常见模式：`Title - App` / `Title — App` / `Title – App`
+  // 注意：只移除“末尾 app 后缀”，避免误伤正文中的连字符。
+  const suffix = new RegExp(`\\s*[-—–]\\s*${escapeRegExp(appName)}\\s*$`, "i");
+  title = title.replace(suffix, "").trim();
+  title = title.replace(/\s+/g, " ");
+  title = title.replace(/\s*[\(\[]\d+[\)\]]\s*$/, "");
+
+  return title;
+}
+
 function normalizeBundleId(value) {
   return String(value ?? "").trim().toLowerCase();
 }
@@ -353,6 +377,15 @@ export function createStore(db, { withTransaction }) {
        AND ts < ?
      ORDER BY ts ASC
      LIMIT ?`
+  );
+
+  const listFramesForTimelineStmt = db.prepare(
+    `SELECT ts, app, window_title, chunk_id
+     FROM frames
+     WHERE deleted_at IS NULL
+       AND ts >= ?
+       AND ts < ?
+     ORDER BY ts ASC`
   );
 
   const deleteFrameStmt = db.prepare(`DELETE FROM frames WHERE id = ?`);
@@ -788,6 +821,268 @@ export function createStore(db, { withTransaction }) {
     const start = new Date(year, month - 1, day, 0, 0, 0, 0);
     const end = new Date(year, month - 1, day + 1, 0, 0, 0, 0);
     return { startTs: start.getTime(), endTs: end.getTime() };
+  }
+
+  function sanitizeIdPart(value) {
+    const raw = String(value ?? "").trim().toLowerCase();
+    if (!raw) return "unknown";
+    const safe = raw.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return safe ? safe.slice(0, 48) : "unknown";
+  }
+
+  function getDailyTimeline({
+    date,
+    splitGapMs = 90_000,
+    sessionMergeGapMs = 5 * 60_000,
+    maxChunkIdsPerSpan = 20,
+  } = {}) {
+    const dateStr = String(date ?? "").trim() || formatLocalDate(new Date());
+    const { startTs, endTs } = localDayRange(dateStr);
+
+    const splitGap = Number(splitGapMs);
+    const effectiveSplitGapMs = Number.isFinite(splitGap)
+      ? Math.max(1_000, Math.min(10 * 60_000, Math.floor(splitGap)))
+      : 90_000;
+
+    const mergeGap = Number(sessionMergeGapMs);
+    const effectiveSessionMergeGapMs = Number.isFinite(mergeGap)
+      ? Math.max(1_000, Math.min(60 * 60_000, Math.floor(mergeGap)))
+      : 5 * 60_000;
+
+    const chunkLimit = Number(maxChunkIdsPerSpan);
+    const effectiveChunkLimit = Number.isFinite(chunkLimit)
+      ? Math.max(1, Math.min(200, Math.floor(chunkLimit)))
+      : 20;
+
+    const rows = listFramesForTimelineStmt.all(startTs, endTs);
+    if (rows.length === 0) {
+      return {
+        date: dateStr,
+        start_ts: startTs,
+        end_ts: endTs,
+        split_gap_ms: effectiveSplitGapMs,
+        session_merge_gap_ms: effectiveSessionMergeGapMs,
+        apps: [],
+        sessions: [],
+        spans: [],
+      };
+    }
+
+    const appStats = new Map();
+    const bumpApp = (appKey, patch) => {
+      const key = String(appKey ?? "");
+      const existing = appStats.get(key) ?? {
+        app: key || null,
+        active_ms: 0,
+        frame_count: 0,
+        span_count: 0,
+        session_count: 0,
+        first_ts: null,
+        last_ts: null,
+      };
+
+      const next = { ...existing, ...patch };
+      appStats.set(key, next);
+      return next;
+    };
+
+    // 统计 app active_ms：按“帧间 delta”（避免受到 span 切分数量影响）。
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const ts = Number(row.ts);
+      const appKey = String(row.app ?? "").trim();
+
+      const current = bumpApp(appKey, {});
+      current.frame_count += 1;
+      current.first_ts = current.first_ts == null ? ts : Math.min(current.first_ts, ts);
+      current.last_ts = current.last_ts == null ? ts : Math.max(current.last_ts, ts);
+
+      const nextRow = rows[i + 1];
+      if (!nextRow) continue;
+      const nextTs = Number(nextRow.ts);
+      const delta = nextTs - ts;
+      if (!Number.isFinite(delta) || delta <= 0) continue;
+      if (delta > effectiveSplitGapMs) continue;
+
+      current.active_ms += delta;
+    }
+
+    const spans = [];
+    let currentSpan = null;
+    let currentSpanKey = null;
+    let spanIndex = 0;
+
+    const finalizeSpan = () => {
+      if (!currentSpan) return;
+
+      currentSpan.chunk_count = currentSpan.chunk_ids.length;
+      spans.push(currentSpan);
+
+      const appKey = String(currentSpan.app ?? "").trim();
+      const stat = bumpApp(appKey, {});
+      stat.span_count += 1;
+
+      currentSpan = null;
+      currentSpanKey = null;
+    };
+
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const ts = Number(row.ts);
+      const app = row.app == null ? null : String(row.app);
+      const appKey = String(row.app ?? "").trim();
+      const windowTitle = row.window_title == null ? null : String(row.window_title);
+      const normalizedTitle = normalizeWindowTitleForTimeline(windowTitle, appKey);
+      const key = `${appKey}\n${normalizedTitle}`;
+
+      const previousTs = i > 0 ? Number(rows[i - 1].ts) : null;
+      const gap = previousTs == null ? 0 : ts - previousTs;
+      const shouldSplit =
+        !currentSpan ||
+        key !== currentSpanKey ||
+        (Number.isFinite(gap) && gap > effectiveSplitGapMs);
+
+      if (shouldSplit) {
+        finalizeSpan();
+
+        const id = `span-${sanitizeIdPart(appKey)}-${ts}-${spanIndex}`;
+        spanIndex += 1;
+
+        currentSpan = {
+          id,
+          start_ts: ts,
+          end_ts: ts,
+          active_ms: 0,
+          app,
+          window_title: windowTitle,
+          window_title_norm: normalizedTitle,
+          frame_count: 0,
+          chunk_count: 0,
+          chunk_ids: [],
+          sample_chunk_id: null,
+        };
+        currentSpanKey = key;
+      }
+
+      currentSpan.frame_count += 1;
+      currentSpan.end_ts = ts;
+
+      const chunkId = row.chunk_id == null ? "" : String(row.chunk_id).trim();
+      if (chunkId) {
+        if (!currentSpan.sample_chunk_id) currentSpan.sample_chunk_id = chunkId;
+        if (
+          currentSpan.chunk_ids.length < effectiveChunkLimit &&
+          !currentSpan.chunk_ids.includes(chunkId)
+        ) {
+          currentSpan.chunk_ids.push(chunkId);
+        }
+      }
+
+      const nextRow = rows[i + 1];
+      if (!nextRow) continue;
+      const nextTs = Number(nextRow.ts);
+      const delta = nextTs - ts;
+      if (!Number.isFinite(delta) || delta <= 0) continue;
+      if (delta > effectiveSplitGapMs) continue;
+
+      const nextAppKey = String(nextRow.app ?? "").trim();
+      const nextTitle = nextRow.window_title == null ? null : String(nextRow.window_title);
+      const nextNorm = normalizeWindowTitleForTimeline(nextTitle, nextAppKey);
+      const nextKey = `${nextAppKey}\n${nextNorm}`;
+      if (nextKey !== currentSpanKey) continue;
+
+      currentSpan.active_ms += delta;
+    }
+
+    finalizeSpan();
+
+    // 基于 spans 构建“按 app 的 session”（允许在短时间内来回切换仍视为同一会话）
+    const sessions = [];
+    const openSessions = new Map(); // appKey -> session
+    const sessionCounts = new Map(); // appKey -> number
+
+    const closeSession = (appKey) => {
+      const session = openSessions.get(appKey);
+      if (!session) return;
+      sessions.push(session);
+      openSessions.delete(appKey);
+    };
+
+    for (const span of spans) {
+      const appKey = String(span.app ?? "").trim();
+      const existing = openSessions.get(appKey);
+
+      if (!existing) {
+        const n = (sessionCounts.get(appKey) ?? 0) + 1;
+        sessionCounts.set(appKey, n);
+
+        openSessions.set(appKey, {
+          id: `session-${sanitizeIdPart(appKey)}-${span.start_ts}-${n}`,
+          start_ts: span.start_ts,
+          end_ts: span.end_ts,
+          active_ms: span.active_ms,
+          app: span.app,
+          span_count: 1,
+          titles: span.window_title_norm ? [span.window_title_norm] : [],
+        });
+        continue;
+      }
+
+      const gap = span.start_ts - existing.end_ts;
+      if (Number.isFinite(gap) && gap <= effectiveSessionMergeGapMs) {
+        existing.end_ts = span.end_ts;
+        existing.active_ms += span.active_ms;
+        existing.span_count += 1;
+
+        if (
+          span.window_title_norm &&
+          !existing.titles.includes(span.window_title_norm) &&
+          existing.titles.length < 8
+        ) {
+          existing.titles.push(span.window_title_norm);
+        }
+        continue;
+      }
+
+      closeSession(appKey);
+
+      const n = (sessionCounts.get(appKey) ?? 0) + 1;
+      sessionCounts.set(appKey, n);
+
+      openSessions.set(appKey, {
+        id: `session-${sanitizeIdPart(appKey)}-${span.start_ts}-${n}`,
+        start_ts: span.start_ts,
+        end_ts: span.end_ts,
+        active_ms: span.active_ms,
+        app: span.app,
+        span_count: 1,
+        titles: span.window_title_norm ? [span.window_title_norm] : [],
+      });
+    }
+
+    for (const appKey of openSessions.keys()) {
+      closeSession(appKey);
+    }
+
+    for (const session of sessions) {
+      const appKey = String(session.app ?? "").trim();
+      const stat = bumpApp(appKey, {});
+      stat.session_count += 1;
+    }
+
+    const apps = [...appStats.values()].sort((a, b) => b.active_ms - a.active_ms);
+    sessions.sort((a, b) => a.start_ts - b.start_ts);
+
+    return {
+      date: dateStr,
+      start_ts: startTs,
+      end_ts: endTs,
+      split_gap_ms: effectiveSplitGapMs,
+      session_merge_gap_ms: effectiveSessionMergeGapMs,
+      apps,
+      sessions,
+      spans,
+    };
   }
 
   function ingestFrame(frame) {
@@ -1606,6 +1901,7 @@ export function createStore(db, { withTransaction }) {
     recleanChunks,
     getDailySummary,
     ensureDailySummary,
+    getDailyTimeline,
     compactFramesToChunks,
     expireChunkedFrameMedia,
     deleteDangerZone,

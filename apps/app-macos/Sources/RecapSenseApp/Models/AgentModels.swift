@@ -53,3 +53,56 @@ struct MediaStatsItem: Decodable, Equatable {
 struct MediaStatsResponse: Decodable, Equatable {
   let stats: MediaStatsItem
 }
+
+// MARK: - Timeline
+
+struct TimelineAppTotalItem: Decodable, Equatable, Identifiable {
+  var id: String { app ?? "" }
+
+  let app: String?
+  let active_ms: Int64
+  let frame_count: Int
+  let span_count: Int
+  let session_count: Int
+  let first_ts: Int64?
+  let last_ts: Int64?
+}
+
+struct TimelineSessionItem: Decodable, Equatable, Identifiable {
+  let id: String
+  let start_ts: Int64
+  let end_ts: Int64
+  let active_ms: Int64
+  let app: String?
+  let span_count: Int
+  let titles: [String]
+}
+
+struct TimelineSpanItem: Decodable, Equatable, Identifiable {
+  let id: String
+  let start_ts: Int64
+  let end_ts: Int64
+  let active_ms: Int64
+  let app: String?
+  let window_title: String?
+  let window_title_norm: String
+  let frame_count: Int
+  let chunk_count: Int
+  let chunk_ids: [String]
+  let sample_chunk_id: String?
+}
+
+struct DailyTimelineItem: Decodable, Equatable {
+  let date: String
+  let start_ts: Int64
+  let end_ts: Int64
+  let split_gap_ms: Int64
+  let session_merge_gap_ms: Int64
+  let apps: [TimelineAppTotalItem]
+  let sessions: [TimelineSessionItem]
+  let spans: [TimelineSpanItem]
+}
+
+struct DailyTimelineResponse: Decodable, Equatable {
+  let timeline: DailyTimelineItem
+}

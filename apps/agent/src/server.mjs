@@ -733,6 +733,16 @@ async function main() {
         return sendJson(res, 200, { summary });
       }
 
+      if (req.method === "GET" && url.pathname === "/v1/timeline/daily") {
+        const date = url.searchParams.get("date") ?? formatLocalDate(new Date());
+        const timeline = store.getDailyTimeline({
+          date,
+          // B（用户选择）：5 分钟粒度
+          sessionMergeGapMs: 5 * 60_000,
+        });
+        return sendJson(res, 200, { timeline });
+      }
+
       if (req.method === "POST" && url.pathname === "/v1/ingest/frame") {
         const body = await readJson(req);
         const result = store.ingestFrame(body ?? {});

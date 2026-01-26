@@ -152,6 +152,31 @@ struct AgentHttpClient {
     return try JSONDecoder().decode(Payload.self, from: data).summary
   }
 
+  /// 获取某一天的时间轴（按 frames 推导，支持窗口标题规范化与按 App 会话合并）。
+  func getDailyTimeline(date: String) async throws -> DailyTimelineItem {
+    var url = baseURL.appendingPathComponent("/v1/timeline/daily")
+    var components = URLComponents(url: url, resolvingAgainstBaseURL: true)
+    components?.queryItems = [
+      URLQueryItem(name: "date", value: date),
+    ]
+    url = components?.url ?? url
+
+    var request = URLRequest(url: url)
+    request.httpMethod = "GET"
+    request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+    let (data, response) = try await URLSession.shared.data(for: request)
+    guard let http = response as? HTTPURLResponse else {
+      throw NSError(domain: "AgentHttpClient", code: -1, userInfo: [NSLocalizedDescriptionKey: "Invalid response"])
+    }
+    guard (200..<300).contains(http.statusCode) else {
+      let body = String(decoding: data, as: UTF8.self)
+      throw NSError(domain: "AgentHttpClient", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: body])
+    }
+
+    return try JSONDecoder().decode(DailyTimelineResponse.self, from: data).timeline
+  }
+
   func search(query: String, limit: Int) async throws -> [SearchResultItem] {
     var url = baseURL.appendingPathComponent("/v1/search")
     var components = URLComponents(url: url, resolvingAgainstBaseURL: true)

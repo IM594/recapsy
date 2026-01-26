@@ -47,6 +47,8 @@ token 默认存放在：
     - `text`：只在正文 `text` 中匹配
 - `GET /v1/chunks/:id`：按 id 获取 chunk
 - `GET /v1/summaries/daily?date=YYYY-MM-DD`：获取（并尽力自动生成）日总结
+- `GET /v1/timeline/daily?date=YYYY-MM-DD`：获取当天时间轴（基于 frames 推导）
+  - 输出：`apps`（按用时排序）+ `spans`（时间轴片段）+ `sessions`（按 app 合并的会话，默认 5 分钟内来回切换会合并）
 - `POST /v1/ingest/frame`：写入截图 OCR 帧
   - body: `{ ts, app, windowTitle, ocrText, phash?, screenshotPath?, thumbnailPath? }`
 - `POST /v1/ingest/chunk`：直接写入/更新 chunk（测试用）
