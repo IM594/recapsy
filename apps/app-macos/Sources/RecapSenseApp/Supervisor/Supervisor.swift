@@ -970,6 +970,166 @@ final class Supervisor: ObservableObject {
     }.value
   }
 
+  func importBackup(from backupRoot: URL, includeMedia: Bool) async throws -> BackupImportResult {
+    let config = self.config
+    let fm = FileManager.default
+
+    let normalizedRoot = backupRoot.standardizedFileURL
+    let sourceDb = normalizedRoot.appendingPathComponent("db/recapsense.db")
+    guard fm.fileExists(atPath: sourceDb.path) else {
+      throw NSError(
+        domain: "Supervisor",
+        code: 1001,
+        userInfo: [NSLocalizedDescriptionKey: "备份目录不合法：缺少 db/recapsense.db（路径：\(sourceDb.path)）"]
+      )
+    }
+
+    let sourceMedia = normalizedRoot.appendingPathComponent("media", isDirectory: true)
+    let backupHasMedia = fm.fileExists(atPath: sourceMedia.path)
+
+    // 记录导入前的状态：导入完成后尽力恢复（用户体验更自然）。
+    let previousAgentEnabled = agentEnabled
+    let previousCollectorEnabled = collectorEnabled
+    let previousCollectorPauseState = collectorPauseState
+    let previousMcpWasRunning = mcp.state.isRunning
+
+    // 导入期间必须确保不会被后台“自愈”拉起进程。
+    agentAutoRestartSuppressed = true
+    collectorAutoRestartSuppressed = true
+    agentAutoRestartTask?.cancel()
+    agentAutoRestartTask = nil
+    collectorAutoRestartTask?.cancel()
+    collectorAutoRestartTask = nil
+
+    // 1) 先停采集：避免导入/快照期间 DB 仍在写入。
+    stopCollectorFully()
+    refreshCollectorDiagnosticsNow()
+    for proc in collectorDiagnostics.processes {
+      _ = await ProcessInspector.terminate(pid: proc.pid)
+    }
+    refreshCollectorDiagnosticsNow()
+
+    // 2) 导入前自动备份当前 DB（更安全：可回滚）。
+    let preImportDbBackupPath = try await createPreImportDatabaseBackup()
+
+    // 3) 停止后端服务（释放 DB 文件句柄）。
+    await stopMcpForMaintenance(timeoutSeconds: 2.0)
+    try await stopAgentForMaintenance(timeoutSeconds: 4.0)
+
+    // 4) 覆盖数据文件（放到后台线程，避免 UI 卡顿）。
+    let stamp = makeTimestampForFilename()
+    let restoreResult = try await Task.detached(priority: .utility) {
+      let destDbDir = config.dataDir.appendingPathComponent("db", isDirectory: true)
+      try fm.createDirectory(at: destDbDir, withIntermediateDirectories: true)
+
+      let destDb = destDbDir.appendingPathComponent("recapsense.db")
+
+      // 清理 WAL/SHM：导入的是单文件一致快照。
+      let destWal = URL(fileURLWithPath: destDb.path + "-wal")
+      let destShm = URL(fileURLWithPath: destDb.path + "-shm")
+      if fm.fileExists(atPath: destWal.path) { try? fm.removeItem(at: destWal) }
+      if fm.fileExists(atPath: destShm.path) { try? fm.removeItem(at: destShm) }
+
+      // 先复制到临时文件，再替换：避免中途失败导致目标 DB 半截损坏。
+      let tempDb = destDbDir.appendingPathComponent("recapsense.importing.\(UUID().uuidString).db")
+      if fm.fileExists(atPath: tempDb.path) { try? fm.removeItem(at: tempDb) }
+      try fm.copyItem(at: sourceDb, to: tempDb)
+
+      if fm.fileExists(atPath: destDb.path) {
+        let backupName = "recapsense.before-import-\(stamp).db"
+        _ = try fm.replaceItemAt(destDb, withItemAt: tempDb, backupItemName: backupName)
+      } else {
+        try fm.moveItem(at: tempDb, to: destDb)
+      }
+
+      var restoredMedia = false
+      if includeMedia, backupHasMedia {
+        let destMedia = config.dataDir.appendingPathComponent("media", isDirectory: true)
+        let backupOldMediaName = "media.before-import-\(stamp)"
+        let backupOldMedia = config.dataDir.appendingPathComponent(backupOldMediaName, isDirectory: true)
+
+        var movedOldMedia = false
+        if fm.fileExists(atPath: destMedia.path) {
+          // 备份旧 media：避免误删；但也要提醒用户这可能占用额外空间。
+          if fm.fileExists(atPath: backupOldMedia.path) {
+            try? fm.removeItem(at: backupOldMedia)
+          }
+          try fm.moveItem(at: destMedia, to: backupOldMedia)
+          movedOldMedia = true
+        }
+
+        do {
+          try fm.copyItem(at: sourceMedia, to: destMedia)
+          restoredMedia = true
+        } catch {
+          // 回滚（尽力而为）：如果新 media 导入失败，尝试恢复旧 media。
+          if fm.fileExists(atPath: destMedia.path) {
+            try? fm.removeItem(at: destMedia)
+          }
+          if movedOldMedia, fm.fileExists(atPath: backupOldMedia.path) {
+            try? fm.moveItem(at: backupOldMedia, to: destMedia)
+          }
+          throw error
+        }
+      }
+
+      return restoredMedia
+    }.value
+
+    // 5) 恢复用户原本的开关/暂停状态，并尽力重启服务。
+    agentEnabled = previousAgentEnabled
+    collectorEnabled = previousCollectorEnabled
+    collectorPauseState = previousCollectorPauseState
+
+    agentAutoRestartSuppressed = false
+    collectorAutoRestartSuppressed = false
+
+    if previousAgentEnabled {
+      startAgent()
+      let ok = await waitForAgentHealthy(timeoutSeconds: 10)
+      if ok {
+        try? await refreshSettingsFromAgent()
+      }
+    }
+
+    if previousMcpWasRunning {
+      startMcpSse()
+    }
+
+    // collector：按导入前的暂停状态恢复
+    if previousCollectorEnabled {
+      switch previousCollectorPauseState {
+      case .none:
+        startCollector()
+      case .manual:
+        // 保持暂停
+        stopCollector()
+      case .until(let until):
+        let remaining = until.timeIntervalSinceNow
+        if remaining > 1 {
+          pauseCollector(forSeconds: remaining)
+        } else {
+          resumeCollector()
+        }
+      }
+    }
+
+    let notes: String
+    if includeMedia && !backupHasMedia {
+      notes = "备份目录不包含 media，本次仅导入 db。"
+    } else {
+      notes = "导入完成。"
+    }
+
+    return BackupImportResult(
+      backupRoot: normalizedRoot,
+      dataDir: config.dataDir,
+      preImportDbBackupPath: preImportDbBackupPath,
+      restoredMedia: restoreResult,
+      notes: notes
+    )
+  }
+
   private func presentAlert(title: String, message: String) {
     let alert = NSAlert()
     alert.messageText = title
@@ -977,6 +1137,139 @@ final class Supervisor: ObservableObject {
     alert.alertStyle = .warning
     alert.addButton(withTitle: "好的")
     alert.runModal()
+  }
+
+  private func makeTimestampForFilename() -> String {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.timeZone = TimeZone.current
+    formatter.dateFormat = "yyyyMMdd-HHmmss"
+    return formatter.string(from: Date())
+  }
+
+  private func createPreImportDatabaseBackup() async throws -> URL? {
+    let fm = FileManager.default
+    let config = self.config
+
+    let dbDir = config.dataDir.appendingPathComponent("db", isDirectory: true)
+    let currentDb = dbDir.appendingPathComponent("recapsense.db")
+    if !fm.fileExists(atPath: currentDb.path) && !agent.state.isRunning {
+      return nil
+    }
+
+    let stamp = makeTimestampForFilename()
+    let backupsDir = config.dataDir.appendingPathComponent("tmp/pre-import-backups", isDirectory: true)
+    try fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
+    let destDb = backupsDir.appendingPathComponent("pre-import-\(stamp).db")
+
+    // 优先走 Agent 的一致快照（更可靠）；如果 Agent 没在跑，再 fallback 到文件拷贝。
+    if agent.state.isRunning {
+      let client = try AgentHttpClient(config: config)
+      let temp = try await client.downloadDatabaseSnapshot()
+
+      if fm.fileExists(atPath: destDb.path) {
+        try? fm.removeItem(at: destDb)
+      }
+
+      do {
+        try fm.moveItem(at: temp, to: destDb)
+      } catch {
+        try fm.copyItem(at: temp, to: destDb)
+        try? fm.removeItem(at: temp)
+      }
+
+      return destDb
+    }
+
+    guard fm.fileExists(atPath: currentDb.path) else {
+      return nil
+    }
+
+    // fallback：文件级备份（尽力而为）。如果存在 WAL/SHM 也一并拷贝，便于紧急恢复。
+    return try await Task.detached(priority: .utility) {
+      if fm.fileExists(atPath: destDb.path) {
+        try? fm.removeItem(at: destDb)
+      }
+      try fm.copyItem(at: currentDb, to: destDb)
+
+      let wal = URL(fileURLWithPath: currentDb.path + "-wal")
+      let shm = URL(fileURLWithPath: currentDb.path + "-shm")
+      if fm.fileExists(atPath: wal.path) {
+        try? fm.copyItem(at: wal, to: URL(fileURLWithPath: destDb.path + "-wal"))
+      }
+      if fm.fileExists(atPath: shm.path) {
+        try? fm.copyItem(at: shm, to: URL(fileURLWithPath: destDb.path + "-shm"))
+      }
+
+      return destDb
+    }.value
+  }
+
+  private func stopMcpForMaintenance(timeoutSeconds: Double) async {
+    // MCP 不直接影响 DB，但为了避免导入期间端口残留/状态错乱，尽量停掉。
+    if case .runningExternal = mcp.state {
+      do {
+        try await shutdownMcpSse()
+        mcp.markStoppedIfExternal()
+      } catch {
+        // 不让 MCP 停止失败阻塞导入；但至少在 UI 里留下错误。
+        mcp.markFailed(message: "无法关闭外部 MCP：\(String(describing: error))")
+      }
+      return
+    }
+
+    mcp.stop()
+    let deadline = Date().addingTimeInterval(max(0.2, timeoutSeconds))
+    while mcp.state.isRunning, Date() < deadline {
+      try? await Task.sleep(nanoseconds: 120_000_000)
+    }
+  }
+
+  private func stopAgentForMaintenance(timeoutSeconds: Double) async throws {
+    // 关键：导入必须释放 DB 文件句柄，因此 Agent 必须真正停掉（包含 external）。
+    agentEnabled = false
+    agentAutoRestartSuppressed = true
+    agentAutoRestartTask?.cancel()
+    agentAutoRestartTask = nil
+
+    if case .runningExternal = agent.state {
+      do {
+        let client = try AgentHttpClient(config: config)
+        try await client.shutdown()
+      } catch {
+        throw NSError(
+          domain: "Supervisor",
+          code: 1002,
+          userInfo: [NSLocalizedDescriptionKey: "无法关闭外部 Agent：\(String(describing: error))。请手动关闭后重试。"]
+        )
+      }
+
+      let ok = await waitForAgentGone(timeoutSeconds: timeoutSeconds)
+      if ok {
+        agent.markStoppedIfExternal()
+        return
+      }
+
+      throw NSError(
+        domain: "Supervisor",
+        code: 1003,
+        userInfo: [NSLocalizedDescriptionKey: "外部 Agent 仍在运行（未能在 \(timeoutSeconds)s 内退出）。请手动关闭后重试。"]
+      )
+    }
+
+    agent.stop()
+    let deadline = Date().addingTimeInterval(max(0.2, timeoutSeconds))
+    while agent.state.isRunning, Date() < deadline {
+      try? await Task.sleep(nanoseconds: 120_000_000)
+    }
+
+    if agent.state.isRunning {
+      throw NSError(
+        domain: "Supervisor",
+        code: 1004,
+        userInfo: [NSLocalizedDescriptionKey: "Agent 未能在 \(timeoutSeconds)s 内停止。请查看日志并重试。"]
+      )
+    }
   }
 
   private func restartCollector() async {

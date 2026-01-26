@@ -11,6 +11,8 @@ struct SettingsView: View {
   @State private var pendingDangerScope: String? = nil
   @State private var lastDangerResult: DangerDeleteResult? = nil
   @State private var lastBackupPath: String? = nil
+  @State private var lastImportPath: String? = nil
+  @State private var lastPreImportDbBackupPath: String? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -295,9 +297,41 @@ struct SettingsView: View {
             }
             .disabled(isLoading)
 
+            Divider()
+
+            Text("导入会覆盖当前数据目录中的数据库（以及可选覆盖 media）。导入前会自动将当前 db 快照备份到 `dataDir/tmp/pre-import-backups/`，便于回滚。")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+
+            Button("导入备份（仅 db）…") {
+              importBackup(includeMedia: false)
+            }
+            .disabled(isLoading)
+
+            Button("导入备份（db + media）…") {
+              importBackup(includeMedia: true)
+            }
+            .disabled(isLoading)
+
             if let lastBackupPath {
               LabeledContent("上次导出") {
                 Text(lastBackupPath)
+                  .font(.caption)
+                  .textSelection(.enabled)
+              }
+            }
+
+            if let lastImportPath {
+              LabeledContent("上次导入") {
+                Text(lastImportPath)
+                  .font(.caption)
+                  .textSelection(.enabled)
+              }
+            }
+
+            if let lastPreImportDbBackupPath {
+              LabeledContent("导入前 DB 备份") {
+                Text(lastPreImportDbBackupPath)
                   .font(.caption)
                   .textSelection(.enabled)
               }
@@ -422,6 +456,32 @@ struct SettingsView: View {
     }
   }
 
+  private func importBackup(includeMedia: Bool) {
+    guard let backupRoot = pickExistingBackupDirectory() else {
+      message = "已取消导入。"
+      return
+    }
+
+    guard confirmImport(backupRoot: backupRoot, includeMedia: includeMedia) else {
+      message = "已取消导入。"
+      return
+    }
+
+    isLoading = true
+    message = includeMedia ? "正在导入备份（db + media，可能较慢）…" : "正在导入备份（仅 db）…"
+    Task {
+      defer { isLoading = false }
+      do {
+        let result = try await supervisor.importBackup(from: backupRoot, includeMedia: includeMedia)
+        lastImportPath = result.backupRoot.path
+        lastPreImportDbBackupPath = result.preImportDbBackupPath?.path
+        message = "导入完成。数据目录：\(result.dataDir.path)"
+      } catch {
+        message = "导入失败：\(String(describing: error))"
+      }
+    }
+  }
+
   private func pickBackupDirectory() -> URL? {
     let panel = NSOpenPanel()
     panel.title = "选择备份保存位置"
@@ -435,6 +495,46 @@ struct SettingsView: View {
     let result = panel.runModal()
     guard result == .OK else { return nil }
     return panel.url
+  }
+
+  private func pickExistingBackupDirectory() -> URL? {
+    let panel = NSOpenPanel()
+    panel.title = "选择 RecapSense 备份目录"
+    panel.message = "请选择一个 RecapSenseBackup-... 目录（里面应包含 db/recapsense.db）。"
+    panel.prompt = "选择"
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = false
+    panel.canCreateDirectories = false
+    panel.allowsMultipleSelection = false
+
+    let result = panel.runModal()
+    guard result == .OK else { return nil }
+    return panel.url
+  }
+
+  private func confirmImport(backupRoot: URL, includeMedia: Bool) -> Bool {
+    let alert = NSAlert()
+    alert.alertStyle = .warning
+    alert.messageText = "确认导入备份？"
+
+    let mode = includeMedia ? "db + media（会覆盖 media）" : "仅 db（不覆盖 media）"
+    alert.informativeText =
+      """
+      将导入：\(mode)
+
+      备份目录：
+      \(backupRoot.path)
+
+      导入会停止采集/后端，并覆盖当前数据目录中的数据库（以及可选覆盖 media）。
+      导入前会自动将当前 db 快照备份到：
+      <dataDir>/tmp/pre-import-backups/
+      """
+
+    alert.addButton(withTitle: "确认导入")
+    alert.addButton(withTitle: "取消")
+
+    let res = alert.runModal()
+    return res == .alertFirstButtonReturn
   }
 
   private func runDangerDelete(scope: String) {

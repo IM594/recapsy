@@ -7,3 +7,10 @@ struct BackupManifest: Codable {
   var notes: String?
 }
 
+struct BackupImportResult: Equatable {
+  var backupRoot: URL
+  var dataDir: URL
+  var preImportDbBackupPath: URL?
+  var restoredMedia: Bool
+  var notes: String?
+}

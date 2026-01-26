@@ -165,6 +165,10 @@ npm run dev:collector -- --once
 - 方式 1（推荐）：在 macOS App 的设置页使用「导出备份」
   - 「导出数据库备份」：导出一个一致的 `db/recapsense.db`
   - 「导出完整备份（db + media）」：同时拷贝 `media/`（可能很大）
+- 导入恢复：在 macOS App 的设置页使用「导入备份」
+  - 「导入备份（仅 db）」：覆盖当前 `db/recapsense.db`（不会覆盖当前 `media/`）
+  - 「导入备份（db + media）」：覆盖当前 `db/recapsense.db`，并用备份的 `media/` 替换（旧 `media/` 会先改名保留）
+  - 导入前会自动把当前 DB 快照备份到：`<dataDir>/tmp/pre-import-backups/`（便于回滚）
 - 方式 2（开发/脚本）：调用 Agent 的 `GET /v1/backup/db` 下载一致快照，再按需拷贝 `media/`
 - 方式 3（不推荐，手动拷贝 dataDir）：请先停止 Agent/Collector，或确保把 SQLite 的 `-wal/-shm` 一并拷贝
 

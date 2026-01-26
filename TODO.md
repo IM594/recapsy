@@ -180,6 +180,7 @@
   - 发布形态：`~/Library/Application Support/RecapSense/`
 - [ ] 导出/导入（换电脑，B 模式优先）
   - [x] 导出：一键导出数据库一致快照（并可选拷贝 `media/` 热证据）
+  - [x] 导入：一键恢复备份（覆盖 db；可选覆盖 `media/`，导入前自动做当前 DB 备份）
   - [ ] 导出增强：`chunks + daily summaries + settings + manifest`（可选只导出“长期层”以减小体积）
   - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
 - [ ] 发布形态下的服务托管（不靠命令行）
