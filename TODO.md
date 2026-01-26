@@ -183,6 +183,9 @@
   - [x] 导入：一键恢复备份（覆盖 db；可选覆盖 `media/`，导入前自动做当前 DB 备份）
   - [ ] 导出增强：`chunks + daily summaries + settings + manifest`（可选只导出“长期层”以减小体积）
   - 导入：自动 migrations + 自动重建 FTS（以及后续向量索引）
+- [ ] 数据体积优化（后置）
+  - `frames` 的 OCR 文本无损压缩（仅对已压实到 chunk 的 frames；保持可反悔）：`ocr_text` → `ocr_text_blob`（gzip/zstd 等）+ 按需解压
+  - 提供统计与维护工具：压缩进度/节省空间估算 + `VACUUM INTO` 生成紧凑备份
 - [ ] 发布形态下的服务托管（不靠命令行）
   - 背景：开发期可以靠 `npm run`，但最终必须对普通用户隐藏。
   - 验收：安装后无需 Node/Swift；菜单栏 App 负责拉起/停止内置 Agent/MCP/Collector；不依赖 shell PATH。
