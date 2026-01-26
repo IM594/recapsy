@@ -128,6 +128,13 @@ function getTokenFromRequest(req, url) {
   return null;
 }
 
+function tokenTailHint(value, { digits = 6 } = {}) {
+  if (!value) return "(none)";
+  const text = String(value);
+  if (text.length <= digits) return "****";
+  return `****${text.slice(-digits)}`;
+}
+
 function sendSseHeaders(res) {
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -205,6 +212,11 @@ async function main() {
       if (req.method === "GET" && url.pathname === "/sse") {
         const provided = getTokenFromRequest(req, url);
         if (provided !== token) {
+          console.warn(
+            `[mcp-sse] unauthorized /sse request (provided=${tokenTailHint(
+              provided
+            )})`
+          );
           return sendJson(res, 401, { error: "Unauthorized" });
         }
 
@@ -245,22 +257,31 @@ async function main() {
       }
 
       if (req.method === "POST" && url.pathname === "/message") {
-        const provided = getTokenFromRequest(req, url);
-        if (provided !== token) {
-          return sendJson(res, 401, { error: "Unauthorized" });
-        }
-
         const sessionIdFromQuery = url.searchParams.get("sessionId")?.trim();
         let sessionId = sessionIdFromQuery;
 
-        if (!sessionId) {
+        const provided = getTokenFromRequest(req, url);
+
+        if (!sessionId && provided === token) {
           // 如果没有带 sessionId，且当前只有一个会话，就默认路由到它（便于调试）。
-          if (sessions.size === 1) {
-            sessionId = [...sessions.keys()][0];
-          }
+          if (sessions.size === 1) sessionId = [...sessions.keys()][0];
+        }
+
+        const authorized =
+          provided === token || (sessionId && sessions.has(sessionId));
+        if (!authorized) {
+          console.warn(
+            `[mcp-sse] unauthorized /message request (hasSessionId=${Boolean(
+              sessionIdFromQuery
+            )} provided=${tokenTailHint(provided)})`
+          );
+          return sendJson(res, 401, { error: "Unauthorized" });
         }
 
         if (!sessionId || !sessions.has(sessionId)) {
+          console.warn(
+            `[mcp-sse] /message requested but session is missing (activeSessions=${sessions.size})`
+          );
           return sendJson(res, 404, { error: "Unknown session" });
         }
 

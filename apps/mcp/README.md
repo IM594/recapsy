@@ -48,6 +48,25 @@ node src/server-sse.mjs
 SSE endpoint：
 
 - `GET /sse`：建立 SSE 连接（需要 token）
-- `POST /message?sessionId=...`：发送 JSON-RPC 消息（需要 token）
+- `POST /message?sessionId=...`：发送 JSON-RPC 消息（**推荐**带 token；但多数 MCP 客户端会在建立 SSE 后仅携带 `sessionId`，此时服务端也会接受）
 
 说明：SSE 连接建立后，服务端会先发一个 `event: endpoint`，告诉客户端应该往哪个 `/message` endpoint 发消息。
+
+## Cherry Studio（SSE）接入
+
+Cherry Studio 支持用 SSE 的方式接入 MCP。RecapSense 的推荐配置是：
+
+- URL：`http://127.0.0.1:4833/sse?token=YOUR_TOKEN`
+
+其中 `YOUR_TOKEN` 可以从以下位置获取（任选其一）：
+
+- RecapSense 数据目录：`${RECAPSENSE_DATA_DIR}/secret/token`
+- 默认数据目录：`<repoRoot>/.recapsense/secret/token`（开发态）
+
+常见报错排查：
+
+- `Error invoking remote method 'mcp:list-tools': ServerError`
+  - 通常意味着 MCP 客户端无法调用 `tools/list`。
+  - 优先检查：URL 是否是 `/sse?token=...`（不是 `/health`、也不是 `/message`）。
+  - 再检查：RecapSense 是否正在运行（确保 `127.0.0.1:4833` 端口已监听）。
+  - 最后查看：`.recapsense/logs/mcp-sse.log` 是否有 `unauthorized /sse` 或 `unknown session` 的日志。
