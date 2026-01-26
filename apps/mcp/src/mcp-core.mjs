@@ -50,6 +50,44 @@ export function toolList() {
         openWorldHint: false,
       },
     },
+    {
+      name: "recapsense_get_chunk",
+      description: "按 chunk id 获取完整内容（包含 app/window/title 与全文文本）。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "chunk id（通常来自 recapsense_search 的结果）。",
+          },
+        },
+        required: ["id"],
+      },
+      annotations: {
+        title: "RecapSense 获取 Chunk",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+    },
+    {
+      name: "recapsense_get_daily_summary",
+      description: "按日期获取日总结；如果当天没有数据会返回空。",
+      inputSchema: {
+        type: "object",
+        properties: {
+          date: {
+            type: "string",
+            description: "日期（YYYY-MM-DD，例如 2026-01-26）。",
+          },
+        },
+        required: ["date"],
+      },
+      annotations: {
+        title: "RecapSense 获取日总结",
+        readOnlyHint: true,
+        openWorldHint: false,
+      },
+    },
   ];
 }
 
@@ -71,6 +109,41 @@ export function formatSearchResults(results) {
     lines.push(`   id: ${item.id}`);
   }
 
+  return lines.join("\n");
+}
+
+export function formatChunk(chunk) {
+  if (!chunk) return "未找到该 chunk。";
+
+  const start = chunk.start_ts != null ? new Date(Number(chunk.start_ts)).toISOString() : "unknown";
+  const end = chunk.end_ts != null ? new Date(Number(chunk.end_ts)).toISOString() : "unknown";
+  const app = chunk.app ? `${chunk.app}` : "UnknownApp";
+  const title = chunk.window_title ? ` — ${chunk.window_title}` : "";
+  const text = String(chunk.text ?? "").trim();
+
+  const lines = [];
+  lines.push(`${start} ~ ${end} | ${app}${title}`);
+  lines.push(`id: ${chunk.id}`);
+  lines.push("");
+  lines.push(text || "（空）");
+  return lines.join("\n");
+}
+
+export function formatDailySummary(summary, date) {
+  if (!summary) {
+    return `日期 ${date ?? ""} 暂无日总结。`;
+  }
+
+  const start = summary.start_ts != null ? new Date(Number(summary.start_ts)).toISOString() : "unknown";
+  const end = summary.end_ts != null ? new Date(Number(summary.end_ts)).toISOString() : "unknown";
+  const text = String(summary.summary ?? "").trim();
+  const dateStr = summary.date ?? date ?? "";
+
+  const lines = [];
+  lines.push(`日总结：${dateStr}`);
+  lines.push(`${start} ~ ${end}`);
+  lines.push("");
+  lines.push(text || "（空）");
   return lines.join("\n");
 }
 
@@ -162,8 +235,144 @@ function makeCallAgentSearch({ agentUrl, token, socketPath }) {
   return ({ query, limit }) => callAgentSearchViaHttp({ agentUrl, token, query, limit });
 }
 
+async function callAgentGetChunkViaHttp({ agentUrl, token, id }) {
+  const encodedId = encodeURIComponent(String(id ?? "").trim());
+  const url = new URL(`/v1/chunks/${encodedId}`, agentUrl);
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `Agent request failed: ${response.status} ${response.statusText}\n${text}`
+    );
+  }
+
+  const payload = await response.json();
+  return payload.chunk ?? null;
+}
+
+async function callAgentGetChunkViaSocket({ socketPath, token, id }) {
+  const encodedId = encodeURIComponent(String(id ?? "").trim());
+  const url = new URL(`http://localhost/v1/chunks/${encodedId}`);
+
+  const responseBody = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath,
+        method: "GET",
+        path: url.pathname + url.search,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          const body = Buffer.concat(chunks).toString("utf8");
+          if (status < 200 || status >= 300) {
+            return reject(
+              new Error(`Agent socket request failed: ${status}\n${body}`)
+            );
+          }
+          resolve(body);
+        });
+      }
+    );
+
+    req.on("error", reject);
+    req.end();
+  });
+
+  const payload = JSON.parse(String(responseBody ?? "{}"));
+  return payload.chunk ?? null;
+}
+
+function makeCallAgentGetChunk({ agentUrl, token, socketPath }) {
+  if (socketPath) {
+    return ({ id }) => callAgentGetChunkViaSocket({ socketPath, token, id });
+  }
+  return ({ id }) => callAgentGetChunkViaHttp({ agentUrl, token, id });
+}
+
+async function callAgentGetDailySummaryViaHttp({ agentUrl, token, date }) {
+  const url = new URL("/v1/summaries/daily", agentUrl);
+  url.searchParams.set("date", String(date ?? "").trim());
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `Agent request failed: ${response.status} ${response.statusText}\n${text}`
+    );
+  }
+
+  const payload = await response.json();
+  return payload.summary ?? null;
+}
+
+async function callAgentGetDailySummaryViaSocket({ socketPath, token, date }) {
+  const url = new URL("http://localhost/v1/summaries/daily");
+  url.searchParams.set("date", String(date ?? "").trim());
+
+  const responseBody = await new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        socketPath,
+        method: "GET",
+        path: url.pathname + url.search,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("end", () => {
+          const status = res.statusCode ?? 0;
+          const body = Buffer.concat(chunks).toString("utf8");
+          if (status < 200 || status >= 300) {
+            return reject(
+              new Error(`Agent socket request failed: ${status}\n${body}`)
+            );
+          }
+          resolve(body);
+        });
+      }
+    );
+
+    req.on("error", reject);
+    req.end();
+  });
+
+  const payload = JSON.parse(String(responseBody ?? "{}"));
+  return payload.summary ?? null;
+}
+
+function makeCallAgentGetDailySummary({ agentUrl, token, socketPath }) {
+  if (socketPath) {
+    return ({ date }) => callAgentGetDailySummaryViaSocket({ socketPath, token, date });
+  }
+  return ({ date }) => callAgentGetDailySummaryViaHttp({ agentUrl, token, date });
+}
+
 export function createMcpRequestHandler({ agentUrl, token, socketPath }) {
   const callAgentSearch = makeCallAgentSearch({ agentUrl, token, socketPath });
+  const callAgentGetChunk = makeCallAgentGetChunk({ agentUrl, token, socketPath });
+  const callAgentGetDailySummary = makeCallAgentGetDailySummary({ agentUrl, token, socketPath });
 
   return async function handleRequest(message) {
     if (!message || message.jsonrpc !== "2.0" || !("method" in message)) {
@@ -185,7 +394,7 @@ export function createMcpRequestHandler({ agentUrl, token, socketPath }) {
         },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
         instructions:
-          "RecapSense 提供对本机记忆数据的只读访问。使用 recapsense_search 可以按关键词检索相关 chunks（按时间临近排序展示）。",
+          "RecapSense 提供对本机记忆数据的只读访问。可用工具：recapsense_search（检索）、recapsense_get_chunk（读取 chunk 全文）、recapsense_get_daily_summary（日总结）。",
       });
     }
 
@@ -201,15 +410,28 @@ export function createMcpRequestHandler({ agentUrl, token, socketPath }) {
       const name = message.params?.name;
       const args = message.params?.arguments ?? {};
 
-      if (name !== "recapsense_search") {
-        return jsonRpcError(id, -32601, `Unknown tool: ${name}`);
-      }
-
       try {
-        const query = String(args.query ?? "");
-        const limit = Number.isFinite(args.limit) ? args.limit : 10;
-        const results = await callAgentSearch({ query, limit });
-        const text = formatSearchResults(results);
+        let text = "";
+
+        if (name === "recapsense_search") {
+          const query = String(args.query ?? "");
+          const limit = Number.isFinite(args.limit) ? args.limit : 10;
+          const results = await callAgentSearch({ query, limit });
+          text = formatSearchResults(results);
+        } else if (name === "recapsense_get_chunk") {
+          const chunkId = String(args.id ?? "").trim();
+          if (!chunkId) throw new Error("chunk id is required");
+          const chunk = await callAgentGetChunk({ id: chunkId });
+          text = formatChunk(chunk);
+        } else if (name === "recapsense_get_daily_summary") {
+          const date = String(args.date ?? "").trim();
+          if (!date) throw new Error("date is required (YYYY-MM-DD)");
+          const summary = await callAgentGetDailySummary({ date });
+          text = formatDailySummary(summary, date);
+        } else {
+          return jsonRpcError(id, -32601, `Unknown tool: ${name}`);
+        }
+
         return jsonRpcResult(id, {
           content: [{ type: "text", text }],
         });
@@ -230,4 +452,3 @@ export function createMcpRequestHandler({ agentUrl, token, socketPath }) {
     return jsonRpcError(id, -32601, "Method not found");
   };
 }
-

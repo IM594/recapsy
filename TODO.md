@@ -202,8 +202,8 @@
 - [ ] `ask` API（本地只读）
   - 输出：答案 + 引用（chunk id + 时间戳 + app/window）
 - [ ] MCP 工具扩展（保持简单）
-  - [ ] `recapsense_get_chunk`
-  - [ ] `recapsense_get_daily_summary`
+  - [x] `recapsense_get_chunk`
+  - [x] `recapsense_get_daily_summary`
   - （后续）`recapsense_ask`
 
 ## Milestone M4（待做）：增强（LLM 视觉、音频、Littlebird 方向）
