@@ -1939,6 +1939,7 @@ export function createStore(db, { withTransaction }) {
     patchSettings,
     ingestFrame,
     upsertChunk,
+    upsertDailySummary,
     getChunk,
     searchChunks,
     recleanChunks,

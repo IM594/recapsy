@@ -1,8 +1,8 @@
-import crypto from "node:crypto";
 import http from "node:http";
 
 import { loadAgentToken } from "./token.mjs";
 import { createMcpRequestHandler, resolveAgentSocketPath } from "./mcp-core.mjs";
+import { createSseService } from "./sse-service.mjs";
 
 const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_PORT = 4833;
@@ -73,96 +73,6 @@ function parsePositiveInt(value, fallback) {
   return parsed;
 }
 
-function readJson(req, { maxBytes = 1_000_000 } = {}) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let total = 0;
-
-    req.on("data", (chunk) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        const error = new Error("Request body too large");
-        error.statusCode = 413;
-        reject(error);
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    req.on("end", () => {
-      if (chunks.length === 0) return resolve(null);
-      const raw = Buffer.concat(chunks).toString("utf8");
-      if (raw.trim() === "") return resolve(null);
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        const error = new Error("Invalid JSON");
-        error.statusCode = 400;
-        reject(error);
-      }
-    });
-
-    req.on("error", reject);
-  });
-}
-
-function sendJson(res, statusCode, body) {
-  const payload = JSON.stringify(body, null, 2);
-  res.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(payload),
-  });
-  res.end(payload);
-}
-
-function getTokenFromRequest(req, url) {
-  const header = req.headers.authorization ?? "";
-  if (header.startsWith("Bearer ")) {
-    return header.slice("Bearer ".length).trim();
-  }
-  const fromQuery = url.searchParams.get("token");
-  if (fromQuery && fromQuery.trim() !== "") {
-    return fromQuery.trim();
-  }
-  return null;
-}
-
-function tokenTailHint(value, { digits = 6 } = {}) {
-  if (!value) return "(none)";
-  const text = String(value);
-  if (text.length <= digits) return "****";
-  return `****${text.slice(-digits)}`;
-}
-
-function sendSseHeaders(res) {
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-  });
-  // 立即 flush 一段内容，避免某些代理/中间层缓冲。
-  res.write(": connected\n\n");
-}
-
-function writeSseEvent(res, { event, data }) {
-  if (event) {
-    res.write(`event: ${event}\n`);
-  }
-  const payload =
-    typeof data === "string" ? data : JSON.stringify(data ?? null);
-  // SSE 允许多行 data，需要逐行前缀。
-  for (const line of String(payload).split("\n")) {
-    res.write(`data: ${line}\n`);
-  }
-  res.write("\n");
-}
-
-function generateSessionId() {
-  // 使用 URL-safe 的随机串，避免在 URL 里出现特殊字符。
-  return crypto.randomBytes(18).toString("base64url");
-}
-
 async function main() {
   installTimestampedConsole();
   installParentWatchdog("mcp-sse");
@@ -182,128 +92,18 @@ async function main() {
 
   const handleRequest = createMcpRequestHandler({ agentUrl, token, socketPath });
 
-  // sessionId -> { res, keepAliveTimer, createdAt }
-  const sessions = new Map();
-
-  const server = http.createServer(async (req, res) => {
-    try {
-      const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
-
-      if (req.method === "GET" && url.pathname === "/health") {
-        return sendJson(res, 200, {
-          ok: true,
-          service: SERVICE_NAME,
-          pid: process.pid,
-        });
-      }
-
-      if (req.method === "POST" && url.pathname === "/shutdown") {
-        const provided = getTokenFromRequest(req, url);
-        if (provided !== token) {
-          return sendJson(res, 401, { error: "Unauthorized" });
-        }
-
-        sendJson(res, 202, { ok: true });
-        const timer = setTimeout(() => process.exit(0), 80);
-        timer.unref();
-        return;
-      }
-
-      if (req.method === "GET" && url.pathname === "/sse") {
-        const provided = getTokenFromRequest(req, url);
-        if (provided !== token) {
-          console.warn(
-            `[mcp-sse] unauthorized /sse request (provided=${tokenTailHint(
-              provided
-            )})`
-          );
-          return sendJson(res, 401, { error: "Unauthorized" });
-        }
-
-        const sessionId = generateSessionId();
-        sendSseHeaders(res);
-
-        // MCP SSE 约定：服务端先告诉客户端“发消息”的 endpoint。
-        // 我们把 sessionId 放进 query，便于多会话。
-        writeSseEvent(res, {
-          event: "endpoint",
-          data: `/message?sessionId=${sessionId}`,
-        });
-
-        const keepAliveTimer = setInterval(() => {
-          try {
-            res.write(`: keepalive ${Date.now()}\n\n`);
-          } catch {
-            // 忽略写失败：close 事件会清理。
-          }
-        }, keepAliveSeconds * 1000);
-        keepAliveTimer.unref();
-
-        sessions.set(sessionId, {
-          res,
-          keepAliveTimer,
-          createdAt: Date.now(),
-        });
-
-        req.on("close", () => {
-          const session = sessions.get(sessionId);
-          if (session) {
-            clearInterval(session.keepAliveTimer);
-          }
-          sessions.delete(sessionId);
-        });
-
-        return;
-      }
-
-      if (req.method === "POST" && url.pathname === "/message") {
-        const sessionIdFromQuery = url.searchParams.get("sessionId")?.trim();
-        let sessionId = sessionIdFromQuery;
-
-        const provided = getTokenFromRequest(req, url);
-
-        if (!sessionId && provided === token) {
-          // 如果没有带 sessionId，且当前只有一个会话，就默认路由到它（便于调试）。
-          if (sessions.size === 1) sessionId = [...sessions.keys()][0];
-        }
-
-        const authorized =
-          provided === token || (sessionId && sessions.has(sessionId));
-        if (!authorized) {
-          console.warn(
-            `[mcp-sse] unauthorized /message request (hasSessionId=${Boolean(
-              sessionIdFromQuery
-            )} provided=${tokenTailHint(provided)})`
-          );
-          return sendJson(res, 401, { error: "Unauthorized" });
-        }
-
-        if (!sessionId || !sessions.has(sessionId)) {
-          console.warn(
-            `[mcp-sse] /message requested but session is missing (activeSessions=${sessions.size})`
-          );
-          return sendJson(res, 404, { error: "Unknown session" });
-        }
-
-        const session = sessions.get(sessionId);
-        const message = await readJson(req);
-        const response = await handleRequest(message);
-
-        // 对于通知（无 id）或被忽略的消息：不通过 SSE 回任何东西，但仍返回 ok。
-        if (response && session?.res) {
-          writeSseEvent(session.res, { event: "message", data: response });
-        }
-
-        return sendJson(res, 202, { ok: true });
-      }
-
-      return sendJson(res, 404, { error: "Not found" });
-    } catch (error) {
-      const statusCode = Number(error?.statusCode ?? 500);
-      const message = error instanceof Error ? error.message : String(error);
-      return sendJson(res, statusCode, { error: message });
-    }
+  const sse = createSseService({
+    host,
+    token,
+    keepAliveSeconds,
+    handleRequest,
+    onShutdown: () => {
+      const timer = setTimeout(() => process.exit(0), 80);
+      timer.unref();
+    },
   });
+
+  const server = http.createServer(sse.handler);
 
   // listen 失败（例如 EADDRINUSE）时必须退出，否则会出现“进程还活着但端口没起来”的假象。
   server.once("error", (error) => {

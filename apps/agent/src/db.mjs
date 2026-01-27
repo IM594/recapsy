@@ -179,3 +179,11 @@ export async function migrate(db) {
     currentVersion = migration.version;
   }
 }
+
+export const __test = {
+  tableExists,
+  isNoSuchModuleError,
+  ensureChunksFts,
+  fileExists,
+  withTransaction,
+};

@@ -5,10 +5,10 @@
   "scripts": {
     "dev": "node src/server.mjs",
     "seed": "node src/seed.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=80 --test-coverage-functions=80 --test-coverage-branches=80"
   },
   "engines": {
     "node": ">=22"
   }
 }
-

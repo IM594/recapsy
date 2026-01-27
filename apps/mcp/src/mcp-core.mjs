@@ -396,14 +396,14 @@ export function resolveAgentSocketPath() {
   return resolveSocketPathFromDataDir(dataDir);
 }
 
-async function callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scope }) {
+async function callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scope, fetchFn }) {
   const url = new URL("/v1/search", agentUrl);
   url.searchParams.set("q", query ?? "");
   url.searchParams.set("limit", String(limit ?? 10));
   if (app != null && String(app).trim() !== "") url.searchParams.set("app", String(app).trim());
   if (scope != null && String(scope).trim() !== "") url.searchParams.set("scope", String(scope).trim());
 
-  const response = await fetch(url, {
+  const response = await fetchFn(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -421,7 +421,7 @@ async function callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scop
   return payload.results ?? [];
 }
 
-async function callAgentSearchViaSocket({ socketPath, token, query, limit, app, scope }) {
+async function callAgentSearchViaSocket({ socketPath, token, query, limit, app, scope, httpRequest }) {
   const url = new URL("http://localhost/v1/search");
   url.searchParams.set("q", query ?? "");
   url.searchParams.set("limit", String(limit ?? 10));
@@ -429,7 +429,7 @@ async function callAgentSearchViaSocket({ socketPath, token, query, limit, app, 
   if (scope != null && String(scope).trim() !== "") url.searchParams.set("scope", String(scope).trim());
 
   const responseBody = await new Promise((resolve, reject) => {
-    const req = http.request(
+    const req = httpRequest(
       {
         socketPath,
         method: "GET",
@@ -462,20 +462,20 @@ async function callAgentSearchViaSocket({ socketPath, token, query, limit, app, 
   return payload.results ?? [];
 }
 
-function makeCallAgentSearch({ agentUrl, token, socketPath }) {
+function makeCallAgentSearch({ agentUrl, token, socketPath, fetchFn, httpRequest }) {
   if (socketPath) {
     return ({ query, limit, app, scope }) =>
-      callAgentSearchViaSocket({ socketPath, token, query, limit, app, scope });
+      callAgentSearchViaSocket({ socketPath, token, query, limit, app, scope, httpRequest });
   }
   return ({ query, limit, app, scope }) =>
-    callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scope });
+    callAgentSearchViaHttp({ agentUrl, token, query, limit, app, scope, fetchFn });
 }
 
-async function callAgentGetChunkViaHttp({ agentUrl, token, id }) {
+async function callAgentGetChunkViaHttp({ agentUrl, token, id, fetchFn }) {
   const encodedId = encodeURIComponent(String(id ?? "").trim());
   const url = new URL(`/v1/chunks/${encodedId}`, agentUrl);
 
-  const response = await fetch(url, {
+  const response = await fetchFn(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -493,12 +493,12 @@ async function callAgentGetChunkViaHttp({ agentUrl, token, id }) {
   return payload.chunk ?? null;
 }
 
-async function callAgentGetChunkViaSocket({ socketPath, token, id }) {
+async function callAgentGetChunkViaSocket({ socketPath, token, id, httpRequest }) {
   const encodedId = encodeURIComponent(String(id ?? "").trim());
   const url = new URL(`http://localhost/v1/chunks/${encodedId}`);
 
   const responseBody = await new Promise((resolve, reject) => {
-    const req = http.request(
+    const req = httpRequest(
       {
         socketPath,
         method: "GET",
@@ -531,18 +531,18 @@ async function callAgentGetChunkViaSocket({ socketPath, token, id }) {
   return payload.chunk ?? null;
 }
 
-function makeCallAgentGetChunk({ agentUrl, token, socketPath }) {
+function makeCallAgentGetChunk({ agentUrl, token, socketPath, fetchFn, httpRequest }) {
   if (socketPath) {
-    return ({ id }) => callAgentGetChunkViaSocket({ socketPath, token, id });
+    return ({ id }) => callAgentGetChunkViaSocket({ socketPath, token, id, httpRequest });
   }
-  return ({ id }) => callAgentGetChunkViaHttp({ agentUrl, token, id });
+  return ({ id }) => callAgentGetChunkViaHttp({ agentUrl, token, id, fetchFn });
 }
 
-async function callAgentGetDailySummaryViaHttp({ agentUrl, token, date }) {
+async function callAgentGetDailySummaryViaHttp({ agentUrl, token, date, fetchFn }) {
   const url = new URL("/v1/summaries/daily", agentUrl);
   url.searchParams.set("date", String(date ?? "").trim());
 
-  const response = await fetch(url, {
+  const response = await fetchFn(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -560,12 +560,12 @@ async function callAgentGetDailySummaryViaHttp({ agentUrl, token, date }) {
   return payload.summary ?? null;
 }
 
-async function callAgentGetDailySummaryViaSocket({ socketPath, token, date }) {
+async function callAgentGetDailySummaryViaSocket({ socketPath, token, date, httpRequest }) {
   const url = new URL("http://localhost/v1/summaries/daily");
   url.searchParams.set("date", String(date ?? "").trim());
 
   const responseBody = await new Promise((resolve, reject) => {
-    const req = http.request(
+    const req = httpRequest(
       {
         socketPath,
         method: "GET",
@@ -598,18 +598,18 @@ async function callAgentGetDailySummaryViaSocket({ socketPath, token, date }) {
   return payload.summary ?? null;
 }
 
-function makeCallAgentGetDailySummary({ agentUrl, token, socketPath }) {
+function makeCallAgentGetDailySummary({ agentUrl, token, socketPath, fetchFn, httpRequest }) {
   if (socketPath) {
-    return ({ date }) => callAgentGetDailySummaryViaSocket({ socketPath, token, date });
+    return ({ date }) => callAgentGetDailySummaryViaSocket({ socketPath, token, date, httpRequest });
   }
-  return ({ date }) => callAgentGetDailySummaryViaHttp({ agentUrl, token, date });
+  return ({ date }) => callAgentGetDailySummaryViaHttp({ agentUrl, token, date, fetchFn });
 }
 
-async function callAgentGetDailyTimelineViaHttp({ agentUrl, token, date }) {
+async function callAgentGetDailyTimelineViaHttp({ agentUrl, token, date, fetchFn }) {
   const url = new URL("/v1/timeline/daily", agentUrl);
   url.searchParams.set("date", String(date ?? "").trim());
 
-  const response = await fetch(url, {
+  const response = await fetchFn(url, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -627,12 +627,12 @@ async function callAgentGetDailyTimelineViaHttp({ agentUrl, token, date }) {
   return payload.timeline ?? null;
 }
 
-async function callAgentGetDailyTimelineViaSocket({ socketPath, token, date }) {
+async function callAgentGetDailyTimelineViaSocket({ socketPath, token, date, httpRequest }) {
   const url = new URL("http://localhost/v1/timeline/daily");
   url.searchParams.set("date", String(date ?? "").trim());
 
   const responseBody = await new Promise((resolve, reject) => {
-    const req = http.request(
+    const req = httpRequest(
       {
         socketPath,
         method: "GET",
@@ -665,18 +665,24 @@ async function callAgentGetDailyTimelineViaSocket({ socketPath, token, date }) {
   return payload.timeline ?? null;
 }
 
-function makeCallAgentGetDailyTimeline({ agentUrl, token, socketPath }) {
+function makeCallAgentGetDailyTimeline({ agentUrl, token, socketPath, fetchFn, httpRequest }) {
   if (socketPath) {
-    return ({ date }) => callAgentGetDailyTimelineViaSocket({ socketPath, token, date });
+    return ({ date }) => callAgentGetDailyTimelineViaSocket({ socketPath, token, date, httpRequest });
   }
-  return ({ date }) => callAgentGetDailyTimelineViaHttp({ agentUrl, token, date });
+  return ({ date }) => callAgentGetDailyTimelineViaHttp({ agentUrl, token, date, fetchFn });
 }
 
-export function createMcpRequestHandler({ agentUrl, token, socketPath }) {
-  const callAgentSearch = makeCallAgentSearch({ agentUrl, token, socketPath });
-  const callAgentGetChunk = makeCallAgentGetChunk({ agentUrl, token, socketPath });
-  const callAgentGetDailySummary = makeCallAgentGetDailySummary({ agentUrl, token, socketPath });
-  const callAgentGetDailyTimeline = makeCallAgentGetDailyTimeline({ agentUrl, token, socketPath });
+export function createMcpRequestHandler({
+  agentUrl,
+  token,
+  socketPath,
+  fetchFn = globalThis.fetch,
+  httpRequest = http.request,
+} = {}) {
+  const callAgentSearch = makeCallAgentSearch({ agentUrl, token, socketPath, fetchFn, httpRequest });
+  const callAgentGetChunk = makeCallAgentGetChunk({ agentUrl, token, socketPath, fetchFn, httpRequest });
+  const callAgentGetDailySummary = makeCallAgentGetDailySummary({ agentUrl, token, socketPath, fetchFn, httpRequest });
+  const callAgentGetDailyTimeline = makeCallAgentGetDailyTimeline({ agentUrl, token, socketPath, fetchFn, httpRequest });
 
   return async function handleRequest(message) {
     if (!message || message.jsonrpc !== "2.0" || !("method" in message)) {

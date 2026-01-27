@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { toolList, formatDailyTimeline } from "./mcp-core.mjs";
+import { toolList, formatDailyTimeline, formatSearchResults, formatChunk, formatDailySummary } from "../src/mcp-core.mjs";
 
 test("toolList includes recapsense_get_daily_timeline", () => {
   const tools = toolList();
@@ -96,3 +96,68 @@ test("formatDailyTimeline raw returns JSON", () => {
   assert.match(text, /"date": "2026-01-26"/);
 });
 
+test("formatDailyTimeline limit normalizes to integer range", () => {
+  const timeline = {
+    date: "2026-01-26",
+    apps: [
+      { app: "A", active_ms: 60_000, frame_count: 1, span_count: 1, session_count: 1 },
+      { app: "B", active_ms: 60_000, frame_count: 1, span_count: 1, session_count: 1 },
+      { app: "C", active_ms: 60_000, frame_count: 1, span_count: 1, session_count: 1 },
+    ],
+    sessions: [],
+    spans: [],
+  };
+
+  const text = formatDailyTimeline(timeline, { view: "overview", limit: "2" });
+  assert.match(text, /App 用时 Top 2/);
+});
+
+test("formatSearchResults empty", () => {
+  assert.equal(formatSearchResults([]), "没有找到结果。");
+});
+
+test("formatSearchResults includes id, app and snippet", () => {
+  const results = [
+    {
+      id: "chunk-1",
+      start_ts: Date.parse("2026-01-26T09:00:00+08:00"),
+      app: "Chrome",
+      window_title: "Example",
+      snippet: "Hello    world\nfrom   RecapSense",
+    },
+  ];
+  const text = formatSearchResults(results);
+  assert.match(text, /Chrome/);
+  assert.match(text, /id: chunk-1/);
+  assert.match(text, /Hello world from RecapSense/);
+});
+
+test("formatChunk null and non-empty", () => {
+  assert.equal(formatChunk(null), "未找到该 chunk。");
+
+  const chunk = {
+    id: "chunk-1",
+    start_ts: Date.parse("2026-01-26T09:00:00+08:00"),
+    end_ts: Date.parse("2026-01-26T09:10:00+08:00"),
+    app: "Chrome",
+    window_title: "Example",
+    text: "some text",
+  };
+  const text = formatChunk(chunk);
+  assert.match(text, /id: chunk-1/);
+  assert.match(text, /some text/);
+});
+
+test("formatDailySummary null and non-empty", () => {
+  assert.match(formatDailySummary(null, "2026-01-26"), /暂无日总结/);
+
+  const summary = {
+    date: "2026-01-26",
+    start_ts: Date.parse("2026-01-26T00:00:00+08:00"),
+    end_ts: Date.parse("2026-01-27T00:00:00+08:00"),
+    summary: "今天主要做了 A/B/C。",
+  };
+  const text = formatDailySummary(summary, "2026-01-26");
+  assert.match(text, /日总结：2026-01-26/);
+  assert.match(text, /今天主要做了/);
+});

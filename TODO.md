@@ -121,6 +121,49 @@
   - 背景：长期几十年数据，必须可迁移。
   - 验收：可导出 `db + settings + manifest`；导入后可直接搜索/日总结可用（热证据可选）。
 
+## 测试（Testing：质量保障与回归防线）
+
+> 目标：关键链路可回归、可量化、可放心改；尽量用自动化测试替代“靠感觉跑一遍”。
+
+- [x] TEST-0 Node：增加覆盖率命令与阈值（80%+）
+  - 背景：TDD 需要可执行的硬门槛，否则容易只测 happy-path 或覆盖不足。
+  - 验收：提供 `npm run test:coverage`（或 workspace 级别等价命令），基于 `node --test --experimental-test-coverage` 输出覆盖率，并设置 lines/functions/branches ≥ 80%。
+  - 进度：已新增 `test:coverage` 脚本（root + `apps/agent` + `apps/mcp`）；`npm run test:coverage` 已通过（以当前覆盖率报告为准，门禁为 lines/functions/branches ≥ 80%）。
+- [x] TEST-1 Agent：HTTP API 集成测试（鉴权/错误码/核心路由）
+  - 背景：目前主要覆盖 store，HTTP 层（鉴权、参数解析、错误码、路由分发）缺少回归防线，容易改坏而不自知。
+  - 验收：新增 handler 级集成测试（不依赖端口监听），覆盖 `/health`（无需 token）与全部 `/v1/*`（必须 token），并覆盖 401/400/413/404/503 等关键错误码与核心接口（settings/search/chunks/ingest/backup/maintenance/danger）。
+  - 进度：已补 `apps/agent/test/server-handler.test.mjs`（在不监听端口的前提下，直接构造 req/res 测 handler；当前环境里 `net.listen` 会 `EPERM`，因此用 handler 级测试替代“真实端口 E2E”）。
+- [x] TEST-1b Agent：真实端口 E2E（可监听环境）
+  - 背景：本机/CI 环境可能需要验证“真正的 server + 网络栈”行为（keep-alive、超时、socket 等）。
+  - 验收：在允许 `net.listen` 的环境补 `apps/agent/test/server.test.mjs`（随机端口）端到端回归（默认会做能力探测；不支持 listen 的环境自动 skip）。
+  - 进度：已补 `apps/agent/test/server.test.mjs`（真实启动 `apps/agent/src/server.mjs` 子进程做 E2E）。
+- [x] TEST-2 Agent：多实例/端口占用/UDS 不破坏回归测试
+  - 背景：多实例写同一 SQLite、端口占用时错误启动第二实例、误 unlink 正在使用的 `agent.sock` 都是 P0 风险。
+  - 验收：以子进程方式启动两个 agent：第二个进程应快速退出且不破坏 socket 文件；在端口被占用时不应进入写库/压实流程（默认会做能力探测；不支持 listen 的环境自动 skip）。
+  - 进度：已补 `apps/agent/test/multi-instance.test.mjs`（端口占用时不会 unlink `agent.sock`）+ `apps/agent/test/data-dir-lock.test.mjs`（dataDir 单实例锁回归）。
+- [x] TEST-3 MCP SSE：服务集成测试（/health /sse /message /shutdown）
+  - 背景：`server-sse.mjs` 的鉴权与 session 路由逻辑复杂，缺少自动化测试容易回退为“能连但不能用”。
+  - 验收：补齐 token header/query、/message 授权（token 或 sessionId）、unknown session=404、unauthorized=401、/shutdown 逻辑与 sessions 清理。
+  - 进度：已补 `apps/mcp/test/server-sse-handler.test.mjs` + `apps/mcp/test/sse-service-branches.test.mjs`（不监听端口，直接测 handler + sessions 路由与鉴权；并补齐 keepalive/413/默认 session 路由等分支）。
+- [x] TEST-3b MCP SSE：真实端口 E2E（可监听环境）
+  - 背景：需要验证 SSE 在真实 http server 上的连接与断开行为。
+  - 验收：在允许 `net.listen` 的环境补“真实启动 server + SSE 端到端”版本。
+  - 进度：已补 `apps/mcp/test/server-sse.e2e.test.mjs`（真实 listen + /sse + /message；不支持 listen 的环境自动 skip）。
+- [x] TEST-4 Agent Store：边界与派生逻辑补齐（重点：search/reclean/delete）
+  - 背景：检索质量与危险删除/重清洗属于长期可用性的核心能力，规则迭代频繁，需要边界测试兜底。
+  - 验收：补齐 `searchChunks`（空 query/app/scope/limit 边界）、`recleanChunks`（dryRun/limit）、`deleteDangerZone`（scope/all/custom + 批处理参数）以及清洗/过滤规则的单测。
+  - 进度：已补 store 分支/边界测试（`apps/agent/test/store-branches.test.mjs`、`apps/agent/test/store-fts-fallback.test.mjs` 等），并补齐危险删除/重清洗/维护逻辑的多分支覆盖。
+- [x] TEST-5 MCP core：格式化输出与参数归一化测试补齐
+  - 背景：MCP 输出是给 LLM/外部工具的接口契约，格式变化会直接影响可用性与稳定性。
+  - 验收：补齐 `formatSearchResults`/`formatChunk`/`formatDailySummary` 以及 limit/view 等参数归一化测试，确保输出稳定、时区显示一致（Asia/Shanghai）。
+  - 进度：已补 `apps/mcp/test/mcp-core.test.mjs` + `apps/mcp/test/mcp-core-branches.test.mjs`；并为可测性在 `createMcpRequestHandler` 增加 `fetchFn/httpRequest` 可注入参数（默认不影响生产行为）。
+- [ ] TEST-6 Swift Collector：新增 SwiftPM testTarget（先测纯逻辑）
+  - 背景：collector 参数解析、日志轮转、单实例锁、OCR 文本处理容易出现边界 bug，但目前零自动化测试。
+  - 验收：为 `apps/collector-macos` 增加 `testTarget`，可运行 `swift test --package-path apps/collector-macos`，覆盖参数校验/锁/日志轮转/OCR 统计等纯逻辑。
+- [ ] TEST-7 Swift App：新增 SwiftPM testTarget（先测配置/锁/进程逻辑）
+  - 背景：菜单栏 App 的配置解析与进程管理是稳定性关键，回归成本高，应该优先补测试。
+  - 验收：为 `apps/app-macos` 增加 `testTarget`，可运行 `swift test --package-path apps/app-macos`，覆盖 `SupervisorConfig` 环境变量解析、单实例锁、进程状态机可测试部分。
+
 ## UI（后置清单：主功能稳定后再回来做）
 
 > 说明：当前 UI 以“能控/能用”为主，不追求完整产品体验。等数据管线、迁移、发布形态稳定后再统一做 UI/交互/视觉设计。
