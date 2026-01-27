@@ -493,6 +493,33 @@ export function createStore(db, { withTransaction }) {
     return message.toLowerCase().includes("no such table: chunks_fts");
   }
 
+  function isFtsQuerySyntaxError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const lower = message.toLowerCase();
+    return (
+      (lower.includes("fts5:") || lower.includes("fts4:")) &&
+      (lower.includes("syntax error") || lower.includes("malformed match"))
+    );
+  }
+
+  function toFtsPlainQuery(rawQuery) {
+    // 把用户输入当作“普通字符串”处理，避免 FTS 查询语法解析错误（例如 . / - : 等）。
+    // 设计原则：
+    // - 只保留字母/数字（含中文等 Unicode 字母）
+    // - 每个 token 用双引号包裹，避免 OR/NOT 等被当成操作符
+    const trimmed = String(rawQuery ?? "").trim();
+    if (!trimmed) return null;
+
+    const tokens = trimmed
+      .split(/[^\p{L}\p{N}]+/gu)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    if (tokens.length === 0) return null;
+
+    return tokens.map((t) => `"${t.replaceAll("\"", "\"\"")}"`).join(" ");
+  }
+
   function probeChunksFtsMode(db) {
     if (process.env.RECAPSENSE_DISABLE_FTS === "1") return null;
     const mode = detectChunksFtsMode(db);
@@ -1206,11 +1233,19 @@ export function createStore(db, { withTransaction }) {
 
     if (normalizedScope === "text") {
       if (ftsEnabled && searchChunksFtsStmt) {
-        const ftsQuery = `text:(${trimmed})`;
-        if (hasAppFilter && searchChunksFtsByAppStmt) {
-          return searchChunksFtsByAppStmt.all(ftsQuery, appFilter, safeLimit);
+        const plainQuery = toFtsPlainQuery(trimmed);
+        if (plainQuery) {
+          const ftsQuery = `text:(${plainQuery})`;
+          try {
+            if (hasAppFilter && searchChunksFtsByAppStmt) {
+              return searchChunksFtsByAppStmt.all(ftsQuery, appFilter, safeLimit);
+            }
+            return searchChunksFtsStmt.all(ftsQuery, safeLimit);
+          } catch (error) {
+            if (!isFtsQuerySyntaxError(error)) throw error;
+            console.warn("[store] FTS query parse failed; falling back to LIKE search.", String(error));
+          }
         }
-        return searchChunksFtsStmt.all(ftsQuery, safeLimit);
       }
 
       const pattern = `%${trimmed}%`;
@@ -1222,10 +1257,18 @@ export function createStore(db, { withTransaction }) {
 
     // scope=all（默认）：保持现有行为（FTS 优先；失败降级 LIKE）。
     if (ftsEnabled && searchChunksFtsStmt) {
-      if (hasAppFilter && searchChunksFtsByAppStmt) {
-        return searchChunksFtsByAppStmt.all(trimmed, appFilter, safeLimit);
+      const plainQuery = toFtsPlainQuery(trimmed);
+      if (plainQuery) {
+        try {
+          if (hasAppFilter && searchChunksFtsByAppStmt) {
+            return searchChunksFtsByAppStmt.all(plainQuery, appFilter, safeLimit);
+          }
+          return searchChunksFtsStmt.all(plainQuery, safeLimit);
+        } catch (error) {
+          if (!isFtsQuerySyntaxError(error)) throw error;
+          console.warn("[store] FTS query parse failed; falling back to LIKE search.", String(error));
+        }
       }
-      return searchChunksFtsStmt.all(trimmed, safeLimit);
     }
 
     const pattern = `%${trimmed}%`;
