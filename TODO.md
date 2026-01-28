@@ -157,12 +157,14 @@
   - 背景：MCP 输出是给 LLM/外部工具的接口契约，格式变化会直接影响可用性与稳定性。
   - 验收：补齐 `formatSearchResults`/`formatChunk`/`formatDailySummary` 以及 limit/view 等参数归一化测试，确保输出稳定、时区显示一致（Asia/Shanghai）。
   - 进度：已补 `apps/mcp/test/mcp-core.test.mjs` + `apps/mcp/test/mcp-core-branches.test.mjs`；并为可测性在 `createMcpRequestHandler` 增加 `fetchFn/httpRequest` 可注入参数（默认不影响生产行为）。
-- [ ] TEST-6 Swift Collector：新增 SwiftPM testTarget（先测纯逻辑）
+- [x] TEST-6 Swift Collector：新增 SwiftPM testTarget（先测纯逻辑）
   - 背景：collector 参数解析、日志轮转、单实例锁、OCR 文本处理容易出现边界 bug，但目前零自动化测试。
   - 验收：为 `apps/collector-macos` 增加 `testTarget`，可运行 `swift test --package-path apps/collector-macos`，覆盖参数校验/锁/日志轮转/OCR 统计等纯逻辑。
-- [ ] TEST-7 Swift App：新增 SwiftPM testTarget（先测配置/锁/进程逻辑）
+  - 进度：已增加 `RecapSenseCollectorTests`（Paths/OCR/OcrDebugLog/CollectorInstanceLock），并可运行 `swift test --package-path apps/collector-macos` 全绿。
+- [x] TEST-7 Swift App：新增 SwiftPM testTarget（先测配置/锁/进程逻辑）
   - 背景：菜单栏 App 的配置解析与进程管理是稳定性关键，回归成本高，应该优先补测试。
   - 验收：为 `apps/app-macos` 增加 `testTarget`，可运行 `swift test --package-path apps/app-macos`，覆盖 `SupervisorConfig` 环境变量解析、单实例锁、进程状态机可测试部分。
+  - 进度：已增加 `RecapSenseAppTests`（SupervisorConfig/SingleInstanceLock/ProcessInspector/ManagedProcessState），并可运行 `swift test --package-path apps/app-macos` 全绿。
 
 ## UI（后置清单：主功能稳定后再回来做）
 

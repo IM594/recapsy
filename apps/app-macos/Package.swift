@@ -14,6 +14,10 @@ let package = Package(
       name: "RecapSenseApp",
       path: "Sources"
     ),
+    .testTarget(
+      name: "RecapSenseAppTests",
+      dependencies: ["RecapSenseApp"],
+      path: "Tests/RecapSenseAppTests"
+    ),
   ]
 )
-
