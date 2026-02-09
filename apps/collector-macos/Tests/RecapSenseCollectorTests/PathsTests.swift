@@ -17,17 +17,17 @@ final class PathsTests: XCTestCase {
     }
   }
 
-  func testCollectorPathsBuildsTokenAndThumbnailPaths() throws {
+  func testCollectorPathsBuildsTokenAndMediaPaths() throws {
     let dataDir = URL(fileURLWithPath: "/tmp/recapsense-data", isDirectory: true)
     let paths = CollectorPaths(dataDir: dataDir)
     XCTAssertEqual(paths.tokenFile.path, "/tmp/recapsense-data/secret/token")
     XCTAssertEqual(
-      paths.thumbnailRelativePath(date: "2026-01-27", filename: "a.jpg"),
-      "media/thumbnails/2026-01-27/a.jpg"
+      paths.screenshotRelativePath(date: "2026-01-27", filename: "a.webp"),
+      "media/screenshots/2026-01-27/a.webp"
     )
     XCTAssertEqual(
-      paths.thumbnailAbsoluteURL(relativePath: "media/thumbnails/2026-01-27/a.jpg").path,
-      "/tmp/recapsense-data/media/thumbnails/2026-01-27/a.jpg"
+      paths.screenshotAbsoluteURL(relativePath: "media/screenshots/2026-01-27/a.webp").path,
+      "/tmp/recapsense-data/media/screenshots/2026-01-27/a.webp"
     )
   }
 

@@ -82,71 +82,93 @@ func captureFrontmostWindowForOCR(
     return .failed
   }
 
-    let options: CGWindowImageOption = [.bestResolution, .boundsIgnoreFraming]
+  // 关键：窗口切换/动画时，按 screen bounds 裁剪很容易截到“过渡态”（例如只剩中间一块、或被遮挡/半透明）。
+  // 因此策略改为：
+  // 1) 先尽量用 windowID 截图（更接近窗口自身缓冲区，通常不受遮挡/动画影响）
+  // 2) 只有当 windowID 截图失败时，再降级到“屏幕合成画面按 bounds 裁剪”
+  //
+  // 同时我们用一个点（候选窗口中心点）反查“此处真正最上层窗口”，用于矫正 metadata 与裁剪 bounds，
+  // 避免 header(app/title) 与 OCR 内容错配。
+  let probePoint = CGPoint(x: candidate.bounds.midX, y: candidate.bounds.midY)
+  let topAtProbe = findTopmostOnScreenWindow(containing: probePoint)
+  let cropTarget = chooseCropTarget(original: candidate, top: topAtProbe)
 
-    if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, candidate.windowID, options) {
+  let options: CGWindowImageOption = [.bestResolution, .boundsIgnoreFraming]
+  let targetRect = cropTarget.bounds.integral
+
+  if let image = CGWindowListCreateImage(.null, .optionIncludingWindow, cropTarget.windowID, options) {
+    if cropTarget.windowID != candidate.windowID || cropTarget.ownerPid != candidate.ownerPid {
       log(
-        "截图来源：前台窗口（windowID=\(candidate.windowID) owner=\(candidate.ownerName ?? "-") name=\(candidate.windowName ?? "-")）"
-      )
-      return .captured(
-        ScreenCaptureResult(
-          image: image,
-          source: .frontmostWindow,
-          metadata: toMetadata(candidate)
-        )
+        "窗口元数据矫正：\(candidate.ownerName ?? "-")/\(candidate.windowName ?? "-") -> \(cropTarget.ownerName ?? "-")/\(cropTarget.windowName ?? "-")"
       )
     }
 
-    if let image = CGWindowListCreateImage(candidate.bounds, .optionIncludingWindow, candidate.windowID, options) {
-      log("截图来源：前台窗口（bounds 降级）（windowID=\(candidate.windowID)）")
-      return .captured(
-        ScreenCaptureResult(
-          image: image,
-          source: .frontmostWindow,
-          metadata: toMetadata(candidate)
-        )
-      )
-    }
-
-    // 某些应用/窗口（例如部分 GPU 渲染窗口）可能无法被“按 windowID”截到，但我们仍然可以：
-    // 直接按 window bounds 去截取屏幕对应区域（合成后的画面），这样至少能显著减少“全屏噪声”。
-    // 关键修复：
-    // - 这里的“bounds 裁剪”截的是屏幕合成后的画面，窗口被覆盖/前台切换时很容易出现：
-    //   header(app/title) 与 OCR 内容“错配/互换”。
-    // - 因此我们在裁剪前，用一个点（候选窗口中心点）反查“此处真正的最上层窗口”，
-    //   若发现不一致，则以“实际最上层窗口”作为 metadata 的真值，并用它的 bounds 进行裁剪。
-    let probePoint = CGPoint(x: candidate.bounds.midX, y: candidate.bounds.midY)
-    let topAtProbe = findTopmostOnScreenWindow(containing: probePoint)
-    let cropTarget = chooseCropTarget(original: candidate, top: topAtProbe)
-
-    let cropAlphaStr = cropTarget.alpha.map { String(format: "%.3f", $0) } ?? "-"
-    let cropSharingStr = cropTarget.sharingState.map { String($0) } ?? "-"
-
-    if let image = CGWindowListCreateImage(cropTarget.bounds, .optionOnScreenOnly, kCGNullWindowID, [.bestResolution]) {
-      if cropTarget.windowID != candidate.windowID || cropTarget.ownerPid != candidate.ownerPid {
-        log(
-          "窗口裁剪元数据矫正：\(candidate.ownerName ?? "-")/\(candidate.windowName ?? "-") -> \(cropTarget.ownerName ?? "-")/\(cropTarget.windowName ?? "-")"
-        )
-      }
-
-      log(
-        "截图来源：窗口区域裁剪（windowID=\(cropTarget.windowID) layer=\(cropTarget.layer) alpha=\(cropAlphaStr) sharing=\(cropSharingStr)）"
-      )
-
-      return .captured(
-        ScreenCaptureResult(
-          image: image,
-          source: .windowBoundsCrop,
-          metadata: toMetadata(cropTarget)
-        )
-      )
-    }
-
-    let candidateAlphaStr = candidate.alpha.map { String(format: "%.3f", $0) } ?? "-"
-    let candidateSharingStr = candidate.sharingState.map { String($0) } ?? "-"
     log(
-      "前台窗口截图失败（windowID=\(candidate.windowID) layer=\(candidate.layer) alpha=\(candidateAlphaStr) sharing=\(candidateSharingStr)），将降级为全屏截图。"
+      "截图来源：前台窗口（windowID=\(cropTarget.windowID) owner=\(cropTarget.ownerName ?? "-") name=\(cropTarget.windowName ?? "-") img=\(image.width)x\(image.height)）"
     )
+    return .captured(
+      ScreenCaptureResult(
+        image: image,
+        source: .frontmostWindow,
+        metadata: toMetadata(cropTarget)
+      )
+    )
+  }
+
+  if let image = CGWindowListCreateImage(targetRect, .optionIncludingWindow, cropTarget.windowID, options) {
+    log(
+      "截图来源：前台窗口（bounds 降级）（windowID=\(cropTarget.windowID) bounds=\(Int(targetRect.width))x\(Int(targetRect.height)) img=\(image.width)x\(image.height)）"
+    )
+    return .captured(
+      ScreenCaptureResult(
+        image: image,
+        source: .frontmostWindow,
+        metadata: toMetadata(cropTarget)
+      )
+    )
+  }
+
+  // windowID 截图失败：降级到“屏幕合成画面按窗口 bounds 裁剪”。
+  let cropAlphaStr = cropTarget.alpha.map { String(format: "%.3f", $0) } ?? "-"
+  let cropSharingStr = cropTarget.sharingState.map { String($0) } ?? "-"
+  if let image = CGWindowListCreateImage(targetRect, .optionOnScreenOnly, kCGNullWindowID, [.bestResolution]) {
+    // 经验：在少数环境里（尤其是多屏/缩放/Stage Manager 等组合），window bounds 裁剪可能返回
+    // 明显偏小的图（scale < 1），导致“只截到中间一块”的视觉效果。这里直接判为失败，让上层降级全屏。
+    let rectW = Double(max(1, targetRect.width))
+    let rectH = Double(max(1, targetRect.height))
+    let scaleX = Double(image.width) / rectW
+    let scaleY = Double(image.height) / rectH
+    if scaleX < 0.90 || scaleY < 0.90 {
+      log(
+        "窗口区域裁剪疑似分辨率异常（bounds=\(Int(targetRect.width))x\(Int(targetRect.height)) img=\(image.width)x\(image.height) scale=\(String(format: "%.2f", scaleX))x\(String(format: "%.2f", scaleY))），将降级为全屏截图。"
+      )
+      return .failed
+    }
+
+    if cropTarget.windowID != candidate.windowID || cropTarget.ownerPid != candidate.ownerPid {
+      log(
+        "窗口裁剪元数据矫正：\(candidate.ownerName ?? "-")/\(candidate.windowName ?? "-") -> \(cropTarget.ownerName ?? "-")/\(cropTarget.windowName ?? "-")"
+      )
+    }
+
+    log(
+      "截图来源：窗口区域裁剪（windowID=\(cropTarget.windowID) layer=\(cropTarget.layer) alpha=\(cropAlphaStr) sharing=\(cropSharingStr) bounds=\(Int(targetRect.width))x\(Int(targetRect.height)) img=\(image.width)x\(image.height)）"
+    )
+
+    return .captured(
+      ScreenCaptureResult(
+        image: image,
+        source: .windowBoundsCrop,
+        metadata: toMetadata(cropTarget)
+      )
+    )
+  }
+
+  let candidateAlphaStr = cropTarget.alpha.map { String(format: "%.3f", $0) } ?? "-"
+  let candidateSharingStr = cropTarget.sharingState.map { String($0) } ?? "-"
+  log(
+    "前台窗口截图失败（windowID=\(cropTarget.windowID) layer=\(cropTarget.layer) alpha=\(candidateAlphaStr) sharing=\(candidateSharingStr)），将降级为全屏截图。"
+  )
 
   // 降级：全屏截图（保持兼容性，避免某些窗口无法截图导致完全无数据）
   if let fallback = captureFullScreenForOCR(log: log) {

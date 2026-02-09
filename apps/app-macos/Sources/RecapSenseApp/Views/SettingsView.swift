@@ -175,12 +175,6 @@ struct SettingsView: View {
             Text("去重阈值（dHash 汉明距离）：\(draft.collector.dedupeThreshold)")
           }
 
-          Toggle("写入缩略图（热证据）", isOn: $draft.collector.thumbnailEnabled)
-
-          Stepper(value: $draft.collector.thumbnailMaxWidth, in: 200...1200, step: 20) {
-            Text("缩略图最大宽度：\(draft.collector.thumbnailMaxWidth) px")
-          }
-
           Divider()
 
           Text("应用黑名单（按身份，不采集）")
@@ -235,8 +229,8 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
           }
 
-          Section("热证据（截图/缩略图）") {
-            Text("说明：frames 的原始文本证据会永久保留（可反悔）；此处仅控制 media（截图/缩略图文件）的保留与提醒阈值。超过阈值只提醒，不会自动清理。")
+          Section("热证据（截图）") {
+            Text("说明：frames 的原始文本证据会永久保留（可反悔）；此处仅控制 media（截图文件）的保留与提醒阈值。超过阈值只提醒，不会自动清理。")
               .font(.caption)
               .foregroundStyle(.secondary)
 
@@ -270,11 +264,11 @@ struct SettingsView: View {
             .disabled(isLoading)
 
             Stepper(value: $draft.agent.evidenceRetentionDays, in: 1...3650) {
-              Text("热证据保留：\(draft.agent.evidenceRetentionDays) 天（仅截图/缩略图）")
+              Text("热证据保留：\(draft.agent.evidenceRetentionDays) 天（仅截图）")
             }
 
             Stepper(value: $draft.agent.evidenceCleanupIntervalMinutes, in: 1...720) {
-              Text("清理任务间隔：\(draft.agent.evidenceCleanupIntervalMinutes) 分钟")
+              Text("维护任务间隔：\(draft.agent.evidenceCleanupIntervalMinutes) 分钟（仅提醒）")
             }
 
             Stepper(value: mediaWarnThresholdGbBinding(), in: 1...500) {

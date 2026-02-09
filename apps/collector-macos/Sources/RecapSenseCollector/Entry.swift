@@ -11,8 +11,7 @@ struct CollectorConfig {
   let ocrLevel: OCRLevel
   let ocrLanguages: [String]
   let ocrLogEnabled: Bool
-  let thumbnailEnabled: Bool
-  let thumbnailMaxWidth: Int
+  let screenshotEnabled: Bool
   let excludedApps: [String]
   let dryRun: Bool
   let once: Bool
@@ -190,7 +189,9 @@ struct RecapSenseCollectorMain {
       logger.info("采集间隔：\(config.intervalSeconds)s，去重阈值：\(config.dedupeThreshold)")
       logger.info("截图范围：\(config.captureMode.rawValue)（window=前台窗口优先；screen=全屏）")
       logger.info("OCR：level=\(config.ocrLevel.rawValue)，languages=\(config.ocrLanguages.joined(separator: ","))")
-      logger.info("缩略图：enabled=\(config.thumbnailEnabled)，maxWidth=\(config.thumbnailMaxWidth)px")
+      logger.info(
+        "原图截图：enabled=\(config.screenshotEnabled)（写入 media/screenshots/YYYY-MM-DD/*.webp；优先 near-lossless(A=95)，仅当 A 略超 1MB 才尝试 B=92；仍超则兜底 lossy(text,q=90)+downscale(0.85→0.75)，并确保 <1MB）"
+      )
       logger.info("OCR 全文日志：\(config.ocrLogEnabled ? "enabled" : "disabled")（调试用途，文件：logs/collector-ocr.log）")
       if config.excludedApps.isEmpty {
         logger.info("应用黑名单（Bundle ID）：无")
@@ -237,6 +238,7 @@ struct RecapSenseCollectorMain {
       }()
 
       var tickIndex = 0
+      var lastFrontmostSignature: (pid_t?, String?)? = nil
       while !(await stop.shouldStop()) {
         if shouldExitBecauseParentMissing() {
           logger.warn("父进程已退出（RECAPSENSE_PARENT_PID 不存在），collector 自动退出。")
@@ -246,10 +248,47 @@ struct RecapSenseCollectorMain {
         tickIndex += 1
 
         do {
-          let context = await MainActor.run {
+          var context = await MainActor.run {
             readFrontmostAppContext(log: { message in
               notices.once(key: "ax-permission") { logger.warn(message) }
             })
+          }
+
+          // 窗口切换/动画防抖（尽量避免截到“切换过程的过渡帧”）：
+          // - 只对 window capture 生效（screen 模式本来就会包含过渡/遮挡，不做强行修正）
+          // - 策略：检测“前台 pid/bundleId 是否变化”，若变化则短暂等待后再确认一次；仍在变化则跳过本轮
+          if config.captureMode == .window {
+            let signature = (context.pid, context.bundleId)
+            if let last = lastFrontmostSignature, last != signature {
+              // 认为刚发生“前台切换”：等待一个很短的稳定窗口。
+              let debounceSeconds: Double = 0.35
+              logger.debug(
+                "检测到前台切换（pid/bundleId 变化），等待 \(Int(debounceSeconds * 1000))ms 以避开切换动画。"
+              )
+              await sleepSeconds(debounceSeconds)
+
+              let checked = await MainActor.run {
+                readFrontmostAppContext(log: { message in
+                  notices.once(key: "ax-permission") { logger.warn(message) }
+                })
+              }
+              let checkedSig = (checked.pid, checked.bundleId)
+              if checkedSig != signature {
+                notices.once(key: "frontmost-unstable") {
+                  logger.warn("检测到前台窗口正在切换/动画中，本轮跳过采集以避免截到不完整画面。")
+                }
+
+                if config.once {
+                  logger.info("处于前台切换中（--once），本轮跳过并退出。")
+                  break
+                }
+
+                await sleepSeconds(config.intervalSeconds)
+                continue
+              }
+              context = checked
+            }
+            lastFrontmostSignature = (context.pid, context.bundleId)
           }
 
           // RecapSense 自身窗口：自动跳过采集。
@@ -426,22 +465,9 @@ struct RecapSenseCollectorMain {
             ocrDebugLog.append(header + body)
           }
 
-          var thumbnailPath: String? = nil
-          if config.thumbnailEnabled {
-            let localDate = formatLocalDate(now)
-            let filename = "\(tsMs)_\(hash.stringValue.replacingOccurrences(of: ":", with: "_")).jpg"
-            let rel = paths.thumbnailRelativePath(date: localDate, filename: filename)
-            let abs = paths.thumbnailAbsoluteURL(relativePath: rel)
-
-            try FileManager.default.createDirectory(
-              at: abs.deletingLastPathComponent(),
-              withIntermediateDirectories: true
-            )
-
-            let thumb = resizeImage(screenshot, maxWidth: config.thumbnailMaxWidth)
-            try writeJpeg(image: thumb, to: abs, quality: 0.70)
-            thumbnailPath = rel
-          }
+          let localDate = formatLocalDate(now)
+          let safeHash = hash.stringValue.replacingOccurrences(of: ":", with: "_")
+          let baseName = "\(tsMs)_\(safeHash)"
 
           let payload = IngestFrameRequestBody(
             ts: tsMs,
@@ -450,8 +476,7 @@ struct RecapSenseCollectorMain {
             windowTitle: windowTitle,
             ocrText: ocrText,
             phash: hash.stringValue,
-            screenshotPath: nil,
-            thumbnailPath: thumbnailPath
+            screenshotPath: nil
           )
 
           if config.dryRun {
@@ -463,20 +488,69 @@ struct RecapSenseCollectorMain {
           } else {
             let result = try await client.ingestFrame(payload)
             if result.skipped {
-              if let thumbnailPath {
-                let abs = paths.thumbnailAbsoluteURL(relativePath: thumbnailPath)
-                try? FileManager.default.removeItem(at: abs)
-              }
-
               let reason = result.reason ?? "unknown"
               notices.once(key: "agent-skipped:\(reason):\(appName ?? "Unknown")") {
                 logger.warn("Agent 兜底丢弃 frame（reason=\(reason)，app=\(appName ?? "Unknown")）")
               }
             } else {
-              let id = result.id
+              guard let id = result.id else {
+                throw NSError(domain: "recapsense.collector", code: 10, userInfo: [
+                  NSLocalizedDescriptionKey: "Agent ingest 成功但缺少 frame.id",
+                ])
+              }
+
+              var screenshotRel: String? = nil
+              var writtenFiles: [URL] = []
+
+              do {
+                if config.screenshotEnabled {
+                  let filename = "\(baseName).webp"
+                  let rel = paths.screenshotRelativePath(date: localDate, filename: filename)
+                  let abs = paths.screenshotAbsoluteURL(relativePath: rel)
+
+                  try FileManager.default.createDirectory(
+                    at: abs.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                  )
+
+                  let encoded = try encodeScreenshotWebP(image: screenshot)
+                  try encoded.data.write(to: abs, options: [.atomic])
+                  writtenFiles.append(abs)
+                  screenshotRel = rel
+
+                  let d = encoded.decision
+                  let ratio = String(format: "%.2f", d.downscaleRatio)
+                  let nearLossless = d.nearLossless.map(String.init) ?? "-"
+                  let q = d.lossyQuality.map(String.init) ?? "-"
+                  let b = d.bytesB.map(String.init) ?? "-"
+                  if d.stage == .c || d.stage == .d2 {
+                    logger.warn(
+                      "截图触发 1MB 兜底：stage=\(d.stage.rawValue) bytes=\(d.bytes) scale=\(ratio) q=\(q) A=\(d.bytesA) B=\(b)"
+                    )
+                  } else if config.verbose {
+                    logger.debug(
+                      "原图截图写入：stage=\(d.stage.rawValue) bytes=\(d.bytes) scale=\(ratio) nearLossless=\(nearLossless) A=\(d.bytesA) B=\(b) rel=\(rel)"
+                    )
+                  }
+                }
+
+                if screenshotRel != nil {
+                  _ = try await client.patchFrameMedia(
+                    frameId: id,
+                    screenshotPath: screenshotRel
+                  )
+                }
+              } catch {
+                // 避免产生垃圾文件：只要“落盘/更新任一步骤失败”，回滚已写出的文件。
+                for file in writtenFiles {
+                  try? FileManager.default.removeItem(at: file)
+                }
+                throw error
+              }
+
               let lines = ocrText.split(separator: "\n").count
               var message =
-                "写入 frame 成功：id=\(id.map(String.init) ?? "?") app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count)"
+                "写入 frame 成功：id=\(id) app=\(appName ?? "Unknown") capture=\(captureResult?.source.rawValue ?? "-") ocr=\(ocrPass) ocrLines=\(lines) ocrChars=\(ocrText.count)"
               if config.verbose {
                 message += " title=\(windowTitle ?? "-")"
               }
@@ -515,10 +589,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
   var ocrLevel: OCRLevel = .fast
   var ocrLanguages: [String] = ["zh-Hans", "en-US"]
   var ocrLogEnabled = false
-  var thumbnailEnabled = true
-  // 说明：该缩略图既用于 UI 预览，也会被未来的视觉/多模态处理复用。
-  // 420px 对 LLM 来说往往偏糊；这里把默认值适度提高，但仍保持对磁盘/CPU 的克制。
-  var thumbnailMaxWidth = 720
+  var screenshotEnabled = true
   var excludedApps: [String] = []
   var dryRun = false
   var once = false
@@ -571,16 +642,9 @@ private func parseConfig(args: [String]) -> CollectorConfig {
       } else {
         printUsageAndExit("参数 --ocr-lang 需要一个用逗号分隔的语言列表，例如 zh-Hans,en-US")
       }
-    case "--no-thumbnails":
-      thumbnailEnabled = false
+    case "--no-screenshots":
+      screenshotEnabled = false
       i += 1
-    case "--thumbnail-width":
-      if i + 1 < args.count, let v = Int(args[i + 1]) {
-        thumbnailMaxWidth = v
-        i += 2
-      } else {
-        printUsageAndExit("参数 --thumbnail-width 需要一个整数（像素）")
-      }
     case "--exclude-app":
       if i + 1 < args.count {
         let raw = args[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
@@ -629,8 +693,7 @@ private func parseConfig(args: [String]) -> CollectorConfig {
     ocrLevel: ocrLevel,
     ocrLanguages: ocrLanguages,
     ocrLogEnabled: ocrLogEnabled,
-    thumbnailEnabled: thumbnailEnabled,
-    thumbnailMaxWidth: thumbnailMaxWidth,
+    screenshotEnabled: screenshotEnabled,
     excludedApps: excludedApps,
     dryRun: dryRun,
     once: once,
@@ -683,8 +746,7 @@ private func printUsageAndExit(_ error: String?) -> Never {
       --ocr-level <fast|accurate>    OCR 模式（默认 fast）
       --ocr-log                      输出 OCR 全文到日志（调试用途，体量较大，默认关闭）
       --ocr-lang <a,b,c>             OCR 语言（默认 zh-Hans,en-US）
-      --no-thumbnails                不写入缩略图文件
-      --thumbnail-width <px>         缩略图最大宽度（默认 720）
+      --no-screenshots               不写入截图原图文件（默认开启；写入 media/screenshots/*.webp）
       --exclude-app <bundleId>       应用黑名单（Bundle ID；遇到该应用则跳过采集；可重复传入）
       --exclude-apps <a,b,c>         应用黑名单（Bundle ID；逗号分隔；等价于多次 --exclude-app）
       --dry-run                      不写入 Agent，仅打印 OCR 摘要

@@ -9,8 +9,6 @@ struct RecapSenseSettings: Codable, Equatable {
   struct Collector: Codable, Equatable {
     var intervalSeconds: Double
     var dedupeThreshold: Int
-    var thumbnailEnabled: Bool
-    var thumbnailMaxWidth: Int
     var ocrLevel: String
     var ocrLanguages: [String]
     var excludedApps: [String]
@@ -18,8 +16,6 @@ struct RecapSenseSettings: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
       case intervalSeconds
       case dedupeThreshold
-      case thumbnailEnabled
-      case thumbnailMaxWidth
       case ocrLevel
       case ocrLanguages
       case excludedApps
@@ -28,16 +24,12 @@ struct RecapSenseSettings: Codable, Equatable {
     init(
       intervalSeconds: Double,
       dedupeThreshold: Int,
-      thumbnailEnabled: Bool,
-      thumbnailMaxWidth: Int,
       ocrLevel: String,
       ocrLanguages: [String],
       excludedApps: [String]
     ) {
       self.intervalSeconds = intervalSeconds
       self.dedupeThreshold = dedupeThreshold
-      self.thumbnailEnabled = thumbnailEnabled
-      self.thumbnailMaxWidth = thumbnailMaxWidth
       self.ocrLevel = ocrLevel
       self.ocrLanguages = ocrLanguages
       self.excludedApps = excludedApps
@@ -48,8 +40,6 @@ struct RecapSenseSettings: Codable, Equatable {
       let defaults = RecapSenseSettings.defaults.collector
       intervalSeconds = try c.decodeIfPresent(Double.self, forKey: .intervalSeconds) ?? defaults.intervalSeconds
       dedupeThreshold = try c.decodeIfPresent(Int.self, forKey: .dedupeThreshold) ?? defaults.dedupeThreshold
-      thumbnailEnabled = try c.decodeIfPresent(Bool.self, forKey: .thumbnailEnabled) ?? defaults.thumbnailEnabled
-      thumbnailMaxWidth = try c.decodeIfPresent(Int.self, forKey: .thumbnailMaxWidth) ?? defaults.thumbnailMaxWidth
       ocrLevel = try c.decodeIfPresent(String.self, forKey: .ocrLevel) ?? defaults.ocrLevel
       ocrLanguages = try c.decodeIfPresent([String].self, forKey: .ocrLanguages) ?? defaults.ocrLanguages
       excludedApps = try c.decodeIfPresent([String].self, forKey: .excludedApps) ?? defaults.excludedApps
@@ -94,8 +84,6 @@ struct RecapSenseSettings: Codable, Equatable {
       collector: Collector(
         intervalSeconds: 5,
         dedupeThreshold: 2,
-        thumbnailEnabled: true,
-        thumbnailMaxWidth: 720,
         ocrLevel: "fast",
         ocrLanguages: ["zh-Hans", "en-US"],
         excludedApps: []

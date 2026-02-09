@@ -2,11 +2,11 @@
 
 这是一个 **macOS 13+** 的原生采集进程（Swift / SwiftPM 可执行程序），负责：
 
-- 每 5 秒截图（当前默认：主屏幕）
+- 默认每 5 秒截图（可在菜单栏 App“设置”里调整，或通过参数 `--interval` 覆盖；当前默认：前台窗口区域，更适合 OCR；也可切到全屏）
 - 计算 `dHash` 做快速去重（避免重复 OCR / 重复入库）
 - Vision OCR 抽取文本
 - 写入本机 Agent：`POST /v1/ingest/frame`（带 token）
--（可选）写入缩略图到数据目录：`media/thumbnails/YYYY-MM-DD/...`（路径会写入 frames 表）
+-（默认开启，可关闭）写入截图原图（WebP near-lossless，带 1MB 硬上限兜底；为降低 CPU，常态只编码 1 次，只有在接近/超过上限时才会走 lossy/downscale 兜底）到数据目录：`media/screenshots/YYYY-MM-DD/...`（用于保留最多原始信息，便于未来再做后处理/派生）
 
 > 目标是先跑通最小闭环：**截图 → OCR → 入库 → 搜索 → MCP**。后续再逐步增强（多屏/更强去重/音频/LLM Vision 等）。
 
@@ -96,11 +96,20 @@ npm run dev:collector -- --interval 5
 
 ## 目录与数据
 
-当缩略图开启（默认开启）时，collector 会写入：
+当“截图原图”开启时，collector 会写入（默认开启）：
 
-- `${RECAPSENSE_DATA_DIR}/media/thumbnails/YYYY-MM-DD/<ts>_<hash>.jpg`
+- 截图原图（证据图）：`${RECAPSENSE_DATA_DIR}/media/screenshots/YYYY-MM-DD/<ts>_<hash>.webp`（near-lossless WebP，带 1MB 硬上限兜底）
 
-并把相对路径写入 ingestion payload 的 `thumbnailPath` 字段（Agent 会原样存入 `frames.thumbnail_path`）。
+为避免产生垃圾文件，collector 采用“两阶段”写入：
+
+1) 先 `POST /v1/ingest/frame` 写入文本证据（OCR）  
+2) 如果 Agent 接收成功，再落盘 media 文件，并调用 `PATCH /v1/frames/:id/media` 回填 `screenshotPath`
+
+如果 Agent 返回 `skipped`，不会写入任何 media 文件。
+
+你可以用参数关闭落盘：
+
+- `--no-screenshots`：不写入截图原图（证据图）
 
 ## 已知限制（MVP）
 

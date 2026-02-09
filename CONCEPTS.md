@@ -6,7 +6,7 @@
 ## 0. 一句话理解这个项目
 
 RecapSense 是一个 **本地、全天候运行的“记忆”管线**：  
-**屏幕截图 → OCR → 写入 frames（文本证据长期保留；截图/缩略图属于热证据） → 压实成 chunks（长期文本） → 搜索/RAG → 通过 HTTP API 与 MCP 暴露给外部工具/LLM。**
+**屏幕截图 → OCR → 写入 frames（文本证据长期保留；截图原图属于热证据） → 压实成 chunks（长期文本） → 搜索/RAG → 通过 HTTP API 与 MCP 暴露给外部工具/LLM。**
 
 核心入口：
 
@@ -24,14 +24,14 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 
 - **本机优先**：所有数据默认只在本机落盘，不面向公网服务。
 - **可检索的长期文本**：把人类行为痕迹压实成“可搜索/可引用”的文本片段（chunks）。
-- **可追溯的证据**：在短时间窗口内保留截图/缩略图等“热证据”，长期仅保留文本（隐私/成本更可控）。
+- **可追溯的证据**：在短时间窗口内保留截图原图等“热证据”，长期仅保留文本（隐私/成本更可控）。
 
 ### 1.2 “B 模式”留存模型（长期文本 + 热窗口证据）
 
 在 `README.md` / `TODO.md` 里明确的策略：
 
 - **长期保存**：`chunks`、`daily summaries`、（预留）视觉抽取文本等。
-- **热窗口证据**：截图/缩略图等媒体文件，只保留有限天数（默认 365 天，可配置），可清理。
+- **热窗口证据**：截图原图等媒体文件，只保留有限天数（默认 365 天，可配置），可清理。
 - **可反悔底座**：frames 的 `ocr_text` 等原始文本证据长期保留，用于未来重建 chunks/派生索引（图片可备份后长期保存）。
 - **派生索引可重建**：FTS（全文索引）以及未来 embeddings/向量索引属于“派生”，可重建，不强依赖。
 
@@ -44,7 +44,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 ### 1.3 关键数据对象：Frame / Chunk / Daily Summary
 
 - **Frame**：一次采集得到的 OCR 帧（粒度较细，体量大，可短期保留）
-  - 典型字段：时间戳、app/windowTitle、OCR 文本、（可选）截图/缩略图路径、感知哈希等
+  - 典型字段：时间戳、app/windowTitle、OCR 文本、（可选）截图路径、感知哈希等
   - 表：`frames`（`apps/agent/src/schema.sql`）
 - **Chunk**：压实后的长期“记忆片段”（粒度更粗，长期可用）
   - 通常由多个 frames 合并、清洗、去噪得到
@@ -90,7 +90,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 - **屏幕/窗口截图**：CoreGraphics（`CGWindowListCreateImage` 等）
 - **OCR**：Vision（`VNRecognizeTextRequest`）
 - **去重**：dHash + 汉明距离（减少重复 OCR/重复入库）
-- **缩略图写盘**：ImageIO 写 JPEG 到 dataDir/media
+- **截图原图写盘**：WebP（视觉无损 near-lossless）写入到 dataDir/media，并带 1MB 硬上限兜底
 - **macOS 权限**：屏幕录制、辅助功能（窗口标题）
 
 入口：
@@ -166,7 +166,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
   - 入口：`apps/agent/src/migrations/0003_settings.sql`
 - `vision_jobs` / `vision_extractions`：视觉增强的任务与产物（预留，暂不启用）
   - 入口：`apps/agent/src/migrations/0002_vision.sql`
-- `thumbnailMaxWidth` 默认值升级（迁移只改旧默认，不覆盖用户自定义）
+- （历史）缩略图相关迁移（当前缩略图功能暂停，未来可能回归）
   - 入口：`apps/agent/src/migrations/0004_thumbnail_width.sql`
 
 ### 3.3 数据目录（Data Dir）与可迁移性
@@ -179,7 +179,7 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 - **目录分层**（约定）：
   - `db/recapsense.db`：SQLite
   - `secret/token`：API token（本机访问）
-  - `media/`：热证据（缩略图等，可整体删）
+  - `media/`：热证据（截图原图，可整体删）
   - `logs/`：日志（agent/mcp/collector）
   - `run/`：运行期文件（例如 app lock、socket）
 
@@ -383,17 +383,17 @@ RecapSense 是一个 **本地、全天候运行的“记忆”管线**：
 
 入口：`apps/collector-macos/Sources/RecapSenseCollector/ImageHash.swift`、`Entry.swift`
 
-### 6.6 缩略图（热证据）写盘
+### 6.6 截图原图（热证据）写盘
 
 概念：
 
-- resize：缩放到最大宽度（默认 720px，可配置）
-- JPEG 写入：ImageIO（`CGImageDestination`）
-- 路径写入 DB：Agent 存相对路径（便于迁移）
+- 当前策略：只保存原图（WebP 视觉无损 near-lossless），不做缩略图（原因见 `TODO.md`）
+- WebP 写入：libwebp（优先 near-lossless A=95；仅当 A 略超 1MB 才尝试 B=92；仍超则兜底 lossy(text,q=90)+downscale(0.85→0.75)，并保证单张 < 1MB；同时默认降低编码 `method` 以减少 CPU 峰值与抖动）
+- 路径写入 DB：Agent 存相对路径（便于迁移/备份）
 
 入口：
 
-- 写 JPEG：`apps/collector-macos/Sources/RecapSenseCollector/ImageIO.swift`
+- 写 WebP：`apps/collector-macos/Sources/RecapSenseCollector/ImageIO.swift`
 - 路径：`apps/collector-macos/Sources/RecapSenseCollector/Paths.swift`
 
 ### 6.7 运行时稳定性：信号/父进程监控/日志轮转

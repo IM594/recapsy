@@ -7,11 +7,11 @@ struct CollectorPaths {
     dataDir.appendingPathComponent("secret/token")
   }
 
-  func thumbnailRelativePath(date: String, filename: String) -> String {
-    "media/thumbnails/\(date)/\(filename)"
+  func screenshotRelativePath(date: String, filename: String) -> String {
+    "media/screenshots/\(date)/\(filename)"
   }
 
-  func thumbnailAbsoluteURL(relativePath: String) -> URL {
+  func screenshotAbsoluteURL(relativePath: String) -> URL {
     dataDir.appendingPathComponent(relativePath)
   }
 }
@@ -48,4 +48,3 @@ func resolveAgentBaseURL() throws -> URL {
   }
   return url
 }
-

@@ -84,9 +84,21 @@
     - [x] Collector：输出 OCR 全文到独立日志（调试用途）
       - 背景：用户难以复制碎片 OCR 来做问题反馈，需要一个“可一键复制”的完整来源。
       - 验收：生成 `${DATA_DIR}/logs/collector-ocr.log`，可在 UI 日志页一键复制；文件超过上限自动轮转为 `.1`。
-    - [x] 缩略图默认尺寸提升（更适合多模态输入）
+    - [x] 缩略图默认尺寸提升（更适合多模态输入，已暂停）
       - 背景：默认 420px 对多模态 LLM 来说偏糊，不利于提取关键信息。
       - 验收：默认提升到 720px；历史库若仍为旧默认值（420）会在迁移时自动更新；用户仍可在设置页手动调整。
+    - [x] Collector：缩略图压缩策略探索（已暂停）
+      - 背景：缩略图未来要复用于多模态/LLM OCR；需要更高压缩率的格式，并能在“严格体积上限”下尽可能保清晰度。
+      - 验收：缩略图功能暂时移除（见下方“缩略图（回归）”）；当前仅保存截图原图（WebP 视觉无损 near-lossless，并带 1MB 硬上限兜底）。
+    - [x] 缩略图：暂时移除（当前仅保存原图）
+      - 背景：目前“原图 vs 缩略图”的文件大小差异很小，但缩略图在压缩/降采样后清晰度下降明显，得不偿失；先保存原图保留最多原始信息，未来可回头从原图再生成缩略图。
+      - 验收：collector 不再生成/落盘缩略图，也不写入 `thumbnailPath`；仅在 ingest 成功后落盘 `media/screenshots/YYYY-MM-DD/<ts>_<hash>.webp`（near-lossless WebP），后续缩略图可从原图离线生成。
+    - [x] Collector：截图 WebP 编码降 CPU / 降抖动
+      - 背景：截图压缩是常驻热路径；当每轮固定做多次 near-lossless 编码或高 `method` 时，会导致 CPU 峰值过高、采集间隔被显著拉长（用户设置 2s 但实际十几秒一张）。
+      - 验收：常态只做 1 次 near-lossless 编码；仅在接近/超过 1MB 上限时才尝试 B / lossy / downscale；默认 `method` 下调以降低 CPU；仍保证单张截图文件 < 1MB。
+    - [ ] 缩略图（回归）：从原图离线生成（可重跑/可调参）
+      - 背景：缩略图仍有价值（UI 预览/多模态输入/传输成本），但应从“保真原图”出发，再选择合适的尺寸/格式/压缩策略。
+      - 验收：提供脚本/维护接口，可从 `media/screenshots/` 批量生成 `media/thumbnails/`；支持可配置 maxWidth/格式/质量，并保证文字清晰度可接受。
     - [x] Collector：fast OCR 自动升级 accurate（按质量触发）
       - 背景：fast OCR 在低对比度/小字/复杂 UI 时容易乱码；一刀切改成 accurate 会显著增加常驻成本。
       - 验收：默认仍跑 fast；当识别结果明显低信号时自动再跑一次 accurate 并择优写入；`collector.log`/`collector-ocr.log` 会标注 `ocr=fast→accurate`。
@@ -199,10 +211,10 @@
   - 写入：`POST /v1/ingest/frame`（带 token）
   - 验收：本机连续采集 10 分钟，`/v1/search` 能搜到当天内容
 - [x] 证据热窗口目录规范（默认 365 天；超阈值仅提醒）
-  - 缩略图按日期分桶：`media/thumbnails/YYYY-MM-DD/...`
+  - 截图原图按日期分桶：`media/screenshots/YYYY-MM-DD/...`
   - DB 存相对路径（可迁移）
 - [x] 证据清理任务（热窗口策略落地）
-  - `POST /v1/maintenance/cleanup` + 定时清理
+  - `POST /v1/maintenance/cleanup`（手动触发）+ media 占用阈值提醒（默认）
   - 只清理已压实（`chunk_id IS NOT NULL`）的 frames
 - [x] Agent 支持 UDS（可选）+ MCP 支持走 UDS
   - `RECAPSENSE_AGENT_SOCKET`，`RECAPSENSE_AGENT_DISABLE_TCP=1`
@@ -212,7 +224,7 @@
 ## Milestone M1（进行中）：可控 + 隐私（能放心全天候跑）
 
 - [x] 设置落库（SQLite `settings`）+ API：`GET/PATCH /v1/settings`
-- [x] macOS UI：设置页可修改采集间隔/去重/缩略图/证据保留等，并可重启 collector 应用
+- [x] macOS UI：设置页可修改采集间隔/去重/证据保留与提醒阈值等，并可重启 collector 应用
 - [x] 暂停/恢复（含定时暂停）
 - [x] App 黑名单（先 App）
 - [ ] 域名黑名单（后置：浏览器 URL/扩展）

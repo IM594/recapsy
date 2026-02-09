@@ -9,9 +9,15 @@ let package = Package(
   products: [
     .executable(name: "recapsense-collector", targets: ["RecapSenseCollector"]),
   ],
+  dependencies: [
+    .package(url: "https://github.com/SDWebImage/libwebp-Xcode.git", from: "1.3.2"),
+  ],
   targets: [
     .executableTarget(
       name: "RecapSenseCollector",
+      dependencies: [
+        .product(name: "libwebp", package: "libwebp-Xcode"),
+      ],
       path: "Sources"
     ),
     .testTarget(

@@ -14,13 +14,17 @@ struct IngestFrameRequestBody: Encodable {
   let ocrText: String
   let phash: String?
   let screenshotPath: String?
-  let thumbnailPath: String?
 }
 
 struct IngestFrameResult: Equatable {
   let id: Int64?
   let skipped: Bool
   let reason: String?
+}
+
+struct PatchFrameMediaResult: Equatable {
+  let id: Int64
+  let screenshotPath: String?
 }
 
 enum AgentClientError: Error, CustomStringConvertible {
@@ -88,6 +92,51 @@ final class AgentClient {
     // 兼容：如果 body 无法解析，但 status=202，我们仍视为 skipped。
     let skipped = frame?.skipped ?? (status == 202)
     return IngestFrameResult(id: frame?.id, skipped: skipped, reason: frame?.reason)
+  }
+
+  func patchFrameMedia(
+    frameId: Int64,
+    screenshotPath: String?
+  ) async throws -> PatchFrameMediaResult {
+    let url = config.baseURL.appendingPathComponent("/v1/frames/\(frameId)/media")
+    var request = URLRequest(url: url)
+    request.httpMethod = "PATCH"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(config.token)", forHTTPHeaderField: "Authorization")
+
+    struct RequestBody: Encodable {
+      let screenshotPath: String?
+    }
+    request.httpBody = try JSONEncoder().encode(RequestBody(
+      screenshotPath: screenshotPath
+    ))
+
+    let (data, response) = try await session.data(for: request)
+    let http = response as? HTTPURLResponse
+    let status = http?.statusCode ?? 0
+
+    if status < 200 || status >= 300 {
+      let message = decodeJsonErrorMessage(from: data) ?? String(data: data, encoding: .utf8) ?? "未知错误"
+      throw AgentClientError.serverError(status: status, message: message)
+    }
+
+    struct ResponseBody: Decodable {
+      struct Frame: Decodable {
+        let id: Int64?
+        let screenshotPath: String?
+      }
+      let frame: Frame?
+    }
+
+    let decoded = try? JSONDecoder().decode(ResponseBody.self, from: data)
+    guard let frame = decoded?.frame, let id = frame.id else {
+      throw AgentClientError.requestFailed("响应解析失败：缺少 frame.id")
+    }
+
+    return PatchFrameMediaResult(
+      id: id,
+      screenshotPath: frame.screenshotPath
+    )
   }
 
   private func decodeJsonErrorMessage(from data: Data) -> String? {

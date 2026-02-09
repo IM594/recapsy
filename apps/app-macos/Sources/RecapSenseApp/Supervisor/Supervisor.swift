@@ -654,8 +654,6 @@ final class Supervisor: ObservableObject {
       "--ocr-log",
       "--ocr-lang",
       settings.collector.ocrLanguages.joined(separator: ","),
-      "--thumbnail-width",
-      String(settings.collector.thumbnailMaxWidth),
     ]
 
     for appName in settings.collector.excludedApps {
@@ -663,10 +661,6 @@ final class Supervisor: ObservableObject {
       if trimmed.isEmpty { continue }
       args.append("--exclude-app")
       args.append(trimmed)
-    }
-
-    if !settings.collector.thumbnailEnabled {
-      args.append("--no-thumbnails")
     }
 
     let spec = ProcessSpec(
@@ -944,7 +938,7 @@ final class Supervisor: ObservableObject {
       结构：
 
       - `db/recapsense.db`：数据库一致快照（包含 frames/chunks/settings 等）
-      - `media/`：热证据（截图/缩略图，可选，可能很大）
+      - `media/`：热证据（截图，可选，可能很大）
 
       手动恢复（临时方案，未来会提供一键导入）：
 
