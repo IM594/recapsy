@@ -50,17 +50,23 @@ token 默认存放在：
 - `GET /v1/timeline/daily?date=YYYY-MM-DD`：获取当天时间轴（基于 frames 推导）
   - 输出：`apps`（按用时排序）+ `spans`（时间轴片段）+ `sessions`（按 app 合并的会话，默认 5 分钟内来回切换会合并）
 - `POST /v1/ingest/frame`：写入截图 OCR 帧
-  - body: `{ ts, app, windowTitle, ocrText, phash?, screenshotPath?, thumbnailPath? }`
+  - body: `{ ts, app, windowTitle, ocrText, phash?, screenshotPath? }`
+  - 说明：
+    - `screenshotPath` 可选（相对 `${RECAPSENSE_DATA_DIR}` 的相对路径，例如 `media/...`）
+    - 推荐实践：先写入 OCR 文本，再落盘 media 文件并用 `PATCH /v1/frames/:id/media` 回填路径，避免产生“写文件成功但入库失败”的垃圾文件
+- `PATCH /v1/frames/:id/media`：更新某条 frame 的媒体路径（用于“入库成功后再落盘并回填”）
+  - body：`{ screenshotPath?: string }`
+  - response：`{ frame: { id, screenshotPath? } }`
 - `POST /v1/ingest/chunk`：直接写入/更新 chunk（测试用）
   - body: `{ id?, startTs, endTs, app?, windowTitle?, text }`
 - `GET /v1/backup/db`：下载数据库一致快照（单文件 `.db`），用于备份/换电脑
   - 说明：
     - 返回的是“可直接复制/替换”的 SQLite 数据库文件（不需要额外带上 `-wal/-shm`）
-    - 如果你希望保留截图/缩略图，请同时备份 `media/` 目录（体积可能较大）
+    - 如果你希望保留截图，请同时备份 `media/` 目录（体积可能较大）
 - `POST /v1/maintenance/cleanup`：清理过期“热证据”（media 文件）
   - 说明：
-    - 只清理 **已经被压实进 chunks 的 frames**（`chunk_id IS NOT NULL`）的截图/缩略图文件，避免误删未压实证据
-    - frames 的原始文本（`ocr_text`）**永久保留**（可反悔）；清理时会清空 `screenshot_path/thumbnail_path`，避免悬挂引用
+    - 只清理 **已经被压实进 chunks 的 frames**（`chunk_id IS NOT NULL`）的截图文件，避免误删未压实证据
+    - frames 的原始文本（`ocr_text`）**永久保留**（可反悔）；清理时会清空 `screenshot_path`，避免悬挂引用
   - body（可选）：`{ retentionDays?: number, maxFramesPerRun?: number }`
     - retentionDays 默认取 `settings.agent.evidenceRetentionDays`
   - response：`{ result: { clearedFrames, deletedFiles, cutoffTs, ... } }`
@@ -155,8 +161,6 @@ token 默认存放在：
 
 - `collector.intervalSeconds`：采集间隔秒数（默认 `5`）
 - `collector.dedupeThreshold`：dHash 去重阈值（默认 `2`）
-- `collector.thumbnailEnabled`：是否写入缩略图（默认 `true`）
-- `collector.thumbnailMaxWidth`：缩略图最大宽度（默认 `720`）
-- `agent.evidenceRetentionDays`：热证据（截图/缩略图文件）保留天数（默认 `365`）；frames 文本永久保留
-- `agent.evidenceCleanupIntervalMinutes`：清理任务间隔分钟数（默认 `60`）
+- `agent.evidenceRetentionDays`：热证据（截图文件）保留天数（默认 `365`）；frames 文本永久保留
+- `agent.evidenceCleanupIntervalMinutes`：维护任务间隔分钟数（默认 `60`；目前仅用于 media 占用阈值提醒，不会自动清理）
 - `agent.mediaWarnThresholdBytes`：media 占用提醒阈值（字节，默认 `10GB`；只提醒不自动清理）

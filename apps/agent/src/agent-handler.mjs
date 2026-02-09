@@ -170,6 +170,29 @@ export function createAgentRequestHandler({
         return sendJson(res, 200, { frame: result });
       }
 
+      if (
+        req.method === "PATCH" &&
+        url.pathname.startsWith("/v1/frames/") &&
+        url.pathname.endsWith("/media")
+      ) {
+        const raw = url.pathname.slice("/v1/frames/".length, -"/media".length);
+        const id = Number.parseInt(raw, 10);
+        if (!Number.isFinite(id) || id <= 0) {
+          return sendJson(res, 400, { error: "Invalid frame id" });
+        }
+
+        const body = await readJson(req);
+        const result = store.patchFrameMediaPaths({
+          id,
+          screenshotPath: body?.screenshotPath,
+          thumbnailPath: body?.thumbnailPath,
+        });
+        if (!result) {
+          return sendJson(res, 404, { error: "Frame not found" });
+        }
+        return sendJson(res, 200, { frame: result });
+      }
+
       if (req.method === "POST" && url.pathname === "/v1/ingest/chunk") {
         const body = await readJson(req);
         const result = store.upsertChunk(body ?? {});

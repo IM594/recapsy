@@ -160,7 +160,7 @@ export function createEvidenceMaintenance({ dataDir, getStore, logger = console 
     lastMediaWarnedAt = now;
 
     logger.warn(
-      `[agent] media 占用已超过阈值：media=${formatBytes(stats.totalBytes)} threshold=${formatBytes(thresholdBytes)}。建议尽快备份数据目录（dataDir=${dataDir}），或调整“热证据保留天数/缩略图开关/阈值”。`
+      `[agent] media 占用已超过阈值：media=${formatBytes(stats.totalBytes)} threshold=${formatBytes(thresholdBytes)}。建议尽快备份数据目录（dataDir=${dataDir}），或调整“热证据保留天数/采集开关/阈值”。`
     );
   }
 
@@ -258,4 +258,3 @@ export function createEvidenceMaintenance({ dataDir, getStore, logger = console 
     deleteMediaDirectory,
   };
 }
-

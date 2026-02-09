@@ -20,14 +20,14 @@ test("maintenance: resolveSafePath enforces dataDir scope", async () => {
   assert.equal(evidence.resolveSafePath("/etc/passwd"), null);
   assert.equal(evidence.resolveSafePath("../escape.txt"), null);
 
-  const abs = evidence.resolveSafePath("media/thumbnails/a.jpg");
+  const abs = evidence.resolveSafePath("media/screenshots/a.webp");
   assert.ok(abs);
   assert.ok(abs.startsWith(path.resolve(dataDir) + path.sep));
 });
 
 test("maintenance: getMediaStats caches and supports refresh", async () => {
   const dataDir = await makeTempDir();
-  const mediaDir = path.join(dataDir, "media", "thumbnails", "2000-01-01");
+  const mediaDir = path.join(dataDir, "media", "screenshots", "2000-01-01");
   await fs.mkdir(mediaDir, { recursive: true });
   await fs.writeFile(path.join(mediaDir, "a.txt"), "hello");
 
@@ -96,9 +96,9 @@ test("maintenance: cleanupEvidence deletes only safe file paths and counts skipp
   const dataDir = await makeTempDir();
 
   // 创建 1 个可删除文件 + 1 个目录（unlink 会 EISDIR 走 error 分支）+ 1 个越界路径（走 skippedPaths）
-  const goodRel = "media/thumbnails/2000-01-01/good.jpg";
-  const dirRel = "media/thumbnails/2000-01-01/dir-as-file";
-  await fs.mkdir(path.join(dataDir, "media", "thumbnails", "2000-01-01"), { recursive: true });
+  const goodRel = "media/screenshots/2000-01-01/good.webp";
+  const dirRel = "media/screenshots/2000-01-01/dir-as-file";
+  await fs.mkdir(path.join(dataDir, "media", "screenshots", "2000-01-01"), { recursive: true });
   await fs.writeFile(path.join(dataDir, goodRel), "ok");
   await fs.mkdir(path.join(dataDir, dirRel), { recursive: true });
 
@@ -109,7 +109,7 @@ test("maintenance: cleanupEvidence deletes only safe file paths and counts skipp
     }),
     expireChunkedFrameMedia: () => ({
       clearedFrames: 2,
-      filePaths: [goodRel, dirRel, "media/thumbnails/2000-01-01/missing.jpg", "/etc/passwd", "../escape.txt"],
+      filePaths: [goodRel, dirRel, "media/screenshots/2000-01-01/missing.webp", "/etc/passwd", "../escape.txt"],
     }),
   };
 
@@ -132,8 +132,8 @@ test("maintenance: cleanupEvidence deletes only safe file paths and counts skipp
 
 test("maintenance: deleteEvidenceFiles ignores missing files and skips unsafe paths", async () => {
   const dataDir = await makeTempDir();
-  const rel = "media/thumbnails/2000-01-01/a.jpg";
-  await fs.mkdir(path.join(dataDir, "media", "thumbnails", "2000-01-01"), { recursive: true });
+  const rel = "media/screenshots/2000-01-01/a.webp";
+  await fs.mkdir(path.join(dataDir, "media", "screenshots", "2000-01-01"), { recursive: true });
   await fs.writeFile(path.join(dataDir, rel), "ok");
 
   const store = { getSettings: () => ({ agent: {}, collector: {} }) };
@@ -155,7 +155,7 @@ test("maintenance: deleteMediaDirectory removes dataDir/media", async () => {
   const store = { getSettings: () => ({ agent: {}, collector: {} }) };
   const evidence = createEvidenceMaintenance({ dataDir, getStore: () => store });
 
-  const mediaDir = path.join(dataDir, "media", "thumbnails");
+  const mediaDir = path.join(dataDir, "media", "screenshots");
   await fs.mkdir(mediaDir, { recursive: true });
   await fs.writeFile(path.join(mediaDir, "a.txt"), "x");
 
@@ -246,7 +246,7 @@ test("maintenance: maybeWarnMediaSize formats bytes with units (>= KB)", async (
 
 test("maintenance: deleteEvidenceFiles counts non-ENOENT unlink errors", async (t) => {
   const dataDir = await makeTempDir();
-  const rel = "media/thumbnails/2000-01-01/a.jpg";
+  const rel = "media/screenshots/2000-01-01/a.webp";
   const abs = path.join(dataDir, rel);
   await fs.mkdir(path.dirname(abs), { recursive: true });
   await fs.writeFile(abs, "ok");

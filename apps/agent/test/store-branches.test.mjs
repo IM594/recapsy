@@ -35,7 +35,6 @@ test("store: getSettings parses known keys and ignores invalid JSON/unknown keys
   );
 
   upsert.run("collector.intervalSeconds", "3", now);
-  upsert.run("collector.thumbnailEnabled", "true", now);
   upsert.run("collector.ocrLevel", "\"accurate\"", now);
   upsert.run("collector.ocrLanguages", JSON.stringify(["en", " ", "", "zh-Hans"]), now);
   upsert.run("collector.excludedApps", JSON.stringify(["com.b", "com.a", "com.a", "not a bundle id"]), now);
@@ -44,7 +43,6 @@ test("store: getSettings parses known keys and ignores invalid JSON/unknown keys
 
   const settings = store.getSettings();
   assert.equal(settings.collector.intervalSeconds, 3);
-  assert.equal(settings.collector.thumbnailEnabled, true);
   assert.equal(settings.collector.ocrLevel, "accurate");
   assert.deepEqual(settings.collector.ocrLanguages, ["en", "zh-Hans"]);
   // invalid bundle id 应在 dedupeBundleIds 时被过滤掉
@@ -62,14 +60,6 @@ test("store: patchSettings validates input and supports no-op patch", async () =
   assert.throws(
     () => store.patchSettings({ collector: { dedupeThreshold: -1 } }),
     /dedupeThreshold/
-  );
-  assert.throws(
-    () => store.patchSettings({ collector: { thumbnailEnabled: "yes" } }),
-    /thumbnailEnabled/
-  );
-  assert.throws(
-    () => store.patchSettings({ collector: { thumbnailMaxWidth: 0 } }),
-    /thumbnailMaxWidth/
   );
   assert.throws(
     () => store.patchSettings({ collector: { ocrLevel: "bad" } }),

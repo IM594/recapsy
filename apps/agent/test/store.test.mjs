@@ -144,7 +144,6 @@ test("store: settings read + patch", async () => {
   const initial = store.getSettings();
   assert.equal(initial.collector.intervalSeconds, 5);
   assert.equal(initial.collector.dedupeThreshold, 2);
-  assert.equal(initial.collector.thumbnailEnabled, true);
   assert.equal(initial.agent.evidenceRetentionDays, 365);
   assert.equal(initial.agent.mediaWarnThresholdBytes, 10 * 1024 * 1024 * 1024);
 
@@ -152,7 +151,6 @@ test("store: settings read + patch", async () => {
     collector: {
       intervalSeconds: 3,
       dedupeThreshold: 1,
-      thumbnailEnabled: false,
     },
     agent: {
       evidenceRetentionDays: 7,
@@ -162,7 +160,6 @@ test("store: settings read + patch", async () => {
 
   assert.equal(updated.collector.intervalSeconds, 3);
   assert.equal(updated.collector.dedupeThreshold, 1);
-  assert.equal(updated.collector.thumbnailEnabled, false);
   assert.equal(updated.agent.evidenceRetentionDays, 7);
   assert.equal(updated.agent.mediaWarnThresholdBytes, 5 * 1024 * 1024 * 1024);
 
@@ -186,7 +183,7 @@ test("store: expireChunkedFrameMedia keeps frames but clears media paths", async
     windowTitle: "Example",
     ocrText: "First frame text",
     phash: "abc",
-    thumbnailPath: `media/thumbnails/${day}/chunked_1.jpg`,
+    screenshotPath: `media/screenshots/${day}/chunked_1.webp`,
   });
 
   store.ingestFrame({
@@ -195,7 +192,7 @@ test("store: expireChunkedFrameMedia keeps frames but clears media paths", async
     windowTitle: "Example",
     ocrText: "Second frame text",
     phash: "def",
-    thumbnailPath: `media/thumbnails/${day}/chunked_2.jpg`,
+    screenshotPath: `media/screenshots/${day}/chunked_2.webp`,
   });
 
   const { createdChunks, consumedFrames } = store.compactFramesToChunks();
@@ -208,7 +205,7 @@ test("store: expireChunkedFrameMedia keeps frames but clears media paths", async
     windowTitle: "Example",
     ocrText: "Unchunked frame text",
     phash: "ghi",
-    thumbnailPath: `media/thumbnails/${day}/unchunked.jpg`,
+    screenshotPath: `media/screenshots/${day}/unchunked.webp`,
   });
   assert.ok(unchunked.id);
 
@@ -223,22 +220,68 @@ test("store: expireChunkedFrameMedia keeps frames but clears media paths", async
   assert.equal(result.clearedFrames, 2);
   assert.equal(result.deletedFrames, 0);
   assert.equal(result.filePaths.length, 2);
-  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/chunked_1.jpg`));
-  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/chunked_2.jpg`));
-  assert.ok(!result.filePaths.includes(`media/thumbnails/${day}/unchunked.jpg`));
+  assert.ok(result.filePaths.includes(`media/screenshots/${day}/chunked_1.webp`));
+  assert.ok(result.filePaths.includes(`media/screenshots/${day}/chunked_2.webp`));
+  assert.ok(!result.filePaths.includes(`media/screenshots/${day}/unchunked.webp`));
 
   const afterCount = db.prepare("SELECT COUNT(1) AS c FROM frames").get().c;
   assert.equal(afterCount, 3);
 
   const chunkedRemaining = db
     .prepare(
-      "SELECT COUNT(1) AS c FROM frames WHERE chunk_id IS NOT NULL AND thumbnail_path IS NOT NULL"
+      "SELECT COUNT(1) AS c FROM frames WHERE chunk_id IS NOT NULL AND screenshot_path IS NOT NULL"
     )
     .get().c;
   assert.equal(chunkedRemaining, 0);
 
   const unchunkedRemaining = db
-    .prepare("SELECT thumbnail_path FROM frames WHERE id = ?")
-    .get(Number(unchunked.id)).thumbnail_path;
-  assert.equal(unchunkedRemaining, `media/thumbnails/${day}/unchunked.jpg`);
+    .prepare("SELECT screenshot_path FROM frames WHERE id = ?")
+    .get(Number(unchunked.id)).screenshot_path;
+  assert.equal(unchunkedRemaining, `media/screenshots/${day}/unchunked.webp`);
+});
+
+test("store: patchFrameMediaPaths updates screenshot paths", async () => {
+  const dataDir = await makeTempDir();
+  const { db, withTransaction } = await openDatabase(dataDir);
+  const store = createStore(db, { withTransaction });
+
+  const inserted = store.ingestFrame({
+    ts: Date.now(),
+    app: "Demo",
+    windowTitle: "Hello",
+    ocrText: "x",
+    phash: "hash",
+  });
+
+  const id = Number(inserted.id);
+  assert.ok(Number.isFinite(id) && id > 0);
+
+  const first = store.patchFrameMediaPaths({
+    id,
+    screenshotPath: "media/screenshots/2000-01-01/a.webp",
+  });
+  assert.equal(first.screenshotPath, "media/screenshots/2000-01-01/a.webp");
+
+  const second = store.patchFrameMediaPaths({
+    id,
+    screenshotPath: "media/screenshots/2000-01-01/b.webp",
+  });
+  assert.equal(second.screenshotPath, "media/screenshots/2000-01-01/b.webp");
+
+  const row = db
+    .prepare("SELECT screenshot_path, thumbnail_path FROM frames WHERE id = ?")
+    .get(id);
+  assert.equal(row.screenshot_path, "media/screenshots/2000-01-01/b.webp");
+  assert.equal(row.thumbnail_path, null);
+
+  assert.throws(
+    () => store.patchFrameMediaPaths({ id, screenshotPath: "/etc/passwd" }),
+    /screenshotPath/
+  );
+
+  const missing = store.patchFrameMediaPaths({
+    id: 999_999_999,
+    screenshotPath: "media/screenshots/2000-01-01/missing.webp",
+  });
+  assert.equal(missing, null);
 });

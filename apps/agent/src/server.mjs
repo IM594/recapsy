@@ -246,8 +246,9 @@ async function main() {
   const getDb = () => dbConn;
   const evidence = createEvidenceMaintenance({ dataDir, getStore });
 
-  // 证据清理任务：从 settings 读取间隔，允许 UI 动态修改后生效（无需重启 Agent）。
-  const scheduleEvidenceCleanup = () => {
+  // 证据维护任务：从 settings 读取间隔，允许 UI 动态修改后生效（无需重启 Agent）。
+  // 注意：按产品策略“只提醒不自动删”，这里仅做 media 占用阈值提醒；清理需要用户手动触发。
+  const scheduleEvidenceMaintenance = () => {
     const currentStore = getStore();
     if (!currentStore) return;
 
@@ -255,25 +256,12 @@ async function main() {
     const delayMs = Math.max(1, Number(intervalMinutes)) * 60_000;
 
     const timer = setTimeout(() => {
-      evidence.cleanupEvidence()
-        .then((result) => {
-          if (result.clearedFrames > 0 || result.deletedFiles > 0) {
-            console.log(
-              `[agent] cleanup evidence: clearedFrames=${result.clearedFrames} deletedFiles=${result.deletedFiles} (retentionDays=${result.retentionDays})`
-            );
-          }
-          if (result.fileErrors > 0) {
-            console.warn(
-              `[agent] cleanup evidence had fileErrors=${result.fileErrors}`
-            );
-          }
-          return evidence.maybeWarnMediaSize();
-        })
+      evidence.maybeWarnMediaSize()
         .catch((error) => {
-          console.warn("[agent] cleanup evidence error:", error);
+          console.warn("[agent] media warn error:", error);
         })
         .finally(() => {
-          scheduleEvidenceCleanup();
+          scheduleEvidenceMaintenance();
         });
     }, delayMs);
     timer.unref();
@@ -396,7 +384,7 @@ async function main() {
   }, dailySummaryIntervalMs);
   dailySummaryTimer.unref();
 
-  scheduleEvidenceCleanup();
+  scheduleEvidenceMaintenance();
   await writeAgentRunInfo({ dataDir, host, port, disableTcp, socketPath, tcpOk, socketOk });
 }
 

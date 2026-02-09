@@ -258,6 +258,7 @@ test("agent handler: auth, errors, core routes（无端口监听）", async () =
   }
 
   // ingest/frame：200 ok (非 excluded app)
+  let insertedFrameId = null;
   {
     const res = await run(handler, makeRequest({
       method: "POST",
@@ -280,6 +281,35 @@ test("agent handler: auth, errors, core routes（无端口监听）", async () =
     const body = parseJson(res);
     assert.ok(body.frame);
     assert.equal(body.frame.skipped, undefined);
+    insertedFrameId = body.frame.id;
+    assert.ok(Number.isFinite(insertedFrameId));
+  }
+
+  // frames/:id/media：PATCH 更新媒体路径
+  {
+    const res = await run(handler, makeRequest({
+      method: "PATCH",
+      url: `/v1/frames/${insertedFrameId}/media`,
+      headers: {
+        host: "127.0.0.1",
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        screenshotPath: "media/screenshots/2000-01-01/a.webp",
+      }),
+    }));
+    assert.equal(res.statusCode, 200);
+    const body = parseJson(res);
+    assert.equal(body.frame?.id, insertedFrameId);
+    assert.equal(body.frame?.screenshotPath, "media/screenshots/2000-01-01/a.webp");
+    assert.equal(body.frame?.thumbnailPath, null);
+
+    const row = db
+      .prepare("SELECT screenshot_path, thumbnail_path FROM frames WHERE id = ?")
+      .get(insertedFrameId);
+    assert.equal(row.screenshot_path, "media/screenshots/2000-01-01/a.webp");
+    assert.equal(row.thumbnail_path, null);
   }
 
   // ingest/chunk + search + get_chunk

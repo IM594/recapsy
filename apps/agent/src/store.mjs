@@ -1,4 +1,5 @@
 import { ulid } from "./ids.mjs";
+import path from "node:path";
 
 function safeJsonParse(value) {
   const raw = String(value ?? "").trim();
@@ -19,14 +20,12 @@ function cloneDefaults() {
     collector: {
       intervalSeconds: 5,
       dedupeThreshold: 2,
-      thumbnailEnabled: true,
-      thumbnailMaxWidth: 720,
       ocrLevel: "fast",
       ocrLanguages: ["zh-Hans", "en-US"],
       excludedApps: [],
     },
     agent: {
-      // 说明：当前“热证据”仅包含截图/缩略图文件（media 目录）；
+      // 说明：当前“热证据”仅包含截图文件（media 目录）；
       // frames 的原始文本（ocr_text）永久保留，用于未来重建 chunks/派生索引。
       evidenceRetentionDays: 365,
       evidenceCleanupIntervalMinutes: 60,
@@ -41,6 +40,23 @@ function normalizeText(text) {
     .replace(/[ \t]+/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
+
+function normalizeMediaRelativePath(value) {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (raw.includes("\0")) return null;
+  if (raw.includes("\\")) return null;
+
+  // 统一按 posix 处理：collector 生成的路径也是 `media/...` 的相对路径。
+  const normalized = path.posix.normalize(raw);
+  if (!normalized || normalized === "." || normalized === "..") return null;
+  if (path.posix.isAbsolute(normalized)) return null;
+  if (normalized.startsWith("../")) return null;
+  if (!normalized.startsWith("media/")) return null;
+
+  return normalized;
 }
 
 function escapeRegExp(input) {
@@ -393,6 +409,22 @@ export function createStore(db, { withTransaction }) {
     `UPDATE frames
      SET screenshot_path = NULL,
          thumbnail_path = NULL
+     WHERE id = ?`
+  );
+  const patchFrameMediaPathsStmt = db.prepare(
+    `UPDATE frames
+     SET screenshot_path = COALESCE(?, screenshot_path),
+         thumbnail_path = COALESCE(?, thumbnail_path)
+     WHERE id = ?`
+  );
+  const getFrameByIdStmt = db.prepare(
+    `SELECT id
+     FROM frames
+     WHERE id = ?`
+  );
+  const getFrameMediaPathsStmt = db.prepare(
+    `SELECT screenshot_path, thumbnail_path
+     FROM frames
      WHERE id = ?`
   );
 
@@ -1147,6 +1179,45 @@ export function createStore(db, { withTransaction }) {
     };
   }
 
+  function patchFrameMediaPaths({ id, screenshotPath, thumbnailPath } = {}) {
+    const frameId = Number(id);
+    if (!Number.isFinite(frameId) || frameId <= 0) {
+      throw new Error("id must be a positive number");
+    }
+
+    const exists = getFrameByIdStmt.get(frameId);
+    if (!exists) return null;
+
+    const resolvedScreenshotPath =
+      screenshotPath == null ? null : normalizeMediaRelativePath(screenshotPath);
+    const resolvedThumbnailPath =
+      thumbnailPath == null ? null : normalizeMediaRelativePath(thumbnailPath);
+
+    if (screenshotPath != null && !resolvedScreenshotPath) {
+      throw new Error('screenshotPath must be a safe relative path like "media/...".');
+    }
+    if (thumbnailPath != null && !resolvedThumbnailPath) {
+      throw new Error('thumbnailPath must be a safe relative path like "media/...".');
+    }
+
+    if (!resolvedScreenshotPath && !resolvedThumbnailPath) {
+      throw new Error("screenshotPath or thumbnailPath is required");
+    }
+
+    patchFrameMediaPathsStmt.run(
+      resolvedScreenshotPath,
+      resolvedThumbnailPath,
+      frameId
+    );
+
+    const row = getFrameMediaPathsStmt.get(frameId) ?? null;
+    return {
+      id: frameId,
+      screenshotPath: row?.screenshot_path ?? null,
+      thumbnailPath: row?.thumbnail_path ?? null,
+    };
+  }
+
   function upsertChunk(chunk) {
     const now = Date.now();
     const id = chunk.id ?? ulid(chunk.startTs ?? now);
@@ -1425,15 +1496,6 @@ export function createStore(db, { withTransaction }) {
         if (Number.isFinite(value) && value >= 0) settings.collector.dedupeThreshold = value;
         break;
       }
-      case "collector.thumbnailEnabled": {
-        if (typeof parsed === "boolean") settings.collector.thumbnailEnabled = parsed;
-        break;
-      }
-      case "collector.thumbnailMaxWidth": {
-        const value = Number.parseInt(String(parsed), 10);
-        if (Number.isFinite(value) && value > 0) settings.collector.thumbnailMaxWidth = value;
-        break;
-      }
       case "collector.ocrLevel": {
         const value = String(parsed);
         if (value === "fast" || value === "accurate") settings.collector.ocrLevel = value;
@@ -1502,19 +1564,6 @@ export function createStore(db, { withTransaction }) {
           throw new Error("collector.dedupeThreshold must be >= 0");
         }
         updates.push(["collector.dedupeThreshold", JSON.stringify(value)]);
-      }
-      if (c.thumbnailEnabled != null) {
-        if (typeof c.thumbnailEnabled !== "boolean") {
-          throw new Error("collector.thumbnailEnabled must be boolean");
-        }
-        updates.push(["collector.thumbnailEnabled", JSON.stringify(c.thumbnailEnabled)]);
-      }
-      if (c.thumbnailMaxWidth != null) {
-        const value = Number.parseInt(String(c.thumbnailMaxWidth), 10);
-        if (!Number.isFinite(value) || value <= 0) {
-          throw new Error("collector.thumbnailMaxWidth must be a positive integer");
-        }
-        updates.push(["collector.thumbnailMaxWidth", JSON.stringify(value)]);
       }
       if (c.ocrLevel != null) {
         const value = String(c.ocrLevel);
@@ -1938,6 +1987,7 @@ export function createStore(db, { withTransaction }) {
     getSettings,
     patchSettings,
     ingestFrame,
+    patchFrameMediaPaths,
     upsertChunk,
     upsertDailySummary,
     getChunk,

@@ -26,8 +26,7 @@ test("store: deleteDangerZone range deletes overlapping chunk + frames and retur
     windowTitle: "Example",
     ocrText: "First frame text",
     phash: "abc",
-    screenshotPath: `media/screenshots/${day}/chunked_1.jpg`,
-    thumbnailPath: `media/thumbnails/${day}/chunked_1.jpg`,
+    screenshotPath: `media/screenshots/${day}/chunked_1.webp`,
   });
   store.ingestFrame({
     ts: baseTs + 5000,
@@ -35,8 +34,7 @@ test("store: deleteDangerZone range deletes overlapping chunk + frames and retur
     windowTitle: "Example",
     ocrText: "Second frame text",
     phash: "def",
-    screenshotPath: `media/screenshots/${day}/chunked_2.jpg`,
-    thumbnailPath: `media/thumbnails/${day}/chunked_2.jpg`,
+    screenshotPath: `media/screenshots/${day}/chunked_2.webp`,
   });
   store.compactFramesToChunks();
 
@@ -47,8 +45,7 @@ test("store: deleteDangerZone range deletes overlapping chunk + frames and retur
     windowTitle: "Example",
     ocrText: "Unchunked frame text",
     phash: "ghi",
-    screenshotPath: `media/screenshots/${day}/unchunked.jpg`,
-    thumbnailPath: `media/thumbnails/${day}/unchunked.jpg`,
+    screenshotPath: `media/screenshots/${day}/unchunked.webp`,
   });
 
   const beforeFrames = db.prepare("SELECT COUNT(1) AS c FROM frames").get().c;
@@ -68,12 +65,9 @@ test("store: deleteDangerZone range deletes overlapping chunk + frames and retur
   assert.equal(result.deletedChunks, 1);
   assert.equal(result.deletedFrames, 3);
   assert.ok(Array.isArray(result.filePaths));
-  assert.ok(result.filePaths.includes(`media/screenshots/${day}/chunked_1.jpg`));
-  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/chunked_1.jpg`));
-  assert.ok(result.filePaths.includes(`media/screenshots/${day}/chunked_2.jpg`));
-  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/chunked_2.jpg`));
-  assert.ok(result.filePaths.includes(`media/screenshots/${day}/unchunked.jpg`));
-  assert.ok(result.filePaths.includes(`media/thumbnails/${day}/unchunked.jpg`));
+  assert.ok(result.filePaths.includes(`media/screenshots/${day}/chunked_1.webp`));
+  assert.ok(result.filePaths.includes(`media/screenshots/${day}/chunked_2.webp`));
+  assert.ok(result.filePaths.includes(`media/screenshots/${day}/unchunked.webp`));
 
   const afterFrames = db.prepare("SELECT COUNT(1) AS c FROM frames").get().c;
   const afterChunks = db.prepare("SELECT COUNT(1) AS c FROM chunks").get().c;
@@ -120,7 +114,7 @@ test("store: deleteDangerZone scope=all clears tables (filePaths empty)", async 
     windowTitle: "Hello",
     ocrText: "demo frame",
     phash: "x",
-    thumbnailPath: "media/thumbnails/2000-01-01/a.jpg",
+    screenshotPath: "media/screenshots/2000-01-01/a.webp",
   });
 
   const beforeFrames = db.prepare("SELECT COUNT(1) AS c FROM frames").get().c;
