@@ -71,7 +71,7 @@ private func runCaptureOnce(dbPath: String) throws {
         ocrProvider: VisionOCRProvider(),
         windowSize: 120
     )
-    let source = try CGWindowCaptureSource(mediaDirectory: mediaDirectory)
+    let source = try CaptureSourceFactory.makeDefault(mediaDirectory: mediaDirectory)
     let service = CaptureService(frameSource: source, pipeline: pipeline)
 
     let captured = try service.captureOnce()
