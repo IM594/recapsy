@@ -26,7 +26,7 @@ public final class OfflinePipeline {
             windowTitle: frame.windowTitle,
             ocrText: text,
             contentHash: frame.contentHash,
-            mediaPath: nil
+            mediaPath: frame.imagePath
         )
         _ = try store.insertFrame(frameInsert)
 

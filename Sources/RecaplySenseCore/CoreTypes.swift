@@ -3,6 +3,8 @@ import Foundation
 public enum RecaplySenseError: Error, LocalizedError {
     case sqlite(message: String)
     case invalidState(message: String)
+    case capture(message: String)
+    case ocr(message: String)
 
     public var errorDescription: String? {
         switch self {
@@ -10,6 +12,10 @@ public enum RecaplySenseError: Error, LocalizedError {
             return "SQLite error: \(message)"
         case .invalidState(let message):
             return "Invalid state: \(message)"
+        case .capture(let message):
+            return "Capture error: \(message)"
+        case .ocr(let message):
+            return "OCR error: \(message)"
         }
     }
 }
@@ -21,14 +27,16 @@ public struct CapturedFrame: Sendable {
     public let contentHash: String
     public let rawPayload: String
     public let mockedText: String
+    public let imagePath: String?
 
     public init(
         capturedAt: Date,
         appName: String,
         windowTitle: String,
         contentHash: String,
-        rawPayload: String,
-        mockedText: String
+        rawPayload: String = "",
+        mockedText: String = "",
+        imagePath: String? = nil
     ) {
         self.capturedAt = capturedAt
         self.appName = appName
@@ -36,6 +44,7 @@ public struct CapturedFrame: Sendable {
         self.contentHash = contentHash
         self.rawPayload = rawPayload
         self.mockedText = mockedText
+        self.imagePath = imagePath
     }
 }
 

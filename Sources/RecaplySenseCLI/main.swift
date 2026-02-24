@@ -40,6 +40,13 @@ private func run() throws {
             print(text)
         }
 
+    case "capture-once":
+        guard args.count >= 2 else {
+            throw CLIError.invalidArguments("capture-once 需要 dbPath")
+        }
+        let dbPath = args[1]
+        try runCaptureOnce(dbPath: dbPath)
+
     case "mcp-stdio":
         guard args.count >= 2 else {
             throw CLIError.invalidArguments("mcp-stdio 需要 dbPath")
@@ -49,6 +56,31 @@ private func run() throws {
 
     default:
         throw CLIError.invalidArguments("不支持的命令: \(command)")
+    }
+}
+
+private func runCaptureOnce(dbPath: String) throws {
+    let dbURL = URL(fileURLWithPath: dbPath)
+    let mediaDirectory = dbURL.deletingLastPathComponent().appendingPathComponent("media")
+
+    let store = try MemoryStore(databaseURL: dbURL)
+    try store.bootstrapSchema()
+
+    let pipeline = OfflinePipeline(
+        store: store,
+        ocrProvider: VisionOCRProvider(),
+        windowSize: 120
+    )
+    let source = try CGWindowCaptureSource(mediaDirectory: mediaDirectory)
+    let service = CaptureService(frameSource: source, pipeline: pipeline)
+
+    let captured = try service.captureOnce()
+    try service.stopAndFlush()
+
+    if captured {
+        print("capture complete: 1 frame ingested")
+    } else {
+        print("capture skipped: no eligible frontmost window")
     }
 }
 
@@ -106,6 +138,7 @@ private func printUsage() {
     RecaplySenseCLI commands:
       bootstrap-db <dbPath>
       search <dbPath> <query>
+      capture-once <dbPath>
       mcp-stdio <dbPath>
     """)
 }
