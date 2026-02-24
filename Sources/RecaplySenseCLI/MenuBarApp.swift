@@ -7,8 +7,25 @@ import AVFoundation
 import ApplicationServices
 
 enum MenuBarAppMain {
+    @MainActor
+    private static var runtimeLock: SingleInstanceLock?
+
     static func run() -> Never {
         MainActor.assumeIsolated {
+            do {
+                let lockURL = try appSupportDirectory().appendingPathComponent("app.lock")
+                let lock = try SingleInstanceLock(lockFileURL: lockURL)
+                let acquired = try lock.acquire()
+                guard acquired else {
+                    fputs("[RecaplySenseCLI] another instance is already running.\n", stderr)
+                    exit(0)
+                }
+                runtimeLock = lock
+            } catch {
+                fputs("[RecaplySenseCLI] failed to acquire single instance lock: \(error)\n", stderr)
+                exit(1)
+            }
+
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
 
@@ -18,6 +35,17 @@ enum MenuBarAppMain {
         }
 
         fatalError("NSApplication exited unexpectedly")
+    }
+
+    @MainActor
+    private static func appSupportDirectory() throws -> URL {
+        let fm = FileManager.default
+        guard let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw RecaplySenseError.invalidState(message: "Cannot locate Application Support directory")
+        }
+        let dir = appSupport.appendingPathComponent("RecaplySense", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
     }
 }
 
