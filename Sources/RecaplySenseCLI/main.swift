@@ -10,8 +10,7 @@ private func run() throws {
     _ = args.removeFirst()
 
     guard let command = args.first else {
-        printUsage()
-        return
+        MenuBarAppMain.run()
     }
 
     switch command {
@@ -53,6 +52,9 @@ private func run() throws {
         }
         let dbPath = args[1]
         try runMCPStdio(dbPath: dbPath)
+
+    case "help", "--help", "-h":
+        printUsage()
 
     default:
         throw CLIError.invalidArguments("不支持的命令: \(command)")
@@ -136,10 +138,12 @@ private func jsonString<T: Encodable>(from value: T) throws -> String {
 private func printUsage() {
     print("""
     RecaplySenseCLI commands:
+      (no args)              launch menu bar app shell
       bootstrap-db <dbPath>
       search <dbPath> <query>
       capture-once <dbPath>
       mcp-stdio <dbPath>
+      help
     """)
 }
 
