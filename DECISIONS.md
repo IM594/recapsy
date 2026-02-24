@@ -1,7 +1,7 @@
 # Recaply Sense 关键决策记录（DECISIONS）
 
-> 版本：v0.1（文档阶段）
-> 状态：待确认
+> 版本：v0.2（文档定版）
+> 状态：已定版（D-001 ~ D-005）
 > 关联规格：`/Users/user/Downloads/projects/my/recaply-sense/SPEC_v2.md`
 
 ## 1. 不可变约束（已锁定）
@@ -14,13 +14,20 @@
 
 ## 2. 开工前必须拍板项（来自 SPEC 第 19 章）
 
-| 决策 ID | 主题 | 候选方案 | 建议方案 | 状态 | 计划拍板时间 |
+| 决策 ID | 主题 | 候选方案 | 已采纳方案 | 状态 | 拍板日期 |
 | --- | --- | --- | --- | --- | --- |
-| D-001 | 本地向量引擎默认实现 | A: SQLite + sqlite-vec；B: SQLite + 外部本地向量库 | A（包体更小、依赖更少） | Proposed | M0 Week1 Day2 |
-| D-002 | 首个云向量 provider | A: Qdrant；B: 其他托管向量服务 | A（生态成熟、过滤检索能力好） | Proposed | M1 Week1 Day1 |
-| D-003 | 首个云对象存储 provider | A: S3 兼容；B: 其他对象存储 | A（接口标准化程度高） | Proposed | M1 Week1 Day1 |
-| D-004 | 首个云 LLM provider | A: 先留空；B: 先接 1 家 | A（先锁接口，M1.1 再接入） | Proposed | M1.1 Week1 Day1 |
-| D-005 | 音频默认保留期 | A: 30 天；B: 90 天；C: 365 天 | B（平衡隐私、可用性、存储） | Proposed | M0 Week1 Day3 |
+| D-001 | 本地向量引擎默认实现 | A: SQLite + sqlite-vec；B: SQLite + 外部本地向量库 | A（SQLite + sqlite-vec） | Accepted | 2026-02-25 |
+| D-002 | 首个云向量 provider | A: Qdrant；B: 其他托管向量服务 | A（Qdrant） | Accepted | 2026-02-25 |
+| D-003 | 首个云对象存储 provider | A: S3 兼容；B: 其他对象存储 | A（S3-compatible Object Storage） | Accepted | 2026-02-25 |
+| D-004 | 首个云 LLM provider | A: 先留空；B: 先接 1 家 | A（M1.1 前保持 `LLMProvider.none`，仅锁接口） | Accepted | 2026-02-25 |
+| D-005 | 音频默认保留期 | A: 30 天；B: 90 天；C: 365 天 | B（90 天） | Accepted | 2026-02-25 |
+
+## 2.1 本轮定版结论（执行约束）
+
+1. 编码阶段以 `D-001 ~ D-005` 为强约束，不再等待二次拍板。
+2. 所有实现必须保持 `Offline Mode` 为默认运行路径。
+3. Cloud Provider 仅在用户显式开启后生效，并且失败时自动回退本地路径。
+4. 若后续需要变更上述已定版项，必须新增 ADR 并标记原决策为 `Superseded`。
 
 ## 3. 决策评估标准
 
