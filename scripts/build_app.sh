@@ -41,12 +41,16 @@ cat > "$CONTENTS_DIR/Info.plist" <<PLIST
   <string>${APP_NAME}</string>
   <key>CFBundleIdentifier</key>
   <string>com.recaply.sense</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
   <key>CFBundleVersion</key>
   <string>0.1.0</string>
   <key>CFBundleShortVersionString</key>
   <string>0.1.0</string>
   <key>CFBundleExecutable</key>
   <string>${APP_NAME}</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>LSUIElement</key>

@@ -25,7 +25,11 @@ public final class SingleInstanceLock {
         if fileDescriptor == -1 {
             fileDescriptor = open(lockFileURL.path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
             if fileDescriptor == -1 {
-                throw RecaplySenseError.invalidState(message: "Cannot open lock file at \(lockFileURL.path)")
+                let openErrno = errno
+                let openMessage = String(cString: strerror(openErrno))
+                throw RecaplySenseError.invalidState(
+                    message: "Cannot open lock file at \(lockFileURL.path), errno=\(openErrno) (\(openMessage))"
+                )
             }
         }
 

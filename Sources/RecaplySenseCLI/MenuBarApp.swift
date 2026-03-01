@@ -8,19 +8,24 @@ import ApplicationServices
 
 enum MenuBarAppMain {
     @MainActor
+    private static var appDelegateRef: MenuBarAppDelegate?
+
+    @MainActor
     private static var runtimeLock: SingleInstanceLock?
 
     static func run() -> Never {
         MainActor.assumeIsolated {
             do {
-                let lockURL = try appSupportDirectory().appendingPathComponent("app.lock")
-                let lock = try SingleInstanceLock(lockFileURL: lockURL)
-                let acquired = try lock.acquire()
-                guard acquired else {
+                let lockResult = try acquireRuntimeLock()
+                switch lockResult {
+                case .acquired(let lock):
+                    runtimeLock = lock
+                case .alreadyRunning:
                     fputs("[RecaplySenseCLI] another instance is already running.\n", stderr)
                     exit(0)
+                case .failed(let message):
+                    throw RecaplySenseError.invalidState(message: message)
                 }
-                runtimeLock = lock
             } catch {
                 fputs("[RecaplySenseCLI] failed to acquire single instance lock: \(error)\n", stderr)
                 exit(1)
@@ -30,6 +35,7 @@ enum MenuBarAppMain {
             app.setActivationPolicy(.accessory)
 
             let delegate = MenuBarAppDelegate()
+            appDelegateRef = delegate
             app.delegate = delegate
             app.run()
         }
@@ -47,6 +53,52 @@ enum MenuBarAppMain {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
+
+    @MainActor
+    private static func candidateLockDirectories() -> [URL] {
+        var candidates: [URL] = []
+
+        // Put temp directory first to avoid startup failure in restricted environments.
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("RecaplySense", isDirectory: true)
+        candidates.append(tempDir)
+
+        if let appSupport = try? appSupportDirectory() {
+            candidates.append(appSupport)
+        }
+        return candidates
+    }
+
+    @MainActor
+    private static func acquireRuntimeLock() throws -> LockAcquireResult {
+        var errors: [String] = []
+
+        for directory in candidateLockDirectories() {
+            let lockURL = directory.appendingPathComponent("app.lock")
+            do {
+                let lock = try SingleInstanceLock(lockFileURL: lockURL)
+                let acquired = try lock.acquire()
+                if acquired {
+                    return .acquired(lock)
+                }
+                return .alreadyRunning
+            } catch {
+                errors.append("\(lockURL.path): \(error.localizedDescription)")
+            }
+        }
+
+        if errors.isEmpty {
+            return .failed("No lock path candidates available")
+        }
+
+        return .failed(errors.joined(separator: " | "))
+    }
+}
+
+private enum LockAcquireResult {
+    case acquired(SingleInstanceLock)
+    case alreadyRunning
+    case failed(String)
 }
 
 @MainActor
