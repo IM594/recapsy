@@ -221,6 +221,10 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         latestCaptureItem.isEnabled = false
         menu.addItem(latestCaptureItem)
 
+        let latestFrameOCRItem = NSMenuItem(title: latestFrameOCRPreviewText(), action: nil, keyEquivalent: "")
+        latestFrameOCRItem.isEnabled = false
+        menu.addItem(latestFrameOCRItem)
+
         let latestChunkItem = NSMenuItem(title: latestChunkPreviewText(), action: nil, keyEquivalent: "")
         latestChunkItem.isEnabled = false
         menu.addItem(latestChunkItem)
@@ -372,6 +376,21 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             return "最近文本: \(preview)"
         } catch {
             return "最近文本读取失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func latestFrameOCRPreviewText() -> String {
+        guard let store else {
+            return "最近OCR: -"
+        }
+
+        do {
+            guard let preview = try store.latestFrameOCRPreview(maxLength: 50), !preview.isEmpty else {
+                return "最近OCR: 暂无"
+            }
+            return "最近OCR: \(preview)"
+        } catch {
+            return "最近OCR读取失败: \(error.localizedDescription)"
         }
     }
 

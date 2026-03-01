@@ -3,8 +3,8 @@ import Testing
 @testable import RecaplySenseCore
 
 struct MemoryStoreObservabilityTests {
-    @Test("应能读取最近采集时间和最近文本预览")
-    func shouldReturnLatestCaptureAndChunkPreview() throws {
+    @Test("应能读取最近采集时间、最近OCR预览和最近文本预览")
+    func shouldReturnLatestCaptureAndPreviews() throws {
         let dbURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("recaply-sense-obsv-\(UUID().uuidString).sqlite")
 
@@ -44,9 +44,11 @@ struct MemoryStoreObservabilityTests {
         )
 
         let latestCaptureAt = try store.latestFrameCapturedAt()
+        let latestFramePreview = try store.latestFrameOCRPreview(maxLength: 3)
         let latestPreview = try store.latestChunkPreview(maxLength: 12)
 
         #expect(latestCaptureAt == t1)
+        #expect(latestFramePreview == "sec")
         #expect(latestPreview == "this is late")
     }
 }

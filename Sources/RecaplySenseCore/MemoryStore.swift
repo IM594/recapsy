@@ -267,6 +267,19 @@ public final class MemoryStore {
         return preview
     }
 
+    public func latestFrameOCRPreview(maxLength: Int) throws -> String? {
+        let sql = "SELECT ocr_text FROM frames ORDER BY captured_at DESC LIMIT 1;"
+        var preview: String?
+        try withPreparedStatement(sql: sql) { statement in
+            if sqlite3_step(statement) == SQLITE_ROW,
+               let textPointer = sqlite3_column_text(statement, 0) {
+                let fullText = String(cString: textPointer)
+                preview = String(fullText.prefix(max(0, maxLength)))
+            }
+        }
+        return preview
+    }
+
     private func openDatabase() throws {
         if sqlite3_open(databaseURL.path, &db) != SQLITE_OK {
             throw RecaplySenseError.sqlite(message: sqliteErrorMessage())
