@@ -5,11 +5,46 @@ import ApplicationServices
 #endif
 
 #if os(macOS)
+public protocol CGWindowCaptureEnvironment {
+    func frontmostApplicationName() -> String?
+    func windowList() -> [[String: Any]]?
+    func captureWindowImage(windowID: CGWindowID) -> CGImage?
+}
+
+private struct LiveCGWindowCaptureEnvironment: CGWindowCaptureEnvironment {
+    func frontmostApplicationName() -> String? {
+        NSWorkspace.shared.frontmostApplication?.localizedName
+    }
+
+    func windowList() -> [[String: Any]]? {
+        CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]]
+    }
+
+    func captureWindowImage(windowID: CGWindowID) -> CGImage? {
+        CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            windowID,
+            [.boundsIgnoreFraming, .bestResolution]
+        )
+    }
+}
+
 public final class CGWindowCaptureSource: FrameSource {
-    private let artifactWriter: FrameArtifactWriter
+    private let environment: any CGWindowCaptureEnvironment
+    private let artifactWriter: any FrameArtifactWriting
 
     public init(mediaDirectory: URL) throws {
+        self.environment = LiveCGWindowCaptureEnvironment()
         self.artifactWriter = try FrameArtifactWriter(mediaDirectory: mediaDirectory)
+    }
+
+    init(environment: any CGWindowCaptureEnvironment, artifactWriter: any FrameArtifactWriting) {
+        self.environment = environment
+        self.artifactWriter = artifactWriter
     }
 
     public func captureFrame(at date: Date) throws -> CapturedFrame? {
@@ -17,12 +52,7 @@ public final class CGWindowCaptureSource: FrameSource {
             return nil
         }
 
-        guard let image = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            frontmostWindow.windowID,
-            [.boundsIgnoreFraming, .bestResolution]
-        ) else {
+        guard let image = environment.captureWindowImage(windowID: frontmostWindow.windowID) else {
             return nil
         }
 
@@ -41,15 +71,11 @@ public final class CGWindowCaptureSource: FrameSource {
     }
 
     private func findFrontmostWindow() -> WindowInfo? {
-        guard let app = NSWorkspace.shared.frontmostApplication else {
+        guard let ownerName = environment.frontmostApplicationName() else {
             return nil
         }
 
-        let ownerName = app.localizedName ?? "Unknown"
-        guard let windowList = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements],
-            kCGNullWindowID
-        ) as? [[String: Any]] else {
+        guard let windowList = environment.windowList() else {
             return nil
         }
 

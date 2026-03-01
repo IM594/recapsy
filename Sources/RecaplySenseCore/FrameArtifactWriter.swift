@@ -12,7 +12,11 @@ public struct FrameArtifact: Sendable {
     }
 }
 
-public final class FrameArtifactWriter {
+public protocol FrameArtifactWriting {
+    func write(cgImage: CGImage, filename: String) throws -> FrameArtifact
+}
+
+public final class FrameArtifactWriter: FrameArtifactWriting {
     private let mediaDirectory: URL
 
     public init(mediaDirectory: URL) throws {

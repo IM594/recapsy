@@ -8,12 +8,31 @@ import ScreenCaptureKit
 
 #if os(macOS) && canImport(ScreenCaptureKit)
 public final class ScreenCaptureKitFrameSource: FrameSource {
-    private let mediaDirectory: URL
-    private let artifactWriter: FrameArtifactWriter
+    private let artifactWriter: any FrameArtifactWriting
+    private let appNameProvider: () -> String?
+    private let imageProvider: () throws -> CGImage
 
     public init(mediaDirectory: URL) throws {
-        self.mediaDirectory = mediaDirectory
         self.artifactWriter = try FrameArtifactWriter(mediaDirectory: mediaDirectory)
+        self.appNameProvider = {
+            NSWorkspace.shared.frontmostApplication?.localizedName
+        }
+        self.imageProvider = {
+            guard #available(macOS 14.0, *) else {
+                throw RecaplySenseError.capture(message: "ScreenCaptureKit requires macOS 14+")
+            }
+            return try ScreenCaptureKitFrameSource.captureImageOnSupportedOS()
+        }
+    }
+
+    init(
+        artifactWriter: any FrameArtifactWriting,
+        appNameProvider: @escaping () -> String?,
+        imageProvider: @escaping () throws -> CGImage
+    ) {
+        self.artifactWriter = artifactWriter
+        self.appNameProvider = appNameProvider
+        self.imageProvider = imageProvider
     }
 
     public func captureFrame(at date: Date) throws -> CapturedFrame? {
@@ -21,34 +40,11 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
             throw RecaplySenseError.capture(message: "ScreenCaptureKit requires macOS 14+")
         }
 
-        return try captureFrameOnSupportedOS(at: date)
-    }
-
-    @available(macOS 14.0, *)
-    private func captureFrameOnSupportedOS(at date: Date) throws -> CapturedFrame? {
-        guard let app = NSWorkspace.shared.frontmostApplication else {
+        guard let appName = appNameProvider(), !appName.isEmpty else {
             return nil
         }
-
-        let appName = app.localizedName ?? "Unknown"
         let windowTitle = appName
-
-        let image = try awaitValue {
-            let content = try await SCShareableContent.current
-            guard let display = content.displays.first else {
-                throw RecaplySenseError.capture(message: "No display available for ScreenCaptureKit")
-            }
-
-            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-            let config = SCStreamConfiguration()
-            config.width = display.width
-            config.height = display.height
-
-            return try await SCScreenshotManager.captureImage(
-                contentFilter: filter,
-                configuration: config
-            )
-        }
+        let image = try imageProvider()
 
         let filename = "frame-sckit-\(Int(date.timeIntervalSince1970 * 1000)).png"
         let artifact = try artifactWriter.write(cgImage: image, filename: filename)
@@ -64,6 +60,25 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
         )
     }
 
+    @available(macOS 14.0, *)
+    private static func captureImageOnSupportedOS() throws -> CGImage {
+        try awaitValue {
+            let content = try await SCShareableContent.current
+            guard let display = content.displays.first else {
+                throw RecaplySenseError.capture(message: "No display available for ScreenCaptureKit")
+            }
+
+            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+            let config = SCStreamConfiguration()
+            config.width = display.width
+            config.height = display.height
+
+            return try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: config
+            )
+        }
+    }
 }
 #else
 public final class ScreenCaptureKitFrameSource: FrameSource {
