@@ -109,6 +109,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 
     private let snapshotService = DashboardSnapshotService()
     private let mainWindowPresenter = MainWindowPresenter()
+    private let captureActionGuard = CaptureActionGuard()
     private var lastErrorMessage: String?
     private var dataDirectoryURL: URL?
     private var refreshTimer: Timer?
@@ -520,37 +521,64 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func startCapture() {
-        guard CGPreflightScreenCaptureAccess() else {
-            _ = CGRequestScreenCaptureAccess()
-            lastErrorMessage = "缺少 screen 权限，已触发系统授权弹窗；授权后请重启应用。"
-            refreshUI()
-            return
-        }
-
-        lifecycleController?.start()
-        refreshUI()
+        performCaptureAction(.start)
     }
 
     @objc
     private func pauseCapture() {
-        lifecycleController?.pause()
-        refreshUI()
+        performCaptureAction(.pause)
     }
 
     @objc
     private func resumeCapture() {
-        lifecycleController?.resume()
-        refreshUI()
+        performCaptureAction(.resume)
     }
 
     @objc
     private func stopCapture() {
+        performCaptureAction(.stop)
+    }
+
+    private func performCaptureAction(_ action: CaptureAction) {
+        let hasScreenPermission = action == .start ? CGPreflightScreenCaptureAccess() : true
+        let resolution = captureActionGuard.resolve(
+            action: action,
+            lifecycleState: lifecycleController?.state,
+            hasScreenPermission: hasScreenPermission
+        )
+
+        if resolution.shouldRequestScreenPermission {
+            _ = CGRequestScreenCaptureAccess()
+        }
+        if let errorMessage = resolution.errorMessage {
+            lastErrorMessage = errorMessage
+        }
+
+        guard let operation = resolution.operation else {
+            refreshUI()
+            return
+        }
+
         do {
-            try lifecycleController?.stop()
+            try executeCaptureOperation(operation)
         } catch {
             lastErrorMessage = error.localizedDescription
         }
+
         refreshUI()
+    }
+
+    private func executeCaptureOperation(_ operation: CaptureOperation) throws {
+        switch operation {
+        case .start:
+            lifecycleController?.start()
+        case .pause:
+            lifecycleController?.pause()
+        case .resume:
+            lifecycleController?.resume()
+        case .stop:
+            try lifecycleController?.stop()
+        }
     }
 
     @objc
