@@ -65,19 +65,13 @@ private func runCaptureOnce(dbPath: String) throws {
     let dbURL = URL(fileURLWithPath: dbPath)
     let mediaDirectory = dbURL.deletingLastPathComponent().appendingPathComponent("media")
 
-    let store = try MemoryStore(databaseURL: dbURL)
-    try store.bootstrapSchema()
-
-    let pipeline = OfflinePipeline(
-        store: store,
-        ocrProvider: VisionOCRProvider(),
-        windowSize: 120
+    let runtime = try AppRuntimeBuilder.build(
+        databaseURL: dbURL,
+        mediaDirectory: mediaDirectory
     )
-    let source = try CaptureSourceFactory.makeDefault(mediaDirectory: mediaDirectory)
-    let service = CaptureService(frameSource: source, pipeline: pipeline)
 
-    let captured = try service.captureOnce()
-    try service.stopAndFlush()
+    let captured = try runtime.captureService.captureOnce()
+    try runtime.captureService.stopAndFlush()
 
     if captured {
         print("capture complete: 1 frame ingested")
@@ -89,50 +83,13 @@ private func runCaptureOnce(dbPath: String) throws {
 private func runMCPStdio(dbPath: String) throws {
     let store = try MemoryStore(databaseURL: URL(fileURLWithPath: dbPath))
     try store.bootstrapSchema()
-    let router = MCPToolRouter(store: store)
+    let handler = MCPStdioHandler(router: MCPToolRouter(store: store))
 
     while let line = readLine() {
-        let response = try handleMCPLine(line: line, router: router)
+        let response = try handler.handle(line: line)
         print(response)
         fflush(stdout)
     }
-}
-
-private func handleMCPLine(line: String, router: MCPToolRouter) throws -> String {
-    guard let data = line.data(using: .utf8) else {
-        return #"{"error":"invalid utf8"}"#
-    }
-
-    guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let tool = object["tool"] as? String else {
-        return #"{"error":"invalid request"}"#
-    }
-
-    let args = object["arguments"] as? [String: Any] ?? [:]
-
-    switch tool {
-    case "recapsense_search":
-        let query = (args["query"] as? String) ?? ""
-        let limit = (args["limit"] as? Int) ?? 10
-        let appFilter = args["app"] as? String
-        let result = try router.recapsenseSearch(query: query, limit: limit, appFilter: appFilter)
-        return try jsonString(from: result)
-
-    case "recapsense_get_chunk":
-        guard let idNumber = args["id"] as? NSNumber else {
-            return #"{"error":"missing id"}"#
-        }
-        let result = try router.recapsenseGetChunk(id: idNumber.int64Value)
-        return try jsonString(from: result)
-
-    default:
-        return #"{"error":"tool not found"}"#
-    }
-}
-
-private func jsonString<T: Encodable>(from value: T) throws -> String {
-    let data = try JSONEncoder().encode(value)
-    return String(data: data, encoding: .utf8) ?? "{}"
 }
 
 private func printUsage() {
