@@ -1,7 +1,6 @@
 import Foundation
 #if os(macOS)
 import AppKit
-import CryptoKit
 #endif
 #if canImport(ScreenCaptureKit)
 import ScreenCaptureKit
@@ -10,10 +9,11 @@ import ScreenCaptureKit
 #if os(macOS) && canImport(ScreenCaptureKit)
 public final class ScreenCaptureKitFrameSource: FrameSource {
     private let mediaDirectory: URL
+    private let artifactWriter: FrameArtifactWriter
 
     public init(mediaDirectory: URL) throws {
         self.mediaDirectory = mediaDirectory
-        try FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+        self.artifactWriter = try FrameArtifactWriter(mediaDirectory: mediaDirectory)
     }
 
     public func captureFrame(at date: Date) throws -> CapturedFrame? {
@@ -51,36 +51,19 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
         }
 
         let filename = "frame-sckit-\(Int(date.timeIntervalSince1970 * 1000)).png"
-        let imageURL = mediaDirectory.appendingPathComponent(filename)
-
-        try writePNG(cgImage: image, to: imageURL)
-        let imageData = try Data(contentsOf: imageURL)
-        let hash = sha256Hex(data: imageData)
+        let artifact = try artifactWriter.write(cgImage: image, filename: filename)
 
         return CapturedFrame(
             capturedAt: date,
             appName: appName,
             windowTitle: windowTitle,
-            contentHash: hash,
-            rawPayload: imageURL.path,
+            contentHash: artifact.hash,
+            rawPayload: artifact.path,
             mockedText: "",
-            imagePath: imageURL.path
+            imagePath: artifact.path
         )
     }
 
-    private func writePNG(cgImage: CGImage, to url: URL) throws {
-        let bitmap = NSBitmapImageRep(cgImage: cgImage)
-        guard let data = bitmap.representation(using: .png, properties: [:]) else {
-            throw RecaplySenseError.capture(message: "cannot convert screenshot to PNG")
-        }
-        try data.write(to: url, options: .atomic)
-    }
-
-    private func sha256Hex(data: Data) -> String {
-        SHA256.hash(data: data)
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
 }
 #else
 public final class ScreenCaptureKitFrameSource: FrameSource {
