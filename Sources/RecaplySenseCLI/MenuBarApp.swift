@@ -107,6 +107,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var lifecycleController: CaptureLifecycleController?
     private var store: MemoryStore?
 
+    private let snapshotService = DashboardSnapshotService()
     private var lastErrorMessage: String?
     private var dataDirectoryURL: URL?
     private var refreshTimer: Timer?
@@ -161,31 +162,19 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let dbURL = dataDirectory.appendingPathComponent("memory.sqlite")
         let mediaDirectory = dataDirectory.appendingPathComponent("media", isDirectory: true)
 
-        let memoryStore = try MemoryStore(databaseURL: dbURL)
-        try memoryStore.bootstrapSchema()
-        store = memoryStore
-
-        let pipeline = OfflinePipeline(
-            store: memoryStore,
-            ocrProvider: VisionOCRProvider(),
-            windowSize: 120
-        )
-        let source = try CaptureSourceFactory.makeDefault(mediaDirectory: mediaDirectory)
-        let service = CaptureService(
-            frameSource: source,
-            pipeline: pipeline,
-            onError: { [weak self] error in
+        let runtime = try AppRuntimeBuilder.build(
+            databaseURL: dbURL,
+            mediaDirectory: mediaDirectory,
+            captureInterval: 2.0,
+            onCaptureError: { [weak self] error in
                 Task { @MainActor [weak self] in
                     self?.lastErrorMessage = error.localizedDescription
                     self?.refreshUI()
                 }
             }
         )
-
-        lifecycleController = CaptureLifecycleController(
-            captureService: service,
-            captureInterval: 2.0
-        )
+        store = runtime.store
+        lifecycleController = runtime.lifecycleController
     }
 
     private func startRefreshTimer() {
@@ -466,15 +455,23 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func refreshMainWindow() {
-        updateValueLabel(statusValueLabel, text: lifecycleText())
-        updateValueLabel(permissionValueLabel, text: permissionText())
-        updateValueLabel(statsValueLabel, text: dataStatsText())
-        updateValueLabel(latestCaptureValueLabel, text: latestCaptureText())
-        updateValueLabel(latestOCRValueLabel, text: latestFrameOCRPreviewText())
-        updateValueLabel(latestChunkValueLabel, text: latestChunkPreviewText())
-        updateValueLabel(dataDirectoryValueLabel, text: dataDirectoryURL?.path ?? "未初始化")
-        updateValueLabel(errorValueLabel, text: lastErrorMessage ?? "无")
-        updateValueLabel(hintValueLabel, text: "当前阶段仅 screen 权限会阻塞采集。")
+        let snapshot = snapshotService.makeSnapshot(
+            lifecycleState: lifecycleController?.state,
+            store: store,
+            dataDirectoryURL: dataDirectoryURL,
+            lastErrorMessage: lastErrorMessage,
+            permissionChecker: permissionStatus(for:)
+        )
+
+        updateValueLabel(statusValueLabel, text: snapshot.statusText)
+        updateValueLabel(permissionValueLabel, text: snapshot.permissionText)
+        updateValueLabel(statsValueLabel, text: snapshot.statsText)
+        updateValueLabel(latestCaptureValueLabel, text: snapshot.latestCaptureText)
+        updateValueLabel(latestOCRValueLabel, text: snapshot.latestFrameOCRText)
+        updateValueLabel(latestChunkValueLabel, text: snapshot.latestChunkText)
+        updateValueLabel(dataDirectoryValueLabel, text: snapshot.dataDirectoryText)
+        updateValueLabel(errorValueLabel, text: snapshot.errorText)
+        updateValueLabel(hintValueLabel, text: snapshot.hintText)
 
         startButton?.isEnabled = lifecycleController?.state == .stopped
         pauseButton?.isEnabled = lifecycleController?.state == .running
@@ -503,118 +500,23 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func lifecycleText() -> String {
-        switch lifecycleController?.state {
-        case .running:
-            return "运行中"
-        case .paused:
-            return "已暂停"
-        case .stopped, .none:
-            return "未启动"
-        }
-    }
-
-    private func permissionText() -> String {
-        let diagnostics = PermissionDiagnostics { permission in
-            switch permission {
-            case .screenRecording:
-                return CGPreflightScreenCaptureAccess() ? .granted : .denied
-            case .microphone:
-                switch AVCaptureDevice.authorizationStatus(for: .audio) {
-                case .authorized:
-                    return .granted
-                case .notDetermined:
-                    return .notDetermined
-                case .denied, .restricted:
-                    return .denied
-                @unknown default:
-                    return .denied
-                }
-            case .accessibility:
-                return AXIsProcessTrusted() ? .granted : .denied
+    private func permissionStatus(for permission: AppPermission) -> PermissionStatus {
+        switch permission {
+        case .screenRecording:
+            return CGPreflightScreenCaptureAccess() ? .granted : .denied
+        case .microphone:
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized:
+                return .granted
+            case .notDetermined:
+                return .notDetermined
+            case .denied, .restricted:
+                return .denied
+            @unknown default:
+                return .denied
             }
-        }
-
-        let snapshot = diagnostics.snapshot()
-        let screen = statusText(snapshot.statusByPermission[.screenRecording])
-        let mic = statusText(snapshot.statusByPermission[.microphone])
-        let ax = statusText(snapshot.statusByPermission[.accessibility])
-
-        return "screen=\(screen)（必需） mic=\(mic)（可选） accessibility=\(ax)（可选）"
-    }
-
-    private func dataStatsText() -> String {
-        guard let store else {
-            return "store 未就绪"
-        }
-
-        do {
-            let frames = try store.countFrames()
-            let chunks = try store.countChunks()
-            return "frames=\(frames) chunks=\(chunks)"
-        } catch {
-            return "读取失败: \(error.localizedDescription)"
-        }
-    }
-
-    private func latestCaptureText() -> String {
-        guard let store else {
-            return "-"
-        }
-
-        do {
-            guard let latest = try store.latestFrameCapturedAt() else {
-                return "暂无"
-            }
-            let formatter = ISO8601DateFormatter()
-            formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
-            formatter.formatOptions = [.withInternetDateTime]
-            return formatter.string(from: latest)
-        } catch {
-            return "读取失败: \(error.localizedDescription)"
-        }
-    }
-
-    private func latestChunkPreviewText() -> String {
-        guard let store else {
-            return "-"
-        }
-
-        do {
-            guard let preview = try store.latestChunkPreview(maxLength: 50), !preview.isEmpty else {
-                return "暂无"
-            }
-            return preview
-        } catch {
-            return "读取失败: \(error.localizedDescription)"
-        }
-    }
-
-    private func latestFrameOCRPreviewText() -> String {
-        guard let store else {
-            return "-"
-        }
-
-        do {
-            guard let preview = try store.latestFrameOCRPreview(maxLength: 50), !preview.isEmpty else {
-                return "暂无"
-            }
-            return preview
-        } catch {
-            return "读取失败: \(error.localizedDescription)"
-        }
-    }
-
-    private func statusText(_ status: PermissionStatus?) -> String {
-        switch status {
-        case .granted:
-            return "已授权"
-        case .denied:
-            return "未授权"
-        case .notDetermined:
-            return "未决定"
-        case .none:
-            return "未知"
+        case .accessibility:
+            return AXIsProcessTrusted() ? .granted : .denied
         }
     }
 
