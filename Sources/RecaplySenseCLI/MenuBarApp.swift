@@ -108,6 +108,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var store: MemoryStore?
 
     private let snapshotService = DashboardSnapshotService()
+    private let mainWindowPresenter = MainWindowPresenter()
     private var lastErrorMessage: String?
     private var dataDirectoryURL: URL?
     private var refreshTimer: Timer?
@@ -462,22 +463,27 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             lastErrorMessage: lastErrorMessage,
             permissionChecker: permissionStatus(for:)
         )
+        let viewModel = mainWindowPresenter.makeViewModel(
+            snapshot: snapshot,
+            lifecycleState: lifecycleController?.state,
+            hasDataDirectory: dataDirectoryURL != nil
+        )
 
-        updateValueLabel(statusValueLabel, text: snapshot.statusText)
-        updateValueLabel(permissionValueLabel, text: snapshot.permissionText)
-        updateValueLabel(statsValueLabel, text: snapshot.statsText)
-        updateValueLabel(latestCaptureValueLabel, text: snapshot.latestCaptureText)
-        updateValueLabel(latestOCRValueLabel, text: snapshot.latestFrameOCRText)
-        updateValueLabel(latestChunkValueLabel, text: snapshot.latestChunkText)
-        updateValueLabel(dataDirectoryValueLabel, text: snapshot.dataDirectoryText)
-        updateValueLabel(errorValueLabel, text: snapshot.errorText)
-        updateValueLabel(hintValueLabel, text: snapshot.hintText)
+        updateValueLabel(statusValueLabel, text: viewModel.statusText)
+        updateValueLabel(permissionValueLabel, text: viewModel.permissionText)
+        updateValueLabel(statsValueLabel, text: viewModel.statsText)
+        updateValueLabel(latestCaptureValueLabel, text: viewModel.latestCaptureText)
+        updateValueLabel(latestOCRValueLabel, text: viewModel.latestFrameOCRText)
+        updateValueLabel(latestChunkValueLabel, text: viewModel.latestChunkText)
+        updateValueLabel(dataDirectoryValueLabel, text: viewModel.dataDirectoryText)
+        updateValueLabel(errorValueLabel, text: viewModel.errorText)
+        updateValueLabel(hintValueLabel, text: viewModel.hintText)
 
-        startButton?.isEnabled = lifecycleController?.state == .stopped
-        pauseButton?.isEnabled = lifecycleController?.state == .running
-        resumeButton?.isEnabled = lifecycleController?.state == .paused
-        stopButton?.isEnabled = lifecycleController?.state != .stopped
-        openDataButton?.isEnabled = dataDirectoryURL != nil
+        startButton?.isEnabled = viewModel.startButtonEnabled
+        pauseButton?.isEnabled = viewModel.pauseButtonEnabled
+        resumeButton?.isEnabled = viewModel.resumeButtonEnabled
+        stopButton?.isEnabled = viewModel.stopButtonEnabled
+        openDataButton?.isEnabled = viewModel.openDataButtonEnabled
     }
 
     private func updateValueLabel(_ label: NSTextField?, text: String) {
@@ -489,15 +495,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem?.button else {
             return
         }
-
-        switch lifecycleController?.state {
-        case .running:
-            button.title = "RS:R"
-        case .paused:
-            button.title = "RS:P"
-        case .stopped, .none:
-            button.title = "RS:S"
-        }
+        button.title = mainWindowPresenter.statusItemTitle(for: lifecycleController?.state)
     }
 
     private func permissionStatus(for permission: AppPermission) -> PermissionStatus {
