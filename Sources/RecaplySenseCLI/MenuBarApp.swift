@@ -217,6 +217,14 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         statsItem.isEnabled = false
         menu.addItem(statsItem)
 
+        let latestCaptureItem = NSMenuItem(title: latestCaptureText(), action: nil, keyEquivalent: "")
+        latestCaptureItem.isEnabled = false
+        menu.addItem(latestCaptureItem)
+
+        let latestChunkItem = NSMenuItem(title: latestChunkPreviewText(), action: nil, keyEquivalent: "")
+        latestChunkItem.isEnabled = false
+        menu.addItem(latestChunkItem)
+
         if let dataDirectoryURL {
             let dataItem = NSMenuItem(title: "数据目录: \(dataDirectoryURL.path)", action: nil, keyEquivalent: "")
             dataItem.isEnabled = false
@@ -331,6 +339,39 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             return "数据统计 frames=\(frames) chunks=\(chunks)"
         } catch {
             return "数据统计读取失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func latestCaptureText() -> String {
+        guard let store else {
+            return "最近采集: -"
+        }
+
+        do {
+            guard let latest = try store.latestFrameCapturedAt() else {
+                return "最近采集: 暂无"
+            }
+            let formatter = ISO8601DateFormatter()
+            formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+            formatter.formatOptions = [.withInternetDateTime]
+            return "最近采集: \(formatter.string(from: latest))"
+        } catch {
+            return "最近采集读取失败: \(error.localizedDescription)"
+        }
+    }
+
+    private func latestChunkPreviewText() -> String {
+        guard let store else {
+            return "最近文本: -"
+        }
+
+        do {
+            guard let preview = try store.latestChunkPreview(maxLength: 50), !preview.isEmpty else {
+                return "最近文本: 暂无"
+            }
+            return "最近文本: \(preview)"
+        } catch {
+            return "最近文本读取失败: \(error.localizedDescription)"
         }
     }
 

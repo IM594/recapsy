@@ -242,6 +242,31 @@ public final class MemoryStore {
         try scalarInt(sql: "SELECT COUNT(*) FROM chunks;")
     }
 
+    public func latestFrameCapturedAt() throws -> Date? {
+        let sql = "SELECT captured_at FROM frames ORDER BY captured_at DESC LIMIT 1;"
+        var result: Date?
+        try withPreparedStatement(sql: sql) { statement in
+            if sqlite3_step(statement) == SQLITE_ROW {
+                let timestamp = sqlite3_column_int64(statement, 0)
+                result = Date(timeIntervalSince1970: TimeInterval(timestamp))
+            }
+        }
+        return result
+    }
+
+    public func latestChunkPreview(maxLength: Int) throws -> String? {
+        let sql = "SELECT text FROM chunks ORDER BY end_at DESC LIMIT 1;"
+        var preview: String?
+        try withPreparedStatement(sql: sql) { statement in
+            if sqlite3_step(statement) == SQLITE_ROW,
+               let textPointer = sqlite3_column_text(statement, 0) {
+                let fullText = String(cString: textPointer)
+                preview = String(fullText.prefix(max(0, maxLength)))
+            }
+        }
+        return preview
+    }
+
     private func openDatabase() throws {
         if sqlite3_open(databaseURL.path, &db) != SQLITE_OK {
             throw RecaplySenseError.sqlite(message: sqliteErrorMessage())
