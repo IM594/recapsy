@@ -110,9 +110,26 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var lastErrorMessage: String?
     private var dataDirectoryURL: URL?
     private var refreshTimer: Timer?
+    private let compileTimeText = MenuBarAppDelegate.resolveCompileTimeText()
+    private var mainWindow: NSWindow?
+    private var statusValueLabel: NSTextField?
+    private var permissionValueLabel: NSTextField?
+    private var statsValueLabel: NSTextField?
+    private var latestCaptureValueLabel: NSTextField?
+    private var latestOCRValueLabel: NSTextField?
+    private var latestChunkValueLabel: NSTextField?
+    private var dataDirectoryValueLabel: NSTextField?
+    private var errorValueLabel: NSTextField?
+    private var hintValueLabel: NSTextField?
+    private var startButton: NSButton?
+    private var pauseButton: NSButton?
+    private var resumeButton: NSButton?
+    private var stopButton: NSButton?
+    private var openDataButton: NSButton?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
+        setupMainWindow()
 
         do {
             try setupRuntime()
@@ -121,12 +138,20 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         startRefreshTimer()
-        refreshMenu()
+        refreshUI()
+        showMainWindow()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         refreshTimer?.invalidate()
         refreshTimer = nil
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            showMainWindow()
+        }
+        return true
     }
 
     private func setupRuntime() throws {
@@ -152,7 +177,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             onError: { [weak self] error in
                 Task { @MainActor [weak self] in
                     self?.lastErrorMessage = error.localizedDescription
-                    self?.refreshMenu()
+                    self?.refreshUI()
                 }
             }
         )
@@ -167,7 +192,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         refreshTimer?.invalidate()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.refreshMenu()
+                self?.refreshUI()
             }
         }
     }
@@ -189,92 +214,278 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
     }
 
+    private func setupMainWindow() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "RecaplySense"
+        window.minSize = NSSize(width: 540, height: 460)
+        window.isReleasedWhenClosed = false
+        window.center()
+
+        let titleLabel = NSTextField(labelWithString: "RecaplySense 主窗口")
+        titleLabel.font = .systemFont(ofSize: 24, weight: .bold)
+
+        let compileTimeLabel = NSTextField(labelWithString: "编译时间: \(compileTimeText)")
+        compileTimeLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        compileTimeLabel.textColor = .tertiaryLabelColor
+        compileTimeLabel.alignment = .left
+        compileTimeLabel.lineBreakMode = .byTruncatingMiddle
+        compileTimeLabel.toolTip = compileTimeText
+
+        let subtitleLabel = NSTextField(labelWithString: "菜单栏只保留关键动作，详细状态统一放在这里。")
+        subtitleLabel.font = .systemFont(ofSize: 14, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabelColor
+
+        let headerStack = NSStackView(views: [titleLabel, subtitleLabel, compileTimeLabel])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 6
+
+        let infoStack = NSStackView()
+        infoStack.orientation = .vertical
+        infoStack.spacing = 14
+        infoStack.alignment = .leading
+        infoStack.translatesAutoresizingMaskIntoConstraints = false
+
+        let statusRow = makeInfoRow(title: "状态")
+        statusValueLabel = statusRow.valueLabel
+        infoStack.addArrangedSubview(statusRow.rowView)
+
+        let permissionRow = makeInfoRow(title: "权限")
+        permissionValueLabel = permissionRow.valueLabel
+        infoStack.addArrangedSubview(permissionRow.rowView)
+
+        let statsRow = makeInfoRow(title: "数据统计")
+        statsValueLabel = statsRow.valueLabel
+        infoStack.addArrangedSubview(statsRow.rowView)
+
+        let captureRow = makeInfoRow(title: "最近采集")
+        latestCaptureValueLabel = captureRow.valueLabel
+        infoStack.addArrangedSubview(captureRow.rowView)
+
+        let ocrRow = makeInfoRow(title: "最近 OCR")
+        latestOCRValueLabel = ocrRow.valueLabel
+        infoStack.addArrangedSubview(ocrRow.rowView)
+
+        let chunkRow = makeInfoRow(title: "最近文本")
+        latestChunkValueLabel = chunkRow.valueLabel
+        infoStack.addArrangedSubview(chunkRow.rowView)
+
+        let dirRow = makeInfoRow(title: "数据目录")
+        dataDirectoryValueLabel = dirRow.valueLabel
+        infoStack.addArrangedSubview(dirRow.rowView)
+
+        let errorRow = makeInfoRow(title: "最近错误")
+        errorValueLabel = errorRow.valueLabel
+        infoStack.addArrangedSubview(errorRow.rowView)
+
+        let hintRow = makeInfoRow(title: "提示")
+        hintValueLabel = hintRow.valueLabel
+        infoStack.addArrangedSubview(hintRow.rowView)
+
+        let infoCard = NSBox()
+        infoCard.boxType = .custom
+        infoCard.borderWidth = 1
+        infoCard.borderColor = NSColor.separatorColor.withAlphaComponent(0.3)
+        infoCard.cornerRadius = 12
+        infoCard.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.5)
+        infoCard.titlePosition = .noTitle
+        infoCard.contentViewMargins = NSSize(width: 20, height: 20)
+        infoCard.translatesAutoresizingMaskIntoConstraints = false
+        infoCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
+
+        let cardContent = NSView()
+        cardContent.addSubview(infoStack)
+        NSLayoutConstraint.activate([
+            infoStack.leadingAnchor.constraint(equalTo: cardContent.leadingAnchor),
+            infoStack.trailingAnchor.constraint(equalTo: cardContent.trailingAnchor),
+            infoStack.topAnchor.constraint(equalTo: cardContent.topAnchor),
+            infoStack.bottomAnchor.constraint(equalTo: cardContent.bottomAnchor),
+        ])
+        infoCard.contentView = cardContent
+
+        let startButton = makeButton(title: "开始采集", action: #selector(startCapture))
+        let pauseButton = makeButton(title: "暂停采集", action: #selector(pauseCapture))
+        let resumeButton = makeButton(title: "继续采集", action: #selector(resumeCapture))
+        let stopButton = makeButton(title: "停止采集", action: #selector(stopCapture))
+        let openDataButton = makeButton(title: "打开数据目录", action: #selector(openDataDirectory))
+        let refreshButton = makeButton(title: "立即刷新", action: #selector(refreshNow))
+
+        let captureActionRow = NSStackView(views: [startButton, pauseButton, resumeButton, stopButton])
+        captureActionRow.orientation = .horizontal
+        captureActionRow.spacing = 8
+        captureActionRow.distribution = .fillEqually
+
+        let utilityActionRow = NSStackView(views: [openDataButton, refreshButton])
+        utilityActionRow.orientation = .horizontal
+        utilityActionRow.spacing = 8
+        utilityActionRow.distribution = .fillEqually
+
+        let contentStack = NSStackView(views: [headerStack, infoCard, captureActionRow, utilityActionRow])
+        contentStack.orientation = .vertical
+        contentStack.spacing = 20
+        contentStack.alignment = .leading
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+
+        headerStack.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        infoCard.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        captureActionRow.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+        utilityActionRow.widthAnchor.constraint(equalTo: contentStack.widthAnchor).isActive = true
+
+        let contentView = NSView()
+        contentView.addSubview(contentStack)
+        NSLayoutConstraint.activate([
+            contentStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            contentStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            contentStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 24),
+            contentStack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -24),
+        ])
+
+        window.contentView = contentView
+        mainWindow = window
+        self.startButton = startButton
+        self.pauseButton = pauseButton
+        self.resumeButton = resumeButton
+        self.stopButton = stopButton
+        self.openDataButton = openDataButton
+    }
+
+    private func makeButton(title: String, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: self, action: action)
+        button.bezelStyle = .rounded
+        button.controlSize = .large
+        button.font = .systemFont(ofSize: NSFont.systemFontSize(for: .large))
+        button.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return button
+    }
+
+    private static func resolveCompileTimeText() -> String {
+        guard let executablePath = CommandLine.arguments.first else {
+            return "未知"
+        }
+
+        let executableURL = URL(fileURLWithPath: executablePath)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: executableURL.path),
+              let modifiedAt = attrs[.modificationDate] as? Date else {
+            return "未知"
+        }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter.string(from: modifiedAt)
+    }
+
+    private func makeInfoRow(title: String) -> (rowView: NSView, valueLabel: NSTextField) {
+        let titleLabel = NSTextField(labelWithString: title)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.alignment = .left
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.widthAnchor.constraint(equalToConstant: 76).isActive = true
+        titleLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let valueLabel = NSTextField(labelWithString: "-")
+        valueLabel.font = .systemFont(ofSize: 13, weight: .regular)
+        valueLabel.textColor = .labelColor
+        valueLabel.lineBreakMode = .byWordWrapping
+        valueLabel.maximumNumberOfLines = 2
+        valueLabel.allowsDefaultTighteningForTruncation = true
+        valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let row = NSStackView(views: [titleLabel, valueLabel])
+        row.orientation = .horizontal
+        row.alignment = .firstBaseline
+        row.spacing = 12
+        row.distribution = .fill
+        return (row, valueLabel)
+    }
+
+    private func refreshUI() {
+        refreshMenu()
+        refreshMainWindow()
+    }
+
     private func refreshMenu() {
         guard let statusItem else {
             return
         }
 
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
-        let stateText = "状态: \(lifecycleText())"
-        let stateItem = NSMenuItem(title: stateText, action: nil, keyEquivalent: "")
-        stateItem.isEnabled = false
-        menu.addItem(stateItem)
+        let openMainItem = NSMenuItem(title: "打开 RecaplySense", action: #selector(showMainWindow), keyEquivalent: "")
+        openMainItem.target = self
+        menu.addItem(openMainItem)
 
-        let permissionItem = NSMenuItem(title: permissionText(), action: nil, keyEquivalent: "")
-        permissionItem.isEnabled = false
-        menu.addItem(permissionItem)
+        menu.addItem(.separator())
 
-        let permissionHintItem = NSMenuItem(
-            title: "说明: M0 仅需 screen；mic/accessibility 当前不阻塞采集",
-            action: nil,
-            keyEquivalent: ""
-        )
-        permissionHintItem.isEnabled = false
-        menu.addItem(permissionHintItem)
+        switch lifecycleController?.state {
+        case .running:
+            let pauseItem = NSMenuItem(title: "暂停采集", action: #selector(pauseCapture), keyEquivalent: "")
+            pauseItem.target = self
+            menu.addItem(pauseItem)
 
-        let statsItem = NSMenuItem(title: dataStatsText(), action: nil, keyEquivalent: "")
-        statsItem.isEnabled = false
-        menu.addItem(statsItem)
+            let stopItem = NSMenuItem(title: "停止采集", action: #selector(stopCapture), keyEquivalent: "")
+            stopItem.target = self
+            menu.addItem(stopItem)
+        case .paused:
+            let resumeItem = NSMenuItem(title: "继续采集", action: #selector(resumeCapture), keyEquivalent: "")
+            resumeItem.target = self
+            menu.addItem(resumeItem)
 
-        let latestCaptureItem = NSMenuItem(title: latestCaptureText(), action: nil, keyEquivalent: "")
-        latestCaptureItem.isEnabled = false
-        menu.addItem(latestCaptureItem)
+            let stopItem = NSMenuItem(title: "停止采集", action: #selector(stopCapture), keyEquivalent: "")
+            stopItem.target = self
+            menu.addItem(stopItem)
+        case .stopped, .none:
+            let startItem = NSMenuItem(title: "开始采集", action: #selector(startCapture), keyEquivalent: "")
+            startItem.target = self
+            menu.addItem(startItem)
+        }
 
-        let latestFrameOCRItem = NSMenuItem(title: latestFrameOCRPreviewText(), action: nil, keyEquivalent: "")
-        latestFrameOCRItem.isEnabled = false
-        menu.addItem(latestFrameOCRItem)
-
-        let latestChunkItem = NSMenuItem(title: latestChunkPreviewText(), action: nil, keyEquivalent: "")
-        latestChunkItem.isEnabled = false
-        menu.addItem(latestChunkItem)
-
-        if let dataDirectoryURL {
-            let dataItem = NSMenuItem(title: "数据目录: \(dataDirectoryURL.path)", action: nil, keyEquivalent: "")
-            dataItem.isEnabled = false
-            menu.addItem(dataItem)
-
-            let openDataItem = NSMenuItem(title: "Open Data Folder", action: #selector(openDataDirectory), keyEquivalent: "o")
+        if dataDirectoryURL != nil {
+            let openDataItem = NSMenuItem(title: "打开数据目录", action: #selector(openDataDirectory), keyEquivalent: "")
             openDataItem.target = self
             menu.addItem(openDataItem)
         }
 
-        if let lastErrorMessage {
-            let errorItem = NSMenuItem(title: "最近错误: \(lastErrorMessage)", action: nil, keyEquivalent: "")
-            errorItem.isEnabled = false
-            menu.addItem(errorItem)
-        }
-
         menu.addItem(.separator())
 
-        let startItem = NSMenuItem(title: "Start", action: #selector(startCapture), keyEquivalent: "s")
-        startItem.target = self
-        startItem.isEnabled = lifecycleController?.state == .stopped
-        menu.addItem(startItem)
-
-        let pauseItem = NSMenuItem(title: "Pause", action: #selector(pauseCapture), keyEquivalent: "p")
-        pauseItem.target = self
-        pauseItem.isEnabled = lifecycleController?.state == .running
-        menu.addItem(pauseItem)
-
-        let resumeItem = NSMenuItem(title: "Resume", action: #selector(resumeCapture), keyEquivalent: "r")
-        resumeItem.target = self
-        resumeItem.isEnabled = lifecycleController?.state == .paused
-        menu.addItem(resumeItem)
-
-        let stopItem = NSMenuItem(title: "Stop", action: #selector(stopCapture), keyEquivalent: "t")
-        stopItem.target = self
-        stopItem.isEnabled = lifecycleController?.state != .stopped
-        menu.addItem(stopItem)
-
-        menu.addItem(.separator())
-
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "退出 RecaplySense", action: #selector(quitApp), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
 
         statusItem.menu = menu
         updateStatusTitle()
+    }
+
+    private func refreshMainWindow() {
+        updateValueLabel(statusValueLabel, text: lifecycleText())
+        updateValueLabel(permissionValueLabel, text: permissionText())
+        updateValueLabel(statsValueLabel, text: dataStatsText())
+        updateValueLabel(latestCaptureValueLabel, text: latestCaptureText())
+        updateValueLabel(latestOCRValueLabel, text: latestFrameOCRPreviewText())
+        updateValueLabel(latestChunkValueLabel, text: latestChunkPreviewText())
+        updateValueLabel(dataDirectoryValueLabel, text: dataDirectoryURL?.path ?? "未初始化")
+        updateValueLabel(errorValueLabel, text: lastErrorMessage ?? "无")
+        updateValueLabel(hintValueLabel, text: "当前阶段仅 screen 权限会阻塞采集。")
+
+        startButton?.isEnabled = lifecycleController?.state == .stopped
+        pauseButton?.isEnabled = lifecycleController?.state == .running
+        resumeButton?.isEnabled = lifecycleController?.state == .paused
+        stopButton?.isEnabled = lifecycleController?.state != .stopped
+        openDataButton?.isEnabled = dataDirectoryURL != nil
+    }
+
+    private func updateValueLabel(_ label: NSTextField?, text: String) {
+        label?.stringValue = text
+        label?.toolTip = text
     }
 
     private func updateStatusTitle() {
@@ -295,11 +506,11 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private func lifecycleText() -> String {
         switch lifecycleController?.state {
         case .running:
-            return "running"
+            return "运行中"
         case .paused:
-            return "paused"
+            return "已暂停"
         case .stopped, .none:
-            return "stopped"
+            return "未启动"
         }
     }
 
@@ -329,81 +540,81 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let mic = statusText(snapshot.statusByPermission[.microphone])
         let ax = statusText(snapshot.statusByPermission[.accessibility])
 
-        return "权限 screen=\(screen) (required) mic=\(mic) (optional) accessibility=\(ax) (optional)"
+        return "screen=\(screen)（必需） mic=\(mic)（可选） accessibility=\(ax)（可选）"
     }
 
     private func dataStatsText() -> String {
         guard let store else {
-            return "数据统计: store not ready"
+            return "store 未就绪"
         }
 
         do {
             let frames = try store.countFrames()
             let chunks = try store.countChunks()
-            return "数据统计 frames=\(frames) chunks=\(chunks)"
+            return "frames=\(frames) chunks=\(chunks)"
         } catch {
-            return "数据统计读取失败: \(error.localizedDescription)"
+            return "读取失败: \(error.localizedDescription)"
         }
     }
 
     private func latestCaptureText() -> String {
         guard let store else {
-            return "最近采集: -"
+            return "-"
         }
 
         do {
             guard let latest = try store.latestFrameCapturedAt() else {
-                return "最近采集: 暂无"
+                return "暂无"
             }
             let formatter = ISO8601DateFormatter()
             formatter.timeZone = TimeZone(identifier: "Asia/Shanghai")
             formatter.formatOptions = [.withInternetDateTime]
-            return "最近采集: \(formatter.string(from: latest))"
+            return formatter.string(from: latest)
         } catch {
-            return "最近采集读取失败: \(error.localizedDescription)"
+            return "读取失败: \(error.localizedDescription)"
         }
     }
 
     private func latestChunkPreviewText() -> String {
         guard let store else {
-            return "最近文本: -"
+            return "-"
         }
 
         do {
             guard let preview = try store.latestChunkPreview(maxLength: 50), !preview.isEmpty else {
-                return "最近文本: 暂无"
+                return "暂无"
             }
-            return "最近文本: \(preview)"
+            return preview
         } catch {
-            return "最近文本读取失败: \(error.localizedDescription)"
+            return "读取失败: \(error.localizedDescription)"
         }
     }
 
     private func latestFrameOCRPreviewText() -> String {
         guard let store else {
-            return "最近OCR: -"
+            return "-"
         }
 
         do {
             guard let preview = try store.latestFrameOCRPreview(maxLength: 50), !preview.isEmpty else {
-                return "最近OCR: 暂无"
+                return "暂无"
             }
-            return "最近OCR: \(preview)"
+            return preview
         } catch {
-            return "最近OCR读取失败: \(error.localizedDescription)"
+            return "读取失败: \(error.localizedDescription)"
         }
     }
 
     private func statusText(_ status: PermissionStatus?) -> String {
         switch status {
         case .granted:
-            return "granted"
+            return "已授权"
         case .denied:
-            return "denied"
+            return "未授权"
         case .notDetermined:
-            return "not_determined"
+            return "未决定"
         case .none:
-            return "unknown"
+            return "未知"
         }
     }
 
@@ -412,24 +623,24 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         guard CGPreflightScreenCaptureAccess() else {
             _ = CGRequestScreenCaptureAccess()
             lastErrorMessage = "缺少 screen 权限，已触发系统授权弹窗；授权后请重启应用。"
-            refreshMenu()
+            refreshUI()
             return
         }
 
         lifecycleController?.start()
-        refreshMenu()
+        refreshUI()
     }
 
     @objc
     private func pauseCapture() {
         lifecycleController?.pause()
-        refreshMenu()
+        refreshUI()
     }
 
     @objc
     private func resumeCapture() {
         lifecycleController?.resume()
-        refreshMenu()
+        refreshUI()
     }
 
     @objc
@@ -439,7 +650,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             lastErrorMessage = error.localizedDescription
         }
-        refreshMenu()
+        refreshUI()
     }
 
     @objc
@@ -450,6 +661,20 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             lastErrorMessage = error.localizedDescription
         }
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc
+    private func showMainWindow() {
+        guard let mainWindow else {
+            return
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        mainWindow.makeKeyAndOrderFront(nil)
+    }
+
+    @objc
+    private func refreshNow() {
+        refreshUI()
     }
 
     @objc
