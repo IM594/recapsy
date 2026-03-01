@@ -105,9 +105,11 @@ private enum LockAcquireResult {
 private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var lifecycleController: CaptureLifecycleController?
+    private var store: MemoryStore?
 
     private var lastErrorMessage: String?
     private var dataDirectoryURL: URL?
+    private var refreshTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -118,7 +120,13 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             lastErrorMessage = error.localizedDescription
         }
 
+        startRefreshTimer()
         refreshMenu()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        refreshTimer?.invalidate()
+        refreshTimer = nil
     }
 
     private func setupRuntime() throws {
@@ -128,11 +136,12 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let dbURL = dataDirectory.appendingPathComponent("memory.sqlite")
         let mediaDirectory = dataDirectory.appendingPathComponent("media", isDirectory: true)
 
-        let store = try MemoryStore(databaseURL: dbURL)
-        try store.bootstrapSchema()
+        let memoryStore = try MemoryStore(databaseURL: dbURL)
+        try memoryStore.bootstrapSchema()
+        store = memoryStore
 
         let pipeline = OfflinePipeline(
-            store: store,
+            store: memoryStore,
             ocrProvider: VisionOCRProvider(),
             windowSize: 120
         )
@@ -152,6 +161,15 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             captureService: service,
             captureInterval: 2.0
         )
+    }
+
+    private func startRefreshTimer() {
+        refreshTimer?.invalidate()
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshMenu()
+            }
+        }
     }
 
     private func ensureDataDirectory() throws -> URL {
@@ -187,10 +205,26 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         permissionItem.isEnabled = false
         menu.addItem(permissionItem)
 
+        let permissionHintItem = NSMenuItem(
+            title: "说明: M0 仅需 screen；mic/accessibility 当前不阻塞采集",
+            action: nil,
+            keyEquivalent: ""
+        )
+        permissionHintItem.isEnabled = false
+        menu.addItem(permissionHintItem)
+
+        let statsItem = NSMenuItem(title: dataStatsText(), action: nil, keyEquivalent: "")
+        statsItem.isEnabled = false
+        menu.addItem(statsItem)
+
         if let dataDirectoryURL {
             let dataItem = NSMenuItem(title: "数据目录: \(dataDirectoryURL.path)", action: nil, keyEquivalent: "")
             dataItem.isEnabled = false
             menu.addItem(dataItem)
+
+            let openDataItem = NSMenuItem(title: "Open Data Folder", action: #selector(openDataDirectory), keyEquivalent: "o")
+            openDataItem.target = self
+            menu.addItem(openDataItem)
         }
 
         if let lastErrorMessage {
@@ -283,7 +317,21 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         let mic = statusText(snapshot.statusByPermission[.microphone])
         let ax = statusText(snapshot.statusByPermission[.accessibility])
 
-        return "权限 screen=\(screen) mic=\(mic) accessibility=\(ax)"
+        return "权限 screen=\(screen) (required) mic=\(mic) (optional) accessibility=\(ax) (optional)"
+    }
+
+    private func dataStatsText() -> String {
+        guard let store else {
+            return "数据统计: store not ready"
+        }
+
+        do {
+            let frames = try store.countFrames()
+            let chunks = try store.countChunks()
+            return "数据统计 frames=\(frames) chunks=\(chunks)"
+        } catch {
+            return "数据统计读取失败: \(error.localizedDescription)"
+        }
     }
 
     private func statusText(_ status: PermissionStatus?) -> String {
@@ -301,6 +349,13 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func startCapture() {
+        guard CGPreflightScreenCaptureAccess() else {
+            _ = CGRequestScreenCaptureAccess()
+            lastErrorMessage = "缺少 screen 权限，已触发系统授权弹窗；授权后请重启应用。"
+            refreshMenu()
+            return
+        }
+
         lifecycleController?.start()
         refreshMenu()
     }
@@ -335,6 +390,15 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             lastErrorMessage = error.localizedDescription
         }
         NSApplication.shared.terminate(nil)
+    }
+
+    @objc
+    private func openDataDirectory() {
+        guard let dataDirectoryURL else {
+            return
+        }
+
+        NSWorkspace.shared.activateFileViewerSelecting([dataDirectoryURL])
     }
 }
 
