@@ -17,12 +17,7 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
         self.appNameProvider = {
             NSWorkspace.shared.frontmostApplication?.localizedName
         }
-        self.imageProvider = {
-            guard #available(macOS 14.0, *) else {
-                throw RecaplySenseError.capture(message: "ScreenCaptureKit requires macOS 14+")
-            }
-            return try ScreenCaptureKitFrameSource.captureImageOnSupportedOS()
-        }
+        self.imageProvider = Self.makeLiveImageProvider()
     }
 
     init(
@@ -35,11 +30,13 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
         self.imageProvider = imageProvider
     }
 
-    public func captureFrame(at date: Date) throws -> CapturedFrame? {
-        guard #available(macOS 14.0, *) else {
-            throw RecaplySenseError.capture(message: "ScreenCaptureKit requires macOS 14+")
+    static func makeLiveImageProvider() -> () throws -> CGImage {
+        {
+            try ScreenCaptureKitLiveImageProvider.captureImage()
         }
+    }
 
+    public func captureFrame(at date: Date) throws -> CapturedFrame? {
         guard let appName = appNameProvider(), !appName.isEmpty else {
             return nil
         }
@@ -59,26 +56,6 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
             imagePath: artifact.path
         )
     }
-
-    @available(macOS 14.0, *)
-    private static func captureImageOnSupportedOS() throws -> CGImage {
-        try awaitValue {
-            let content = try await SCShareableContent.current
-            guard let display = content.displays.first else {
-                throw RecaplySenseError.capture(message: "No display available for ScreenCaptureKit")
-            }
-
-            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
-            let config = SCStreamConfiguration()
-            config.width = display.width
-            config.height = display.height
-
-            return try await SCScreenshotManager.captureImage(
-                contentFilter: filter,
-                configuration: config
-            )
-        }
-    }
 }
 #else
 public final class ScreenCaptureKitFrameSource: FrameSource {
@@ -92,38 +69,3 @@ public final class ScreenCaptureKitFrameSource: FrameSource {
     }
 }
 #endif
-
-private func awaitValue<T>(_ operation: @escaping @Sendable () async throws -> T) throws -> T {
-    let semaphore = DispatchSemaphore(value: 0)
-    let state = LockedResult<T>()
-
-    Task {
-        do {
-            let value = try await operation()
-            state.set(.success(value))
-        } catch {
-            state.set(.failure(error))
-        }
-        semaphore.signal()
-    }
-
-    semaphore.wait()
-    return try state.get().get()
-}
-
-private final class LockedResult<T>: @unchecked Sendable {
-    private let lock = NSLock()
-    private var result: Result<T, Error>?
-
-    func set(_ result: Result<T, Error>) {
-        lock.lock()
-        self.result = result
-        lock.unlock()
-    }
-
-    func get() -> Result<T, Error> {
-        lock.lock()
-        defer { lock.unlock() }
-        return result ?? .failure(RecaplySenseError.capture(message: "await result is empty"))
-    }
-}

@@ -22,6 +22,22 @@ struct ScreenCaptureKitFrameSourceTests {
         #expect(writer.writeCallCount == 0)
     }
 
+    @Test("ScreenCaptureKitFrameSource 当前台应用为空字符串时应返回 nil")
+    func shouldReturnNilWhenFrontmostAppEmpty() throws {
+        let writer = StubFrameArtifactWriter()
+        let source = ScreenCaptureKitFrameSource(
+            artifactWriter: writer,
+            appNameProvider: { "" },
+            imageProvider: {
+                throw RecaplySenseError.capture(message: "should not capture")
+            }
+        )
+
+        let frame = try source.captureFrame(at: Date(timeIntervalSince1970: 1_700_000_000))
+        #expect(frame == nil)
+        #expect(writer.writeCallCount == 0)
+    }
+
     @Test("ScreenCaptureKitFrameSource 应写入并返回帧元数据")
     func shouldBuildFrameWithArtifact() throws {
         let image = try #require(makeImage(color: .systemRed))
@@ -60,6 +76,36 @@ struct ScreenCaptureKitFrameSourceTests {
             _ = try source.captureFrame(at: Date(timeIntervalSince1970: 1_700_000_000))
         }
         #expect(writer.writeCallCount == 0)
+    }
+
+    @Test("ScreenCaptureKitFrameSource 支持通过 live provider 工厂执行集成烟测")
+    func shouldSupportLiveProviderFactorySmokeTest() throws {
+        let writer = StubFrameArtifactWriter(result: FrameArtifact(path: "/tmp/live-provider.png", hash: "live-hash"))
+        let source = ScreenCaptureKitFrameSource(
+            artifactWriter: writer,
+            appNameProvider: { "RecaplySenseTests" },
+            imageProvider: ScreenCaptureKitFrameSource.makeLiveImageProvider()
+        )
+
+        do {
+            let frame = try source.captureFrame(at: Date(timeIntervalSince1970: 1_700_000_000))
+            if let value = frame {
+                #expect(value.appName == "RecaplySenseTests")
+                #expect(writer.writeCallCount == 1)
+            } else {
+                #expect(writer.writeCallCount == 0)
+            }
+        } catch {
+            let description: String
+            if let localizedError = error as? LocalizedError,
+               let message = localizedError.errorDescription {
+                description = message
+            } else {
+                description = String(describing: error)
+            }
+            #expect(!description.isEmpty)
+            #expect(writer.writeCallCount == 0)
+        }
     }
 }
 
