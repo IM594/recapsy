@@ -109,6 +109,7 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 
     private let snapshotService = DashboardSnapshotService()
     private let mainWindowPresenter = MainWindowPresenter()
+    private let statusMenuPresenter = StatusMenuPresenter()
     private let captureActionGuard = CaptureActionGuard()
     private var lastErrorMessage: String?
     private var dataDirectoryURL: URL?
@@ -410,50 +411,46 @@ private final class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 
         let menu = NSMenu()
         menu.autoenablesItems = false
-
-        let openMainItem = NSMenuItem(title: "打开 RecaplySense", action: #selector(showMainWindow), keyEquivalent: "")
-        openMainItem.target = self
-        menu.addItem(openMainItem)
-
-        menu.addItem(.separator())
-
-        switch lifecycleController?.state {
-        case .running:
-            let pauseItem = NSMenuItem(title: "暂停采集", action: #selector(pauseCapture), keyEquivalent: "")
-            pauseItem.target = self
-            menu.addItem(pauseItem)
-
-            let stopItem = NSMenuItem(title: "停止采集", action: #selector(stopCapture), keyEquivalent: "")
-            stopItem.target = self
-            menu.addItem(stopItem)
-        case .paused:
-            let resumeItem = NSMenuItem(title: "继续采集", action: #selector(resumeCapture), keyEquivalent: "")
-            resumeItem.target = self
-            menu.addItem(resumeItem)
-
-            let stopItem = NSMenuItem(title: "停止采集", action: #selector(stopCapture), keyEquivalent: "")
-            stopItem.target = self
-            menu.addItem(stopItem)
-        case .stopped, .none:
-            let startItem = NSMenuItem(title: "开始采集", action: #selector(startCapture), keyEquivalent: "")
-            startItem.target = self
-            menu.addItem(startItem)
+        let entries = statusMenuPresenter.makeEntries(
+            lifecycleState: lifecycleController?.state,
+            hasDataDirectory: dataDirectoryURL != nil
+        )
+        for entry in entries {
+            switch entry {
+            case .separator:
+                menu.addItem(.separator())
+            case .item(let title, let action, let keyEquivalent):
+                let menuItem = NSMenuItem(
+                    title: title,
+                    action: selector(for: action),
+                    keyEquivalent: keyEquivalent
+                )
+                menuItem.target = self
+                menu.addItem(menuItem)
+            }
         }
-
-        if dataDirectoryURL != nil {
-            let openDataItem = NSMenuItem(title: "打开数据目录", action: #selector(openDataDirectory), keyEquivalent: "")
-            openDataItem.target = self
-            menu.addItem(openDataItem)
-        }
-
-        menu.addItem(.separator())
-
-        let quitItem = NSMenuItem(title: "退出 RecaplySense", action: #selector(quitApp), keyEquivalent: "q")
-        quitItem.target = self
-        menu.addItem(quitItem)
 
         statusItem.menu = menu
         updateStatusTitle()
+    }
+
+    private func selector(for action: StatusMenuAction) -> Selector {
+        switch action {
+        case .openMain:
+            return #selector(showMainWindow)
+        case .start:
+            return #selector(startCapture)
+        case .pause:
+            return #selector(pauseCapture)
+        case .resume:
+            return #selector(resumeCapture)
+        case .stop:
+            return #selector(stopCapture)
+        case .openDataDirectory:
+            return #selector(openDataDirectory)
+        case .quit:
+            return #selector(quitApp)
+        }
     }
 
     private func refreshMainWindow() {
