@@ -129,7 +129,7 @@ Frontend 通过 WebSocket 接收进度通知。
   "queue_length": 5,
   "processing": {
     "screenshot_id": "screenshot:abc123",
-    "stage": "ocr",
+    "stage": "embedding",
     "progress": 0.6
   },
   "stats": {
@@ -783,7 +783,113 @@ Frontend 通过 WebSocket 接收进度通知。
 
 ---
 
-## 11. WebSocket Events (Complete Reference)
+## 11. Backup & Export
+
+### `POST /api/v1/backup/trigger`
+
+手动触发数据库备份。
+
+**Response 202:**
+
+```json
+{
+  "backup_id": "backup_2026-03-31_143000",
+  "status": "started",
+  "estimated_size_mb": 2100
+}
+```
+
+### `GET /api/v1/backup/status`
+
+查询备份状态和历史。
+
+**Response 200:**
+
+```json
+{
+  "auto_backup": {
+    "enabled": true,
+    "schedule": "0 3 * * *",
+    "last_run": "2026-03-31T03:00:00Z",
+    "last_status": "success",
+    "next_run": "2026-04-01T03:00:00Z"
+  },
+  "backups": [
+    {
+      "id": "backup_2026-03-31_030000",
+      "type": "auto",
+      "size_mb": 2100,
+      "created_at": "2026-03-31T03:00:00Z"
+    }
+  ],
+  "retention": {
+    "daily_count": 7,
+    "weekly_count": 4
+  }
+}
+```
+
+### `POST /api/v1/export`
+
+导出用户数据为人类可读格式。
+
+**Request:**
+
+```json
+{
+  "format": "portable",
+  "include": ["screenshots", "metadata", "entities", "chat_history", "activity_segments"],
+  "output_path": "/Volumes/ExternalDisk/recaply-export"
+}
+```
+
+**Response 202:**
+
+```json
+{
+  "export_id": "export_2026-03-31",
+  "status": "started",
+  "estimated_size_gb": 15.2
+}
+```
+
+---
+
+## 12. AI Usage Statistics
+
+### `GET /api/v1/stats/ai-usage`
+
+获取 AI 模型使用量和费用估算。
+
+**Response 200:**
+
+```json
+{
+  "today": {
+    "tokens_in": 450000,
+    "tokens_out": 52000,
+    "estimated_cost_usd": 0.68,
+    "segments_processed": 85,
+    "embedding_calls": 12500
+  },
+  "this_month": {
+    "tokens_in": 12000000,
+    "tokens_out": 1500000,
+    "estimated_cost_usd": 18.50,
+    "segments_processed": 2400,
+    "embedding_calls": 350000
+  },
+  "budget": {
+    "daily_usd": 1.0,
+    "remaining_today_usd": 0.32,
+    "auto_pause_on_exceed": true
+  }
+}
+```
+
+---
+
+## 13. WebSocket Events (Complete Reference)
 
 ### Client → Server
 
@@ -808,7 +914,7 @@ Frontend 通过 WebSocket 接收进度通知。
 { "type": "screenshot:new", "data": { "id": "...", "timestamp": "...", "app_name": "..." } }
 
 // 摄入进度
-{ "type": "ingestion:progress", "data": { "screenshot_id": "...", "stage": "ocr", "progress": 0.6 } }
+{ "type": "ingestion:progress", "data": { "screenshot_id": "...", "stage": "embedding", "progress": 0.6 } }
 { "type": "ingestion:complete", "data": { "screenshot_id": "..." } }
 
 // 搜索结果
@@ -830,7 +936,7 @@ Frontend 通过 WebSocket 接收进度通知。
 
 ---
 
-## 12. Error Response Format
+## 14. Error Response Format
 
 所有 API 错误使用统一格式：
 
@@ -860,10 +966,12 @@ Frontend 通过 WebSocket 接收进度通知。
 | `RATE_LIMITED`          | 429         | 请求过于频繁     |
 | `STORAGE_FULL`          | 507         | 存储空间不足     |
 | `INGESTION_FAILED`      | 500         | 截图处理失败     |
+| `BUDGET_EXCEEDED`       | 429         | AI 用量超出预算  |
+| `BACKUP_FAILED`         | 500         | 备份执行失败     |
 
 ---
 
-## 13. API Versioning Strategy
+## 15. API Versioning Strategy
 
 ```
 当前版本: v1

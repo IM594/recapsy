@@ -1,6 +1,6 @@
 # Recaply Sense — Data Models
 
-> Version: 0.1.0 | Last Updated: 2026-03-31
+> Version: 0.1.0 | Last Updated: 2026-04-01
 
 ## SurrealDB Data Model
 
@@ -27,18 +27,23 @@ DEFINE FIELD is_active      ON screenshot TYPE bool;           -- 是否是活�
 DEFINE FIELD diff_ratio     ON screenshot TYPE float;          -- 与上一帧的差异比
 DEFINE FIELD resolution     ON screenshot TYPE string;         -- 分辨率
 DEFINE FIELD file_size      ON screenshot TYPE int;            -- 文件大小 (bytes)
-DEFINE FIELD processed      ON screenshot TYPE bool DEFAULT false;  -- 是否已处理
+DEFINE FIELD status         ON screenshot TYPE string DEFAULT 'queued';
+    -- 'queued' | 'processing' | 'done' | 'dead_letter'
+DEFINE FIELD retry_count    ON screenshot TYPE int DEFAULT 0;  -- 处理重试次数
+DEFINE FIELD last_error     ON screenshot TYPE option<string>; -- 最后一次处理错误信息
+DEFINE FIELD ocr_truncated  ON screenshot TYPE bool DEFAULT false; -- OCR 文本是否经过截断
+DEFINE FIELD purged         ON screenshot TYPE bool DEFAULT false; -- 截图文件是否已清理（保留元数据）
 DEFINE FIELD embedding      ON screenshot TYPE option<array<float>>; -- 向量嵌入 (BGE-M3, 1024维)
 DEFINE FIELD timezone        ON screenshot TYPE string;         -- 采集时的时区 (e.g. "Asia/Shanghai")
 DEFINE FIELD local_date      ON screenshot TYPE string;         -- 本地日期 (e.g. "2026-03-31")
 DEFINE FIELD local_hour      ON screenshot TYPE int;            -- 本地小时 (0-23)
-DEFINE FIELD capture_id      ON screenshot TYPE string;         -- 幂等 ID (sha256(path+timestamp))
+DEFINE FIELD capture_id      ON screenshot TYPE string;         -- 幂等 ID: sha256(path+timestamp+file_size+machine_id)
 DEFINE FIELD created_at     ON screenshot TYPE datetime DEFAULT time::now();
 
 -- 索引
 DEFINE INDEX idx_screenshot_timestamp ON screenshot FIELDS timestamp;
 DEFINE INDEX idx_screenshot_app       ON screenshot FIELDS app_name;
-DEFINE INDEX idx_screenshot_processed ON screenshot FIELDS processed;
+DEFINE INDEX idx_screenshot_status    ON screenshot FIELDS status;
 DEFINE INDEX idx_screenshot_bundle    ON screenshot FIELDS bundle_id;
 DEFINE INDEX idx_screenshot_capture   ON screenshot FIELDS capture_id UNIQUE; -- 幂等去重
 DEFINE INDEX idx_screenshot_local     ON screenshot FIELDS local_date, local_hour; -- 按本地时间聚合
@@ -121,6 +126,35 @@ DEFINE FIELD value ON settings TYPE any;
 DEFINE INDEX idx_settings_key ON settings FIELDS key UNIQUE;
 ```
 
+### `migration_history` — 数据库迁移记录
+
+```surql
+DEFINE TABLE migration_history SCHEMAFULL;
+
+DEFINE FIELD version     ON migration_history TYPE int;
+DEFINE FIELD name        ON migration_history TYPE string;
+DEFINE FIELD applied_at  ON migration_history TYPE datetime DEFAULT time::now();
+DEFINE FIELD duration_ms ON migration_history TYPE int;
+
+DEFINE INDEX idx_mh_version ON migration_history FIELDS version UNIQUE;
+```
+
+### `entity_merge_candidate` — 实体合并候选
+
+```surql
+DEFINE TABLE entity_merge_candidate SCHEMAFULL;
+
+DEFINE FIELD entity_a    ON entity_merge_candidate TYPE record<entity>;
+DEFINE FIELD entity_b    ON entity_merge_candidate TYPE record<entity>;
+DEFINE FIELD similarity  ON entity_merge_candidate TYPE float;     -- 相似度得分
+DEFINE FIELD match_type  ON entity_merge_candidate TYPE string;    -- 'name' | 'alias' | 'vector' | 'mixed'
+DEFINE FIELD status      ON entity_merge_candidate TYPE string DEFAULT 'pending';
+    -- 'pending' | 'merged' | 'rejected'
+DEFINE FIELD created_at  ON entity_merge_candidate TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX idx_emc_status ON entity_merge_candidate FIELDS status;
+```
+
 ### `activity_segment` — 活动片段（Vision LLM 生成, TDR-019）
 
 ```surql
@@ -140,6 +174,10 @@ DEFINE FIELD summary ON activity_segment TYPE string;         -- 一段话摘要
 DEFINE FIELD visual_elements ON activity_segment TYPE array;  -- ["代码编辑器", "聊天消息列表"]
 DEFINE FIELD key_entities ON activity_segment TYPE array;     -- [{name:"张三", type:"person"}, ...]
 
+-- 中文预分词字段（Ingestion Pipeline 预处理后写入，与 screenshot 相同策略）
+DEFINE FIELD activity_tokenized ON activity_segment TYPE option<string>;
+DEFINE FIELD summary_tokenized  ON activity_segment TYPE option<string>;
+
 -- 关联的截图 ID（代表帧）
 DEFINE FIELD screenshot_ids ON activity_segment TYPE array;   -- ["screenshot:abc123", ...]
 DEFINE FIELD frame_count ON activity_segment TYPE int;        -- 原始帧数（去重前）
@@ -157,6 +195,16 @@ DEFINE INDEX idx_segment_time ON activity_segment FIELDS session_start;
 DEFINE INDEX idx_segment_app ON activity_segment FIELDS bundle_id, session_start;
 DEFINE INDEX idx_segment_scene ON activity_segment FIELDS scene_type;
 DEFINE INDEX idx_segment_embedding ON activity_segment FIELDS embedding HNSW DIMENSION 1024 DIST COSINE;
+
+-- 全文搜索索引（英文 + 中文预分词）
+DEFINE INDEX idx_segment_activity_fts ON activity_segment FIELDS activity
+  FULLTEXT ANALYZER ocr_analyzer BM25;
+DEFINE INDEX idx_segment_summary_fts ON activity_segment FIELDS summary
+  FULLTEXT ANALYZER ocr_analyzer BM25;
+DEFINE INDEX idx_segment_activity_cjk ON activity_segment FIELDS activity_tokenized
+  FULLTEXT ANALYZER cjk_analyzer BM25;
+DEFINE INDEX idx_segment_summary_cjk ON activity_segment FIELDS summary_tokenized
+  FULLTEXT ANALYZER cjk_analyzer BM25;
 ```
 
 ---
@@ -294,12 +342,16 @@ export interface Screenshot {
   diff_ratio: number;
   resolution: string;
   file_size: number;
-  processed: boolean;
+  status: "queued" | "processing" | "done" | "dead_letter";
+  retry_count: number;
+  last_error: string | null;
+  ocr_truncated: boolean;
+  purged: boolean;
   embedding: number[] | null; // BGE-M3, 1024 维
   timezone: string; // e.g. "Asia/Shanghai"
   local_date: string; // e.g. "2026-03-31"
   local_hour: number; // 0-23
-  capture_id: string; // 幂等 ID: sha256(path + timestamp)
+  capture_id: string; // 幂等 ID: sha256(path + timestamp + file_size + machine_id)
   created_at: Date;
 }
 
@@ -399,6 +451,10 @@ export interface ActivitySegment {
   summary: string;
   visual_elements: string[];               // ["代码编辑器", "终端输出"]
   key_entities: { name: string; type: EntityType }[];
+
+  // 中文预分词字段
+  activity_tokenized: string | null;
+  summary_tokenized: string | null;
 
   // 关联截图
   screenshot_ids: string[];

@@ -189,13 +189,8 @@ recaply-sense/
 │   │   │   │   │   ├── timeRangeSearch.ts
 │   │   │   │   │   └── hybridSearch.ts
 │   │   │   │   └── ranker.ts
-│   │   │   ├── ai/                       # AI Provider (纯模型调用)
-│   │   │   │   ├── manager.ts
-│   │   │   │   ├── providers/
-│   │   │   │   │   ├── provider.ts
-│   │   │   │   │   ├── ollama.ts
-│   │   │   │   │   ├── openai.ts
-│   │   │   │   │   └── anthropic.ts
+│   │   │   ├── ai/                       # AI Provider (纯模型调用, TDR-016 简化)
+│   │   │   │   ├── providers.ts          # AI SDK provider 工厂（按配置返回 openai/anthropic/ollama）
 │   │   │   │   ├── embedding/
 │   │   │   │   │   ├── local.ts
 │   │   │   │   │   └── remote.ts

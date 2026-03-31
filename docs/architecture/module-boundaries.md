@@ -222,7 +222,7 @@ engine/
 │   │   │   ├── chat.ts                   # POST /chat, WS /chat/stream
 │   │   │   ├── entities.ts              # GET /entities/*
 │   │   │   ├── screenshots.ts           # GET /screenshots/*
-│   │   │   ├── settings.ts              # GET/PUT /settings
+│   │   │   ├── settings.ts              # GET/PATCH /settings
 │   │   │   ├── collector.ts             # POST /collector/control
 │   │   │   ├── stats.ts                 # GET /stats/*
 │   │   │   └── health.ts                # GET /health
@@ -310,6 +310,7 @@ engine/
 │   │   │   ├── relationshipRepo.ts       # 关系数据仓库
 │   │   │   ├── embeddingRepo.ts          # 向量数据仓库
 │   │   │   ├── settingsRepo.ts           # 设置数据仓库
+│   │   │   ├── activitySegmentRepo.ts    # 活动片段仓库
 │   │   │   └── chatHistoryRepo.ts        # 对话历史仓库
 │   │   ├── migrations/
 │   │   │   ├── runner.ts                 # 迁移执行器
