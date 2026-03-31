@@ -260,6 +260,12 @@ engine/
 │   │   └── adapters/
 │   │       └── tesseract.ts              # Tesseract OCR 适配（纯TS降级方案）
 │   │
+│   ├── vision/                           ← 子模块: Vision LLM 处理 (TDR-019)
+│   │   ├── sessionManager.ts            # App Session 管理（开始/结束/flush）
+│   │   ├── frameSelector.ts             # OCR 文本去重 + 代表帧选择（≤8帧）
+│   │   ├── visionAnalyzer.ts            # Vision LLM 调用 + 结构化输出
+│   │   └── segmentWriter.ts             # activity_segment 写入存储
+│   │
 │   ├── agent/                            ← 子模块: AI Agent (智能体)
 │   │   ├── agent.ts                      # Agent 主入口（AI SDK streamText + tools）
 │   │   ├── tools/                        # Agent 可调用的工具集（AI SDK tool 格式）
@@ -269,6 +275,7 @@ engine/
 │   │   │   ├── timeFilterTool.ts         # 时间范围过滤
 │   │   │   ├── entityLookupTool.ts       # 实体查找
 │   │   │   ├── screenshotTool.ts         # 截图详情获取
+│   │   │   ├── activitySearchTool.ts    # 活动片段搜索 (activity_segment)
 │   │   │   └── statsTool.ts              # 统计分析
 │   │   ├── memory/
 │   │   │   ├── conversationMemory.ts     # 对话上下文记忆
@@ -330,16 +337,17 @@ engine/
 
 ```
                可以调用 →
-               api   mcp   ingestion  agent   search   ai    storage
-调用方 ↓     ┌──────┬─────┬──────────┬───────┬────────┬─────┬────────┐
-  api        │  -   │  ❌  │    ✅     │  ✅   │   ✅   │  ❌  │   ❌   │
-  mcp        │  ❌  │  -   │    ❌     │  ❌   │   ✅   │  ❌  │   ✅   │
-  ingestion  │  ❌  │  ❌  │    -      │  ❌   │   ❌   │  ✅  │   ✅   │
-  agent      │  ❌  │  ❌  │    ❌     │  -    │   ✅   │  ✅  │   ✅   │
-  search     │  ❌  │  ❌  │    ❌     │  ❌   │   -    │  ✅  │   ✅   │
-  ai         │  ❌  │  ❌  │    ❌     │  ❌   │   ❌   │  -   │   ❌   │
-  storage    │  ❌  │  ❌  │    ❌     │  ❌   │   ❌   │  ❌  │   -    │
-             └──────┴─────┴──────────┴───────┴────────┴─────┴────────┘
+               api   mcp   ingestion  vision  agent   search   ai    storage
+调用方 ↓     ┌──────┬─────┬──────────┬───────┬───────┬────────┬─────┬────────┐
+  api        │  -   │  ❌  │    ✅     │  ❌   │  ✅   │   ✅   │  ❌  │   ❌   │
+  mcp        │  ❌  │  -   │    ❌     │  ❌   │  ❌   │   ✅   │  ❌  │   ✅   │
+  ingestion  │  ❌  │  ❌  │    -      │  ✅   │  ❌   │   ❌   │  ✅  │   ✅   │
+  vision     │  ❌  │  ❌  │    ❌     │  -    │  ❌   │   ❌   │  ✅  │   ✅   │
+  agent      │  ❌  │  ❌  │    ❌     │  ❌   │  -    │   ✅   │  ✅  │   ✅   │
+  search     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌   │   -    │  ✅  │   ✅   │
+  ai         │  ❌  │  ❌  │    ❌     │  ❌   │  ❌   │   ❌   │  -   │   ❌   │
+  storage    │  ❌  │  ❌  │    ❌     │  ❌   │  ❌   │   ❌   │  ❌  │   -    │
+             └──────┴─────┴──────────┴───────┴───────┴────────┴─────┴────────┘
 
 规则：
   • api 和 mcp 是两个并列的入口层
@@ -353,10 +361,15 @@ engine/
   • agent 是内部 AI 智能体，仅服务于 Frontend Chat：
     - agent → search（执行各种搜索）
     - agent → ai（调用 LLM 做意图理解/回答合成）
-    - agent → storage（获取截图详情/实体/对话历史）
+    - agent → storage（获取截图详情/实体/对话历史/活动片段）
   • ingestion 可调用 ai（embedding/NER）和 storage（写入数据）
     - OCR 由 Collector 端完成（TDR-017），Engine 接收 ocr_text
     - ingestion 对中文 OCR 文本做分词后存入检索字段
+    - ingestion → vision：截图入库后通知 vision 模块更新 App Session
+  • vision 是 App Session 级别的理解层（TDR-019）：
+    - vision → ai（调用 Vision LLM）
+    - vision → storage（读取截图帧、写入 activity_segment）
+    - 由 ingestion 触发，异步处理，不阻塞摄入管线
   • ai 是纯模型调用层，不访问 storage
   • storage 是最底层，不调用任何其他模块
 ```

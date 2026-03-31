@@ -76,9 +76,10 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 进程 1: recaply-engine (后端服务，launchd 托管)
   ├── HTTP/WS Server (Hono on Bun)
   ├── Ingestion Pipeline
-  ├── Agent (AI 智能体：意图理解 → 规划 → 工具调用 → 汇总)
+  ├── Vision LLM (App Session → 活动摘要, TDR-019)
+  ├── Agent (AI SDK streamText + tools, TDR-016)
   ├── Search Engine
-  ├── AI Provider (LLM / Embedding)
+  ├── AI Provider (LLM / Embedding / Vision)
   └── SurrealDB (embedded)
 
 进程 2: recaply-collector (采集器守护进程，launchd 托管)
@@ -139,6 +140,25 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
                     │     • OCR 文本 + FTS 索引       │
                     │     • 向量嵌入                  │
                     │     • 实体节点 + 关系边          │
+                    └──────────────┬───────────────┘
+                                   │
+                    ┌──────────────▼──────────────┐
+                    │   Vision LLM 处理 (TDR-019)  │
+                    │   (异步, App Session 触发)    │
+                    │                              │
+                    │  1. App Session 管理          │
+                    │     检测 App 切换 → Session 结束│
+                    │                              │
+                    │  2. OCR 文本去重 + 代表帧选择  │
+                    │     相似度 > 70% 的帧跳过      │
+                    │     选择 ≤ 8 张代表帧          │
+                    │                              │
+                    │  3. Vision LLM 调用           │
+                    │     发送代表帧图片 → 结构化输出  │
+                    │                              │
+                    │  4. 写入 activity_segment      │
+                    │     • 活动描述 + 场景分类       │
+                    │     • 实体 + 向量嵌入           │
                     └──────────────────────────────┘
 
 
@@ -148,30 +168,21 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
   User Query ──▶ Frontend ──HTTP──▶ Backend
                                       │
                     ┌────────────────────────────────────────────┐
-                    │           Agent (AI 智能体)                 │
+                    │     Agent (AI SDK streamText + tools)      │
                     │                                            │
-                    │  1. 🧠 意图理解 (Intent Parser)              │
-                    │     LLM 分析用户查询，提取意图和约束          │
+                    │  LLM 自行规划 tool calling 序列 (TDR-016) │
                     │                                            │
-                    │  2. 📋 任务规划 (Task Planner)               │
-                    │     分解为可执行的步骤序列                    │
-                    │                                            │
-                    │  3. 🔧 工具调用 (Tool Execution)             │
-                    │     ┌──────────┐  ┌──────────────┐        │
-                    │     │ 向量搜索   │  │ 全文搜索 (FTS)│        │
-                    │     │ 语义相似   │  │ 精确匹配      │        │
-                    │     └────┬─────┘  └──────┬───────┘        │
-                    │          │               │                 │
-                    │     ┌────▼───────────────▼────┐           │
-                    │     │   图查询 (Graph Traverse) │           │
-                    │     │   实体关联 · 时间范围       │           │
-                    │     └────────────┬────────────┘           │
-                    │                  │                         │
-                    │  4. 🔀 结果融合 (Result Fusion & Rank)      │
-                    │     合并 · 去重 · 交叉过滤 · 排序            │
-                    │                                            │
-                    │  5. 📝 生成回答 (Response Synthesis)         │
-                    │     LLM 汇总搜索结果，生成自然语言回答       │
+                    │  可用工具：                                  │
+                    │  ┌──────────┐ ┌──────────────┐            │
+                    │  │ 向量搜索  │ │ 全文搜索 (FTS)│            │
+                    │  └────┬─────┘ └──────┬───────┘            │
+                    │  ┌────▼──────────────▼────┐               │
+                    │  │  图查询 · 时间过滤       │               │
+                    │  │  实体查找 · 截图详情      │               │
+                    │  │  活动片段搜索 (TDR-019)  │               │
+                    │  └────────────┬────────────┘               │
+                    │               │                             │
+                    │  LLM 汇总结果，流式返回自然语言回答          │
                     └────────────────────┬───────────────────────┘
                                          │
                                Response ◀┘
@@ -196,6 +207,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 │ Embedding Model    │ BAAI/bge-m3          │ 多语言100+，同模型│
 │ LLM (local)        │ Ollama               │ 本地推理（可选） │
 │ LLM (cloud)        │ OpenAI / Anthropic   │ 云端推理（默认） │
+│ Vision LLM         │ Provider 可切换      │ 截图理解 (TDR-019)│
 │ AI SDK             │ Vercel AI SDK        │ Agent 编排+多 Provider │
 │ MCP                │ @modelcontextprotocol/sdk │ stdio + Streamable HTTP │
 │ Image Format       │ WebP                 │ 压缩率高质量好   │

@@ -121,6 +121,44 @@ DEFINE FIELD value ON settings TYPE any;
 DEFINE INDEX idx_settings_key ON settings FIELDS key UNIQUE;
 ```
 
+### `activity_segment` — 活动片段（Vision LLM 生成, TDR-019）
+
+```surql
+DEFINE TABLE activity_segment SCHEMAFULL;
+
+DEFINE FIELD app_name ON activity_segment TYPE string;
+DEFINE FIELD bundle_id ON activity_segment TYPE string;
+DEFINE FIELD display_id ON activity_segment TYPE int;
+DEFINE FIELD session_start ON activity_segment TYPE datetime;
+DEFINE FIELD session_end ON activity_segment TYPE datetime;
+DEFINE FIELD duration_seconds ON activity_segment TYPE int;
+
+-- Vision LLM 生成的结构化描述
+DEFINE FIELD activity ON activity_segment TYPE string;        -- "在 Slack #general 和张三讨论项目进度"
+DEFINE FIELD scene_type ON activity_segment TYPE string;      -- coding|chatting|browsing|designing|meeting|reading|other
+DEFINE FIELD summary ON activity_segment TYPE string;         -- 一段话摘要
+DEFINE FIELD visual_elements ON activity_segment TYPE array;  -- ["代码编辑器", "聊天消息列表"]
+DEFINE FIELD key_entities ON activity_segment TYPE array;     -- [{name:"张三", type:"person"}, ...]
+
+-- 关联的截图 ID（代表帧）
+DEFINE FIELD screenshot_ids ON activity_segment TYPE array;   -- ["screenshot:abc123", ...]
+DEFINE FIELD frame_count ON activity_segment TYPE int;        -- 原始帧数（去重前）
+DEFINE FIELD selected_frame_count ON activity_segment TYPE int; -- 代表帧数（去重后）
+
+-- 元数据
+DEFINE FIELD embedding ON activity_segment TYPE array<float>; -- summary 的 BGE-M3 向量 (1024维)
+DEFINE FIELD llm_model ON activity_segment TYPE string;       -- 使用的 Vision LLM 模型
+DEFINE FIELD llm_tokens_in ON activity_segment TYPE int;      -- input token 数
+DEFINE FIELD llm_tokens_out ON activity_segment TYPE int;     -- output token 数
+DEFINE FIELD processed_at ON activity_segment TYPE datetime DEFAULT time::now();
+
+-- 索引
+DEFINE INDEX idx_segment_time ON activity_segment FIELDS session_start;
+DEFINE INDEX idx_segment_app ON activity_segment FIELDS bundle_id, session_start;
+DEFINE INDEX idx_segment_scene ON activity_segment FIELDS scene_type;
+DEFINE INDEX idx_segment_embedding ON activity_segment FIELDS embedding HNSW DIMENSION 1024 DIST COSINE;
+```
+
 ---
 
 ## 2. Graph Relations (Edges)
@@ -220,6 +258,19 @@ DEFINE INDEX idx_related_type ON related_to FIELDS relation_type;
   │ file    │ "main.swift", "architecture.md"         │
   │ email   │ "john@example.com"                      │
   └─────────┴─────────────────────────────────────────┘
+
+  activity_segment（TDR-019, Vision LLM 生成）:
+  ┌────────────────────────────────────────────────────┐
+  │              activity_segment                      │
+  ├────────────────────────────────────────────────────┤
+  │  app_name, bundle_id                              │
+  │  session_start / session_end                      │
+  │  activity (LLM 描述)                              │
+  │  scene_type                                       │
+  │  summary, key_entities                            │
+  │  screenshot_ids[] → screenshot                    │
+  │  embedding (1024维)                               │
+  └────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -318,6 +369,48 @@ export interface ChatMessage {
     entities_mentioned?: string[];
   } | null;
   created_at: Date;
+}
+
+// shared/src/types/activity.ts (TDR-019)
+
+export type SceneType =
+  | "coding"
+  | "chatting"
+  | "browsing"
+  | "designing"
+  | "meeting"
+  | "reading"
+  | "writing"
+  | "terminal"
+  | "other";
+
+export interface ActivitySegment {
+  id: string;
+  app_name: string;
+  bundle_id: string;
+  display_id: number;
+  session_start: Date;
+  session_end: Date;
+  duration_seconds: number;
+
+  // Vision LLM 生成
+  activity: string;                        // "在 Slack #general 和张三讨论项目进度"
+  scene_type: SceneType;
+  summary: string;
+  visual_elements: string[];               // ["代码编辑器", "终端输出"]
+  key_entities: { name: string; type: EntityType }[];
+
+  // 关联截图
+  screenshot_ids: string[];
+  frame_count: number;                     // 原始帧数
+  selected_frame_count: number;            // 去重后代表帧数
+
+  // 元数据
+  embedding?: number[];                    // summary 的 BGE-M3 向量 (1024维)
+  llm_model: string;
+  llm_tokens_in: number;
+  llm_tokens_out: number;
+  processed_at: Date;
 }
 
 // shared/src/types/search.ts

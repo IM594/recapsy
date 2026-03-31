@@ -472,6 +472,80 @@ Frontend（SwiftUI）仅作为 UI 客户端连接已运行的服务，不负责�
 
 ---
 
+## TDR-019: 两层截图理解（OCR + Vision LLM）
+
+**决策：** 截图理解分为两层——Tier 1 (Apple Vision OCR, 每帧本地执行) 和 Tier 2 (Vision LLM, 按 App Session 触发)。
+
+**Tier 1: OCR（基础层）**
+
+- 在 Collector 端每帧执行 Apple Vision OCR，提取原始文字 (`ocr_text`)
+- 零成本，低延迟，为全文检索和去重提供基础数据
+
+**Tier 2: Vision LLM（理解层）**
+
+- 以 App Session 为处理单位（用户在同一 App 停留的时间段）
+- Session 结束（App 切换）时触发 LLM 处理
+- 通过 OCR 文本相似度去重，选择 ≤8 张代表帧
+- Vision LLM 生成结构化活动摘要（`activity_segment`）
+
+**App Session 定义：**
+
+```
+Session 开始：用户切入一个 App（bundle_id 变化）
+Session 结束：用户切出该 App
+
+边界处理：
+  - 停留 > N 分钟（可配置）：强制 flush，开启新 session
+  - 停留 < 3 秒：忽略，不创建 segment
+  - 多显示器：按 display_id 维护独立 session
+```
+
+**代表帧选择算法：**
+
+```
+1. 收集 session 内所有帧的 ocr_text
+2. 逐帧计算与前一保留帧的文本相似度（Jaccard / 字符重叠）
+3. 相似度 > 70%（如慢速滚动）→ 跳过该帧
+4. 保留语义变化帧 + 首帧 + 末帧
+5. 若仍 > 8 帧，按 diff_ratio 降序取 Top 8
+```
+
+**Vision LLM 输出（结构化）：**
+
+```typescript
+{
+  activity: string;           // "在 Slack #general 和张三讨论项目进度"
+  scene_type: string;         // "chatting" | "coding" | "browsing" | ...
+  key_entities: Entity[];     // 识别出的人名、项目名、URL 等
+  visual_elements: string[];  // "代码编辑器", "聊天消息列表", "PR 页面"
+  summary: string;            // 一段话摘要
+}
+```
+
+**成本预估（以 Ministral 3B $0.10/MTok 为参考，实际取决于选用模型）：**
+
+- 8 张图约 17k input + 2k output tokens ≈ $0.002/次
+- 中度使用约 120 次/天 ≈ $0.23/天 ≈ $7/月
+
+**Provider 不锁定：** 默认 Provider 未定，通过 Vercel AI SDK 抽象，支持 Mistral / Gemini / Claude / OpenAI 切换。
+
+**原因：**
+
+- OCR 只提取文字，对图表/UI 布局/视觉内容无感
+- Vision LLM 能理解"用户在做什么"，大幅提升搜索和回忆体验
+- App Session 是自然的记忆单元，比固定时间窗口更符合用户心智
+- OCR 文本相似度去重消除滚动等冗余帧，零成本
+- ≤8 图批量处理比单帧逐个处理更高效且给模型更多上下文
+
+**否决方案：**
+
+- ❌ 每帧都调 Vision LLM — 成本爆炸（2s/帧 × 8h = 14,400 次/天）
+- ❌ 固定时间窗口触发 — 不如 App Session 自然，跨 App 混合会降低摘要质量
+- ❌ 用 LLM 做选帧决策 — 过度工程化，OCR 文本对比已经足够且零成本
+- ❌ 纯 OCR 无 LLM — 丧失语义理解能力，搜索和回忆体验上限低
+
+---
+
 ## Decision Log
 
 | #   | Decision                | Date       | Status      |
@@ -494,3 +568,4 @@ Frontend（SwiftUI）仅作为 UI 客户端连接已运行的服务，不负责�
 | 016 | Vercel AI SDK           | 2026-04-01 | ✅ Accepted |
 | 017 | OCR 归属 Collector 端   | 2026-04-01 | ✅ Accepted |
 | 018 | 进程生命周期托管模型    | 2026-04-01 | ✅ Accepted |
+| 019 | 两层截图理解            | 2026-04-01 | ✅ Accepted |

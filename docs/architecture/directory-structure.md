@@ -159,6 +159,11 @@ recaply-sense/
 │   │   │   │   │   └── contextEnricher.ts
 │   │   │   │   └── adapters/
 │   │   │   │       └── tesseract.ts           # 纯 TS OCR 降级方案
+│   │   │   ├── vision/                  # Vision LLM 处理 (TDR-019)
+│   │   │   │   ├── sessionManager.ts    # App Session 管理（开始/结束/flush）
+│   │   │   │   ├── frameSelector.ts     # OCR 文本去重 + 代表帧选择（≤8帧）
+│   │   │   │   ├── visionAnalyzer.ts    # Vision LLM 调用 + 结构化输出
+│   │   │   │   └── segmentWriter.ts     # activity_segment 写入存储
 │   │   │   ├── agent/                    # AI Agent (AI SDK 编排, TDR-016)
 │   │   │   │   ├── agent.ts             # AI SDK streamText + tools 主入口
 │   │   │   │   ├── tools/
@@ -168,6 +173,7 @@ recaply-sense/
 │   │   │   │   │   ├── timeFilterTool.ts
 │   │   │   │   │   ├── entityLookupTool.ts
 │   │   │   │   │   ├── screenshotTool.ts
+│   │   │   │   │   ├── activitySearchTool.ts  # 活动片段搜索
 │   │   │   │   │   └── statsTool.ts
 │   │   │   │   ├── memory/
 │   │   │   │   │   ├── conversationMemory.ts
@@ -204,6 +210,7 @@ recaply-sense/
 │   │   │   │   │   ├── relationshipRepo.ts
 │   │   │   │   │   ├── embeddingRepo.ts
 │   │   │   │   │   ├── settingsRepo.ts
+│   │   │   │   │   ├── activitySegmentRepo.ts  # 活动片段仓库
 │   │   │   │   │   └── chatHistoryRepo.ts
 │   │   │   │   ├── migrations/
 │   │   │   │   │   ├── runner.ts
