@@ -83,14 +83,14 @@ frontend/
 
 ### 边界规则
 
-| ✅ 可以做 | ❌ 不能做 |
-|-----------|----------|
-| 调用 Backend API | 直接访问 SurrealDB |
-| 渲染截图和文本 | 执行 OCR |
-| 管理子进程生命周期 | 直接截屏 |
-| 本地 UI 状态管理 | 业务逻辑处理 |
-| 展示 AI 回复 | 直接调用 LLM API |
-| 用户设置界面 | 直接写配置文件 |
+| ✅ 可以做                      | ❌ 不能做          |
+| ------------------------------ | ------------------ |
+| 调用 Backend API               | 直接访问 SurrealDB |
+| 渲染截图和文本                 | 执行 OCR           |
+| 注册 LaunchAgent (首次安装时)  | 直接截屏           |
+| 本地 UI 状态管理               | 业务逻辑处理       |
+| 展示 AI 回复                   | 直接调用 LLM API   |
+| 用户设置界面                   | 直接写配置文件     |
 
 ### 对外接口
 
@@ -100,8 +100,8 @@ frontend/
   ← Engine WebSocket          接收实时通知
 
 生产：
-  → 启动/停止 Engine 进程
-  → 启动/停止 Collector 进程
+  → 首次安装时注册 Engine + Collector 为 LaunchAgent (SMAppService)
+  → 设置页面提供"停止后台服务"选项（注销 LaunchAgent）
 ```
 
 ---
@@ -145,15 +145,16 @@ collector/
 
 ### 边界规则
 
-| ✅ 可以做 | ❌ 不能做 |
-|-----------|----------|
-| 截取屏幕 | OCR 文本提取 |
-| 帧差异检测 | AI 推理 |
-| 截图压缩 (WebP) | 向量化 |
-| 写入截图文件 | 写入 SurrealDB |
-| 采集窗口标题/应用名 | 实体提取 |
-| 隐私过滤 | 搜索查询 |
-| 通知 Engine 有新截图 | 直接响应用户查询 |
+| ✅ 可以做            | ❌ 不能做        |
+| -------------------- | ---------------- |
+| 截取屏幕             | AI 推理          |
+| 帧差异检测           | 向量化           |
+| 截图压缩 (WebP)      | 写入 SurrealDB   |
+| OCR 文本提取 (Apple Vision) | 实体提取   |
+| 写入截图文件         | 搜索查询         |
+| 采集窗口标题/应用名  | 直接响应用户查询 |
+| 隐私过滤             |                  |
+| 通知 Engine 有新截图 |                  |
 
 ### 对外接口
 
@@ -161,7 +162,8 @@ collector/
 生产：
   → 截图文件写入 ~/screenshots/
   → HTTP POST → Engine /api/v1/ingest/screenshot
-    Body: { path, timestamp, app_name, window_title, display_id }
+    Body: { path, timestamp, app_name, window_title, display_id,
+            ocr_text, capture_id, timezone, ... }
 
 消费：
   ← Engine API 获取配置（排除列表、截图间隔等）
@@ -180,9 +182,13 @@ POST /api/v1/ingest/screenshot
   "window_title": "#general - Slack",
   "bundle_id": "com.tinyspeck.slackmacgap",
   "display_id": 1,
-  "is_active_window": true,
-  "pixel_diff_ratio": 0.35,    // 与上一帧的差异比
-  "screen_resolution": "2560x1600"
+  "is_active": true,
+  "diff_ratio": 0.35,              // 与上一帧的差异比
+  "resolution": "2560x1600",
+  "file_size": 204800,             // 文件大小 (bytes)
+  "ocr_text": "张三: 看一下这个链接...", // Apple Vision OCR 提取的文本 (TDR-017)
+  "capture_id": "a1b2c3d4e5f6...", // 幂等 ID: sha256(path + timestamp)
+  "timezone": "Asia/Shanghai"       // 采集时的时区
 }
 ```
 
@@ -218,6 +224,7 @@ engine/
 │   │   │   ├── screenshots.ts           # GET /screenshots/*
 │   │   │   ├── settings.ts              # GET/PUT /settings
 │   │   │   ├── collector.ts             # POST /collector/control
+│   │   │   ├── stats.ts                 # GET /stats/*
 │   │   │   └── health.ts                # GET /health
 │   │   └── ws/
 │   │       ├── handler.ts                # WebSocket 连接管理
@@ -239,29 +246,23 @@ engine/
 │   │   │   └── statsOverview.ts          # recaply://stats/overview
 │   │   └── transport/
 │   │       ├── stdio.ts                  # stdio 传输 (Claude Desktop/Cursor)
-│   │       └── sse.ts                    # SSE 传输 (Web MCP 客户端)
+│   │       └── streamableHttp.ts         # Streamable HTTP 传输 (Web MCP 客户端)
 │   │
 │   ├── ingestion/                        ← 子模块: Ingestion Pipeline
 │   │   ├── pipeline.ts                   # 摄入管线编排
-│   │   ├── queue.ts                      # 任务队列（内存队列）
+│   │   ├── queue.ts                      # 任务队列（启动时扫描 processed=false 恢复）
 │   │   ├── processors/
-│   │   │   ├── ocr.ts                    # OCR 处理器
+│   │   │   ├── chineseTokenizer.ts       # 中文分词（jieba-wasm）
 │   │   │   ├── entityExtractor.ts        # 实体提取 (NER)
-│   │   │   ├── embedder.ts               # 向量化处理器
-│   │   │   ├── deduplicator.ts           # 去重处理器
+│   │   │   ├── embedder.ts               # 向量化处理器 (BGE-M3)
+│   │   │   ├── deduplicator.ts           # 去重（capture_id 幂等）
 │   │   │   └── contextEnricher.ts        # 上下文增强
 │   │   └── adapters/
-│   │       ├── appleVision.ts            # Apple Vision OCR 适配
-│   │       └── tesseract.ts              # Tesseract OCR 适配（降级）
+│   │       └── tesseract.ts              # Tesseract OCR 适配（纯TS降级方案）
 │   │
 │   ├── agent/                            ← 子模块: AI Agent (智能体)
-│   │   ├── agent.ts                      # Agent 主入口
-│   │   ├── intentParser.ts               # 意图理解：LLM 解析用户查询
-│   │   ├── taskPlanner.ts                # 任务规划：分解为执行步骤
-│   │   ├── executor.ts                   # 执行器：编排工具调用
-│   │   ├── synthesizer.ts                # 回答合成：LLM 汇总结果
-│   │   ├── tools/                        # Agent 可调用的工具集
-│   │   │   ├── tool.ts                   # Tool 抽象接口
+│   │   ├── agent.ts                      # Agent 主入口（AI SDK streamText + tools）
+│   │   ├── tools/                        # Agent 可调用的工具集（AI SDK tool 格式）
 │   │   │   ├── vectorSearchTool.ts       # 向量语义搜索
 │   │   │   ├── fullTextSearchTool.ts     # 全文精确搜索
 │   │   │   ├── graphQueryTool.ts         # 图关系查询
@@ -273,9 +274,7 @@ engine/
 │   │   │   ├── conversationMemory.ts     # 对话上下文记忆
 │   │   │   └── workingMemory.ts          # 工作记忆（当前任务状态）
 │   │   └── prompts/
-│   │       ├── intentPrompt.ts           # 意图解析 prompt
-│   │       ├── plannerPrompt.ts          # 任务规划 prompt
-│   │       └── synthesizerPrompt.ts      # 回答合成 prompt
+│   │       └── systemPrompt.ts           # Agent 系统 prompt
 │   │
 │   ├── search/                           ← 子模块: Search Engine
 │   │   ├── engine.ts                     # 搜索引擎主入口
@@ -288,18 +287,12 @@ engine/
 │   │   └── ranker.ts                     # 结果排序器
 │   │
 │   ├── ai/                               ← 子模块: AI Provider (纯模型调用层)
-│   │   ├── manager.ts                    # AI 模型管理器
-│   │   ├── providers/
-│   │   │   ├── provider.ts               # Provider 抽象接口
-│   │   │   ├── ollama.ts                 # Ollama 本地 LLM
-│   │   │   ├── openai.ts                 # OpenAI API
-│   │   │   ├── anthropic.ts              # Anthropic API
-│   │   │   └── appleML.ts               # Apple CoreML（未来）
+│   │   ├── providers.ts                  # AI SDK provider 工厂（按配置返回 openai/anthropic/ollama）
 │   │   ├── embedding/
-│   │   │   ├── local.ts                  # 本地 Embedding (ONNX)
-│   │   │   └── remote.ts                 # 远程 Embedding API
+│   │   │   ├── local.ts                  # 本地 Embedding (BGE-M3 ONNX)
+│   │   │   └── remote.ts                 # 远程 Embedding API (BGE-M3 云端)
 │   │   └── ner/
-│   │       ├── extractor.ts              # 命名实体识别
+│   │       ├── extractor.ts              # 命名实体识别（AI SDK generateObject）
 │   │       └── patterns.ts               # 实体模式定义
 │   │
 │   ├── storage/                          ← 子模块: Storage Layer
@@ -351,7 +344,7 @@ engine/
 规则：
   • api 和 mcp 是两个并列的入口层
     - api（HTTP/WS）给内部 Frontend + Collector 使用
-    - mcp（stdio/SSE）给外部 AI 系统使用（Claude/Cursor 等）
+    - mcp（stdio/Streamable HTTP）给外部 AI 系统使用（Claude/Cursor 等）
   • mcp 只暴露原始能力，不调用 agent：
     - 外部 AI 系统自己就是 Agent，自己做意图理解和编排
     - mcp → search（搜索工具）
@@ -362,6 +355,8 @@ engine/
     - agent → ai（调用 LLM 做意图理解/回答合成）
     - agent → storage（获取截图详情/实体/对话历史）
   • ingestion 可调用 ai（embedding/NER）和 storage（写入数据）
+    - OCR 由 Collector 端完成（TDR-017），Engine 接收 ocr_text
+    - ingestion 对中文 OCR 文本做分词后存入检索字段
   • ai 是纯模型调用层，不访问 storage
   • storage 是最底层，不调用任何其他模块
 ```
@@ -369,35 +364,35 @@ engine/
 ### Agent 子模块详解
 
 ```
-Agent 是 Engine 中的 AI 智能体，负责：
+Agent 是 Engine 中的 AI 智能体，基于 Vercel AI SDK 构建（TDR-016），负责：
 
 1. 接收用户的自然语言查询或对话
-2. 理解意图、拆解任务
-3. 自主选择并调用工具（搜索、图查询、时间过滤等）
-4. 可以多轮工具调用、反思、迭代
+2. 通过 AI SDK 的 tool calling 自主选择并调用工具
+3. 工具包括搜索、图查询、时间过滤、实体查找等
+4. 可以多轮工具调用、反思、迭代（AI SDK 自动编排）
 5. 最终汇总结果生成自然语言回答
 
-工作流程:
+工作流程（AI SDK streamText + tools）:
   User "上周我跟张三讨论的链接"
     │
     ▼
-  intentParser.ts    → 解析出：时间=上周, 人物=张三, 目标=URL
+  agent.ts (AI SDK streamText)
+    │  LLM 自行规划工具调用序列
+    ▼
+  Tool calls (自动编排):
+    │  timeFilterTool → 上周截图 IDs
+    │  entityLookupTool → 张三出现的截图 IDs
+    │  交集 → fullTextSearchTool → 含 URL 的结果
     │
     ▼
-  taskPlanner.ts     → 生成计划：[时间过滤, 实体查找, URL提取, 交叉匹配]
-    │
-    ▼
-  executor.ts        → 依次调用 tools/：
-    │                    timeFilterTool → 上周截图 IDs
-    │                    entityLookupTool → 张三出现的截图 IDs
-    │                    交集 → fullTextSearchTool → 含 URL 的结果
-    │
-    ▼
-  synthesizer.ts     → LLM 汇总结果，生成回答
+  LLM 汇总结果，流式返回自然语言回答
 
-Agent vs Search 的区别：
-  • Search 是底层能力：执行单一搜索策略（向量/全文/图/时间）
-  • Agent 是高层编排：理解复杂意图，组合多种搜索，多轮推理
+Agent vs Search 的职责边界：
+  • Search 是确定性底层能力：接受显式策略和过滤条件，执行搜索
+    - 不做意图理解，不做查询规划
+    - /search API 只接受 strategy: vector|fulltext|graph|hybrid + 显式 filters
+  • Agent 是智能编排层：理解自然语言意图，组合多种搜索，多轮推理
+    - 自然语言查询只走 /chat（由 Agent 编排后调用 Search）
 
   Search: "SELECT * FROM screenshot WHERE ocr_text @@ 'github'"
   Agent:  "帮我找上周张三在 Slack 上发的那个 GitHub 链接"
@@ -411,7 +406,7 @@ Agent vs Search 的区别：
   → HTTP REST API on port 21890           (给 Frontend / Collector)
   → WebSocket on port 21890/ws            (给 Frontend 实时通知)
   → MCP Server via stdio                  (给 Claude Desktop / Cursor)
-  → MCP Server via SSE on port 21891      (给 Web MCP 客户端)
+  → MCP Server via Streamable HTTP on port 21891 (给 Web MCP 客户端)
 
 消费：
   ← Collector HTTP POST（接收截图通知）
@@ -446,20 +441,20 @@ shared/
 │       ├── date.ts                # 日期工具
 │       └── validation.ts          # 通用校验
 ├── swift/
-│   └── SharedTypes.swift          # Swift 等价类型（手动同步或 codegen）
+│   └── SharedTypes.swift          # Swift Codable 类型（由 quicktype 自动生成，勿手动编辑）
 ├── package.json
 └── tsconfig.json
 ```
 
 ### 边界规则
 
-| ✅ 可以包含 | ❌ 不能包含 |
-|------------|-----------|
-| 类型定义 (interface/type) | 业务逻辑 |
-| 常量和枚举 | 数据库操作 |
-| 纯函数工具 | 网络请求 |
-| 校验 schema (Zod) | 状态管理 |
-| 错误码定义 | 第三方 SDK 调用 |
+| ✅ 可以包含               | ❌ 不能包含     |
+| ------------------------- | --------------- |
+| 类型定义 (interface/type) | 业务逻辑        |
+| 常量和枚举                | 数据库操作      |
+| 纯函数工具                | 网络请求        |
+| 校验 schema (Zod)         | 状态管理        |
+| 错误码定义                | 第三方 SDK 调用 |
 
 ---
 
@@ -517,7 +512,7 @@ await db.query("SELECT * FROM screenshot WHERE ...");
 // ✅ 正确：Storage 层包装错误
 class StorageError extends AppError {
   constructor(message: string, cause?: Error) {
-    super('STORAGE_ERROR', message, cause);
+    super("STORAGE_ERROR", message, cause);
   }
 }
 
@@ -533,14 +528,16 @@ class StorageError extends AppError {
 export const engineConfig = z.object({
   port: z.number().default(21890),
   db: z.object({
-    mode: z.enum(['embedded', 'remote']).default('embedded'),
-    path: z.string().default('~/Library/Application Support/RecaplySense/db'),
+    mode: z.enum(["embedded", "remote"]).default("embedded"),
+    path: z.string().default("~/Library/Application Support/RecaplySense/db"),
     remoteUrl: z.string().optional(),
   }),
   ai: z.object({
-    embeddingModel: z.string().default('bge-small-en-v1.5'),
-    llmProvider: z.enum(['ollama', 'openai', 'anthropic']).default('ollama'),
-    ollamaUrl: z.string().default('http://localhost:11434'),
+    embeddingModel: z.string().default("bge-m3"),
+    embeddingDimensions: z.number().default(1024),
+    embeddingEndpoint: z.string().optional(), // 云端 BGE-M3 API 端点
+    llmProvider: z.enum(["ollama", "openai", "anthropic"]), // 无默认值，首次启动引导用户选择
+    ollamaUrl: z.string().default("http://localhost:11434"),
   }),
   capture: z.object({
     intervalMs: z.number().default(2000),

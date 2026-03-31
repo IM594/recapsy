@@ -8,6 +8,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 通过 AI 理解和索引这些记忆，让用户可以随时搜索、回忆和分析自己的数字生活。
 
 **核心理念：**
+
 - 被动记录，主动回忆
 - 本地优先，隐私至上
 - AI 增强，不是 AI 依赖
@@ -39,7 +40,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 │  │  │      Protocol Adapters (入口层)       │ │                       │
 │  │  │  ┌────────────┐  ┌───────────────┐  │ │                       │
 │  │  │  │  HTTP API   │  │  MCP Server   │  │ │                       │
-│  │  │  │  (REST+WS)  │  │ (stdio/SSE)   │  │ │                       │
+│  │  │  │  (REST+WS)  │  │(stdio/Stream) │  │ │                       │
 │  │  │  │ 给内部 UI    │  │ 给外部 AI 系统 │  │ │                       │
 │  │  │  └──────┬─────┘  └──────┬────────┘  │ │                       │
 │  │  └─────────┼───────────────┼───────────┘ │                       │
@@ -72,18 +73,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 ```
 用户安装 RecaplySense.app 后：
 
-进程 1: RecaplySense (主进程)
-  ├── SwiftUI UI (前端)
-  ├── Collector Controller (管理采集器生命周期)
-  └── 菜单栏图标
-
-进程 2: recaply-collector (采集器守护进程)
-  ├── Screen Capture Loop
-  ├── Change Detection
-  ├── Privacy Filter
-  └── Screenshot Storage
-
-进程 3: recaply-engine (后端服务)
+进程 1: recaply-engine (后端服务，launchd 托管)
   ├── HTTP/WS Server (Hono on Bun)
   ├── Ingestion Pipeline
   ├── Agent (AI 智能体：意图理解 → 规划 → 工具调用 → 汇总)
@@ -91,10 +81,24 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
   ├── AI Provider (LLM / Embedding)
   └── SurrealDB (embedded)
 
-启动流程：
-  App Launch → 启动 recaply-engine → 启动 recaply-collector
-  App Quit → collector 可选后台继续 → engine 继续运行
-  菜单栏常驻 → 随时唤起 UI
+进程 2: recaply-collector (采集器守护进程，launchd 托管)
+  ├── Screen Capture Loop
+  ├── Change Detection
+  ├── Privacy Filter
+  ├── OCR (Apple Vision 文本提取)
+  └── Screenshot Storage
+
+进程 3: RecaplySense (UI 客户端，用户按需打开)
+  ├── SwiftUI UI (前端)
+  ├── 连接 Engine API/WS
+  └── 菜单栏图标
+
+启动流程（launchd 托管模型）：
+  首次安装 → App 注册 Engine + Collector 为 LaunchAgent (SMAppService)
+  开机/登录 → launchd 自动启动 Engine + Collector
+  App 打开 → UI 连接已运行的 Engine
+  App 关闭 → UI 退出，Engine + Collector 继续后台运行
+  崩溃恢复 → launchd 自动重启崩溃进程
 ```
 
 ## 4. Data Flow
@@ -113,19 +117,22 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
                                    │
                     截图压缩存储 (WebP) ──▶ ~/screenshots/
                                    │
+                    OCR 文本提取 (Apple Vision)
+                                   │
                     HTTP POST ─────▶ Backend
+                     (path + metadata + ocr_text)
                                    │
                     ┌──────────────▼──────────────┐
                     │     Ingestion Pipeline       │
                     │                              │
-                    │  1. OCR 文本提取               │
-                    │     (Apple Vision / Tesseract)│
+                    │  1. 中文预分词                  │
+                    │     (对 ocr_text 做中文分词)    │
                     │                              │
                     │  2. 实体提取 (NER)             │
                     │     人名·应用·URL·话题·项目     │
                     │                              │
                     │  3. Embedding 向量化           │
-                    │     (本地 MiniLM / BGE)        │
+                    │     (BGE-M3 云端 API / 本地 ONNX) │
                     │                              │
                     │  4. 写入 SurrealDB             │
                     │     • screenshot 记录          │
@@ -179,15 +186,18 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 │ macOS UI           │ SwiftUI              │ 原生，性能最佳    │
 │ Menu Bar           │ SwiftUI MenuBarExtra │ 系统级常驻       │
 │ Screen Capture     │ ScreenCaptureKit     │ Apple 原生 API   │
-│ OCR                │ Apple Vision         │ 本地免费，质量高  │
+│ OCR                │ Apple Vision         │ Collector端执行    │
 │ Backend Runtime    │ Bun                  │ 快，TS 原生      │
 │ HTTP Framework     │ Hono                 │ 轻量，Bun 优化   │
 │ WebSocket          │ Bun native WS        │ 内置支持         │
 │ Database           │ SurrealDB            │ 多模型一体       │
-│ Embedding (local)  │ ONNX Runtime         │ 本地向量化       │
-│ Embedding Model    │ BGE-small / MiniLM   │ 轻量高质量       │
-│ LLM (local)        │ Ollama               │ 本地推理         │
-│ LLM (cloud)        │ OpenAI / Anthropic   │ 可选云端增强     │
+│ Embedding (cloud)  │ BGE-M3 API           │ 中英双语，1024维 │
+│ Embedding (local)  │ BGE-M3 ONNX          │ 离线降级         │
+│ Embedding Model    │ BAAI/bge-m3          │ 多语言100+，同模型│
+│ LLM (local)        │ Ollama               │ 本地推理（可选） │
+│ LLM (cloud)        │ OpenAI / Anthropic   │ 云端推理（默认） │
+│ AI SDK             │ Vercel AI SDK        │ Agent 编排+多 Provider │
+│ MCP                │ @modelcontextprotocol/sdk │ stdio + Streamable HTTP │
 │ Image Format       │ WebP                 │ 压缩率高质量好   │
 │ IPC                │ HTTP REST + WS       │ 通用跨平台       │
 │ Build (Swift)      │ Xcode / SPM          │ Apple 标准       │
@@ -231,7 +241,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
   └── logs/                     # 日志文件
 
   ~/Library/Caches/RecaplySense/
-  └── thumbnails/               # 缩略图缓存
+  └── thumbnails/               # 缩略图缓存（由 Engine API 按需生成）
 ```
 
 ## 7. Security & Privacy

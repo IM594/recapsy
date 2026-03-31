@@ -89,7 +89,11 @@ recaply-sense/
 │       │       ├── Context/
 │       │       │   ├── ActiveAppDetector.swift
 │       │       │   ├── WindowTitleReader.swift
+│       │       │   ├── TimezoneCapture.swift    # 采集时的 IANA 时区
 │       │       │   └── ContextCollector.swift
+│       │       ├── OCR/                         # OCR 模块 (TDR-017)
+│       │       │   ├── VisionOCR.swift          # Apple Vision 文字识别
+│       │       │   └── OCRProcessor.swift       # OCR 编排（截图→文字）
 │       │       ├── Network/
 │       │       │   ├── EngineClient.swift
 │       │       │   └── HealthCheck.swift
@@ -143,37 +147,33 @@ recaply-sense/
 │   │   │   │   │   └── statsOverview.ts
 │   │   │   │   └── transport/
 │   │   │   │       ├── stdio.ts
-│   │   │   │       └── sse.ts
+│   │   │   │       └── streamableHttp.ts
 │   │   │   ├── ingestion/
 │   │   │   │   ├── pipeline.ts
 │   │   │   │   ├── queue.ts
-│   │   │   │   └── processors/
-│   │   │   │       ├── ocr.ts
-│   │   │   │       ├── entityExtractor.ts
-│   │   │   │       ├── embedder.ts
-│   │   │   │       ├── deduplicator.ts
-│   │   │   │       └── contextEnricher.ts
-│   │   │   ├── agent/                    # AI Agent (智能体)
-│   │   │   │   ├── agent.ts
-│   │   │   │   ├── intentParser.ts
-│   │   │   │   ├── taskPlanner.ts
-│   │   │   │   ├── executor.ts
-│   │   │   │   ├── synthesizer.ts
+│   │   │   │   ├── processors/
+│   │   │   │   │   ├── chineseTokenizer.ts    # 中文分词（jieba-wasm）
+│   │   │   │   │   ├── entityExtractor.ts
+│   │   │   │   │   ├── embedder.ts            # BGE-M3 向量化
+│   │   │   │   │   ├── deduplicator.ts        # capture_id 幂等去重
+│   │   │   │   │   └── contextEnricher.ts
+│   │   │   │   └── adapters/
+│   │   │   │       └── tesseract.ts           # 纯 TS OCR 降级方案
+│   │   │   ├── agent/                    # AI Agent (AI SDK 编排, TDR-016)
+│   │   │   │   ├── agent.ts             # AI SDK streamText + tools 主入口
 │   │   │   │   ├── tools/
-│   │   │   │   │   ├── tool.ts
 │   │   │   │   │   ├── vectorSearchTool.ts
 │   │   │   │   │   ├── fullTextSearchTool.ts
 │   │   │   │   │   ├── graphQueryTool.ts
 │   │   │   │   │   ├── timeFilterTool.ts
 │   │   │   │   │   ├── entityLookupTool.ts
-│   │   │   │   │   └── screenshotTool.ts
+│   │   │   │   │   ├── screenshotTool.ts
+│   │   │   │   │   └── statsTool.ts
 │   │   │   │   ├── memory/
 │   │   │   │   │   ├── conversationMemory.ts
 │   │   │   │   │   └── workingMemory.ts
 │   │   │   │   └── prompts/
-│   │   │   │       ├── intentPrompt.ts
-│   │   │   │       ├── plannerPrompt.ts
-│   │   │   │       └── synthesizerPrompt.ts
+│   │   │   │       └── systemPrompt.ts
 │   │   │   ├── search/
 │   │   │   │   ├── engine.ts
 │   │   │   │   ├── strategies/
@@ -242,8 +242,10 @@ recaply-sense/
 │       │   └── utils/
 │       │       ├── date.ts
 │       │       └── validation.ts
+│       ├── generated/
+│       │   └── schemas/               # JSON Schema（zod-to-json-schema 生成）
 │       ├── swift/
-│       │   └── SharedTypes.swift      # Swift 等价类型
+│       │   └── SharedTypes.swift      # Swift Codable 类型（quicktype 自动生成，勿手动编辑）
 │       ├── package.json
 │       └── tsconfig.json
 │
@@ -265,6 +267,8 @@ recaply-sense/
 ## Monorepo Configuration
 
 ### Root `package.json`
+
+> **注意：** `apps/` (Swift 项目) 不在 Turborepo workspaces 中。Swift 项目使用 Xcode/SPM 构建，通过 root scripts 中的 shell 命令编排。
 
 ```json
 {
@@ -329,12 +333,14 @@ recaply-sense/
   },
   "dependencies": {
     "hono": "^4",
-    "surrealdb": "^1",
+    "surrealdb": "^2",
+    "@surrealdb/node": "^2",
     "@modelcontextprotocol/sdk": "^1",
-    "zod": "^3",
-    "onnxruntime-node": "^1",
-    "openai": "^4",
-    "@anthropic-ai/sdk": "^0.30",
+    "zod": "^4",
+    "ai": "^4",
+    "@ai-sdk/openai": "^1",
+    "@ai-sdk/anthropic": "^1",
+    "ollama-ai-provider": "^1",
     "pino": "^9"
   },
   "devDependencies": {
@@ -355,11 +361,13 @@ recaply-sense/
   "main": "src/index.ts",
   "scripts": {
     "build": "bun build src/index.ts --outdir dist --target bun",
+    "generate:types": "bun scripts/generate-swift-types.ts",
     "test": "bun test",
     "lint": "biome check src/"
   },
   "dependencies": {
-    "zod": "^3"
+    "zod": "^4",
+    "zod-to-json-schema": "^3"
   },
   "devDependencies": {
     "typescript": "^5.7"
@@ -388,8 +396,8 @@ recaply-sense/
 │   │   ├── 02/
 │   │   └── ...
 │   └── ...
-├── models/                            # AI 模型文件
-│   ├── bge-small-en-v1.5.onnx        # Embedding 模型
+├── models/                            # AI 模型文件（本地降级时使用）
+│   ├── bge-m3.onnx                    # Embedding 模型 (BGE-M3, ~1.1GB)
 │   └── ...
 └── logs/                              # 日志
     ├── engine.log

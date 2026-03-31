@@ -37,9 +37,10 @@ WebSocket: ws://localhost:21890/ws
     "last_screenshot_at": "2026-03-31T14:30:12.000Z"
   },
   "ai": {
-    "embedding_model": "bge-small-en-v1.5",
-    "llm_provider": "ollama",
-    "llm_model": "llama3",
+    "embedding_model": "bge-m3",
+    "embedding_dimensions": 1024,
+    "llm_provider": "anthropic",
+    "llm_model": "claude-sonnet-4-20250514",
     "llm_status": "available"
   },
   "storage": {
@@ -71,7 +72,10 @@ Collector 截图后通知 Engine 处理。
   "is_active": true,
   "diff_ratio": 0.35,
   "resolution": "2560x1600",
-  "file_size": 204800
+  "file_size": 204800,
+  "ocr_text": "张三: 看一下这个链接 https://github.com/...",
+  "capture_id": "a1b2c3d4e5f6...",
+  "timezone": "Asia/Shanghai"
 }
 ```
 
@@ -85,7 +89,8 @@ Collector 截图后通知 Engine 处理。
 }
 ```
 
-**处理流程：** Engine 异步执行 Ingestion Pipeline（OCR → NER → Embedding → 存储）。
+**处理流程：** Engine 异步执行 Ingestion Pipeline（中文分词 → NER → Embedding → 存储）。
+OCR 已由 Collector 端完成（TDR-017），Engine 接收 `ocr_text`。`capture_id` 保证幂等性，重复提交自动去重。
 Frontend 通过 WebSocket 接收进度通知。
 
 ### `POST /api/v1/ingest/batch`
@@ -141,34 +146,35 @@ Frontend 通过 WebSocket 接收进度通知。
 
 ### `POST /api/v1/search`
 
-智能搜索 — AI 理解查询意图，多策略融合搜索。
+确定性搜索 — 按显式策略和过滤条件执行搜索，不做意图理解或查询规划。
+自然语言查询请使用 `POST /api/v1/chat`（由 Agent 编排搜索）。
 
 **Request:**
 
 ```json
 {
-  "query": "上周我跟张三在 Slack 上讨论的那个项目链接",
+  "query": "github 链接",
   "filters": {
     "time_range": {
       "start": "2026-03-24T00:00:00Z",
       "end": "2026-03-31T23:59:59Z"
     },
     "apps": ["Slack"],
-    "entity_types": ["url"]
+    "entity_types": ["url"],
+    "timezone": "Asia/Shanghai"
   },
   "limit": 20,
   "offset": 0,
-  "strategy": "auto"
+  "strategy": "hybrid"
 }
 ```
 
 **`strategy` options:**
 
-- `"auto"` — AI 自动选择搜索策略（默认）
 - `"vector"` — 仅向量语义搜索
 - `"fulltext"` — 仅全文搜索
 - `"graph"` — 仅图关系搜索
-- `"hybrid"` — 向量 + 全文混合
+- `"hybrid"` — 向量 + 全文混合（默认）
 
 **Response 200:**
 
@@ -198,7 +204,7 @@ Frontend 通过 WebSocket 接收进度通知。
     }
   ],
   "total_count": 5,
-  "search_plan": "时间范围过滤 → 应用过滤(Slack) → 实体匹配(张三) → URL实体提取"
+  "strategy_used": "hybrid"
 }
 ```
 
@@ -238,9 +244,10 @@ Frontend 通过 WebSocket 接收进度通知。
 **Query Parameters:**
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `date` | string (ISO date) | today | 日期 |
+| `date` | string (ISO date) | today | 日期（按 timezone 计算） |
 | `hour` | number (0-23) | - | 可选，指定小时 |
 | `app` | string | - | 按应用过滤 |
+| `timezone` | string (IANA) | `"UTC"` | 时区，用于确定 "today" 和日期边界 |
 | `limit` | number | 50 | 每页数量 |
 | `offset` | number | 0 | 偏移量 |
 | `group_by` | string | `"minute"` | 分组粒度: `"second"`, `"minute"`, `"hour"` |
@@ -306,6 +313,7 @@ Frontend 通过 WebSocket 接收进度通知。
 |-------|------|-------------|
 | `start` | string (ISO date) | 开始日期 |
 | `end` | string (ISO date) | 结束日期 |
+| `timezone` | string (IANA) | 时区，用于确定日期边界（默认 UTC） |
 
 **Response 200:**
 
@@ -633,12 +641,13 @@ Frontend 通过 WebSocket 接收进度通知。
     "max_storage_gb": 500
   },
   "ai": {
-    "llm_provider": "ollama",
-    "llm_model": "llama3",
+    "llm_provider": "anthropic",
+    "llm_model": "claude-sonnet-4-20250514",
     "ollama_url": "http://localhost:11434",
     "openai_api_key": "sk-***masked***",
     "anthropic_api_key": "sk-***masked***",
-    "embedding_model": "bge-small-en-v1.5",
+    "embedding_model": "bge-m3",
+    "embedding_dimensions": 1024,
     "auto_entity_extraction": true
   },
   "privacy": {
@@ -840,17 +849,17 @@ Frontend 通过 WebSocket 接收进度通知。
 
 ### Error Codes
 
-| Code                | HTTP Status | Description      |
-| ------------------- | ----------- | ---------------- |
-| `VALIDATION_ERROR`  | 400         | 请求参数校验失败 |
-| `NOT_FOUND`         | 404         | 资源不存在       |
+| Code                    | HTTP Status | Description      |
+| ----------------------- | ----------- | ---------------- |
+| `VALIDATION_ERROR`      | 400         | 请求参数校验失败 |
+| `NOT_FOUND`             | 404         | 资源不存在       |
 | `COLLECTOR_UNAVAILABLE` | 503         | 采集器不可用     |
-| `DB_ERROR`          | 500         | 数据库操作失败   |
-| `AI_PROVIDER_ERROR` | 502         | AI 模型调用失败  |
-| `SEARCH_FAILED`     | 500         | 搜索执行失败     |
-| `RATE_LIMITED`      | 429         | 请求过于频繁     |
-| `STORAGE_FULL`      | 507         | 存储空间不足     |
-| `INGESTION_FAILED`  | 500         | 截图处理失败     |
+| `DB_ERROR`              | 500         | 数据库操作失败   |
+| `AI_PROVIDER_ERROR`     | 502         | AI 模型调用失败  |
+| `SEARCH_FAILED`         | 500         | 搜索执行失败     |
+| `RATE_LIMITED`          | 429         | 请求过于频繁     |
+| `STORAGE_FULL`          | 507         | 存储空间不足     |
+| `INGESTION_FAILED`      | 500         | 截图处理失败     |
 
 ---
 

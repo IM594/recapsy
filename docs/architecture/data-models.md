@@ -28,7 +28,11 @@ DEFINE FIELD diff_ratio     ON screenshot TYPE float;          -- 与上一帧�
 DEFINE FIELD resolution     ON screenshot TYPE string;         -- 分辨率
 DEFINE FIELD file_size      ON screenshot TYPE int;            -- 文件大小 (bytes)
 DEFINE FIELD processed      ON screenshot TYPE bool DEFAULT false;  -- 是否已处理
-DEFINE FIELD embedding      ON screenshot TYPE option<array<float>>; -- 向量嵌入
+DEFINE FIELD embedding      ON screenshot TYPE option<array<float>>; -- 向量嵌入 (BGE-M3, 1024维)
+DEFINE FIELD timezone        ON screenshot TYPE string;         -- 采集时的时区 (e.g. "Asia/Shanghai")
+DEFINE FIELD local_date      ON screenshot TYPE string;         -- 本地日期 (e.g. "2026-03-31")
+DEFINE FIELD local_hour      ON screenshot TYPE int;            -- 本地小时 (0-23)
+DEFINE FIELD capture_id      ON screenshot TYPE string;         -- 幂等 ID (sha256(path+timestamp))
 DEFINE FIELD created_at     ON screenshot TYPE datetime DEFAULT time::now();
 
 -- 索引
@@ -36,15 +40,26 @@ DEFINE INDEX idx_screenshot_timestamp ON screenshot FIELDS timestamp;
 DEFINE INDEX idx_screenshot_app       ON screenshot FIELDS app_name;
 DEFINE INDEX idx_screenshot_processed ON screenshot FIELDS processed;
 DEFINE INDEX idx_screenshot_bundle    ON screenshot FIELDS bundle_id;
+DEFINE INDEX idx_screenshot_capture   ON screenshot FIELDS capture_id UNIQUE; -- 幂等去重
+DEFINE INDEX idx_screenshot_local     ON screenshot FIELDS local_date, local_hour; -- 按本地时间聚合
 
 -- 全文搜索索引
-DEFINE ANALYZER ocr_analyzer TOKENIZERS class FILTERS lowercase, snowball(english);
+-- 注意：SurrealDB 内建 tokenizer 对中文分词不友好（无中文分词器）
+-- 英文使用 snowball(english) 词干化；中文依赖 Ingestion Pipeline 预分词后存入 ocr_text_tokenized
+-- 中文语义检索主要依赖 Embedding 向量搜索（BGE-M3）
+DEFINE ANALYZER ocr_analyzer TOKENIZERS class, blank FILTERS lowercase, snowball(english);
 DEFINE INDEX idx_screenshot_fts ON screenshot FIELDS ocr_text
-  SEARCH ANALYZER ocr_analyzer BM25;
+  FULLTEXT ANALYZER ocr_analyzer BM25;
+
+-- 中文预分词文本索引（Ingestion Pipeline 预处理后写入，用空格分隔的中文分词结果）
+DEFINE FIELD ocr_text_tokenized ON screenshot TYPE option<string>;
+DEFINE ANALYZER cjk_analyzer TOKENIZERS blank FILTERS lowercase;
+DEFINE INDEX idx_screenshot_fts_cjk ON screenshot FIELDS ocr_text_tokenized
+  FULLTEXT ANALYZER cjk_analyzer BM25;
 
 -- 向量索引 (HNSW)
 DEFINE INDEX idx_screenshot_vec ON screenshot FIELDS embedding
-  MTREE DIMENSION 384 DIST COSINE;  -- 384 = BGE-small 维度
+  HNSW DIMENSION 1024 DIST COSINE;  -- 1024 = BGE-M3 维度
 ```
 
 ### `entity` — 实体 (人/应用/URL/话题等)
@@ -68,7 +83,7 @@ DEFINE INDEX idx_entity_type_name ON entity FIELDS type, name UNIQUE;
 DEFINE INDEX idx_entity_freq      ON entity FIELDS frequency;
 
 DEFINE INDEX idx_entity_vec ON entity FIELDS embedding
-  MTREE DIMENSION 384 DIST COSINE;
+  HNSW DIMENSION 1024 DIST COSINE;
 ```
 
 ### `chat_session` — AI 对话会话
@@ -146,14 +161,11 @@ DEFINE FIELD created_at ON related_to TYPE datetime DEFAULT time::now();
 DEFINE INDEX idx_related_type ON related_to FIELDS relation_type;
 ```
 
-### `follows` — 截图时序关系
+### ~~`follows` — 截图时序关系（已移除）~~
 
-```surql
-DEFINE TABLE follows SCHEMAFULL TYPE RELATION IN screenshot OUT screenshot;
-
-DEFINE FIELD gap_seconds ON follows TYPE float;  -- 两张截图间隔秒数
-DEFINE FIELD same_app    ON follows TYPE bool;   -- 是否同一应用
-```
+> **已移除 (2026-04-01)：** 截图时序关系通过 `timestamp` 索引排序实现，
+> 不再为每对相邻截图单独建图边。按 2s/帧估算，10 年将产生 5000 万+ follows 边，
+> 信息密度极低。API 层的 `previous_screenshot` / `next_screenshot` 通过查询实现。
 
 ---
 
@@ -185,15 +197,15 @@ DEFINE FIELD same_app    ON follows TYPE bool;   -- 是否同一应用
   │  metadata    │                   │  window_title    │
   │  frequency   │                   │  ocr_text        │
   │  embedding   │                   │  embedding       │
-  └──────┬───────┘                   └────────┬─────────┘
-         │                                     │
-         │ related_to                          │ follows
-         │ (N:M, self-referencing)             │ (1:1 chain)
-         ▼                                     ▼
-  ┌──────────────┐                   ┌──────────────────┐
-  │    entity     │                   │    screenshot     │
-  │   (other)    │                   │     (next)       │
-  └──────────────┘                   └──────────────────┘
+  └──────┬───────┘                   │  timezone        │
+         │                           │  local_date      │
+         │ related_to                │  capture_id      │
+         │ (N:M, self-referencing)   └──────────────────┘
+         ▼                           时序关系通过 timestamp
+  ┌──────────────┐                   排序实现，不单独建边
+  │    entity     │
+  │   (other)    │
+  └──────────────┘
 
 
   Entity Types:
@@ -218,7 +230,7 @@ DEFINE FIELD same_app    ON follows TYPE bool;   -- 是否同一应用
 // shared/src/types/screenshot.ts
 
 export interface Screenshot {
-  id: string;                    // SurrealDB record ID: "screenshot:xxx"
+  id: string; // SurrealDB record ID: "screenshot:xxx"
   path: string;
   timestamp: Date;
   app_name: string;
@@ -226,21 +238,33 @@ export interface Screenshot {
   window_title: string;
   display_id: number;
   ocr_text: string | null;
+  ocr_text_tokenized: string | null; // 中文预分词文本（空格分隔）
   is_active: boolean;
   diff_ratio: number;
   resolution: string;
   file_size: number;
   processed: boolean;
-  embedding: number[] | null;
+  embedding: number[] | null; // BGE-M3, 1024 维
+  timezone: string; // e.g. "Asia/Shanghai"
+  local_date: string; // e.g. "2026-03-31"
+  local_hour: number; // 0-23
+  capture_id: string; // 幂等 ID: sha256(path + timestamp)
   created_at: Date;
 }
 
 // shared/src/types/entity.ts
 
-export type EntityType = 'person' | 'app' | 'url' | 'topic' | 'project' | 'file' | 'email';
+export type EntityType =
+  | "person"
+  | "app"
+  | "url"
+  | "topic"
+  | "project"
+  | "file"
+  | "email";
 
 export interface Entity {
-  id: string;                    // "entity:xxx"
+  id: string; // "entity:xxx"
   type: EntityType;
   name: string;
   aliases: string[];
@@ -255,16 +279,16 @@ export interface Entity {
 // shared/src/types/relationship.ts
 
 export type RelationType =
-  | 'co_appeared'
-  | 'mentioned'
-  | 'used_with'
-  | 'belongs_to'
-  | 'derived_from';
+  | "co_appeared"
+  | "mentioned"
+  | "used_with"
+  | "belongs_to"
+  | "derived_from";
 
 export interface Relationship {
   id: string;
-  in: string;                    // entity ID
-  out: string;                   // entity ID
+  in: string; // entity ID
+  out: string; // entity ID
   relation_type: RelationType;
   weight: number;
   first_seen: Date;
@@ -281,11 +305,11 @@ export interface ChatSession {
   updated_at: Date;
 }
 
-export type MessageRole = 'user' | 'assistant' | 'system';
+export type MessageRole = "user" | "assistant" | "system";
 
 export interface ChatMessage {
   id: string;
-  session: string;               // chat_session record ID
+  session: string; // chat_session record ID
   role: MessageRole;
   content: string;
   metadata: {
@@ -314,12 +338,12 @@ export interface SearchResult {
   screenshots: ScoredScreenshot[];
   entities: ScoredEntity[];
   total_count: number;
-  search_plan?: string;          // AI 生成的查询计划（debug 用）
+  strategy_used: "vector" | "fulltext" | "graph" | "hybrid";
 }
 
 export interface ScoredScreenshot extends Screenshot {
   score: number;
-  highlights: string[];          // 匹配的文本片段
+  highlights: string[]; // 匹配的文本片段
 }
 
 export interface ScoredEntity extends Entity {
@@ -330,13 +354,25 @@ export interface ScoredEntity extends Entity {
 // shared/src/types/events.ts (WebSocket)
 
 export type WSEvent =
-  | { type: 'screenshot:new'; data: { id: string; timestamp: Date; app_name: string } }
-  | { type: 'ingestion:progress'; data: { screenshot_id: string; stage: string; progress: number } }
-  | { type: 'ingestion:complete'; data: { screenshot_id: string } }
-  | { type: 'search:result'; data: SearchResult }
-  | { type: 'chat:chunk'; data: { session_id: string; content: string; done: boolean } }
-  | { type: 'collector:status'; data: { status: 'running' | 'paused' | 'stopped' } }
-  | { type: 'error'; data: { code: string; message: string } };
+  | {
+      type: "screenshot:new";
+      data: { id: string; timestamp: Date; app_name: string };
+    }
+  | {
+      type: "ingestion:progress";
+      data: { screenshot_id: string; stage: string; progress: number };
+    }
+  | { type: "ingestion:complete"; data: { screenshot_id: string } }
+  | { type: "search:result"; data: SearchResult }
+  | {
+      type: "chat:chunk";
+      data: { session_id: string; content: string; done: boolean };
+    }
+  | {
+      type: "collector:status";
+      data: { status: "running" | "paused" | "stopped" };
+    }
+  | { type: "error"; data: { code: string; message: string } };
 ```
 
 ---
@@ -369,7 +405,7 @@ LIMIT 20;
 LET $query_vec = <从 embedding 模型获取>;
 SELECT *, vector::similarity::cosine(embedding, $query_vec) AS score
 FROM screenshot
-WHERE embedding <|10,384|> $query_vec
+WHERE embedding <|10,1024|> $query_vec
 ORDER BY score DESC
 LIMIT 20;
 ```
@@ -404,7 +440,7 @@ WHERE in = (SELECT id FROM entity WHERE name = '张三')
   );
 ```
 
-### 复合智能查询（由 AI Query Planner 生成）
+### 复合智能查询（由 Agent 工具调用生成）
 
 ```surql
 -- 用户问："上周我跟张三在 Slack 上讨论那个项目时提到的链接"
