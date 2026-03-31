@@ -33,6 +33,7 @@ DEFINE FIELD retry_count    ON screenshot TYPE int DEFAULT 0;  -- 处理重试�
 DEFINE FIELD last_error     ON screenshot TYPE option<string>; -- 最后一次处理错误信息
 DEFINE FIELD ocr_truncated  ON screenshot TYPE bool DEFAULT false; -- OCR 文本是否经过截断
 DEFINE FIELD purged         ON screenshot TYPE bool DEFAULT false; -- 截图文件是否已清理（保留元数据）
+DEFINE FIELD vision_pending ON screenshot TYPE bool DEFAULT false; -- 是否等待 Vision LLM 处理（失败重试标记）
 DEFINE FIELD embedding      ON screenshot TYPE option<array<float>>; -- 向量嵌入 (BGE-M3, 1024维)
 DEFINE FIELD timezone        ON screenshot TYPE string;         -- 采集时的时区 (e.g. "Asia/Shanghai")
 DEFINE FIELD local_date      ON screenshot TYPE string;         -- 本地日期 (e.g. "2026-03-31")
@@ -63,6 +64,7 @@ DEFINE INDEX idx_screenshot_fts_cjk ON screenshot FIELDS ocr_text_tokenized
   FULLTEXT ANALYZER cjk_analyzer BM25;
 
 -- 向量索引 (HNSW)
+-- 注意：embedding 为 option 类型，搜索查询需显式 WHERE embedding IS NOT NULL
 DEFINE INDEX idx_screenshot_vec ON screenshot FIELDS embedding
   HNSW DIMENSION 1024 DIST COSINE;  -- 1024 = BGE-M3 维度
 ```
@@ -72,7 +74,8 @@ DEFINE INDEX idx_screenshot_vec ON screenshot FIELDS embedding
 ```surql
 DEFINE TABLE entity SCHEMAFULL;
 
-DEFINE FIELD type       ON entity TYPE string;        -- 'person', 'app', 'url', 'topic', 'project', 'file'
+DEFINE FIELD type       ON entity TYPE string
+  ASSERT $value IN ['person', 'app', 'url', 'topic', 'project', 'file', 'email'];
 DEFINE FIELD name       ON entity TYPE string;        -- 实体名称
 DEFINE FIELD aliases    ON entity TYPE option<array<string>>; -- 别名列表
 DEFINE FIELD metadata   ON entity TYPE option<object>;  -- 附加元数据
@@ -162,14 +165,15 @@ DEFINE TABLE activity_segment SCHEMAFULL;
 
 DEFINE FIELD app_name ON activity_segment TYPE string;
 DEFINE FIELD bundle_id ON activity_segment TYPE string;
-DEFINE FIELD display_id ON activity_segment TYPE int;
+DEFINE FIELD display_ids ON activity_segment TYPE array<int>;  -- 涉及的显示器 IDs（同 App 跨多屏合并）
 DEFINE FIELD session_start ON activity_segment TYPE datetime;
 DEFINE FIELD session_end ON activity_segment TYPE datetime;
 DEFINE FIELD duration_seconds ON activity_segment TYPE int;
 
 -- Vision LLM 生成的结构化描述
 DEFINE FIELD activity ON activity_segment TYPE string;        -- "在 Slack #general 和张三讨论项目进度"
-DEFINE FIELD scene_type ON activity_segment TYPE string;      -- coding|chatting|browsing|designing|meeting|reading|other
+DEFINE FIELD scene_type ON activity_segment TYPE string      -- coding|chatting|browsing|designing|meeting|reading|writing|terminal|other
+  ASSERT $value IN ['coding', 'chatting', 'browsing', 'designing', 'meeting', 'reading', 'writing', 'terminal', 'other'];
 DEFINE FIELD summary ON activity_segment TYPE string;         -- 一段话摘要
 DEFINE FIELD visual_elements ON activity_segment TYPE array;  -- ["代码编辑器", "聊天消息列表"]
 DEFINE FIELD key_entities ON activity_segment TYPE array;     -- [{name:"张三", type:"person"}, ...]
@@ -184,7 +188,7 @@ DEFINE FIELD frame_count ON activity_segment TYPE int;        -- 原始帧数（
 DEFINE FIELD selected_frame_count ON activity_segment TYPE int; -- 代表帧数（去重后）
 
 -- 元数据
-DEFINE FIELD embedding ON activity_segment TYPE array<float>; -- summary 的 BGE-M3 向量 (1024维)
+DEFINE FIELD embedding ON activity_segment TYPE option<array<float>>; -- summary 的 BGE-M3 向量 (1024维)，LLM 失败时为 null
 DEFINE FIELD llm_model ON activity_segment TYPE string;       -- 使用的 Vision LLM 模型
 DEFINE FIELD llm_tokens_in ON activity_segment TYPE int;      -- input token 数
 DEFINE FIELD llm_tokens_out ON activity_segment TYPE int;     -- output token 数
@@ -192,9 +196,9 @@ DEFINE FIELD processed_at ON activity_segment TYPE datetime DEFAULT time::now();
 
 -- 索引
 DEFINE INDEX idx_segment_time ON activity_segment FIELDS session_start;
-DEFINE INDEX idx_segment_app ON activity_segment FIELDS bundle_id, session_start;
-DEFINE INDEX idx_segment_scene ON activity_segment FIELDS scene_type;
-DEFINE INDEX idx_segment_embedding ON activity_segment FIELDS embedding HNSW DIMENSION 1024 DIST COSINE;
+DEFINE INDEX idx_segment_app ON activity_segment FIELDS bundle_id, session_start;DEFINE INDEX idx_segment_scene ON activity_segment FIELDS scene_type;
+DEFINE INDEX idx_segment_embedding ON activity_segment FIELDS embedding
+  HNSW DIMENSION 1024 DIST COSINE;  -- embedding 为 option，搜索需 WHERE embedding IS NOT NULL
 
 -- 全文搜索索引（英文 + 中文预分词）
 DEFINE INDEX idx_segment_activity_fts ON activity_segment FIELDS activity
@@ -224,6 +228,20 @@ DEFINE FIELD context    ON appeared_in TYPE option<string>; -- 出现时的上�
 DEFINE FIELD created_at ON appeared_in TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX idx_appeared_time ON appeared_in FIELDS timestamp;
+```
+
+### `appeared_in_segment` — 实体出现在活动片段中
+
+```surql
+DEFINE TABLE appeared_in_segment SCHEMAFULL TYPE RELATION IN entity OUT activity_segment;
+
+DEFINE FIELD source     ON appeared_in_segment TYPE string;
+    -- 'vision_llm'  : Vision LLM key_entities 提取
+    -- 'inherited'    : 从 appeared_in (screenshot) 继承
+DEFINE FIELD confidence ON appeared_in_segment TYPE float;
+DEFINE FIELD created_at ON appeared_in_segment TYPE datetime DEFAULT time::now();
+
+DEFINE INDEX idx_ais_out ON appeared_in_segment FIELDS out;
 ```
 
 ### `related_to` — 实体之间的关联
@@ -319,6 +337,12 @@ DEFINE INDEX idx_related_type ON related_to FIELDS relation_type;
   │  screenshot_ids[] → screenshot                    │
   │  embedding (1024维)                               │
   └────────────────────────────────────────────────────┘
+          ▲
+          │ appeared_in_segment (N:M)
+          │ (实体参与的活动片段)
+  ┌───────┴──────┐
+  │    entity     │
+  └──────────────┘
 ```
 
 ---
@@ -347,6 +371,7 @@ export interface Screenshot {
   last_error: string | null;
   ocr_truncated: boolean;
   purged: boolean;
+  vision_pending: boolean;                 // 是否等待 Vision LLM 处理
   embedding: number[] | null; // BGE-M3, 1024 维
   timezone: string; // e.g. "Asia/Shanghai"
   local_date: string; // e.g. "2026-03-31"
@@ -440,7 +465,7 @@ export interface ActivitySegment {
   id: string;
   app_name: string;
   bundle_id: string;
-  display_id: number;
+  display_ids: number[];                       // 涉及的显示器 IDs（同 App 跨多屏合并）
   session_start: Date;
   session_end: Date;
   duration_seconds: number;
@@ -486,6 +511,7 @@ export interface SearchRequest {
 export interface SearchResult {
   screenshots: ScoredScreenshot[];
   entities: ScoredEntity[];
+  activity_segments: ScoredActivitySegment[];
   total_count: number;
   strategy_used: "vector" | "fulltext" | "graph" | "hybrid";
 }
@@ -498,6 +524,17 @@ export interface ScoredScreenshot extends Screenshot {
 export interface ScoredEntity extends Entity {
   score: number;
   related_screenshots_count: number;
+}
+
+export interface ScoredActivitySegment {
+  id: string;
+  app_name: string;
+  session_start: Date;
+  session_end: Date;
+  activity: string;
+  scene_type: SceneType;
+  summary: string;
+  score: number;
 }
 
 // shared/src/types/events.ts (WebSocket)

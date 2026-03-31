@@ -176,6 +176,9 @@ Frontend 通过 WebSocket 接收进度通知。
 - `"graph"` — 仅图关系搜索
 - `"hybrid"` — 向量 + 全文混合（默认）
 
+> **activity_segment 搜索：** `hybrid` 和 `vector` 策略自动包含 `activity_segment` 的向量/全文搜索。
+> `activity_segment` 的搜索结果在响应的 `activity_segments` 字段中返回。
+
 **Response 200:**
 
 ```json
@@ -201,6 +204,18 @@ Frontend 通过 WebSocket 接收进度通知。
       "name": "https://github.com/example/project",
       "score": 0.95,
       "related_screenshots_count": 3
+    }
+  ],
+  "activity_segments": [
+    {
+      "id": "activity_segment:seg001",
+      "app_name": "Slack",
+      "session_start": "2026-03-28T10:00:00Z",
+      "session_end": "2026-03-28T10:25:00Z",
+      "activity": "在 Slack #general 和张三讨论 GitHub 项目链接",
+      "scene_type": "chatting",
+      "summary": "与张三讨论 RecaplySense 项目进度，交换了 GitHub PR 链接",
+      "score": 0.88
     }
   ],
   "total_count": 5,
@@ -387,6 +402,11 @@ Frontend 通过 WebSocket 接收进度通知。
 ```
 
 **Response 200 (非流式):**
+
+> **流式 vs 非流式选择策略：**
+> - **推荐路径：** Frontend 使用 WebSocket `chat:send` 获取流式回复（实时打字效果）
+> - **HTTP POST 非流式路径** 作为降级方案：WS 连接不可用时使用，等待完整回复后一次性返回
+> - 不提供 HTTP SSE 方案以避免三套流式协议的维护成本
 
 ```json
 {
@@ -601,6 +621,16 @@ Frontend 通过 WebSocket 接收进度通知。
 }
 ```
 
+> **实现说明：** `previous_screenshot` 和 `next_screenshot` 不通过图边关系获取（已移除 `follows` 边），
+> 而是通过 timestamp 索引查询相邻记录：
+> ```surql
+> -- previous
+> SELECT id FROM screenshot WHERE timestamp < $current.timestamp ORDER BY timestamp DESC LIMIT 1;
+> -- next
+> SELECT id FROM screenshot WHERE timestamp > $current.timestamp ORDER BY timestamp ASC LIMIT 1;
+> ```
+```
+
 ### `GET /api/v1/screenshots/:id/image`
 
 获取截图图片文件（代理）。
@@ -710,6 +740,53 @@ Frontend 通过 WebSocket 接收进度通知。
   "message": "Collector paused successfully"
 }
 ```
+
+### `GET /api/v1/collector/config`
+
+Collector 轮询获取配置和控制指令（每 5 秒）。
+
+**Response 200:**
+
+```json
+{
+  "control": {
+    "action": "running",
+    "updated_at": "2026-03-31T14:30:00Z"
+  },
+  "capture": {
+    "interval_ms": 2000,
+    "min_diff_ratio": 0.05,
+    "excluded_apps": ["com.apple.keychainaccess", "1Password"],
+    "excluded_window_titles": ["*password*"],
+    "quality": 80
+  }
+}
+```
+
+### `POST /api/v1/collector/heartbeat`
+
+Collector 上报心跳状态（随 config 轮询一起，或独立发送）。
+
+**Request:**
+
+```json
+{
+  "status": "running",
+  "uptime_seconds": 86400,
+  "screenshots_today": 12500,
+  "last_capture_at": "2026-03-31T14:30:12.000Z"
+}
+```
+
+**Response 200:**
+
+```json
+{
+  "ack": true
+}
+```
+
+> **Engine 心跳检测：** 15 秒未收到心跳 → 标记 Collector 异常，通过 WS 推送 `collector:status { status: "unreachable" }` 给 Frontend。
 
 ---
 
@@ -891,17 +968,26 @@ Frontend 通过 WebSocket 接收进度通知。
 
 ## 13. WebSocket Events (Complete Reference)
 
+### 连接策略
+
+```
+• Frontend 与 Engine 保持单一 WS 长连接，所有消息类型复用同一连接
+• 所有 Client → Server 的请求消息必须携带 request_id（UUID v4）
+• Server → Client 的响应消息回带 request_id 以关联请求（如并发多个搜索）
+• 服务端主动推送（screenshot:new, ingestion:progress）不含 request_id
+```
+
 ### Client → Server
 
 ```typescript
 // 搜索
-{ "type": "search:query", "data": { "query": "...", "filters": {...} } }
+{ "type": "search:query", "request_id": "uuid-xxx", "data": { "query": "...", "filters": {...} } }
 
 // 对话
-{ "type": "chat:send", "data": { "session_id": "...", "content": "..." } }
+{ "type": "chat:send", "request_id": "uuid-xxx", "data": { "session_id": "...", "content": "..." } }
 
 // Collector 控制
-{ "type": "collector:control", "data": { "action": "pause" } }
+{ "type": "collector:control", "request_id": "uuid-xxx", "data": { "action": "pause" } }
 
 // 心跳
 { "type": "ping" }
@@ -910,25 +996,25 @@ Frontend 通过 WebSocket 接收进度通知。
 ### Server → Client
 
 ```typescript
-// 新截图通知
+// 新截图通知（服务端主动推送，无 request_id）
 { "type": "screenshot:new", "data": { "id": "...", "timestamp": "...", "app_name": "..." } }
 
-// 摄入进度
+// 摄入进度（服务端主动推送）
 { "type": "ingestion:progress", "data": { "screenshot_id": "...", "stage": "embedding", "progress": 0.6 } }
 { "type": "ingestion:complete", "data": { "screenshot_id": "..." } }
 
-// 搜索结果
-{ "type": "search:result", "data": { "screenshots": [...], "entities": [...] } }
+// 搜索结果（回带 request_id）
+{ "type": "search:result", "request_id": "uuid-xxx", "data": { "screenshots": [...], "entities": [...], "activity_segments": [...] } }
 
-// 对话流式回复
-{ "type": "chat:chunk", "data": { "session_id": "...", "content": "...", "done": false } }
-{ "type": "chat:chunk", "data": { "session_id": "...", "content": "", "done": true, "metadata": {...} } }
+// 对话流式回复（回带 request_id）
+{ "type": "chat:chunk", "request_id": "uuid-xxx", "data": { "session_id": "...", "content": "...", "done": false } }
+{ "type": "chat:chunk", "request_id": "uuid-xxx", "data": { "session_id": "...", "content": "", "done": true, "metadata": {...} } }
 
-// Collector 状态变更
+// Collector 状态变更（服务端主动推送）
 { "type": "collector:status", "data": { "status": "running" } }
 
-// 错误
-{ "type": "error", "data": { "code": "SEARCH_FAILED", "message": "..." } }
+// 错误（可能含 request_id）
+{ "type": "error", "request_id": "uuid-xxx", "data": { "code": "SEARCH_FAILED", "message": "..." } }
 
 // 心跳响应
 { "type": "pong" }

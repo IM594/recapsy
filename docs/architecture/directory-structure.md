@@ -21,7 +21,9 @@ recaply-sense/
 │   │   ├── module-boundaries.md
 │   │   ├── data-models.md
 │   │   ├── api-contracts.md
-│   │   └── tech-decisions.md
+│   │   ├── tech-decisions.md
+│   │   ├── operational-design.md
+│   │   └── directory-structure.md
 │   ├── guides/                        # 开发指南
 │   │   ├── getting-started.md
 │   │   ├── development.md
@@ -232,6 +234,7 @@ recaply-sense/
 │       │   │   ├── screenshot.ts
 │       │   │   ├── entity.ts
 │       │   │   ├── relationship.ts
+│       │   │   ├── activity.ts            # 活动片段类型 (TDR-019)
 │       │   │   ├── search.ts
 │       │   │   ├── chat.ts
 │       │   │   ├── timeline.ts
@@ -343,7 +346,8 @@ recaply-sense/
     "@ai-sdk/openai": "^1",
     "@ai-sdk/anthropic": "^1",
     "ollama-ai-provider": "^1",
-    "pino": "^9"
+    "pino": "^9",
+    "pino-roll": "^1"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -401,6 +405,9 @@ recaply-sense/
 ├── models/                            # AI 模型文件（本地降级时使用）
 │   ├── bge-m3.onnx                    # Embedding 模型 (BGE-M3, ~1.1GB)
 │   └── ...
+├── backups/                           # 自动/手动备份
+│   └── backup_2026-03-31_030000.surql.zst
+├── collector_buffer.sqlite            # Collector 离线缓冲（Engine 不可达时）
 └── logs/                              # 日志
     ├── engine.log
     ├── collector.log

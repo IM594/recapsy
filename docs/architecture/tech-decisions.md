@@ -104,6 +104,20 @@
 |------|-------------|-------------|
 | OCR | — | Apple Vision（Collector 端执行，见 TDR-017） |
 | Embedding | BGE-M3 云端 API（1024 维） | BGE-M3 ONNX（1024 维，模型 ~1.1GB） |
+
+**Embedding 云端 API 提供商选型：**
+
+| 提供商 | 优势 | 劣势 |
+|--------|------|------|
+| **SiliconFlow** ✅ | 国内低延迟；BGE-M3 原生支持；按量计费便宜 | 海外节点较少 |
+| Jina AI | 全球节点；OpenAI 兼容接口 | BGE-M3 需确认支持 |
+| HuggingFace Inference | 开源模型直接调用 | 免费额度有限，延迟不稳定 |
+| 自建 (TEI) | 完全可控 | 需要 GPU 服务器，运维成本 |
+
+**默认选择 SiliconFlow：**
+- API 兼容 OpenAI `/v1/embeddings` 接口，切换成本低
+- BGE-M3 作为头部模型有专门优化
+- 配置项 `ai.embeddingEndpoint` 允许用户切换到其他兼容端点
 | NER (实体提取) | 云端 LLM 提取 | 本地规则匹配 |
 | LLM (Agent/对话) | OpenAI / Anthropic（用户首次启动时选择） | Ollama（可选） |
 
@@ -497,7 +511,9 @@ Session 结束：用户切出该 App
 边界处理：
   - 停留 > N 分钟（可配置）：强制 flush，开启新 session
   - 停留 < 3 秒：忽略，不创建 segment
-  - 多显示器：按 display_id 维护独立 session
+  - 多显示器：同一 App 跨多显示器时合并为一个 session
+    （display_id 作为 metadata 记录在帧级别，不作为 session 分割维度）
+    理由：用户常在一个屏幕写代码、另一个屏幕看文档，都是同一 App 活动
 ```
 
 **代表帧选择算法：**

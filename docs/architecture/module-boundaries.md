@@ -14,16 +14,20 @@
 │  │ (SwiftUI)│  │  (Swift)  │  │       (TypeScript)           │  │
 │  │          │  │           │  │                              │  │
 │  │          │  │           │  │  ┌─────────┐ ┌───────────┐  │  │
+│  │          │  │           │  │  │   api   │ │   mcp     │  │  │
+│  │          │  │           │  │  │(HTTP+WS)│ │(MCP入口)   │  │  │
+│  │          │  │           │  │  └─────────┘ └───────────┘  │  │
+│  │          │  │           │  │  ┌─────────┐ ┌───────────┐  │  │
 │  │          │  │           │  │  │ingestion│ │  agent    │  │  │
 │  │          │  │           │  │  │         │ │(AI 智能体) │  │  │
 │  │          │  │           │  │  └─────────┘ └───────────┘  │  │
 │  │          │  │           │  │  ┌─────────┐ ┌───────────┐  │  │
-│  │          │  │           │  │  │   ai    │ │  search   │  │  │
-│  │          │  │           │  │  │(Provider)│ │           │  │  │
+│  │          │  │           │  │  │ vision  │ │  search   │  │  │
+│  │          │  │           │  │  │(活动摘要)│ │           │  │  │
 │  │          │  │           │  │  └─────────┘ └───────────┘  │  │
 │  │          │  │           │  │  ┌─────────┐ ┌───────────┐  │  │
-│  │          │  │           │  │  │ storage │ │   api     │  │  │
-│  │          │  │           │  │  │         │ │(HTTP + WS)│  │  │
+│  │          │  │           │  │  │   ai    │ │  storage  │  │  │
+│  │          │  │           │  │  │(Provider)│ │           │  │  │
 │  │          │  │           │  │  └─────────┘ └───────────┘  │  │
 │  └──────────┘  └───────────┘  └─────────────────────────────┘  │
 │                                                                 │
@@ -132,7 +136,11 @@ collector/
 │   │   ├── Context/
 │   │   │   ├── ActiveAppDetector.swift  # 当前活跃应用检测
 │   │   │   ├── WindowTitleReader.swift  # 窗口标题读取
+│   │   │   ├── TimezoneCapture.swift   # 采集时的 IANA 时区
 │   │   │   └── ContextCollector.swift   # 上下文信息聚合
+│   │   ├── OCR/                         # OCR 模块 (TDR-017)
+│   │   │   ├── VisionOCR.swift          # Apple Vision 文字识别
+│   │   │   └── OCRProcessor.swift       # OCR 编排（截图→文字）
 │   │   ├── Network/
 │   │   │   ├── EngineClient.swift       # 与 Engine 通信
 │   │   │   └── HealthCheck.swift        # Engine 健康检测
@@ -166,8 +174,12 @@ collector/
             ocr_text, capture_id, timezone, ... }
 
 消费：
-  ← Engine API 获取配置（排除列表、截图间隔等）
-  ← Engine 健康检查端点
+  ← Engine GET /api/v1/collector/config（轮询配置 + 控制指令，每 5 秒）
+  ← Engine GET /api/v1/health（健康检查）
+
+生产（心跳）：
+  → Engine POST /api/v1/collector/heartbeat
+    Body: { status, uptime_seconds, screenshots_today, last_capture_at }
 ```
 
 ### Collector → Engine 通信协议
@@ -187,7 +199,7 @@ POST /api/v1/ingest/screenshot
   "resolution": "2560x1600",
   "file_size": 204800,             // 文件大小 (bytes)
   "ocr_text": "张三: 看一下这个链接...", // Apple Vision OCR 提取的文本 (TDR-017)
-  "capture_id": "a1b2c3d4e5f6...", // 幂等 ID: sha256(path + timestamp)
+  "capture_id": "a1b2c3d4e5f6...", // 幂等 ID: sha256(path + timestamp + file_size + machine_id)
   "timezone": "Asia/Shanghai"       // 采集时的时区
 }
 ```
@@ -199,7 +211,7 @@ POST /api/v1/ingest/screenshot
 **语言：** TypeScript + Bun  
 **职责边界：** 所有业务逻辑的核心，包含 AI、搜索、存储
 
-Engine 内部进一步分为 **7 个子模块**：
+Engine 内部进一步分为 **8 个子模块**：
 
 ```
 engine/
@@ -250,7 +262,7 @@ engine/
 │   │
 │   ├── ingestion/                        ← 子模块: Ingestion Pipeline
 │   │   ├── pipeline.ts                   # 摄入管线编排
-│   │   ├── queue.ts                      # 任务队列（启动时扫描 processed=false 恢复）
+│   │   ├── queue.ts                      # 任务队列（启动时扫描 status='queued'|'processing' 恢复）
 │   │   ├── processors/
 │   │   │   ├── chineseTokenizer.ts       # 中文分词（jieba-wasm）
 │   │   │   ├── entityExtractor.ts        # 实体提取 (NER)
@@ -442,6 +454,8 @@ shared/
 │   ├── types/
 │   │   ├── screenshot.ts          # 截图相关类型
 │   │   ├── entity.ts              # 实体类型（人/应用/URL/话题）
+│   │   ├── relationship.ts        # 关系类型（related_to 等）
+│   │   ├── activity.ts            # 活动片段类型 (TDR-019)
 │   │   ├── search.ts              # 搜索请求/响应类型
 │   │   ├── chat.ts                # 对话消息类型
 │   │   ├── timeline.ts            # 时间线类型
@@ -486,6 +500,35 @@ scripts/
 ---
 
 ## Cross-Module Communication Rules
+
+### Rule 0: Collector 控制链路
+
+```
+Frontend 控制 Collector 的流程：
+
+  Frontend ──POST /collector/control──▶ Engine
+  Engine   ──写入 settings 表──▶ SurrealDB
+  Collector ──GET /collector/config 轮询──▶ Engine
+
+实现方式：
+  1. Engine 收到 collector:pause/resume/stop 后，将指令写入 settings 表
+     key: "collector_control", value: { action: "pause", at: "2026-03-31T..." }
+  2. Collector 每 5 秒轮询 GET /api/v1/collector/config 获取：
+     - 控制指令（pause/resume/stop）
+     - 排除列表更新
+     - 截图间隔/质量参数
+  3. Collector 执行指令后回报状态：
+     POST /api/v1/collector/heartbeat { status: "paused", ... }
+  4. Engine 通过 WS 推送 collector:status 给 Frontend
+
+为什么是轮询而非长连接？
+  • Collector 是轻量 CLI Daemon，保持 WS 长连接增加复杂度
+  • 5 秒轮询延迟对控制指令完全可接受（用户感知 < 5s）
+  • 轮询同时兼作心跳，Engine 超过 15s 无轮询 → 标记 Collector 异常
+  • 符合 Rule 1 单向依赖：Collector 主动拉取，Engine 不反向调用
+```
+
+---
 
 ### Rule 1: 单向依赖
 

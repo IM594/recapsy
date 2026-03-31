@@ -310,7 +310,7 @@ Ingestion Pipeline 重试:
 
 ```
 • LLM 调用失败 → activity_segment 不生成，不阻塞 Ingestion
-• 标记对应的 screenshot 帧为 vision_pending = true
+• 标记对应的 screenshot 帧为 vision_pending = true（见 data-models.md screenshot 表定义）
 • 下次 session flush 或定期任务重新尝试
 • 3 次失败后跳过该 segment，仅依赖 OCR 层数据
 ```
@@ -384,9 +384,13 @@ Ingestion Pipeline 重试:
    a. 删除截图文件 (WebP)
    b. 删除缩略图缓存
    c. 删除 appeared_in 关系边（WHERE out IN $ids）
-   d. 从 activity_segment.screenshot_ids 中移除引用
-   e. 清空 screenshot.embedding 字段（释放向量存储空间）
-   f. 将 screenshot.purged = true
+   d. 删除 appeared_in_segment 关系边（WHERE out.screenshot_ids CONTAINSANY $ids 的 segment 相关）
+   e. 从 activity_segment.screenshot_ids 中移除引用
+   f. 清空 screenshot.embedding 字段（释放向量存储空间）
+      注意: SurrealDB HNSW 索引在 embedding 设为 NULL 后，
+      该记录自动不参与向量搜索。无需手动重建索引，
+      但搜索查询中仍建议加 WHERE embedding IS NOT NULL 做显式保护。
+   g. 将 screenshot.purged = true
       （保留元数据但清除大字段: path, ocr_text, embedding）
 3. 清理后更新 entity.frequency 计数
 4. 删除不再被任何 screenshot 引用的 entity 记录
@@ -479,6 +483,7 @@ GET /api/v1/stats/ai-usage  → 见 api-contracts.md §12
 
 ```
 Pino 配置 pino-roll 日志轮转:
+  • 依赖: pino-roll（需加入 packages/engine/package.json dependencies）
   • 按大小轮转: 50MB/文件
   • 保留: 最近 10 个日志文件
   • 路径: ~/Library/.../RecaplySense/logs/engine.log
@@ -570,4 +575,236 @@ Token 在首次安装时由 Frontend 生成并写入 Collector 和 Engine 的配
 策略: 固定窗口（1 分钟），内存计数器（无需 Redis）
 Collector 豁免: 请求含 X-Collector-Token header
 超限返回: 429 + Retry-After header
+```
+
+---
+
+## 15. Graceful Shutdown 流程
+
+### 15.1 Engine 优雅关停
+
+```
+收到 SIGTERM（launchd 停止服务）或 SIGINT（开发模式 Ctrl+C）时：
+
+1. 停止接受新 HTTP 请求（Hono server.close()）
+2. 等待进行中的请求完成（最大 10s 超时）
+3. 关闭 WebSocket 连接（发送 close frame）
+4. Flush ingestion queue：
+   a. 停止消费新任务
+   b. 等待当前处理中的 screenshot 完成（最大 30s）
+   c. 队列中未处理的任务保持 status='queued'，下次启动恢复
+5. Flush vision session：
+   a. 当前活跃的 App Session 立即 flush（触发 segment 生成）
+   b. 若 LLM 调用已发出，等待其返回（最大 15s）
+6. 关闭 SurrealDB 连接（确保 WAL flush）
+7. 关闭 MCP Server transport
+8. 写入最终日志 "Engine shutdown complete"
+9. process.exit(0)
+
+总超时限制: 60s。超时后强制 exit(1)。
+```
+
+### 15.2 Collector 优雅关停
+
+```
+收到 SIGTERM 时：
+1. 停止截图循环
+2. 完成当前正在写入的截图文件
+3. Flush 离线缓冲队列中已准备好的 HTTP 请求
+4. 关闭 SQLite 缓冲文件
+5. 退出
+
+总超时限制: 10s。
+```
+
+---
+
+## 16. 升级与热更新策略
+
+### 16.1 升级流程
+
+```
+版本升级通过 App 自更新（Sparkle 框架）或手动替换 .app 实现。
+
+升级步骤：
+  1. 新版 RecaplySense.app 替换旧版（覆盖 /Applications/RecaplySense.app）
+  2. 新版 App 首次启动时检测版本变化
+  3. 重新注册 LaunchAgent（更新二进制路径和参数）
+     SMAppService 重新 register → launchd 会 reload plist
+  4. launchd 自动停止旧版 Engine/Collector 进程
+  5. launchd 自动启动新版 Engine/Collector 进程
+  6. Engine 启动时自动执行待执行的数据库迁移
+
+不停机升级（不支持）:
+  • Engine 是单实例嵌入式服务，不支持蓝绿部署
+  • 升级期间约 5-10 秒服务不可用，Collector 自动进入离线缓冲模式
+  • Engine 恢复后 Collector 回放缓冲数据
+
+版本兼容性:
+  • Collector 和 Engine 版本必须一致（同一 App Bundle 内）
+  • 数据库迁移保证向前兼容（只有 up，无 down）
+```
+
+---
+
+## 17. Collector Token 认证失败处理
+
+```
+X-Collector-Token 校验策略：
+
+Engine 端:
+  • 启动时从 config.json 或环境变量加载 expected_collector_token
+  • 对 /api/v1/ingest/* 和 /api/v1/collector/* 路径的请求检查:
+    X-Collector-Token header == expected_collector_token
+  • Token 不匹配 → 返回 403 Forbidden
+    { "error": { "code": "INVALID_COLLECTOR_TOKEN", "message": "..." } }
+  • Token 缺失 → 视为 Frontend 请求，正常处理（但不享受 Rate Limit 豁免）
+
+Collector 端:
+  • Token 从 ~/Library/.../RecaplySense/config.json 读取
+  • 收到 403 → 记录错误日志，进入离线缓冲模式
+  • 不自动重试认证（避免日志风暴），等待用户检查配置
+
+Token 生成:
+  • 首次安装时 Frontend 生成 UUID v4 作为 token
+  • 写入 config.json 的 collector_token 字段
+  • Engine 和 Collector 从同一配置文件读取
+```
+
+---
+
+## 18. 系统权限请求流程
+
+```
+macOS 权限请求时机与顺序：
+
+  ┌──────────────────────────────────────────────────────────┐
+  │         首次启动 Onboarding 流程                            │
+  │                                                            │
+  │  Step 1: 欢迎页面 + 功能介绍                                │
+  │                                                            │
+  │  Step 2: 请求屏幕录制权限 (Screen Recording)               │
+  │    • 说明: "需要录制屏幕以记录你的数字生活"                   │
+  │    • 触发: CGRequestScreenCaptureAccess()                   │
+  │    • 拒绝处理: 展示引导页，提供"打开系统偏好设置"按钮          │
+  │    • 权限检查: CGPreflightScreenCaptureAccess()             │
+  │                                                            │
+  │  Step 3: 请求辅助功能权限 (Accessibility) — 可选             │
+  │    • 说明: "用于读取窗口标题以增强搜索体验"                    │
+  │    • 若用户拒绝: 降级运行（无窗口标题数据）                    │
+  │                                                            │
+  │  Step 4: 选择 AI Provider                                  │
+  │    • OpenAI / Anthropic / Ollama(本地)                      │
+  │    • 输入 API Key（如选云端）                                │
+  │                                                            │
+  │  Step 5: 注册 LaunchAgent + 启动后台服务                    │
+  │    • SMAppService.mainApp.register()                        │
+  │                                                            │
+  │  Step 6: 完成，进入主界面                                    │
+  └──────────────────────────────────────────────────────────┘
+
+后续权限丢失处理：
+  • Collector 启动时检查屏幕录制权限
+  • 权限丢失 → 通过 heartbeat 上报 Engine → WS 推送 Frontend
+  • Frontend 弹出权限恢复引导
+
+权限查询方式选择（TDR-017 补充）：
+  • ScreenCaptureKit: SCShareableContent.current 会触发系统授权弹窗
+  • CGPreflightScreenCaptureAccess(): 仅查询不弹窗，适用于权限检查
+```
+
+---
+
+## 19. MCP Server 进程与 Lifecycle
+
+```
+MCP Server 的两种传输模式运行在不同的进程上下文中：
+
+模式 1: stdio (Claude Desktop / Cursor)
+────────────────────────────────────────
+  • 由外部 AI 客户端（Claude Desktop / Cursor）启动 MCP Server 进程
+  • 进程入口: recaply-engine --mcp-stdio
+  • 独立于主 Engine 进程运行（但共享 SurrealDB 数据目录）
+  • 连接方式: MCP Server 内部通过 HTTP 调用主 Engine API (localhost:21890)
+    而非直接 import Engine 模块（避免两个进程竞争 SurrealDB 锁）
+  • Lifecycle: 随外部 AI 客户端启停，无需 launchd 管理
+
+模式 2: Streamable HTTP (端口 21891)
+────────────────────────────────────
+  • 在主 Engine 进程内作为第二个 HTTP 服务运行（与主 API 同进程）
+  • 端口 21891 独立于主 API 的 21890
+  • 两个 Hono 实例，共享 Engine 内部模块引用（search/storage）
+  • Lifecycle: 随 Engine 启停
+
+配置（engine config schema 扩展）:
+  mcp: {
+    stdio: { enabled: true },
+    http: {
+      enabled: true,
+      port: 21891,
+    }
+  }
+
+客户端配置示例（Claude Desktop mcp_servers.json）:
+  {
+    "recaply-sense": {
+      "command": "/Applications/RecaplySense.app/Contents/MacOS/recaply-engine",
+      "args": ["--mcp-stdio"]
+    }
+  }
+```
+
+---
+
+## 20. Agent 安全护栏
+
+### 20.1 Tool Calling 限制
+
+```
+AI SDK streamText 配置:
+  • maxSteps: 10          — 最大工具调用轮次（防止无限循环）
+  • maxTokens: 4096       — 单次回复最大 token 数
+  • temperature: 0.3      — 降低随机性以保证一致性
+  • 超过 maxSteps → 返回已收集的部分结果 + 告知用户"查询过于复杂"
+
+工具调用超时:
+  • 单个工具调用超时: 10s（搜索类），30s（AI 类）
+  • 总对话超时: 120s
+  • 超时 → 中断当前工具调用，用已有结果合成回答
+```
+
+### 20.2 Prompt 注入防护
+
+```
+• Agent system prompt 中明确角色约束（只能查询用户自己的屏幕数据）
+• 用户输入不直接拼入 SurrealQL 查询（通过 Repository 参数化查询）
+• MCP Tools 输入由 Zod schema 严格校验
+```
+
+---
+
+## 21. Embedding 批量处理策略
+
+### 21.1 Ingestion Pipeline 批量优化
+
+```
+单条 vs 批量:
+  • 云端 API: 批量调用（每批 ≤ 32 条文本），显著减少 HTTP 开销和延迟
+  • 本地 ONNX: 逐条处理（本地调用无网络开销，且内存受限）
+
+批量调度:
+  1. Ingestion queue 消费时按 batch_size=32 聚合
+  2. 等待条件: 凑满 32 条 或 超过 2 秒（先到为准）
+  3. 一次 HTTP 调用提交 32 条文本给 BGE-M3 API
+  4. 批量写入 SurrealDB
+
+性能预估（云端 API）:
+  • 单条: ~200ms/次，32 条串行 = ~6.4s
+  • 批量: ~300ms/次（32 条一起），加速 ~20x
+  • 吞吐: ~100 条/秒 vs 单条 ~5 条/秒
+
+实现:
+  // engine/src/ingestion/processors/embedder.ts
+  // batchEmbed(texts: string[], batchSize = 32): Promise<number[][]>
+  // 内部按 batchSize 分组，调用 ai/embedding/remote.ts 的批量接口
 ```
