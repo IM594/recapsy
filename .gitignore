@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+.turbo/
+
+# Build outputs
+dist/
+*.build/
+.swiftpm/
+
+# Runtime data (never commit)
+*.sqlite
+*.surql
+*.zst
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/settings.json
+.idea/
+*.xcuserdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Models (too large)
+*.onnx
+*.bin
+
+# Test coverage
+coverage/
+
+# Claude Code local config (skills/ should be tracked)
+.claude/settings.local.json

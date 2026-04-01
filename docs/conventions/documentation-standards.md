@@ -23,7 +23,17 @@ docs/
     ├── getting-started.md
     ├── local-development.md
     └── troubleshooting.md
+
+.claude/skills/           # Claude Code Skills（按需加载入口）
+├── arch.md               # 系统架构 + 模块边界 + 技术决策
+├── data.md               # 数据模型
+├── api.md                # 接口契约
+├── ts-dev.md             # TypeScript 开发规范
+├── swift-dev.md          # Swift 开发规范
+└── ops.md                # 运维 + CI/CD + 发版 + 目录结构
 ```
+
+> **Skills 与 docs 的关系**：`.claude/skills/` 是 `docs/` 的按需加载入口，每个 skill 引用对应的源文件路径。Claude Code 通过 `/arch`、`/data` 等命令触发 skill，仅加载相关文档到上下文，避免一次性加载全部 ~8300 行。
 
 ---
 
@@ -318,4 +328,5 @@ bunx changelogen
 | **TDR 不可变**  | 已有 TDR 不修改，推翻则新建 TDR 并标注引用         |
 | **API 契约**    | API 变更必须先更新 `api-contracts.md`（契约先行）  |
 | **数据模型**    | 表结构变更必须更新 `data-models.md`                |
-| **Review 检查** | Code Review 检查文档是否需要同步更新               |
+| **Skills 同步** | 源文件增删或路径变更时，同步更新 `.claude/skills/` 中的引用 |
+| **Review 检查** | Code Review 检查文档和 Skills 是否需要同步更新     |

@@ -78,7 +78,7 @@ feat/Add_Search_Feature       ❌ (不要大写和下划线)
 
 ### Scope 列表
 
-Scope 对应项目模块，可选但推荐：
+Scope 对应项目模块，必须写：
 
 ```
 # Engine 子模块

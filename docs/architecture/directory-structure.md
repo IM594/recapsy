@@ -14,6 +14,16 @@ recaply-sense/
 ├── turbo.json                         # Turborepo 配置
 ├── package.json                       # Root workspace 配置
 ├── bun.lockb                          # Bun lockfile
+├── CLAUDE.md                          # Claude Code 项目指令
+│
+├── .claude/                           # 🤖 Claude Code 配置
+│   └── skills/                        # 按需加载文档的 Skills
+│       ├── arch.md                    # 系统架构 + 模块边界
+│       ├── data.md                    # 数据模型
+│       ├── api.md                     # 接口契约
+│       ├── ts-dev.md                  # TypeScript 开发规范
+│       ├── swift-dev.md               # Swift 开发规范
+│       └── ops.md                     # 运维 + CI/CD + 发版
 │
 ├── docs/                              # 📚 项目文档
 │   ├── architecture/                  # 架构设计文档
