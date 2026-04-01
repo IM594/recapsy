@@ -87,10 +87,20 @@
 - ❌ CozoDB — 开发放缓，需学 Datalog
 - ❌ FalkorDB — 需要运行 Redis 服务
 
-**风险：**
+**风险与验证：**
 
 - SurrealDB 相对年轻，API 可能有 breaking changes
 - 缓解：Repository 抽象层隔离数据库细节，必要时可替换
+
+**PoC 验证清单（在编写业务代码前必须完成）：**
+
+| # | 验证项 | 通过标准 | 失败预案 |
+|---|--------|---------|---------|
+| 1 | Bun + SurrealDB SDK 连接 | CRUD + WebSocket 事件监听正常工作 | 降级到 HTTP 连接模式 |
+| 2 | 嵌入式模式崩溃恢复 | kill -9 后重启，数据无丢失 | 评估 standalone server 模式 |
+| 3 | 10 万条向量搜索 | HNSW 搜索延迟 < 200ms (P95) | 评估 Phase 2 降维策略提前 |
+| 4 | 中文预分词全文搜索 | jieba 分词 + blank tokenizer 召回率可接受 | 加重向量搜索权重，FTS 降级为辅助 |
+| 5 | 并发读写 | ingestion 写入 + search 查询并发无死锁 | 引入读写队列化 |
 
 ---
 
@@ -120,6 +130,41 @@
 - 配置项 `ai.embeddingEndpoint` 允许用户切换到其他兼容端点
 | NER (实体提取) | 云端 LLM 提取 | 本地规则匹配 |
 | LLM (Agent/对话) | OpenAI / Anthropic（用户首次启动时选择） | Ollama（可选） |
+
+**NER 二级策略：**
+
+NER 不应每帧都调用云端 LLM。按 5000 帧/天估算，每帧一次 LLM 调用的成本远超 Vision LLM。采用分级策略：
+
+```
+Level 1 — 本地规则匹配（零成本，覆盖 ~80% 实体）：
+  • 正则提取 URL、邮箱、文件路径
+  • bundle_id → app 实体（确定性映射）
+  • @mention 模式 → person 实体
+  • 已知实体字典匹配（从 entity 表缓存高频实体名称）
+
+Level 2 — 云端 LLM 提取（仅规则无法覆盖时触发）：
+  • OCR 文本中出现未知人名、项目名等非结构化实体
+  • 触发条件：Level 1 提取结果为空，且 ocr_text 长度 > 50 字符
+  • 使用 AI SDK generateObject，按 NER prompt 提取结构化实体
+  • Token 消耗纳入统一 AI 成本追踪（见下方成本追踪）
+```
+
+**统一 AI 成本追踪：**
+
+所有 AI API 调用（Embedding / NER / Vision LLM / Agent 对话）统一经过 `ai/` 模块的计量中间件，汇总到 ai-usage 统计：
+
+```
+┌─────────────────┬───────────────┬──────────────────┐
+│ 组件             │ 成本追踪字段    │ 预算控制          │
+├─────────────────┼───────────────┼──────────────────┤
+│ Embedding        │ embedding_tokens │ 纳入总预算       │
+│ NER (Level 2)   │ ner_tokens      │ 纳入总预算       │
+│ Vision LLM      │ vision_tokens    │ 独立日预算 $1.0  │
+│ Agent 对话       │ agent_tokens     │ 纳入总预算       │
+├─────────────────┼───────────────┼──────────────────┤
+│ 日总预算（可配置）│               │ 默认 $3.0/天     │
+└─────────────────┴───────────────┴──────────────────┘
+```
 
 **Embedding 模型选型：**
 
@@ -585,3 +630,4 @@ Session 结束：用户切出该 App
 | 017 | OCR 归属 Collector 端   | 2026-04-01 | ✅ Accepted |
 | 018 | 进程生命周期托管模型    | 2026-04-01 | ✅ Accepted |
 | 019 | 两层截图理解            | 2026-04-01 | ✅ Accepted |
+| 020 | NER 二级策略 + AI 成本追踪  | 2026-04-02 | ✅ Accepted |

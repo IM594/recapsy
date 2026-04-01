@@ -225,10 +225,20 @@ recaply-sense/
 │   │   │   │   │       └── 001_initial.ts
 │   │   │   │   └── schema/
 │   │   │   │       └── surreal.ts
-│   │   │   └── utils/
-│   │   │       ├── logger.ts
-│   │   │       ├── errors.ts
-│   │   │       └── timing.ts
+│   │   │   ├── scheduler/                  # 定时任务调度
+│   │   │   │   ├── registry.ts             # 任务注册表（cron 调度）
+│   │   │   │   └── tasks/
+│   │   │   │       ├── screenshotCleanup.ts  # 截图清理
+│   │   │   │       ├── backupDaily.ts        # 每日备份
+│   │   │   │       ├── deadLetterScan.ts     # Dead letter 扫描重试
+│   │   │   │       └── visionRetry.ts        # Vision 失败帧重试
+│   │   │   ├── utils/
+│   │   │   │   ├── logger.ts
+│   │   │   │   ├── errors.ts
+│   │   │   │   └── timing.ts
+│   │   │   └── events/
+│   │   │       ├── bus.ts                  # 进程内事件总线（typed EventEmitter）
+│   │   │       └── types.ts               # 事件类型定义
 │   │   ├── tests/
 │   │   │   ├── unit/
 │   │   │   ├── integration/

@@ -544,7 +544,23 @@ Collector:
 未来增强（非 MVP）：可选的 Bearer Token 认证
 ```
 
-### 13.3 Collector 标识
+### 13.3 CORS 策略
+
+```
+Engine API 仅绑定 localhost，但浏览器插件或本地 Web UI 可能通过 fetch 访问。
+Hono CORS 中间件配置：
+
+  origin: ['http://localhost:*', 'tauri://localhost']
+  methods: ['GET', 'POST', 'PUT', 'DELETE']
+  headers: ['Content-Type', 'X-Collector-Token']
+
+策略说明：
+  • 仅允许 localhost 来源（任何端口）和 Tauri 协议
+  • 生产环境不允许 origin: *（防止恶意网页通过浏览器访问本地 API）
+  • MCP Streamable HTTP (21891) 同样应用此策略
+```
+
+### 13.4 Collector 标识
 
 ```
 Collector 的请求通过 X-Collector-Token header 标识。

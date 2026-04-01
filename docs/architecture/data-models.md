@@ -228,6 +228,8 @@ DEFINE FIELD context    ON appeared_in TYPE option<string>; -- 出现时的上�
 DEFINE FIELD created_at ON appeared_in TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX idx_appeared_time ON appeared_in FIELDS timestamp;
+DEFINE INDEX idx_appeared_in  ON appeared_in FIELDS in;    -- 按 entity 查询"实体出现过的截图"
+DEFINE INDEX idx_appeared_out ON appeared_in FIELDS out;   -- 按 screenshot 查询"截图中出现的实体"
 ```
 
 ### `appeared_in_segment` — 实体出现在活动片段中
@@ -242,6 +244,7 @@ DEFINE FIELD confidence ON appeared_in_segment TYPE float;
 DEFINE FIELD created_at ON appeared_in_segment TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX idx_ais_out ON appeared_in_segment FIELDS out;
+DEFINE INDEX idx_ais_in  ON appeared_in_segment FIELDS in;  -- 按 entity 查询"实体参与的活动片段"
 ```
 
 ### `related_to` — 实体之间的关联
@@ -262,7 +265,9 @@ DEFINE FIELD last_seen  ON related_to TYPE datetime;
 DEFINE FIELD count      ON related_to TYPE int DEFAULT 1;      -- 共现次数
 DEFINE FIELD created_at ON related_to TYPE datetime DEFAULT time::now();
 
-DEFINE INDEX idx_related_type ON related_to FIELDS relation_type;
+DEFINE INDEX idx_related_type   ON related_to FIELDS relation_type;
+DEFINE INDEX idx_related_unique ON related_to FIELDS in, out, relation_type UNIQUE;
+    -- 保证同一对实体之间每种关系类型只有一条边，通过 count += 1 追踪频率
 ```
 
 ### ~~`follows` — 截图时序关系（已移除）~~

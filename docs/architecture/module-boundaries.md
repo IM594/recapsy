@@ -211,7 +211,7 @@ POST /api/v1/ingest/screenshot
 **语言：** TypeScript + Bun  
 **职责边界：** 所有业务逻辑的核心，包含 AI、搜索、存储
 
-Engine 内部进一步分为 **8 个子模块**：
+Engine 内部进一步分为 **10 个子模块**：
 
 ```
 engine/
@@ -332,6 +332,18 @@ engine/
 │   │   └── schema/
 │   │       └── surreal.ts                # SurrealDB Schema 定义
 │   │
+│   ├── scheduler/                        ← 子模块: 定时任务调度
+│   │   ├── registry.ts                   # 任务注册表
+│   │   └── tasks/
+│   │       ├── screenshotCleanup.ts      # 截图清理（按保留策略 + 磁盘阈值）
+│   │       ├── backupDaily.ts            # 每日自动备份
+│   │       ├── deadLetterScan.ts         # Dead letter 扫描与重试
+│   │       └── visionRetry.ts            # Vision LLM 失败帧重试
+│   │
+│   ├── events/                           ← 公共基础设施: 进程内事件总线
+│   │   ├── bus.ts                        # 进程内事件总线（typed EventEmitter）
+│   │   └── types.ts                      # 事件类型定义
+│   │
 │   └── utils/
 │       ├── logger.ts                     # 日志工具
 │       ├── errors.ts                     # 错误类型定义
@@ -350,17 +362,19 @@ engine/
 
 ```
                可以调用 →
-               api   mcp   ingestion  vision  agent   search   ai    storage
-调用方 ↓     ┌──────┬─────┬──────────┬───────┬───────┬────────┬─────┬────────┐
-  api        │  -   │  ❌  │    ✅     │  ❌   │  ✅   │   ✅   │  ❌  │   ❌   │
-  mcp        │  ❌  │  -   │    ❌     │  ❌   │  ❌   │   ✅   │  ❌  │   ✅   │
-  ingestion  │  ❌  │  ❌  │    -      │  ✅   │  ❌   │   ❌   │  ✅  │   ✅   │
-  vision     │  ❌  │  ❌  │    ❌     │  -    │  ❌   │   ❌   │  ✅  │   ✅   │
-  agent      │  ❌  │  ❌  │    ❌     │  ❌   │  -    │   ✅   │  ✅  │   ✅   │
-  search     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌   │   -    │  ✅  │   ✅   │
-  ai         │  ❌  │  ❌  │    ❌     │  ❌   │  ❌   │   ❌   │  -   │   ❌   │
-  storage    │  ❌  │  ❌  │    ❌     │  ❌   │  ❌   │   ❌   │  ❌  │   -    │
-             └──────┴─────┴──────────┴───────┴───────┴────────┴─────┴────────┘
+               api   mcp   ingestion  vision  agent  search  ai    storage  events  scheduler
+调用方 ↓     ┌──────┬─────┬──────────┬───────┬──────┬───────┬─────┬────────┬───────┬──────────┐
+  api        │  -   │  ❌  │    ✅     │  ❌   │  ✅  │  ✅   │  ❌ │   ❌   │  ✅   │    ✅    │
+  mcp        │  ❌  │  -   │    ❌     │  ❌   │  ❌  │  ✅   │  ❌ │   ✅   │  ✅   │    ❌    │
+  ingestion  │  ❌  │  ❌  │    -      │  ✅   │  ❌  │  ❌   │  ✅ │   ✅   │  ✅   │    ❌    │
+  vision     │  ❌  │  ❌  │    ❌     │  -    │  ❌  │  ❌   │  ✅ │   ✅   │  ✅   │    ❌    │
+  agent      │  ❌  │  ❌  │    ❌     │  ❌   │  -   │  ✅   │  ✅ │   ✅   │  ✅   │    ❌    │
+  search     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  -    │  ✅ │   ✅   │  ✅   │    ❌    │
+  ai         │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │  -  │   ❌   │  ✅   │    ❌    │
+  storage    │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │  ❌ │   -    │  ✅   │    ❌    │
+  events     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │  ❌ │   ❌   │  -    │    ❌    │
+  scheduler  │  ❌  │  ❌  │    ✅     │  ✅   │  ❌  │  ❌   │  ❌ │   ✅   │  ✅   │    -     │
+             └──────┴─────┴──────────┴───────┴──────┴───────┴─────┴────────┴───────┴──────────┘
 
 规则：
   • api 和 mcp 是两个并列的入口层
@@ -385,6 +399,13 @@ engine/
     - 由 ingestion 触发，异步处理，不阻塞摄入管线
   • ai 是纯模型调用层，不访问 storage
   • storage 是最底层，不调用任何其他模块
+  • events 是进程内事件总线（typed EventEmitter），所有模块均可 emit/subscribe，解决业务层向入口层通信的反向依赖问题
+  • scheduler 承载所有跨模块的周期性运维任务：
+    - scheduler → storage（截图清理、备份）
+    - scheduler → ingestion（dead letter 重试）
+    - scheduler → vision（失败帧重试）
+    - api → scheduler（手动触发备份/清理）
+    - scheduler 通过 EventBus 发送执行结果通知
 ```
 
 ### Agent 子模块详解
@@ -561,6 +582,33 @@ interface ScreenshotRepository {
 await db.query("SELECT * FROM screenshot WHERE ...");
 ```
 
+### Rule 6: 跨 Repository 事务
+
+多个 Repository 的写操作需要原子性时，使用 `withTransaction` 辅助函数。
+
+```typescript
+// ✅ 正确：Ingestion Pipeline 的原子写入
+async function processScreenshot(data: IngestData) {
+  await withTransaction(db, async (tx) => {
+    await screenshotRepo.save(tx, screenshot);
+    await entityRepo.upsert(tx, entities);
+    await relationshipRepo.createEdges(tx, edges);
+  });
+  // 事务提交后再做 Embedding（允许单独失败和重试）
+  await embeddingRepo.saveEmbedding(screenshot.id, vector);
+}
+
+// ❌ 错误：各 Repository 独立写入，中间失败导致数据不一致
+await screenshotRepo.save(screenshot);
+await entityRepo.upsert(entities);     // 这里失败 → screenshot 成为孤立记录
+await relationshipRepo.createEdges(edges);
+```
+
+规则：
+  - 结构化数据（screenshot + entity + 关系边）的写入必须包裹在事务中
+  - Embedding 写入可在事务外执行（允许独立重试，失败不影响结构化数据完整性）
+  - Repository 方法签名需支持可选的事务上下文参数
+
 ### Rule 3: 错误隔离
 
 每个模块独立处理错误，不向上层泄露内部实现细节。
@@ -602,4 +650,29 @@ export const engineConfig = z.object({
     excludedApps: z.array(z.string()).default([]),
   }),
 });
+```
+
+### Rule 5: 事件驱动解耦（EventBus）
+
+业务模块不能直接调用入口层（api/mcp），所有需要"通知外部"的场景通过事件总线解耦。
+
+```typescript
+// ✅ 正确：业务模块通过 EventBus emit 事件
+// ingestion/pipeline.ts
+eventBus.emit('ingestion:progress', { screenshot_id, stage, progress });
+
+// api/ws/handler.ts 订阅事件并推送给客户端
+eventBus.on('ingestion:progress', (data) => ws.send(data));
+
+// ❌ 错误：业务模块直接 import api 层的推送函数
+import { pushToWebSocket } from '../api/ws/handler';
+```
+
+同时用于 ingestion → vision 的触发：
+```typescript
+// ingestion/pipeline.ts
+eventBus.emit('screenshot:ingested', { screenshot_id, bundle_id });
+
+// vision/sessionManager.ts
+eventBus.on('screenshot:ingested', (data) => sessionManager.onNewScreenshot(data));
 ```
