@@ -35,17 +35,17 @@ git commit -m "chore(deps): update lockfile"
   "dependencies": {
     // 运行时必需
     "hono": "^4.x",
-    "surrealdb": "^1.x",
-    "zod": "^3.x",
-    "pino": "^9.x",
-    "ai": "^4.x", // Vercel AI SDK
+    "surrealdb": "^2",
+    "zod": "^4",
+    "pino": "^10",
+    "ai": "^6", // Vercel AI SDK
   },
   "devDependencies": {
     // 仅开发/构建/测试
     "@biomejs/biome": "^2.x",
     "@types/bun": "latest",
     "pino-pretty": "^13.x", // 仅开发环境日志美化
-    "@commitlint/cli": "^19.x",
+    "@commitlint/cli": "^20",
   },
 }
 ```
@@ -63,7 +63,7 @@ git commit -m "chore(deps): update lockfile"
 
 | 类型                                    | 策略           | 示例       | 理由                   |
 | --------------------------------------- | -------------- | ---------- | ---------------------- |
-| **核心依赖**（Hono, SurrealDB, AI SDK） | `^major.minor` | `"^4.6"`   | 允许 patch，锁定 minor |
+| **核心依赖**（Hono, SurrealDB, AI SDK） | `^major`       | `"^4"`     | 允许 minor + patch    |
 | **工具链**（Biome, commitlint）         | `^major`       | `"^2"`     | 宽松，工具兼容性好     |
 | **类型包**                              | `latest`       | `"latest"` | 总是最新               |
 | **精确锁定**                            | 仅出问题时     | `"1.2.3"`  | 除非某版本有已知 bug   |
@@ -71,9 +71,9 @@ git commit -m "chore(deps): update lockfile"
 ```jsonc
 {
   "dependencies": {
-    "hono": "^4.6", // 核心：锁 minor
-    "zod": "^3.23", // 核心：锁 minor
-    "pino": "^9", // 稳定库：锁 major
+    "hono": "^4", // 核心：锁 major
+    "zod": "^4", // 核心：锁 major
+    "pino": "^10", // 稳定库：锁 major
   },
   "devDependencies": {
     "@biomejs/biome": "^2", // 工具：锁 major

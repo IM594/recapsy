@@ -314,7 +314,7 @@ recaply-sense/
   },
   "devDependencies": {
     "turbo": "^2",
-    "typescript": "^5.7",
+    "typescript": "^6",
     "@types/bun": "latest"
   }
 }
@@ -359,20 +359,20 @@ recaply-sense/
   "dependencies": {
     "hono": "^4",
     "surrealdb": "^2",
-    "@surrealdb/node": "^2",
+    "@surrealdb/node": "^3",
     "@modelcontextprotocol/sdk": "^1",
     "zod": "^4",
-    "ai": "^4",
-    "@ai-sdk/openai": "^1",
-    "@ai-sdk/anthropic": "^1",
+    "ai": "^6",
+    "@ai-sdk/openai": "^3",
+    "@ai-sdk/anthropic": "^3",
     "ollama-ai-provider": "^1",
-    "pino": "^9",
-    "pino-roll": "^1"
+    "pino": "^10",
+    "pino-roll": "^4"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5.7",
-    "@biomejs/biome": "^1"
+    "typescript": "^6",
+    "@biomejs/biome": "^2"
   }
 }
 ```
@@ -396,7 +396,7 @@ recaply-sense/
     "zod-to-json-schema": "^3"
   },
   "devDependencies": {
-    "typescript": "^5.7"
+    "typescript": "^6"
   }
 }
 ```
