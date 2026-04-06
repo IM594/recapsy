@@ -1,0 +1,13 @@
+export const MAX_RETRY_COUNT = 3;
+export const MAX_OCR_TEXT_LENGTH = 6000;
+export const OCR_TRUNCATE_FRONT = 3000;
+export const OCR_TRUNCATE_BACK = 3000;
+export const MAX_REPRESENTATIVE_FRAMES = 8;
+export const MIN_DIFF_RATIO = 0.05;
+export const CAPTURE_INTERVAL_MS = 2000;
+export const IDLE_CAPTURE_INTERVAL_MS = 10000;
+export const IDLE_THRESHOLD_COUNT = 30;
+export const MAX_BATCH_SIZE = 100;
+export const BATCH_INTERVAL_MS = 500;
+export const EMBEDDING_BATCH_SIZE = 32;
+export const MAX_STORAGE_GB = 500;

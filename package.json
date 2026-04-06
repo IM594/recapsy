@@ -1,0 +1,19 @@
+{
+  "name": "recaply-sense",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "turbo run dev",
+    "dev:engine": "cd packages/engine && bun --watch src/index.ts",
+    "dev:db": "bash scripts/dev-db.sh",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "turbo": "^2.9.4",
+    "typescript": "^6.0.2"
+  }
+}
