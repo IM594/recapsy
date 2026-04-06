@@ -1,6 +1,6 @@
 # Recaply Sense — Data Models
 
-> Version: 0.1.0 | Last Updated: 2026-04-01
+> Version: 0.1.0 | Last Updated: 2026-04-07
 
 ## SurrealDB Data Model
 
@@ -127,8 +127,9 @@ DEFINE INDEX idx_msg_session ON chat_message FIELDS session;
 ```surql
 DEFINE TABLE settings SCHEMAFULL;
 
-DEFINE FIELD key   ON settings TYPE string;
-DEFINE FIELD value ON settings TYPE any;
+DEFINE FIELD key        ON settings TYPE string;
+DEFINE FIELD value      ON settings TYPE any;
+DEFINE FIELD updated_at ON settings TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX idx_settings_key ON settings FIELDS key UNIQUE;
 ```
@@ -363,7 +364,7 @@ DEFINE INDEX idx_related_unique ON related_to FIELDS in, out, relation_type UNIQ
 ## 4. TypeScript Type Definitions
 
 ```typescript
-// shared/src/types/screenshot.ts
+// shared/src/schemas/screenshot.ts
 
 export interface Screenshot {
   id: string; // SurrealDB record ID: "screenshot:xxx"
@@ -393,7 +394,7 @@ export interface Screenshot {
   created_at: Date;
 }
 
-// shared/src/types/entity.ts
+// shared/src/schemas/entity.ts
 
 export type EntityType =
   | "person"
@@ -417,7 +418,7 @@ export interface Entity {
   created_at: Date;
 }
 
-// shared/src/types/relationship.ts
+// shared/src/schemas/relationship.ts
 
 export type RelationType =
   | "co_appeared"
@@ -437,7 +438,7 @@ export interface Relationship {
   count: number;
 }
 
-// shared/src/types/chat.ts
+// shared/src/schemas/chat.ts
 
 export interface ChatSession {
   id: string;
@@ -461,7 +462,7 @@ export interface ChatMessage {
   created_at: Date;
 }
 
-// shared/src/types/activity.ts (TDR-019)
+// shared/src/schemas/activity.ts (TDR-019)
 
 export type SceneType =
   | "coding"
@@ -507,7 +508,7 @@ export interface ActivitySegment {
   processed_at: Date;
 }
 
-// shared/src/types/search.ts
+// shared/src/schemas/search.ts
 
 export interface SearchRequest {
   query: string;
@@ -550,7 +551,7 @@ export interface ScoredActivitySegment {
   score: number;
 }
 
-// shared/src/types/events.ts (WebSocket)
+// shared/src/schemas/events.ts (WebSocket)
 
 export type WSEvent =
   | {

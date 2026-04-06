@@ -334,7 +334,7 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 > **关键技术坑（实现时注意）：**
 > 1. Turborepo + Bun workspace 缓存可能冲突：开发模式用 `bun --watch` 不依赖 Turbo 缓存
 > 2. SurrealDB SDK 返回 `unknown` 类型：Repository 层用 Zod parse 返回值转强类型
-> 3. Migration Runner 需自建：SurrealDB 无内置 migration，用 `_migrations` 元表 + 版本化脚本
+> 3. Migration Runner 需自建：SurrealDB 无内置 migration，用 `migration_history` 元表 + 版本化脚本
 > 4. 推荐 SCHEMAFULL 表模式：严格字段校验，配合 Zod 双重保障，代价是每加字段要写 migration
 > 5. Pino 在 Bun 下 `pino-pretty` 可能有 worker thread 兼容问题：不行就用 console transport
 > 6. TypeScript Path Aliases 需三处对齐：tsconfig.json paths + package.json exports + workspace 协议
@@ -342,50 +342,50 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 **Monorepo 初始化：**
 
-- [ ] 初始化 root `package.json`（workspaces: `packages/*`）
-- [ ] 配置 `turbo.json`
-- [ ] 配置 root `.gitignore`、`.editorconfig`
-- [ ] 配置 TypeScript（root `tsconfig.json` + packages 继承）
-- [ ] 配置 Biome（`biome.json`）
+- [x] 初始化 root `package.json`（workspaces: `packages/*`）
+- [x] 配置 `turbo.json`
+- [x] 配置 root `.gitignore`、`.editorconfig`
+- [x] 配置 TypeScript（root `tsconfig.json` + packages 继承）
+- [x] 配置 Biome（`biome.json`）
 
 **开发工具：**
 
-- [ ] `scripts/dev-db.sh` — 一键启动 SurrealDB standalone 开发实例（`surreal start --bind 127.0.0.1:21890 surrealkv://...`）
-- [ ] `package.json` 添加 `dev:db` script
+- [x] `scripts/dev-db.sh` — 一键启动 SurrealDB standalone 开发实例（`surreal start --bind 127.0.0.1:21890 surrealkv://...`）
+- [x] `package.json` 添加 `dev:db` script
 
 **packages/shared：**
 
-- [ ] Zod schema 定义：screenshot、entity、relationship、activity_segment、settings（⚠️ chat/events 推迟到 Phase 2/4）
-- [ ] TypeScript 类型导出（`z.infer`）
-- [ ] 常量定义：API 路径、默认配置值、系统限制
-- [ ] 通用工具函数：date、validation
-- [ ] Barrel export (`index.ts`)
+- [x] Zod schema 定义：screenshot、entity、relationship、activity_segment、settings（⚠️ chat/events 推迟到 Phase 2/4）
+- [x] TypeScript 类型导出（`z.infer`）
+- [x] 常量定义：API 路径、默认配置值、系统限制
+- [x] 通用工具函数：date、validation
+- [x] Barrel export (`index.ts`)
 
 **packages/engine 骨架：**
 
-- [ ] `package.json` + 依赖安装
-- [ ] `tsconfig.json`（strict: true + 全部严格选项）
-- [ ] `bunfig.toml`
-- [ ] `src/config/` — Zod 配置 schema + 加载器
-- [ ] `src/utils/logger.ts` — Pino 根 logger 工厂（⚠️ pino-pretty 在 Bun 下可能需降级为 console transport）
-- [ ] `src/utils/errors.ts` — AppError 基类 + 子类错误层级
-- [ ] `src/events/` — EventBus（typed EventEmitter）+ 事件类型定义
+- [x] `package.json` + 依赖安装
+- [x] `tsconfig.json`（strict: true + 全部严格选项）
+- [x] `bunfig.toml`
+- [x] `src/config/` — Zod 配置 schema + 加载器
+- [x] `src/utils/logger.ts` — Pino 根 logger 工厂（⚠️ pino-pretty 在 Bun 下可能需降级为 console transport）
+- [x] `src/utils/errors.ts` — AppError 基类 + 子类错误层级
+- [x] `src/events/` — EventBus（typed EventEmitter）+ 事件类型定义
 
 **Storage 层：**
 
-- [ ] `src/storage/database.ts` — SurrealDB 连接管理（Standalone WS `ws://127.0.0.1:21890`）+ 启动健康检查
-- [ ] `src/storage/schema/surreal.ts` — SurrealDB Schema 定义（⚠️ 使用 SCHEMAFULL 模式）
-- [ ] `src/storage/migrations/runner.ts` — 迁移执行器（⚠️ 自建：`_migrations` 元表 + 版本化脚本，无第三方工具）
-- [ ] `src/storage/migrations/versions/001_initial.ts` — 初始表结构
+- [x] `src/storage/database.ts` — SurrealDB 连接管理（Standalone WS `ws://127.0.0.1:21890`）+ 启动健康检查
+- [x] ~~`src/storage/schema/surreal.ts`~~ Schema 定义整合进 migration `001-initial.ts`
+- [x] `src/storage/migrations/runner.ts` — 迁移执行器（⚠️ 自建：`migration_history` 元表 + 版本化脚本，无第三方工具）
+- [x] `src/storage/migrations/versions/001-initial.ts` — 初始表结构
   - 包含预留字段：`embedding_model`、`schema_version`、`image_embedding`、`image_embedding_model`
   - 包含 HNSW 向量索引 + FTS 全文索引（基于 PoC 验证语法）
-- [ ] `src/storage/file-storage.ts` — `FileStorage` 接口 + `LocalFileStorage` 实现（Appendix C.2）
-- [ ] `src/storage/repositories/screenshotRepo.ts`
-- [ ] `src/storage/repositories/entityRepo.ts`（接口 + 基础 CRUD，复杂查询 Phase 2）
-- [ ] `src/storage/repositories/relationshipRepo.ts`（接口 + 基础 CRUD，复杂查询 Phase 2）
-- [ ] `src/storage/repositories/activitySegmentRepo.ts`（⚠️ 原清单遗漏）
-- [ ] `src/storage/repositories/settingsRepo.ts`
-- [ ] 测试：Repository 单元测试 + SurrealDB 集成测试（⚠️ 需真实 SurrealDB `memory` 模式，写 test setup/teardown）
+- [x] `src/storage/file-storage.ts` — `FileStorage` 接口 + `LocalFileStorage` 实现（含路径遍历防护）
+- [x] `src/storage/repositories/screenshot-repo.ts`
+- [x] `src/storage/repositories/entity-repo.ts`（接口 + 基础 CRUD + upsert，复杂查询 Phase 2）
+- [x] `src/storage/repositories/relationship-repo.ts`（接口 + 基础 CRUD，复杂查询 Phase 2）
+- [x] `src/storage/repositories/activity-segment-repo.ts`（⚠️ 原清单遗漏）
+- [x] `src/storage/repositories/settings-repo.ts`
+- [x] 测试：50 tests 全通过（单元 + 集成，嵌入式 SurrealDB `mem://` 模式）
 
 ---
 

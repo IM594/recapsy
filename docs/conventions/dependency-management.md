@@ -37,7 +37,7 @@ git commit -m "chore(deps): update lockfile"
     "hono": "^4.x",
     "surrealdb": "^2",
     "zod": "^4",
-    "pino": "^10",
+    "pino": "^9",
     "ai": "^6", // Vercel AI SDK
   },
   "devDependencies": {
@@ -73,7 +73,7 @@ git commit -m "chore(deps): update lockfile"
   "dependencies": {
     "hono": "^4", // 核心：锁 major
     "zod": "^4", // 核心：锁 major
-    "pino": "^10", // 稳定库：锁 major
+    "pino": "^9", // 稳定库：锁 major
   },
   "devDependencies": {
     "@biomejs/biome": "^2", // 工具：锁 major
