@@ -38,6 +38,7 @@
 - [六、风险与任务总结矩阵](#六风险与任务总结矩阵)
 - [附录 A: 实现过程中发现的新问题](#附录-a-实现过程中发现的新问题)
 - [附录 B: 架构变更日志](#附录-b-架构变更日志)
+- [附录 C: 设计预留清单](#附录-c-设计预留清单phase-0-讨论产出)
 
 ---
 
@@ -687,4 +688,65 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 > | 日期 | 变更文件 | 变更摘要 | 原因 |
 > | ---- | -------- | -------- | ---- |
 
-（暂无）
+| 日期 | 变更文件 | 变更摘要 | 原因 |
+| ---- | -------- | -------- | ---- |
+| 2026-04-06 | data-models.md | screenshot 表加 `embedding_model`, `image_embedding`, `image_embedding_model` 字段 | Embedding 模型迁移追踪 + 多模态预留 |
+| 2026-04-06 | data-models.md | entity 表加 `embedding_model` 字段 | Embedding 模型迁移追踪 |
+| 2026-04-06 | data-models.md | activity_segment 表加 `embedding_model`, `schema_version`, `timezone`, `local_date` 字段 | 模型迁移 + Vision prompt 版本 + 本地时间聚合 |
+| 2026-04-06 | data-models.md | screenshot.path 改为相对路径，新增 §7 文件存储设计约定（FileStorage 接口 + StorageConfig） | 支持存储位置迁移（NAS/S3） |
+| 2026-04-06 | operational-design.md | 清理策略不再清空 ocr_text，仅清空 embedding 和 image_embedding | 保留 Embedding 模型迁移能力 |
+
+---
+
+## 附录 C: 设计预留清单（Phase 0 讨论产出）
+
+> Phase 0 PoC 验证和产品化讨论中确认的预留项，确保未来扩展性：
+
+### C.1 Schema 预留字段
+
+| 字段 | 表 | 类型 | 目的 | 文档位置 |
+|------|-----|------|------|----------|
+| `embedding_model` | screenshot, entity, activity_segment | `string DEFAULT 'bge-m3-v1'` | Embedding 模型迁移追踪 | data-models.md |
+| `schema_version` | activity_segment | `int DEFAULT 1` | Vision prompt 版本追踪 | data-models.md |
+| `image_embedding` | screenshot | `option<array<float>>` | 多模态图片向量（暂不写入，不建索引） | data-models.md |
+| `image_embedding_model` | screenshot | `option<string>` | 多模态模型版本 | data-models.md |
+| `timezone` | activity_segment | `string` | 本地时间聚合 | data-models.md |
+| `local_date` | activity_segment | `string` | 按天查询 | data-models.md |
+
+### C.2 存储设计约定
+
+| 约定 | 说明 | 文档位置 |
+|------|------|----------|
+| DB 中图片路径存**相对路径** | `2026/04/06/143025_a1b2.webp`，换存储位置只改基目录 | data-models.md §7.1 |
+| `FileStorage` 接口抽象 | 先只实现 `LocalFileStorage`，预留 NAS/S3 接口 | data-models.md §7.2 |
+| `screenshots_dir` 可配置 | 默认 `~/Library/.../screenshots/`，支持指向 NAS 挂载点 | data-models.md §7.3 |
+
+### C.3 接口设计预留（Phase 2 实现时）
+
+| 预留 | 说明 |
+|------|------|
+| `EmbeddingProvider.embedImage?()` | 可选方法，当前不实现，为多模态 embedding 预留 |
+| Ingestion Pipeline 插件式 processor | 每步骤独立，方便未来新增 image embedding processor |
+
+### C.4 搜索引擎预留（Phase 3 实现时）
+
+| 预留 | 说明 |
+|------|------|
+| Search strategy 列表可扩展 | 留注释标记 `// 未来：imageVectorSearch` |
+| Reranker 槽位 | ranker.ts 结构允许插入 rerank 步骤 |
+
+### C.5 清理策略约束
+
+| 约束 | 说明 | 文档位置 |
+|------|------|----------|
+| 清理时**不删 ocr_text** | 保留 Embedding 模型重新编码能力 | operational-design.md §9.2 |
+| 截图 WebP 默认保留至用户配置的天数 | 为 image embedding 批处理留窗口（默认永不删除） | operational-design.md §9.1 |
+
+### C.6 运行时架构决策
+
+| 决策 | 结论 | 来源 |
+|------|------|------|
+| SurrealDB 模式 | **Standalone + WebSocket 连接** | PoC-12 |
+| 存储协议 | `surrealkv://`，数据目录 `~/Library/.../RecaplySense/db/` | PoC-12 |
+| Engine/DB 可远程部署 | 改连接地址即可，架构天然支持 | Phase 0 讨论 |
+| Embedding 模型迁移 | 可行，只需保留原始文本 + embedding_model 字段 | Phase 0 讨论 |

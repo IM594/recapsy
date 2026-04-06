@@ -386,12 +386,13 @@ Ingestion Pipeline 重试:
    c. 删除 appeared_in 关系边（WHERE out IN $ids）
    d. 删除 appeared_in_segment 关系边（WHERE out.screenshot_ids CONTAINSANY $ids 的 segment 相关）
    e. 从 activity_segment.screenshot_ids 中移除引用
-   f. 清空 screenshot.embedding 字段（释放向量存储空间）
+   f. 清空 screenshot.embedding 和 screenshot.image_embedding 字段（释放向量存储空间）
       注意: SurrealDB HNSW 索引在 embedding 设为 NULL 后，
       该记录自动不参与向量搜索。无需手动重建索引，
       但搜索查询中仍建议加 WHERE embedding IS NOT NULL 做显式保护。
    g. 将 screenshot.purged = true
-      （保留元数据但清除大字段: path, ocr_text, embedding）
+      （保留元数据；清除大字段: path, embedding, image_embedding）
+      ⚠️ 不清空 ocr_text — 保留以支持未来 Embedding 模型迁移（重新编码）和全文搜索
 3. 清理后更新 entity.frequency 计数
 4. 删除不再被任何 screenshot 引用的 entity 记录
 ```

@@ -16,7 +16,7 @@ SurrealDB 使用 record-based 模型，支持文档、图关系和向量。
 ```surql
 DEFINE TABLE screenshot SCHEMAFULL;
 
-DEFINE FIELD path           ON screenshot TYPE string;         -- 文件路径
+DEFINE FIELD path           ON screenshot TYPE string;         -- 相对文件路径 (e.g. "2026/04/06/143025_a1b2.webp")
 DEFINE FIELD timestamp      ON screenshot TYPE datetime;       -- 截图时间
 DEFINE FIELD app_name       ON screenshot TYPE string;         -- 应用名
 DEFINE FIELD bundle_id      ON screenshot TYPE string;         -- 应用 Bundle ID
@@ -35,6 +35,9 @@ DEFINE FIELD ocr_truncated  ON screenshot TYPE bool DEFAULT false; -- OCR 文本
 DEFINE FIELD purged         ON screenshot TYPE bool DEFAULT false; -- 截图文件是否已清理（保留元数据）
 DEFINE FIELD vision_pending ON screenshot TYPE bool DEFAULT false; -- 是否等待 Vision LLM 处理（失败重试标记）
 DEFINE FIELD embedding      ON screenshot TYPE option<array<float>>; -- 向量嵌入 (BGE-M3, 1024维)
+DEFINE FIELD embedding_model ON screenshot TYPE string DEFAULT 'bge-m3-v1'; -- Embedding 模型版本（迁移追踪）
+DEFINE FIELD image_embedding ON screenshot TYPE option<array<float>>;       -- [预留] 多模态图片向量
+DEFINE FIELD image_embedding_model ON screenshot TYPE option<string>;       -- [预留] 多模态模型版本
 DEFINE FIELD timezone        ON screenshot TYPE string;         -- 采集时的时区 (e.g. "Asia/Shanghai")
 DEFINE FIELD local_date      ON screenshot TYPE string;         -- 本地日期 (e.g. "2026-03-31")
 DEFINE FIELD local_hour      ON screenshot TYPE int;            -- 本地小时 (0-23)
@@ -83,6 +86,7 @@ DEFINE FIELD first_seen ON entity TYPE datetime;       -- 首次出现时间
 DEFINE FIELD last_seen  ON entity TYPE datetime;       -- 最后出现时间
 DEFINE FIELD frequency  ON entity TYPE int DEFAULT 0;  -- 出现频率
 DEFINE FIELD embedding  ON entity TYPE option<array<float>>; -- 实体向量
+DEFINE FIELD embedding_model ON entity TYPE string DEFAULT 'bge-m3-v1'; -- Embedding 模型版本
 DEFINE FIELD created_at ON entity TYPE datetime DEFAULT time::now();
 
 DEFINE INDEX idx_entity_type      ON entity FIELDS type;
@@ -189,6 +193,10 @@ DEFINE FIELD selected_frame_count ON activity_segment TYPE int; -- 代表帧数�
 
 -- 元数据
 DEFINE FIELD embedding ON activity_segment TYPE option<array<float>>; -- summary 的 BGE-M3 向量 (1024维)，LLM 失败时为 null
+DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'; -- Embedding 模型版本
+DEFINE FIELD schema_version ON activity_segment TYPE int DEFAULT 1;  -- Vision prompt 版本（新旧 segment 分类风格追踪）
+DEFINE FIELD timezone ON activity_segment TYPE string;               -- 采集时区 (e.g. "Asia/Shanghai")
+DEFINE FIELD local_date ON activity_segment TYPE string;             -- 本地日期 (e.g. "2026-03-31")，按天聚合用
 DEFINE FIELD llm_model ON activity_segment TYPE string;       -- 使用的 Vision LLM 模型
 DEFINE FIELD llm_tokens_in ON activity_segment TYPE int;      -- input token 数
 DEFINE FIELD llm_tokens_out ON activity_segment TYPE int;     -- output token 数
@@ -660,3 +668,51 @@ WHERE out IN $filtered
   AND in.type = 'url'
 ORDER BY screenshot.timestamp DESC;
 ```
+
+---
+
+## 7. 文件存储设计约定
+
+### 7.1 截图文件路径规则
+
+截图文件存储在可配置的基目录下，DB 中 `screenshot.path` 字段存储**相对路径**（不含基目录前缀）：
+
+```
+基目录（默认）: ~/Library/Application Support/RecaplySense/screenshots/
+相对路径格式:   {YYYY}/{MM}/{DD}/{HHMMSS}_{hash}.webp
+完整路径 = 基目录 + 相对路径
+```
+
+**存相对路径的原因：** 更换存储位置（本地 → NAS / 外接硬盘 / 服务器）时，只需修改基目录配置，无需更新每条 DB 记录。
+
+### 7.2 FileStorage 接口
+
+文件存储通过接口抽象，支持未来扩展到不同后端：
+
+```typescript
+interface FileStorage {
+  write(key: string, data: Buffer): Promise<void>;
+  read(key: string): Promise<Buffer>;
+  delete(key: string): Promise<void>;
+  exists(key: string): Promise<boolean>;
+  getUrl(key: string): string; // 本地返回 file://，远程返回 http://
+}
+```
+
+| 实现 | 适用场景 | Phase |
+|------|---------|-------|
+| `LocalFileStorage` | 默认本地存储 | Phase 1 实现 |
+| NAS 挂载 | Mac 挂载 SMB/NFS 后改配置路径即可 | 无需新代码 |
+| `S3FileStorage` | S3/MinIO 对象存储 | 按需实现 |
+| `WebDAVFileStorage` | 家用 NAS（群晖等） | 按需实现 |
+
+### 7.3 存储配置
+
+```typescript
+interface StorageConfig {
+  screenshots_dir: string;  // 截图基目录，默认 ~/Library/.../screenshots/
+  thumbnails_dir: string;   // 缩略图基目录，默认 ~/Library/.../thumbnails/
+  // 未来扩展
+  // storage_backend: 'local' | 's3' | 'webdav';
+  // s3_config?: { bucket: string; region: string; ... };
+}
