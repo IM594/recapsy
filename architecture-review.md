@@ -284,22 +284,22 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 **SurrealDB 3.x 验证：**
 
-- [ ] PoC-01: Bun + SurrealDB JS SDK (v2.0.3) 连接 SurrealDB 3.x（CRUD + WS 事件监听）
-- [ ] PoC-02: 嵌入式模式崩溃恢复（kill -9 后重启，数据无丢失）
-- [ ] PoC-03: 10 万条向量搜索（HNSW 搜索延迟 < 200ms P95）
-- [ ] PoC-04: 中文预分词全文搜索（jieba 分词 + blank tokenizer 召回率验证）
-- [ ] PoC-05: HNSW 并发写入（3.0 新特性，ingestion 写 + search 读同时进行）
-- [ ] PoC-06: Bun + SurrealDB SDK 绑定方式确认（WASM vs N-API vs HTTP）
-- [ ] PoC-07: Client-side transactions 原子性验证（3.0 新特性，隔离级别、回滚行为）
-- [ ] PoC-08: HNSW + option embedding 行为（null embedding 是否被索引跳过）
-- [ ] PoC-09: embedded 模式下 surreal export 可用性
-- [ ] PoC-10: embedded 模式启动方式和内存管理
+- [x] PoC-01: Bun + SurrealDB JS SDK (v2.0.3) 连接 SurrealDB 3.x（CRUD + WS 事件监听）— 2026-04-06（PASS：CRUD + SurrealQL + Live Query 全部通过；Live Query 推荐用 async iterator 方式）
+- [x] PoC-02: 嵌入式模式崩溃恢复（kill -9 后重启，数据无丢失）— 2026-04-06（PASS：standalone + `surrealkv://` 路径，100条数据 kill -9 后全部恢复）
+- [x] PoC-03: 10 万条向量搜索（HNSW 搜索延迟 < 200ms P95）— 2026-04-06（PASS：100k/1024D P95=168ms；注意 KNN 语法需带 EF 参数 `<|K,EF|>`）
+- [x] PoC-04: 中文预分词全文搜索（jieba 分词 + blank tokenizer 召回率验证）— 2026-04-06（PASS：85.4% 平均召回率；注意 3.x 语法为 `FULLTEXT ANALYZER`；jieba 需自定义词典优化"微信"等词）
+- [x] PoC-05: HNSW 并发写入（3.0 新特性，ingestion 写 + search 读同时进行）— 2026-04-06（PASS：5 并发写入 + 搜索，0 死锁 0 错误，1500 条全部写入）
+- [x] PoC-06: Bun + SurrealDB SDK 绑定方式确认（WASM vs N-API vs HTTP）— 2026-04-06（PASS：WS/HTTP/Embedded mem:///surrealkv:// 四种模式全部通过；推荐 WebSocket，支持 live query）
+- [x] PoC-07: Client-side transactions 原子性验证（3.0 新特性，隔离级别、回滚行为）— 2026-04-06（PASS：COMMIT 正常，CANCEL 回滚后数据不变，批量原子性正常）
+- [x] PoC-08: HNSW + option embedding 行为（null embedding 是否被索引跳过）— 2026-04-06（PASS：null embedding 记录自动排除在 KNN 和 IS NOT NONE 过滤结果外）
+- [x] PoC-09: embedded 模式下 surreal export 可用性 — 2026-04-06（PASS：SDK db.export()、CLI surreal export、SurrealQL SELECT 三种方式均可用）
+- [x] PoC-10: embedded 模式启动方式和内存管理 — 2026-04-06（PASS：mem:// 和 surrealkv:// 可用，file:// 不支持；@surrealdb/node createNodeEngines() 在 Bun 下正常工作）
 
 **其他关键依赖验证：**
 
-- [ ] PoC-11: jieba-wasm 在 Bun 下的兼容性（初始化时间、内存占用、分词质量）
-- [ ] PoC-12: SurrealDB embedded vs standalone 模式最终选型决策
-- [ ] 结论文档：`poc/RESULTS.md`（记录每项验证的通过/失败状态和最终决策）
+- [x] PoC-11: jieba-wasm 在 Bun 下的兼容性（初始化时间、内存占用、分词质量）— 2026-04-06（PASS：WASM 加载正常，精确/全/搜索模式全通过，性能 0.016ms/次，12.5k 字符大文本稳定，并发安全）
+- [x] PoC-12: SurrealDB embedded vs standalone 模式最终选型决策 — 2026-04-06（决策：**推荐 standalone 模式 + WebSocket 连接**。理由：①standalone 支持 live query（embedded 不支持 WS 事件推送）②standalone 方便 CLI 调试（surreal sql/export）③多进程隔离更健壮④embedded @surrealdb/node 在 Bun 下虽可用但属于 N-API 绑定，长期稳定性不如官方 WS/HTTP 协议⑤standalone 用 launchd 管理，进程生命周期可控。备注：存储协议用 surrealkv://，数据目录 ~/Library/Application Support/RecaplySense/db/）
+- [x] 结论文档：`poc/RESULTS.md`（记录每项验证的通过/失败状态和最终决策）— 2026-04-06
 
 **Phase 0 退出条件：**
 
@@ -644,8 +644,8 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 | 分类      | 项目                                              | 优先级 | 对应 Phase        | 状态 |
 | --------- | ------------------------------------------------- | ------ | ----------------- | ---- |
-| 🚨 阻塞性 | SurrealDB 3.x PoC 验证（10 项）                   | 最高   | Phase 0           | [ ]  |
-| 🚨 阻塞性 | jieba-wasm + Bun 兼容性验证                       | 最高   | Phase 0           | [ ]  |
+| 🚨 阻塞性 | SurrealDB 3.x PoC 验证（10 项）                   | 最高   | Phase 0           | [x]  |
+| 🚨 阻塞性 | jieba-wasm + Bun 兼容性验证                       | 最高   | Phase 0           | [x]  |
 | ⚠️ 高     | 时间语义统一（UTC + 本地时间派生规则）            | 高     | Phase 1 schema    | [ ]  |
 | ⚠️ 高     | 搜索分页语义冻结（统一流 or 分通道）              | 高     | Phase 3 开工前    | [ ]  |
 | ⚠️ 高     | activity_segment 实体双写收敛（图边 vs 内联数组） | 高     | Phase 1 schema    | [ ]  |
