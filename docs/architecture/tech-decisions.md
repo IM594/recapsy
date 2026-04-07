@@ -94,13 +94,13 @@
 
 **PoC 验证清单（在编写业务代码前必须完成）：**
 
-| # | 验证项 | 通过标准 | 失败预案 |
-|---|--------|---------|---------|
-| 1 | Bun + SurrealDB SDK 连接 | CRUD + WebSocket 事件监听正常工作 | 降级到 HTTP 连接模式 |
-| 2 | 嵌入式模式崩溃恢复 | kill -9 后重启，数据无丢失 | 评估 standalone server 模式 |
-| 3 | 10 万条向量搜索 | HNSW 搜索延迟 < 200ms (P95) | 评估 Phase 2 降维策略提前 |
-| 4 | 中文预分词全文搜索 | jieba 分词 + blank tokenizer 召回率可接受 | 加重向量搜索权重，FTS 降级为辅助 |
-| 5 | 并发读写 | ingestion 写入 + search 查询并发无死锁 | 引入读写队列化 |
+| #   | 验证项                   | 通过标准                                  | 失败预案                         |
+| --- | ------------------------ | ----------------------------------------- | -------------------------------- |
+| 1   | Bun + SurrealDB SDK 连接 | CRUD + WebSocket 事件监听正常工作         | 降级到 HTTP 连接模式             |
+| 2   | 嵌入式模式崩溃恢复       | kill -9 后重启，数据无丢失                | 评估 standalone server 模式      |
+| 3   | 10 万条向量搜索          | HNSW 搜索延迟 < 200ms (P95)               | 评估 Phase 2 降维策略提前        |
+| 4   | 中文预分词全文搜索       | jieba 分词 + blank tokenizer 召回率可接受 | 加重向量搜索权重，FTS 降级为辅助 |
+| 5   | 并发读写                 | ingestion 写入 + search 查询并发无死锁    | 引入读写队列化                   |
 
 ---
 
@@ -117,19 +117,20 @@
 
 **Embedding 云端 API 提供商选型：**
 
-| 提供商 | 优势 | 劣势 |
-|--------|------|------|
-| **SiliconFlow** ✅ | 国内低延迟；BGE-M3 原生支持；按量计费便宜 | 海外节点较少 |
-| Jina AI | 全球节点；OpenAI 兼容接口 | BGE-M3 需确认支持 |
-| HuggingFace Inference | 开源模型直接调用 | 免费额度有限，延迟不稳定 |
-| 自建 (TEI) | 完全可控 | 需要 GPU 服务器，运维成本 |
+| 提供商                | 优势                                      | 劣势                      |
+| --------------------- | ----------------------------------------- | ------------------------- |
+| **SiliconFlow** ✅    | 国内低延迟；BGE-M3 原生支持；按量计费便宜 | 海外节点较少              |
+| Jina AI               | 全球节点；OpenAI 兼容接口                 | BGE-M3 需确认支持         |
+| HuggingFace Inference | 开源模型直接调用                          | 免费额度有限，延迟不稳定  |
+| 自建 (TEI)            | 完全可控                                  | 需要 GPU 服务器，运维成本 |
 
 **默认选择 SiliconFlow：**
+
 - API 兼容 OpenAI `/v1/embeddings` 接口，切换成本低
 - BGE-M3 作为头部模型有专门优化
 - 配置项 `ai.embeddingEndpoint` 允许用户切换到其他兼容端点
-| NER (实体提取) | 云端 LLM 提取 | 本地规则匹配 |
-| LLM (Agent/对话) | OpenAI / Anthropic（用户首次启动时选择） | Ollama（可选） |
+  | NER (实体提取) | 云端 LLM 提取 | 本地规则匹配 |
+  | LLM (Agent/对话) | OpenAI / Anthropic（用户首次启动时选择） | Ollama（可选） |
 
 **NER 二级策略：**
 
@@ -366,6 +367,9 @@ Level 2 — 云端 LLM 提取（仅规则无法覆盖时触发）：
 | `recaply://recent/screenshots` | 最近截图 OCR 文本 |
 | `recaply://entities/frequent` | 高频实体列表 |
 | `recaply://stats/overview` | 系统总览统计 |
+| `rem://daily/{date}` | 日摘要 MD 文件（REM 知识沉淀层） |
+| `rem://weekly/{week}` | 周回顾 MD 文件（REM 层） |
+| `rem://memory` | 用户记忆文件（REM 层） |
 
 **原因：**
 
@@ -609,25 +613,71 @@ Session 结束：用户切出该 App
 
 ## Decision Log
 
-| #   | Decision                | Date       | Status      |
-| --- | ----------------------- | ---------- | ----------- |
-| 001 | 三端架构                | 2026-03-31 | ✅ Accepted |
-| 002 | SwiftUI 前端            | 2026-03-31 | ✅ Accepted |
-| 003 | TypeScript + Bun 后端   | 2026-03-31 | ✅ Accepted |
-| 004 | SurrealDB 统一存储      | 2026-03-31 | ✅ Accepted |
-| 005 | AI 分层策略（修订）     | 2026-03-31 | ✅ Accepted |
-| 006 | HTTP REST + WebSocket   | 2026-03-31 | ✅ Accepted |
-| 007 | WebP 截图格式           | 2026-03-31 | ✅ Accepted |
-| 008 | Hono HTTP 框架          | 2026-03-31 | ✅ Accepted |
-| 009 | Biome Linter            | 2026-03-31 | ✅ Accepted |
-| 010 | Turborepo Monorepo      | 2026-03-31 | ✅ Accepted |
-| 011 | 端口号 21890            | 2026-03-31 | ✅ Accepted |
-| 012 | 截图变化检测策略        | 2026-03-31 | ✅ Accepted |
-| 013 | Collector vs Agent 命名 | 2026-03-31 | ✅ Accepted |
-| 014 | MCP Server 设计策略     | 2026-03-31 | ✅ Accepted |
-| 015 | Swift ↔ TS 类型同步     | 2026-04-01 | ✅ Accepted |
-| 016 | Vercel AI SDK           | 2026-04-01 | ✅ Accepted |
-| 017 | OCR 归属 Collector 端   | 2026-04-01 | ✅ Accepted |
-| 018 | 进程生命周期托管模型    | 2026-04-01 | ✅ Accepted |
-| 019 | 两层截图理解            | 2026-04-01 | ✅ Accepted |
-| 020 | NER 二级策略 + AI 成本追踪  | 2026-04-02 | ✅ Accepted |
+| #   | Decision                   | Date       | Status      |
+| --- | -------------------------- | ---------- | ----------- |
+| 001 | 三端架构                   | 2026-03-31 | ✅ Accepted |
+| 002 | SwiftUI 前端               | 2026-03-31 | ✅ Accepted |
+| 003 | TypeScript + Bun 后端      | 2026-03-31 | ✅ Accepted |
+| 004 | SurrealDB 统一存储         | 2026-03-31 | ✅ Accepted |
+| 005 | AI 分层策略（修订）        | 2026-03-31 | ✅ Accepted |
+| 006 | HTTP REST + WebSocket      | 2026-03-31 | ✅ Accepted |
+| 007 | WebP 截图格式              | 2026-03-31 | ✅ Accepted |
+| 008 | Hono HTTP 框架             | 2026-03-31 | ✅ Accepted |
+| 009 | Biome Linter               | 2026-03-31 | ✅ Accepted |
+| 010 | Turborepo Monorepo         | 2026-03-31 | ✅ Accepted |
+| 011 | 端口号 21890               | 2026-03-31 | ✅ Accepted |
+| 012 | 截图变化检测策略           | 2026-03-31 | ✅ Accepted |
+| 013 | Collector vs Agent 命名    | 2026-03-31 | ✅ Accepted |
+| 014 | MCP Server 设计策略        | 2026-03-31 | ✅ Accepted |
+| 015 | Swift ↔ TS 类型同步        | 2026-04-01 | ✅ Accepted |
+| 016 | Vercel AI SDK              | 2026-04-01 | ✅ Accepted |
+| 017 | OCR 归属 Collector 端      | 2026-04-01 | ✅ Accepted |
+| 018 | 进程生命周期托管模型       | 2026-04-01 | ✅ Accepted |
+| 019 | 两层截图理解               | 2026-04-01 | ✅ Accepted |
+| 020 | NER 二级策略 + AI 成本追踪 | 2026-04-02 | ✅ Accepted |
+| 021 | REM 知识沉淀层三通道设计   | 2026-04-07 | ✅ Accepted |
+
+---
+
+## TDR-021: REM 知识沉淀层三通道设计（Routines + Memory + REM Cache）
+
+**决策：** 新增 `rem/` 子模块，将原始截图/OCR/活动数据沉淀为可消费的知识，通过三个通道交付。
+
+**三个交付通道：**
+
+| 通道                | 面向       | 交互方式                                         |
+| ------------------- | ---------- | ------------------------------------------------ |
+| **Routines**        | 用户       | 定时 Scheduler 任务生成日摘要/周回顾，推送到 UI  |
+| **Memory**          | Agent      | `memory.md` 文件，Agent 对话时自动读取作为上下文 |
+| **REM Cache**       | 外部 Agent | MD 文件 + MCP Resources，供 Claude/Cursor 读取   |
+
+**核心设计原则：**
+
+1. 零操作：用户不需要管理知识库，知识自动生成、按需呈现
+2. 知识找人：Routines 主动推送，Agent 自动引用 Memory
+3. MD 服务 Agent，UI 服务用户：不暴露文件系统给用户
+4. 渐进式精确：先日摘要，随数据积累产出周/月回顾
+
+**文件位置：**
+
+```
+~/Library/Application Support/RecaplySense/rem/
+├── daily/YYYY-MM-DD.md     # 日摘要（Routine 自动生成）
+├── weekly/YYYY-WNN.md      # 周回顾（Routine 自动生成）
+└── memory.md               # 用户记忆（简单持久化文件）
+```
+
+**Memory 设计：** `memory.md` 不入库，就是一个文件。Agent 读取时当文本处理。
+用户可手动编辑，Agent 可追加（标记 `[inferred]`），避免 DB 和文件双向同步的复杂性。
+
+**新增数据表：** `rem_summary`（结构化摘要记录，可搜索），详见 `data-models.md`。
+
+**竞品参考：** LittleBird（Routines 推送模式）、Screenpipe（Pipe 知识管线、MCP 集成）、OpenClaw（SOUL.md 持久记忆）。
+
+**详细设计文档：** `docs/architecture/rem-layer.md`
+
+**否决方案：**
+
+- ❌ 复杂知识库 UI + 标签管理 — 心智负担重，违背"零操作"原则
+- ❌ Memory 入库 + 双向同步 — 过度工程化，文件足够简单
+- ❌ 实时 RAG（每次查询实时生成摘要）— 延迟高、成本高，不如预生成 + 缓存

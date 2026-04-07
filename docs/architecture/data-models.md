@@ -220,6 +220,35 @@ DEFINE INDEX idx_segment_summary_cjk ON activity_segment FIELDS summary_tokenize
   FULLTEXT ANALYZER cjk_analyzer BM25;
 ```
 
+### `rem_summary` — 知识摘要（REM 知识沉淀层生成, TDR-021）
+
+```surql
+DEFINE TABLE rem_summary SCHEMAFULL;
+
+DEFINE FIELD type           ON rem_summary TYPE string
+  ASSERT $value IN ['daily', 'weekly', 'monthly'];
+DEFINE FIELD period_start   ON rem_summary TYPE datetime;
+DEFINE FIELD period_end     ON rem_summary TYPE datetime;
+DEFINE FIELD timezone       ON rem_summary TYPE string;
+DEFINE FIELD local_date     ON rem_summary TYPE string;       -- 'YYYY-MM-DD' 或 'YYYY-WNN'
+DEFINE FIELD content        ON rem_summary TYPE string;       -- Markdown 正文
+DEFINE FIELD key_topics     ON rem_summary TYPE array<string>;
+DEFINE FIELD stats          ON rem_summary TYPE object;       -- { screen_time, app_distribution, ... }
+DEFINE FIELD embedding      ON rem_summary TYPE option<array<float>>;
+DEFINE FIELD embedding_model ON rem_summary TYPE string DEFAULT 'bge-m3-v1';
+DEFINE FIELD llm_model      ON rem_summary TYPE string;
+DEFINE FIELD schema_version ON rem_summary TYPE int DEFAULT 1;
+DEFINE FIELD routine_id     ON rem_summary TYPE option<string>; -- 关联的 Routine ID
+DEFINE FIELD created_at     ON rem_summary TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at     ON rem_summary TYPE datetime DEFAULT time::now();
+
+-- 索引
+DEFINE INDEX idx_ks_type_date ON rem_summary FIELDS type, local_date UNIQUE;
+DEFINE INDEX idx_ks_period    ON rem_summary FIELDS period_start;
+DEFINE INDEX idx_ks_embedding ON rem_summary FIELDS embedding
+  HNSW DIMENSION 1024 DIST COSINE;
+```
+
 ---
 
 ## 2. Graph Relations (Edges)
@@ -357,6 +386,20 @@ DEFINE INDEX idx_related_unique ON related_to FIELDS in, out, relation_type UNIQ
   ┌───────┴──────┐
   │    entity     │
   └──────────────┘
+
+  rem_summary（TDR-021, REM 层生成）:
+  ┌────────────────────────────────────────────────────┐
+  │            rem_summary                             │
+  ├────────────────────────────────────────────────────┤
+  │  type (daily/weekly/monthly)                       │
+  │  period_start / period_end                         │
+  │  local_date ('YYYY-MM-DD' 或 'YYYY-WNN')          │
+  │  content (Markdown 正文)                           │
+  │  key_topics[], stats{}                             │
+  │  embedding (1024维)                                │
+  │  → 同步导出为 rem/daily/*.md                       │
+  │  → 同步导出为 rem/weekly/*.md                      │
+  └────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -385,7 +428,7 @@ export interface Screenshot {
   last_error: string | null;
   ocr_truncated: boolean;
   purged: boolean;
-  vision_pending: boolean;                 // 是否等待 Vision LLM 处理
+  vision_pending: boolean; // 是否等待 Vision LLM 处理
   embedding: number[] | null; // BGE-M3, 1024 维
   timezone: string; // e.g. "Asia/Shanghai"
   local_date: string; // e.g. "2026-03-31"
@@ -479,16 +522,16 @@ export interface ActivitySegment {
   id: string;
   app_name: string;
   bundle_id: string;
-  display_ids: number[];                       // 涉及的显示器 IDs（同 App 跨多屏合并）
+  display_ids: number[]; // 涉及的显示器 IDs（同 App 跨多屏合并）
   session_start: Date;
   session_end: Date;
   duration_seconds: number;
 
   // Vision LLM 生成
-  activity: string;                        // "在 Slack #general 和张三讨论项目进度"
+  activity: string; // "在 Slack #general 和张三讨论项目进度"
   scene_type: SceneType;
   summary: string;
-  visual_elements: string[];               // ["代码编辑器", "终端输出"]
+  visual_elements: string[]; // ["代码编辑器", "终端输出"]
   key_entities: { name: string; type: EntityType }[];
 
   // 中文预分词字段
@@ -497,11 +540,11 @@ export interface ActivitySegment {
 
   // 关联截图
   screenshot_ids: string[];
-  frame_count: number;                     // 原始帧数
-  selected_frame_count: number;            // 去重后代表帧数
+  frame_count: number; // 原始帧数
+  selected_frame_count: number; // 去重后代表帧数
 
   // 元数据
-  embedding?: number[];                    // summary 的 BGE-M3 向量 (1024维)
+  embedding?: number[]; // summary 的 BGE-M3 向量 (1024维)
   llm_model: string;
   llm_tokens_in: number;
   llm_tokens_out: number;
@@ -549,6 +592,35 @@ export interface ScoredActivitySegment {
   scene_type: SceneType;
   summary: string;
   score: number;
+}
+
+// shared/src/schemas/rem.ts (TDR-021)
+
+export type RemSummaryType = "daily" | "weekly" | "monthly";
+
+export interface RemSummary {
+  id: string;
+  type: RemSummaryType;
+  period_start: Date;
+  period_end: Date;
+  timezone: string;
+  local_date: string; // 'YYYY-MM-DD' 或 'YYYY-WNN'
+  content: string; // Markdown 正文
+  key_topics: string[];
+  stats: {
+    screen_time_minutes?: number;
+    screenshot_count?: number;
+    segment_count?: number;
+    entity_count?: number;
+    app_distribution?: Record<string, number>;
+  };
+  embedding?: number[];
+  embedding_model: string;
+  llm_model: string;
+  schema_version: number;
+  routine_id?: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
 // shared/src/schemas/events.ts (WebSocket)
@@ -700,20 +772,21 @@ interface FileStorage {
 }
 ```
 
-| 实现 | 适用场景 | Phase |
-|------|---------|-------|
-| `LocalFileStorage` | 默认本地存储 | Phase 1 实现 |
-| NAS 挂载 | Mac 挂载 SMB/NFS 后改配置路径即可 | 无需新代码 |
-| `S3FileStorage` | S3/MinIO 对象存储 | 按需实现 |
-| `WebDAVFileStorage` | 家用 NAS（群晖等） | 按需实现 |
+| 实现                | 适用场景                          | Phase        |
+| ------------------- | --------------------------------- | ------------ |
+| `LocalFileStorage`  | 默认本地存储                      | Phase 1 实现 |
+| NAS 挂载            | Mac 挂载 SMB/NFS 后改配置路径即可 | 无需新代码   |
+| `S3FileStorage`     | S3/MinIO 对象存储                 | 按需实现     |
+| `WebDAVFileStorage` | 家用 NAS（群晖等）                | 按需实现     |
 
 ### 7.3 存储配置
 
 ```typescript
 interface StorageConfig {
-  screenshots_dir: string;  // 截图基目录，默认 ~/Library/.../screenshots/
-  thumbnails_dir: string;   // 缩略图基目录，默认 ~/Library/.../thumbnails/
+  screenshots_dir: string; // 截图基目录，默认 ~/Library/.../screenshots/
+  thumbnails_dir: string; // 缩略图基目录，默认 ~/Library/.../thumbnails/
   // 未来扩展
   // storage_backend: 'local' | 's3' | 'webdav';
   // s3_config?: { bucket: string; region: string; ... };
 }
+```

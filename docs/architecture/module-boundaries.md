@@ -26,9 +26,12 @@
 │  │          │  │           │  │  │(活动摘要)│ │           │  │  │
 │  │          │  │           │  │  └─────────┘ └───────────┘  │  │
 │  │          │  │           │  │  ┌─────────┐ ┌───────────┐  │  │
-│  │          │  │           │  │  │   ai    │ │  storage  │  │  │
-│  │          │  │           │  │  │(Provider)│ │           │  │  │
+│  │          │  │           │  │  │   rem   │ │   ai      │  │  │
+│  │          │  │           │  │  │  (REM)  │ │(Provider) │  │  │
 │  │          │  │           │  │  └─────────┘ └───────────┘  │  │
+│  │          │  │           │  │  ┌───────────────────────┐  │  │
+│  │          │  │           │  │  │       storage         │  │  │
+│  │          │  │           │  │  └───────────────────────┘  │  │
 │  └──────────┘  └───────────┘  └─────────────────────────────┘  │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────────┐│
@@ -87,14 +90,14 @@ frontend/
 
 ### 边界规则
 
-| ✅ 可以做                      | ❌ 不能做          |
-| ------------------------------ | ------------------ |
-| 调用 Backend API               | 直接访问 SurrealDB |
-| 渲染截图和文本                 | 执行 OCR           |
-| 注册 LaunchAgent (首次安装时)  | 直接截屏           |
-| 本地 UI 状态管理               | 业务逻辑处理       |
-| 展示 AI 回复                   | 直接调用 LLM API   |
-| 用户设置界面                   | 直接写配置文件     |
+| ✅ 可以做                     | ❌ 不能做          |
+| ----------------------------- | ------------------ |
+| 调用 Backend API              | 直接访问 SurrealDB |
+| 渲染截图和文本                | 执行 OCR           |
+| 注册 LaunchAgent (首次安装时) | 直接截屏           |
+| 本地 UI 状态管理              | 业务逻辑处理       |
+| 展示 AI 回复                  | 直接调用 LLM API   |
+| 用户设置界面                  | 直接写配置文件     |
 
 ### 对外接口
 
@@ -153,16 +156,16 @@ collector/
 
 ### 边界规则
 
-| ✅ 可以做            | ❌ 不能做        |
-| -------------------- | ---------------- |
-| 截取屏幕             | AI 推理          |
-| 帧差异检测           | 向量化           |
-| 截图压缩 (WebP)      | 写入 SurrealDB   |
-| OCR 文本提取 (Apple Vision) | 实体提取   |
-| 写入截图文件         | 搜索查询         |
-| 采集窗口标题/应用名  | 直接响应用户查询 |
-| 隐私过滤             |                  |
-| 通知 Engine 有新截图 |                  |
+| ✅ 可以做                   | ❌ 不能做        |
+| --------------------------- | ---------------- |
+| 截取屏幕                    | AI 推理          |
+| 帧差异检测                  | 向量化           |
+| 截图压缩 (WebP)             | 写入 SurrealDB   |
+| OCR 文本提取 (Apple Vision) | 实体提取         |
+| 写入截图文件                | 搜索查询         |
+| 采集窗口标题/应用名         | 直接响应用户查询 |
+| 隐私过滤                    |                  |
+| 通知 Engine 有新截图        |                  |
 
 ### 对外接口
 
@@ -211,7 +214,7 @@ POST /api/v1/ingest/screenshot
 **语言：** TypeScript + Bun  
 **职责边界：** 所有业务逻辑的核心，包含 AI、搜索、存储
 
-Engine 内部进一步分为 **10 个子模块**：
+Engine 内部进一步分为 **11 个子模块**：
 
 ```
 engine/
@@ -255,7 +258,10 @@ engine/
 │   │   │   ├── todaySummary.ts           # recaply://today/summary
 │   │   │   ├── recentScreenshots.ts      # recaply://recent/screenshots
 │   │   │   ├── frequentEntities.ts       # recaply://entities/frequent
-│   │   │   └── statsOverview.ts          # recaply://stats/overview
+│   │   │   ├── statsOverview.ts          # recaply://stats/overview
+│   │   │   ├── dailySummary.ts           # rem://daily/{date}
+│   │   │   ├── weeklySummary.ts          # rem://weekly/{week}
+│   │   │   └── memory.ts                 # rem://memory
 │   │   └── transport/
 │   │       ├── stdio.ts                  # stdio 传输 (Claude Desktop/Cursor)
 │   │       └── streamableHttp.ts         # Streamable HTTP 传输 (Web MCP 客户端)
@@ -277,6 +283,18 @@ engine/
 │   │   ├── frameSelector.ts             # OCR 文本去重 + 代表帧选择（≤8帧）
 │   │   ├── visionAnalyzer.ts            # Vision LLM 调用 + 结构化输出
 │   │   └── segmentWriter.ts             # activity_segment 写入存储
+│   │
+│   ├── rem/                             ← 子模块: REM Layer（知识沉淀层）
+│   │   ├── generators/
+│   │   │   ├── daily-summary.ts         # 日摘要生成器
+│   │   │   ├── weekly-summary.ts        # 周摘要生成器
+│   │   │   └── types.ts                 # 生成器共享类型
+│   │   ├── memory/
+│   │   │   ├── memory-manager.ts        # Memory 文件读写
+│   │   │   └── memory-extractor.ts      # 从对话中提取记忆（inferred）
+│   │   ├── export/
+│   │   │   └── md-exporter.ts           # DB → MD 文件导出
+│   │   └── index.ts                     # 模块入口
 │   │
 │   ├── agent/                            ← 子模块: AI Agent (智能体)
 │   │   ├── agent.ts                      # Agent 主入口（AI SDK streamText + tools）
@@ -338,7 +356,9 @@ engine/
 │   │       ├── screenshotCleanup.ts      # 截图清理（按保留策略 + 磁盘阈值）
 │   │       ├── backupDaily.ts            # 每日自动备份
 │   │       ├── deadLetterScan.ts         # Dead letter 扫描与重试
-│   │       └── visionRetry.ts            # Vision LLM 失败帧重试
+│   │       ├── visionRetry.ts            # Vision LLM 失败帧重试
+│   │       ├── dailySummary.ts           # 日摘要生成（REM 层 Routine）
+│   │       └── weeklySummary.ts          # 周回顾生成（REM 层 Routine）
 │   │
 │   ├── events/                           ← 公共基础设施: 进程内事件总线
 │   │   ├── bus.ts                        # 进程内事件总线（typed EventEmitter）
@@ -362,19 +382,20 @@ engine/
 
 ```
                可以调用 →
-               api   mcp   ingestion  vision  agent  search  ai    storage  events  scheduler
-调用方 ↓     ┌──────┬─────┬──────────┬───────┬──────┬───────┬─────┬────────┬───────┬──────────┐
-  api        │  -   │  ❌  │    ✅     │  ❌   │  ✅  │  ✅   │  ❌ │   ❌   │  ✅   │    ✅    │
-  mcp        │  ❌  │  -   │    ❌     │  ❌   │  ❌  │  ✅   │  ❌ │   ✅   │  ✅   │    ❌    │
-  ingestion  │  ❌  │  ❌  │    -      │  ✅   │  ❌  │  ❌   │  ✅ │   ✅   │  ✅   │    ❌    │
-  vision     │  ❌  │  ❌  │    ❌     │  -    │  ❌  │  ❌   │  ✅ │   ✅   │  ✅   │    ❌    │
-  agent      │  ❌  │  ❌  │    ❌     │  ❌   │  -   │  ✅   │  ✅ │   ✅   │  ✅   │    ❌    │
-  search     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  -    │  ✅ │   ✅   │  ✅   │    ❌    │
-  ai         │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │  -  │   ❌   │  ✅   │    ❌    │
-  storage    │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │  ❌ │   -    │  ✅   │    ❌    │
-  events     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │  ❌ │   ❌   │  -    │    ❌    │
-  scheduler  │  ❌  │  ❌  │    ✅     │  ✅   │  ❌  │  ❌   │  ❌ │   ✅   │  ✅   │    -     │
-             └──────┴─────┴──────────┴───────┴──────┴───────┴─────┴────────┴───────┴──────────┘
+               api   mcp   ingestion  vision  agent  search  rem        ai    storage  events  scheduler
+调用方 ↓     ┌──────┬─────┬──────────┬───────┬──────┬───────┬──────────┬─────┬────────┬───────┬──────────┐
+  api        │  -   │  ❌  │    ✅     │  ❌   │  ✅  │  ✅   │    ❌     │  ❌ │   ❌   │  ✅   │    ✅    │
+  mcp        │  ❌  │  -   │    ❌     │  ❌   │  ❌  │  ✅   │    ✅     │  ❌ │   ✅   │  ✅   │    ❌    │
+  ingestion  │  ❌  │  ❌  │    -      │  ✅   │  ❌  │  ❌   │    ❌     │  ✅ │   ✅   │  ✅   │    ❌    │
+  vision     │  ❌  │  ❌  │    ❌     │  -    │  ❌  │  ❌   │    ❌     │  ✅ │   ✅   │  ✅   │    ❌    │
+  agent      │  ❌  │  ❌  │    ❌     │  ❌   │  -   │  ✅   │    ✅     │  ✅ │   ✅   │  ✅   │    ❌    │
+  search     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  -    │    ❌     │  ✅ │   ✅   │  ✅   │    ❌    │
+  rem        │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │    -      │  ✅ │   ✅   │  ✅   │    ❌    │
+  ai         │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │    ❌     │  -  │   ❌   │  ✅   │    ❌    │
+  storage    │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │    ❌     │  ❌ │   -    │  ✅   │    ❌    │
+  events     │  ❌  │  ❌  │    ❌     │  ❌   │  ❌  │  ❌   │    ❌     │  ❌ │   ❌   │  -    │    ❌    │
+  scheduler  │  ❌  │  ❌  │    ✅     │  ✅   │  ❌  │  ❌   │    ✅     │  ❌ │   ✅   │  ✅   │    -     │
+             └──────┴─────┴──────────┴───────┴──────┴───────┴──────────┴─────┴────────┴───────┴──────────┘
 
 规则：
   • api 和 mcp 是两个并列的入口层
@@ -384,11 +405,13 @@ engine/
     - 外部 AI 系统自己就是 Agent，自己做意图理解和编排
     - mcp → search（搜索工具）
     - mcp → storage（读取截图/实体/统计，只读）
+    - mcp → rem（读取 REM 层 MD 文件，MCP Resources）
   • api → agent：内部 Chat 界面的用户查询需要 Agent 编排
   • agent 是内部 AI 智能体，仅服务于 Frontend Chat：
     - agent → search（执行各种搜索）
     - agent → ai（调用 LLM 做意图理解/回答合成）
     - agent → storage（获取截图详情/实体/对话历史/活动片段）
+    - agent → rem（读取 memory.md 作为上下文、读取日摘要）
   • ingestion 可调用 ai（embedding/NER）和 storage（写入数据）
     - OCR 由 Collector 端完成（TDR-017），Engine 接收 ocr_text
     - ingestion 对中文 OCR 文本做分词后存入检索字段
@@ -397,6 +420,10 @@ engine/
     - vision → ai（调用 Vision LLM）
     - vision → storage（读取截图帧、写入 activity_segment）
     - 由 ingestion 触发，异步处理，不阻塞摄入管线
+  • rem 是 REM（知识沉淀层）（TDR-021）：
+    - rem → ai（调用 LLM 生成摘要）
+    - rem → storage（读取 activity_segment、写入 rem_summary）
+    - 由 scheduler 触发（Routines 定时任务），也可被 agent/mcp 读取
   • ai 是纯模型调用层，不访问 storage
   • storage 是最底层，不调用任何其他模块
   • events 是进程内事件总线（typed EventEmitter），所有模块均可 emit/subscribe，解决业务层向入口层通信的反向依赖问题
@@ -404,6 +431,7 @@ engine/
     - scheduler → storage（截图清理、备份）
     - scheduler → ingestion（dead letter 重试）
     - scheduler → vision（失败帧重试）
+    - scheduler → rem（日摘要/周回顾生成）
     - api → scheduler（手动触发备份/清理）
     - scheduler 通过 EventBus 发送执行结果通知
 ```
@@ -600,14 +628,15 @@ async function processScreenshot(data: IngestData) {
 
 // ❌ 错误：各 Repository 独立写入，中间失败导致数据不一致
 await screenshotRepo.save(screenshot);
-await entityRepo.upsert(entities);     // 这里失败 → screenshot 成为孤立记录
+await entityRepo.upsert(entities); // 这里失败 → screenshot 成为孤立记录
 await relationshipRepo.createEdges(edges);
 ```
 
 规则：
-  - 结构化数据（screenshot + entity + 关系边）的写入必须包裹在事务中
-  - Embedding 写入可在事务外执行（允许独立重试，失败不影响结构化数据完整性）
-  - Repository 方法签名需支持可选的事务上下文参数
+
+- 结构化数据（screenshot + entity + 关系边）的写入必须包裹在事务中
+- Embedding 写入可在事务外执行（允许独立重试，失败不影响结构化数据完整性）
+- Repository 方法签名需支持可选的事务上下文参数
 
 ### Rule 3: 错误隔离
 
@@ -659,20 +688,23 @@ export const engineConfig = z.object({
 ```typescript
 // ✅ 正确：业务模块通过 EventBus emit 事件
 // ingestion/pipeline.ts
-eventBus.emit('ingestion:progress', { screenshot_id, stage, progress });
+eventBus.emit("ingestion:progress", { screenshot_id, stage, progress });
 
 // api/ws/handler.ts 订阅事件并推送给客户端
-eventBus.on('ingestion:progress', (data) => ws.send(data));
+eventBus.on("ingestion:progress", (data) => ws.send(data));
 
 // ❌ 错误：业务模块直接 import api 层的推送函数
-import { pushToWebSocket } from '../api/ws/handler';
+import { pushToWebSocket } from "../api/ws/handler";
 ```
 
 同时用于 ingestion → vision 的触发：
+
 ```typescript
 // ingestion/pipeline.ts
-eventBus.emit('screenshot:ingested', { screenshot_id, bundle_id });
+eventBus.emit("screenshot:ingested", { screenshot_id, bundle_id });
 
 // vision/sessionManager.ts
-eventBus.on('screenshot:ingested', (data) => sessionManager.onNewScreenshot(data));
+eventBus.on("screenshot:ingested", (data) =>
+  sessionManager.onNewScreenshot(data),
+);
 ```

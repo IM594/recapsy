@@ -64,6 +64,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 │  │      RecaplySense/                        │                       │
 │  │      ├── screenshots/    (截图原文件)       │                       │
 │  │      ├── db/             (SurrealDB 数据)  │                       │
+│  │      ├── rem/            (REM（知识沉淀层）MD 文件)  │                       │
 │  │      └── models/         (本地 AI 模型)     │                       │
 │  └───────────────────────────────────────────┘                       │
 └─────────────────────────────────────────────────────────────────────┘
@@ -78,6 +79,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
   ├── HTTP/WS Server (Hono on Bun)
   ├── Ingestion Pipeline
   ├── Vision LLM (App Session → 活动摘要, TDR-019)
+  ├── REM Layer (日摘要/周回顾/用户记忆, TDR-021)
   ├── Agent (AI SDK streamText + tools, TDR-016)
   ├── Search Engine
   ├── AI Provider (LLM / Embedding / Vision)
@@ -191,13 +193,14 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
 │                                                                                 │
 │   ┌───────────────────── 后台任务 (Scheduler) ───────────────────────────┐      │
 │   │                                                                      │      │
-│   │   screenshotCleanup   backupDaily   deadLetterScan   visionRetry    │      │
-│   │   (截图清理)           (每日备份)     (死信重试)        (Vision 重试)  │      │
+│   │   screenshotCleanup  backupDaily  deadLetterScan  visionRetry      │      │
+│   │   dailySummary       weeklySummary                                 │      │
+│   │   (截图清理/备份/死信重试/Vision重试/日摘要/周回顾)                  │      │
 │   │        │                  │              │                │          │      │
 │   │        └──────────────────┴──────────────┴────────────────┘          │      │
 │   │                           │                                          │      │
 │   │                           ▼                                          │      │
-│   │                  storage / ingestion / vision                        │      │
+│   │                  storage / ingestion / vision / rem                        │      │
 │   │                                                                      │      │
 │   └──────────────────────────────────────────────────────────────────────┘      │
 │                                                                                 │
@@ -208,6 +211,7 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
   ├── screenshots/    Collector 直接写入，Engine 通过 path 引用
   ├── db/             SurrealDB 数据（文档 + 图 + 向量 + FTS）
   ├── models/         本地 AI 模型 (BGE-M3 ONNX)
+  ├── rem/            REM 层文件（日摘要/周回顾/用户记忆）
   ├── backups/        自动/手动备份
   ├── logs/           Pino JSON 日志
   └── collector_buffer.sqlite   Collector 离线缓冲
@@ -375,6 +379,10 @@ Recaply Sense 是一个 macOS 原生的个人记忆系统。它持续记录用�
   │   │   └── 143014_def456.webp
   │   └── ...
   ├── db/                       # SurrealDB 数据文件
+  ├── rem/                      # REM 层 MD 文件
+  │   ├── daily/                # 日摘要（Routine 自动生成）
+  │   ├── weekly/               # 周回顾（Routine 自动生成）
+  │   └── memory.md             # 用户记忆
   ├── models/                   # 用户下载的额外模型
   ├── backups/                  # 自动/手动备份
   ├── config.json               # 用户配置

@@ -271,9 +271,11 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 ### 为什么这个顺序？
 
 1. **Phase 0 先行**：SurrealDB 是最大不确定性，早验证早决策
-2. **Engine 从底层往上建**：storage → ingestion → search → agent，严格遵循依赖方向
-3. **Collector 放在 Phase 5**：在 Collector 完成前，可以用脚本模拟截图输入来测试 Engine
-4. **UI 最后做**：在所有后端 API 就绪前做 UI 是浪费时间，且 API 接口可能在 Phase 2-4 中变化
+2. **Engine 从底层往上建**：storage → ingestion → search → vision → agent → rem，严格遵循依赖方向
+3. **Phase 4 拆为 4a/4b/4c**：Vision、Agent、MCP 是三个独立子系统，各自有独立验收标准，拆开后粒度更可控
+4. **REM 层（4.5）紧跟 Vision 后**：日/周摘要依赖 activity_segment（Vision 产出），但不需等 Agent/MCP 完成
+5. **Collector 放在 Phase 5**：在 Collector 完成前，用 `scripts/simulate-collector.ts` 模拟截图输入测试 Engine
+6. **UI 分两期**：6a MVP（菜单栏搜索）先跑通核心体验，6b 再补全功能
 
 ---
 
@@ -320,18 +322,21 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 > 对原始任务清单做了如下调整，避免过度设计并补齐缺失项：
 >
 > **砍掉/推迟（Phase 2+ 再加）：**
+>
 > - ~~`src/utils/timing.ts`~~ — 性能计时在 Phase 1 骨架阶段无场景，Phase 2 再加
 > - ~~chat、events Zod schema~~ — chat 是 Phase 4，events 是 Phase 2，只定义 Phase 1-2 要用的 schema
 > - ~~`withTransaction` 辅助函数~~ — Phase 1 无事务场景，推迟到 Phase 2
 > - entityRepo/relationshipRepo 只需**接口 + 基础 CRUD**，复杂查询方法推迟
 >
 > **必须补上的缺失项：**
+>
 > - `scripts/dev-db.sh` — 一键启动 SurrealDB 开发实例，避免每次手动 `surreal start`
 > - `activitySegmentRepo.ts` — 原清单遗漏，表结构和基础 CRUD 应在 Phase 1 准备
 > - `FileStorage` 接口 + `LocalFileStorage` 实现 — Appendix C 已预留，Phase 1 应落地
 > - DB 健康检查 — Engine 启动时确认 SurrealDB 在线，不在线给清晰报错
 >
 > **关键技术坑（实现时注意）：**
+>
 > 1. Turborepo + Bun workspace 缓存可能冲突：开发模式用 `bun --watch` 不依赖 Turbo 缓存
 > 2. SurrealDB SDK 返回 `unknown` 类型：Repository 层用 Zod parse 返回值转强类型
 > 3. Migration Runner 需自建：SurrealDB 无内置 migration，用 `migration_history` 元表 + 版本化脚本
@@ -432,6 +437,14 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 - [ ] `src/index.ts` — Bun 服务入口（组装依赖、启动 HTTP server）
 - [ ] Graceful shutdown（SIGTERM/SIGINT 处理）
 
+**开发工具：**
+
+- [ ] `scripts/simulate-collector.ts` — 截图模拟脚本（生成测试截图 + OCR 数据 → POST 到 Engine，用于 Phase 2-4 测试）
+
+**Migration 预留：**
+
+- [ ] `src/storage/migrations/versions/002-rem-layer.ts` — 预留 rem_summary + routine 表结构（Phase 4.5 使用）
+
 **测试：**
 
 - [ ] Ingestion Pipeline 单元测试（mock AI provider + mock DB）
@@ -444,19 +457,24 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 > **目标：** 搜索引擎 + 时间线 + 实体查询 API
 > **验收标准：** 能搜索到 Phase 2 写入的数据，各接口性能达标
 
+**前置条件：**
+
+- [ ] 搜索分页语义决策文档（统一流 or 分通道，参考 §2.4）— Phase 3 开工前必须冻结
+
 **Search Engine：**
 
 - [ ] `src/search/engine.ts` — 搜索引擎主入口
 - [ ] `src/search/strategies/vectorSearch.ts` — 向量语义搜索
 - [ ] `src/search/strategies/fullTextSearch.ts` — 全文搜索（英文 + 中文预分词）
-- [ ] `src/search/strategies/graphSearch.ts` — 图关系搜索
+- [-] ~~`src/search/strategies/graphSearch.ts`~~ — 推迟到 MVP 后，数据量不足时效果有限
 - [ ] `src/search/strategies/timeRangeSearch.ts` — 时间范围搜索
-- [ ] `src/search/strategies/hybridSearch.ts` — 混合搜索（3 策略并行 + RRF 融合）
+- [ ] `src/search/strategies/hybridSearch.ts` — 混合搜索（向量+全文+时间 并行 + RRF 融合）
 - [ ] `src/search/ranker.ts` — 结果排序器
 
 **API 路由：**
 
-- [ ] `src/api/routes/search.ts` — `POST /search` + `POST /search/suggest`
+- [ ] `src/api/routes/search.ts` — `POST /search`
+- [-] ~~`POST /search/suggest`~~ — 推迟到 UI 需要自动补全时再做
 - [ ] `src/api/routes/timeline.ts` — `GET /timeline` + `GET /timeline/summary`
 - [ ] `src/api/routes/entities.ts` — `GET /entities` + `GET /entities/:id` + `GET /entities/:id/graph`
 - [ ] `src/api/routes/screenshots.ts` — `GET /screenshots/:id` + `/image` + `/thumbnail`
@@ -469,23 +487,22 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 **Storage 补充：**
 
-- [ ] `src/storage/repositories/embeddingRepo.ts`
-- [ ] `src/storage/repositories/activitySegmentRepo.ts`
-- [ ] `src/storage/repositories/chatHistoryRepo.ts`
+- [-] ~~`src/storage/repositories/activitySegmentRepo.ts`~~ — 已在 Phase 1 实现
+- [-] ~~`src/storage/repositories/embeddingRepo.ts`~~ — 合并到各 repo 的查询方法中
 
 **测试：**
 
 - [ ] Search 各策略单元测试
-- [ ] Hybrid 搜索集成测试（真实 SurrealDB 内存模式 + 测试数据）
+- [ ] Hybrid 搜索集成测试（真实 SurrealDB 内存模式 + 测试数据，至少 1000 条截图）
 - [ ] API E2E 测试（搜索 + 时间线）
 - [ ] 性能基准测试（向量搜索 < 100ms、混合搜索 < 500ms）
 
 ---
 
-### Phase 4 — AI 智能层（3-5 天）
+### Phase 4a — Vision + Scheduler（3-4 天）
 
-> **目标：** Vision LLM + AI Agent + MCP Server + 定时任务
-> **验收标准：** 能通过 chat 自然语言查询屏幕记录；MCP Server 可被 Claude Desktop 调用
+> **目标：** Vision LLM 活动摘要生成 + 定时任务框架
+> **验收标准：** 截图入库后自动生成 activity_segment；Scheduler 定时任务正常运行
 
 **Vision 模块：**
 
@@ -497,25 +514,70 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 - [ ] EventBus 订阅 `screenshot:ingested` + 定时扫描 `vision_pending = true` 双通道
 - [ ] Vision LLM 失败降级（3 次失败后跳过）
 
+**Scheduler 框架：**
+
+- [ ] `src/scheduler/registry.ts` — 任务注册表
+- [ ] `src/scheduler/tasks/screenshotCleanup.ts`
+- [ ] `src/scheduler/tasks/backupDaily.ts`
+- [ ] `src/scheduler/tasks/deadLetterScan.ts`
+- [ ] `src/scheduler/tasks/visionRetry.ts`
+
+**其他 API：**
+
+- [ ] `src/api/routes/settings.ts` — `GET/PATCH /settings`
+- [ ] `src/api/routes/backup.ts` — `POST /backup/trigger` + `GET /backup/status`
+
+**测试：**
+
+- [ ] Vision 帧选择算法测试
+- [ ] Vision → activity_segment 生成集成测试
+
+---
+
+### Phase 4b — Agent + Chat + Memory（3-4 天）
+
+> **目标：** AI Agent 对话能力 + 用户记忆集成
+> **验收标准：** 通过 Chat 自然语言查询屏幕记录；Agent 回答时引用 memory.md 上下文
+
 **Agent 模块：**
 
 - [ ] `src/agent/agent.ts` — AI SDK streamText + tools 主入口
 - [ ] `src/agent/tools/vectorSearchTool.ts`
 - [ ] `src/agent/tools/fullTextSearchTool.ts`
-- [ ] `src/agent/tools/graphQueryTool.ts`
 - [ ] `src/agent/tools/timeFilterTool.ts`
 - [ ] `src/agent/tools/entityLookupTool.ts`
 - [ ] `src/agent/tools/screenshotTool.ts`
 - [ ] `src/agent/tools/activitySearchTool.ts`
 - [ ] `src/agent/tools/statsTool.ts`
-- [ ] `src/agent/prompts/systemPrompt.ts`
+- [ ] `src/agent/prompts/systemPrompt.ts`（含 memory.md 注入）
 - [ ] `src/agent/memory/conversationMemory.ts`
 - [ ] Agent 安全护栏（maxSteps=10、maxTokens=4096、超时限制）
+
+**Memory 集成（前移自 Phase 4.5）：**
+
+- [ ] `src/rem/memory/memory-manager.ts` — `memory.md` 读写管理
+- [ ] Agent system prompt 注入 `memory.md` 内容
+- [ ] Agent 支持"记住这个"指令 → 追加到 `memory.md`
+- [ ] `memory.md` 初始模板生成（首次启动）
+- [ ] `memory.md` 文件大小上限检查（50KB，超过时提示用户精简）
 
 **Chat API：**
 
 - [ ] `src/api/routes/chat.ts` — `POST /chat/sessions` + `GET /chat/sessions` + `POST /chat/sessions/:id/messages`
 - [ ] WebSocket chat:send → chat:chunk 流式回复
+
+**测试：**
+
+- [ ] Agent 工具调用测试（mock LLM）
+- [ ] Memory Manager 读写测试
+- [ ] Chat 流式回复 E2E 测试
+
+---
+
+### Phase 4c — MCP Server（2-3 天）
+
+> **目标：** MCP Server 供外部 AI 系统消费屏幕记忆
+> **验收标准：** Claude Desktop 能通过 MCP 调用搜索工具、读取资源
 
 **MCP Server：**
 
@@ -531,33 +593,59 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 - [ ] `src/mcp/resources/frequentEntities.ts`
 - [ ] `src/mcp/resources/statsOverview.ts`
 - [ ] `src/mcp/transport/stdio.ts`（含 Engine 健康检查逻辑）
-- [ ] `src/mcp/transport/streamableHttp.ts`
-
-**定时任务：**
-
-- [ ] `src/scheduler/registry.ts` — 任务注册表
-- [ ] `src/scheduler/tasks/screenshotCleanup.ts`
-- [ ] `src/scheduler/tasks/backupDaily.ts`
-- [ ] `src/scheduler/tasks/deadLetterScan.ts`
-- [ ] `src/scheduler/tasks/visionRetry.ts`
-
-**其他 API：**
-
-- [ ] `src/api/routes/settings.ts` — `GET/PATCH /settings`
-- [ ] `src/api/routes/backup.ts` — `POST /backup/trigger` + `GET /backup/status`
-- [ ] `src/api/routes/export.ts` — `POST /export`
-- [ ] `src/api/routes/ai-usage.ts` — `GET /stats/ai-usage`
+- [-] ~~`src/mcp/transport/streamableHttp.ts`~~ — 推迟到 MVP 后，stdio 优先
 
 **测试：**
 
-- [ ] Agent 工具调用测试（mock LLM）
-- [ ] Vision 帧选择算法测试
-- [ ] MCP Server 集成测试
-- [ ] Chat 流式回复 E2E 测试
+- [ ] MCP Server 集成测试（stdio transport）
+- [ ] Claude Desktop 端到端验证
 
 ---
 
-### Phase 5 — Collector（5-7 天）
+### Phase 4.5 — REM 层（2-3 天）
+
+> **目标：** 日/周摘要自动生成 + MD 知识缓存 + MCP REM Resources
+> **验收标准：** Scheduler 触发后自动生成日摘要 MD 文件 + DB 记录；MCP Resources 可读取
+> **详细设计：** `docs/architecture/rem-layer.md`
+
+**REM Generators：**
+
+- [ ] `src/rem/generators/daily-summary.ts` — 日摘要生成器（读 segments → LLM → MD + DB）
+- [ ] `src/rem/generators/weekly-summary.ts` — 周回顾生成器（聚合日摘要 → LLM）
+- [ ] `src/rem/generators/types.ts` — 生成器共享类型
+
+**Memory 补充（从对话自动提取）：**
+
+- [ ] `src/rem/memory/memory-extractor.ts` — 从 Chat 对话中提取记忆（标记 `[inferred]`）
+
+**MD 导出：**
+
+- [ ] `src/rem/export/md-exporter.ts` — DB → MD 文件导出
+
+**Storage 补充：**
+
+- [ ] `src/storage/repositories/rem-summary-repo.ts` — rem_summary CRUD
+
+**Scheduler 任务：**
+
+- [ ] `src/scheduler/tasks/dailySummary.ts` — 每日 23:55 触发日摘要生成
+- [ ] `src/scheduler/tasks/weeklySummary.ts` — 每周日 20:00 触发周回顾
+
+**MCP Resources：**
+
+- [ ] `src/mcp/resources/dailySummary.ts` — `rem://daily/{date}`
+- [ ] `src/mcp/resources/weeklySummary.ts` — `rem://weekly/{week}`
+- [ ] `src/mcp/resources/userMemory.ts` — `rem://memory`
+
+**测试：**
+
+- [ ] Daily Summary Generator 单元测试（mock segments + mock LLM）
+- [ ] MD 导出格式验证
+- [ ] MCP Resources 集成测试
+
+---
+
+### Phase 5 — Collector（7-10 天）
 
 > **目标：** Swift 屏幕采集守护进程
 > **验收标准：** 启动 Collector 后自动截图 → OCR → POST 到 Engine → 数据入库
@@ -622,43 +710,28 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 ---
 
-### Phase 6 — Desktop UI（持续迭代）
+### Phase 6a — Desktop MVP UI（5-7 天）
 
-> **目标：** SwiftUI macOS 菜单栏应用
-> **验收标准：** 完整的用户体验——安装 → 引导 → 录制 → 搜索 → 对话
+> **目标：** SwiftUI macOS 菜单栏应用 MVP
+> **验收标准：** 菜单栏搜索屏幕记录 + 基础设置
 
 **App 基础：**
 
 - [ ] `RecaplySenseApp.swift` — App 入口 + 生命周期
 - [ ] `AppDelegate.swift` — NSApplicationDelegate
-- [ ] `ProcessManager.swift` — LaunchAgent 注册（SMAppService）
+- [ ] `LaunchAgentManager.swift` — LaunchAgent 注册（⚠️ 原 ProcessManager.swift，参考 §3.6 改名）
 
-**Onboarding：**
-
-- [ ] `OnboardingView.swift` — 首次使用引导
-  - 屏幕录制权限请求
-  - 辅助功能权限（可选）
-  - AI Provider 选择 + API Key 输入
-  - LaunchAgent 注册
-
-**核心视图：**
+**核心视图（MVP）：**
 
 - [ ] `MenuBarView.swift` — 菜单栏常驻图标
 - [ ] `QuickSearchView.swift` — 快捷搜索弹窗
-- [ ] `TimelineView.swift` — 时间线主视图
-- [ ] `ScreenshotCard.swift` — 截图卡片组件
-- [ ] `TimelineFilter.swift` — 过滤器
 - [ ] `SearchView.swift` — 搜索主视图
 - [ ] `SearchResultView.swift` — 搜索结果
-- [ ] `ChatView.swift` — AI 对话界面
-- [ ] `MessageBubble.swift` — 消息气泡
 
-**设置：**
+**基础设置（MVP）：**
 
-- [ ] `SettingsView.swift` — 设置主视图
-- [ ] `PrivacySettings.swift` — 隐私控制
-- [ ] `StorageSettings.swift` — 存储管理
-- [ ] `AISettings.swift` — AI 模型设置
+- [ ] `SettingsView.swift` — 设置主视图（精简版）
+- [ ] `AISettings.swift` — AI Provider 选择 + API Key 输入
 
 **Services：**
 
@@ -668,7 +741,38 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 **共享类型：**
 
-- [ ] `shared/swift/SharedTypes.swift`（手动维护 or quicktype 自动生成，基于 §3.4 决策）
+- [ ] `shared/swift/SharedTypes.swift`（手动维护，参考 §3.4 决策）
+
+---
+
+### Phase 6b — Desktop 完整 UI（持续迭代）
+
+> **目标：** 完整用户体验——引导 → 录制 → 时间线 → 搜索 → 对话
+> **验收标准：** 全流程可用
+
+**Onboarding：**
+
+- [ ] `OnboardingView.swift` — 首次使用引导
+  - 屏幕录制权限请求
+  - 辅助功能权限（可选）
+  - AI Provider 选择 + API Key 输入
+  - LaunchAgent 注册
+
+**时间线：**
+
+- [ ] `TimelineView.swift` — 时间线主视图
+- [ ] `ScreenshotCard.swift` — 截图卡片组件
+- [ ] `TimelineFilter.swift` — 过滤器
+
+**Chat：**
+
+- [ ] `ChatView.swift` — AI 对话界面
+- [ ] `MessageBubble.swift` — 消息气泡
+
+**完整设置：**
+
+- [ ] `PrivacySettings.swift` — 隐私控制
+- [ ] `StorageSettings.swift` — 存储管理
 
 ---
 
@@ -682,9 +786,13 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 | ⚠️ 高     | 搜索分页语义冻结（统一流 or 分通道）              | 高     | Phase 3 开工前    | [ ]  |
 | ⚠️ 高     | activity_segment 实体双写收敛（图边 vs 内联数组） | 高     | Phase 1 schema    | [ ]  |
 | ⚠️ 高     | 内存预算修正（基础进程 vs 含向量索引）            | 高     | Phase 1 开工前    | [ ]  |
-| ⚠️ 高     | Vision Session 持久化方案                         | 高     | Phase 4 设计时    | [ ]  |
-| ⚠️ 高     | MCP stdio 启动时 Engine 健康检查                  | 高     | Phase 4           | [ ]  |
-| ⚠️ 中     | ProcessManager.swift 改名为 LaunchAgentManager    | 中     | Phase 6           | [ ]  |
+| ⚠️ 高     | Vision Session 持久化方案                         | 高     | Phase 4a          | [ ]  |
+| ⚠️ 高     | MCP stdio 启动时 Engine 健康检查                  | 高     | Phase 4c          | [ ]  |
+| ⚠️ 高     | Embedding API 外部依赖风险（限流/超时/重试）      | 高     | Phase 2           | [ ]  |
+| ⚠️ 高     | Vision LLM prompt 工程（摘要质量调优）            | 高     | Phase 4a          | [ ]  |
+| ⚠️ 高     | ScreenCaptureKit 权限管理（macOS TCC）            | 高     | Phase 5           | [ ]  |
+| ⚠️ 中     | LaunchAgentManager.swift（原 ProcessManager）     | 中     | Phase 6a          | [x]  |
+| ⚠️ 中     | Vercel AI SDK + Bun 兼容性                        | 中     | Phase 4b          | [ ]  |
 | ⚠️ 中     | 文档细节对齐（lockfile、workspaces、目录命名）    | 中     | Phase 1 骨架      | [ ]  |
 | ⚠️ 中     | CI 加入集成测试                                   | 中     | Phase 3 之后      | [ ]  |
 | ⚠️ 中     | Collector 批量回放节流策略                        | 中     | Phase 5           | [ ]  |
@@ -693,6 +801,9 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 | 💡 低     | 简化 Collector Token → User-Agent                 | 低     | Phase 5           | [ ]  |
 | 💡 低     | 推迟 Swift 类型自动生成                           | 低     | Phase 5           | [ ]  |
 | 💡 低     | 截图清理后 segment 预览缓存                       | 低     | Phase 4 scheduler | [ ]  |
+| ⚠️ 中     | REM 层设计：Routines + Memory + REM Cache          | 中     | Phase 4.5         | [ ]  |
+| 💡 低     | 自定义 Routines（用户定义 prompt + 频率）         | 低     | Phase 4.5 后续    | [ ]  |
+| 💡 低     | Memory 自动推断优化（从对话中提取偏好/事实）      | 低     | Phase 4.5 后续    | [ ]  |
 
 ---
 
@@ -719,14 +830,18 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 > | 日期 | 变更文件 | 变更摘要 | 原因 |
 > | ---- | -------- | -------- | ---- |
 
-| 日期 | 变更文件 | 变更摘要 | 原因 |
-| ---- | -------- | -------- | ---- |
-| 2026-04-06 | data-models.md | screenshot 表加 `embedding_model`, `image_embedding`, `image_embedding_model` 字段 | Embedding 模型迁移追踪 + 多模态预留 |
-| 2026-04-06 | data-models.md | entity 表加 `embedding_model` 字段 | Embedding 模型迁移追踪 |
-| 2026-04-06 | data-models.md | activity_segment 表加 `embedding_model`, `schema_version`, `timezone`, `local_date` 字段 | 模型迁移 + Vision prompt 版本 + 本地时间聚合 |
-| 2026-04-06 | data-models.md | screenshot.path 改为相对路径，新增 §7 文件存储设计约定（FileStorage 接口 + StorageConfig） | 支持存储位置迁移（NAS/S3） |
-| 2026-04-06 | operational-design.md | 清理策略不再清空 ocr_text，仅清空 embedding 和 image_embedding | 保留 Embedding 模型迁移能力 |
-| 2026-04-07 | architecture-review.md | Phase 1 任务清单预审调整：砍掉 timing.ts/chat schema/withTransaction，补上 dev-db 脚本/activitySegmentRepo/FileStorage/DB 健康检查，标注 7 项技术坑 | 避免过度设计 + 补齐缺失 |
+| 日期       | 变更文件                  | 变更摘要                                                                                                                                            | 原因                                         |
+| ---------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| 2026-04-06 | data-models.md            | screenshot 表加 `embedding_model`, `image_embedding`, `image_embedding_model` 字段                                                                  | Embedding 模型迁移追踪 + 多模态预留          |
+| 2026-04-06 | data-models.md            | entity 表加 `embedding_model` 字段                                                                                                                  | Embedding 模型迁移追踪                       |
+| 2026-04-06 | data-models.md            | activity_segment 表加 `embedding_model`, `schema_version`, `timezone`, `local_date` 字段                                                            | 模型迁移 + Vision prompt 版本 + 本地时间聚合 |
+| 2026-04-06 | data-models.md            | screenshot.path 改为相对路径，新增 §7 文件存储设计约定（FileStorage 接口 + StorageConfig）                                                          | 支持存储位置迁移（NAS/S3）                   |
+| 2026-04-06 | operational-design.md     | 清理策略不再清空 ocr_text，仅清空 embedding 和 image_embedding                                                                                      | 保留 Embedding 模型迁移能力                  |
+| 2026-04-07 | architecture-review.md    | Phase 1 任务清单预审调整：砍掉 timing.ts/chat schema/withTransaction，补上 dev-db 脚本/activitySegmentRepo/FileStorage/DB 健康检查，标注 7 项技术坑 | 避免过度设计 + 补齐缺失                      |
+| 2026-04-07 | rem-layer.md (新增)       | 新增 REM 层架构设计文档：Routines + Memory + REM Cache 三通道设计                                                                               | 沉淀原始数据为可消费知识，降低用户心智负担   |
+| 2026-04-07 | architecture-review.md    | 新增 Phase 4.5 REM 层实现计划，风险矩阵补充 REM 层相关项                                                                                             | 落实知识层设计到实现路线图                   |
+| 2026-04-07 | architecture-review.md    | Phase 4 拆分为 4a(Vision+Scheduler)/4b(Agent+Chat+Memory)/4c(MCP)，Phase 6 拆为 6a(MVP)/6b(完整)，Phase 5 估时调整为 7-10 天                        | Review Agent 审查：粒度过大、估时偏乐观      |
+| 2026-04-07 | architecture-review.md    | Phase 2 补充 simulate-collector 脚本和 rem migration 预留；Phase 3 补搜索分页前置条件、砍 graphSearch/search-suggest/重复 repo                | Review Agent 审查：遗漏项 + 过度设计削减     |
 
 ---
 
@@ -736,49 +851,49 @@ DEFINE FIELD embedding_model ON activity_segment TYPE string DEFAULT 'bge-m3-v1'
 
 ### C.1 Schema 预留字段
 
-| 字段 | 表 | 类型 | 目的 | 文档位置 |
-|------|-----|------|------|----------|
-| `embedding_model` | screenshot, entity, activity_segment | `string DEFAULT 'bge-m3-v1'` | Embedding 模型迁移追踪 | data-models.md |
-| `schema_version` | activity_segment | `int DEFAULT 1` | Vision prompt 版本追踪 | data-models.md |
-| `image_embedding` | screenshot | `option<array<float>>` | 多模态图片向量（暂不写入，不建索引） | data-models.md |
-| `image_embedding_model` | screenshot | `option<string>` | 多模态模型版本 | data-models.md |
-| `timezone` | activity_segment | `string` | 本地时间聚合 | data-models.md |
-| `local_date` | activity_segment | `string` | 按天查询 | data-models.md |
+| 字段                    | 表                                   | 类型                         | 目的                                 | 文档位置       |
+| ----------------------- | ------------------------------------ | ---------------------------- | ------------------------------------ | -------------- |
+| `embedding_model`       | screenshot, entity, activity_segment | `string DEFAULT 'bge-m3-v1'` | Embedding 模型迁移追踪               | data-models.md |
+| `schema_version`        | activity_segment                     | `int DEFAULT 1`              | Vision prompt 版本追踪               | data-models.md |
+| `image_embedding`       | screenshot                           | `option<array<float>>`       | 多模态图片向量（暂不写入，不建索引） | data-models.md |
+| `image_embedding_model` | screenshot                           | `option<string>`             | 多模态模型版本                       | data-models.md |
+| `timezone`              | activity_segment                     | `string`                     | 本地时间聚合                         | data-models.md |
+| `local_date`            | activity_segment                     | `string`                     | 按天查询                             | data-models.md |
 
 ### C.2 存储设计约定
 
-| 约定 | 说明 | 文档位置 |
-|------|------|----------|
-| DB 中图片路径存**相对路径** | `2026/04/06/143025_a1b2.webp`，换存储位置只改基目录 | data-models.md §7.1 |
-| `FileStorage` 接口抽象 | 先只实现 `LocalFileStorage`，预留 NAS/S3 接口 | data-models.md §7.2 |
-| `screenshots_dir` 可配置 | 默认 `~/Library/.../screenshots/`，支持指向 NAS 挂载点 | data-models.md §7.3 |
+| 约定                        | 说明                                                   | 文档位置            |
+| --------------------------- | ------------------------------------------------------ | ------------------- |
+| DB 中图片路径存**相对路径** | `2026/04/06/143025_a1b2.webp`，换存储位置只改基目录    | data-models.md §7.1 |
+| `FileStorage` 接口抽象      | 先只实现 `LocalFileStorage`，预留 NAS/S3 接口          | data-models.md §7.2 |
+| `screenshots_dir` 可配置    | 默认 `~/Library/.../screenshots/`，支持指向 NAS 挂载点 | data-models.md §7.3 |
 
 ### C.3 接口设计预留（Phase 2 实现时）
 
-| 预留 | 说明 |
-|------|------|
-| `EmbeddingProvider.embedImage?()` | 可选方法，当前不实现，为多模态 embedding 预留 |
+| 预留                                | 说明                                               |
+| ----------------------------------- | -------------------------------------------------- |
+| `EmbeddingProvider.embedImage?()`   | 可选方法，当前不实现，为多模态 embedding 预留      |
 | Ingestion Pipeline 插件式 processor | 每步骤独立，方便未来新增 image embedding processor |
 
 ### C.4 搜索引擎预留（Phase 3 实现时）
 
-| 预留 | 说明 |
-|------|------|
+| 预留                       | 说明                                    |
+| -------------------------- | --------------------------------------- |
 | Search strategy 列表可扩展 | 留注释标记 `// 未来：imageVectorSearch` |
-| Reranker 槽位 | ranker.ts 结构允许插入 rerank 步骤 |
+| Reranker 槽位              | ranker.ts 结构允许插入 rerank 步骤      |
 
 ### C.5 清理策略约束
 
-| 约束 | 说明 | 文档位置 |
-|------|------|----------|
-| 清理时**不删 ocr_text** | 保留 Embedding 模型重新编码能力 | operational-design.md §9.2 |
+| 约束                               | 说明                                            | 文档位置                   |
+| ---------------------------------- | ----------------------------------------------- | -------------------------- |
+| 清理时**不删 ocr_text**            | 保留 Embedding 模型重新编码能力                 | operational-design.md §9.2 |
 | 截图 WebP 默认保留至用户配置的天数 | 为 image embedding 批处理留窗口（默认永不删除） | operational-design.md §9.1 |
 
 ### C.6 运行时架构决策
 
-| 决策 | 结论 | 来源 |
-|------|------|------|
-| SurrealDB 模式 | **Standalone + WebSocket 连接** | PoC-12 |
-| 存储协议 | `surrealkv://`，数据目录 `~/Library/.../RecaplySense/db/` | PoC-12 |
-| Engine/DB 可远程部署 | 改连接地址即可，架构天然支持 | Phase 0 讨论 |
-| Embedding 模型迁移 | 可行，只需保留原始文本 + embedding_model 字段 | Phase 0 讨论 |
+| 决策                 | 结论                                                      | 来源         |
+| -------------------- | --------------------------------------------------------- | ------------ |
+| SurrealDB 模式       | **Standalone + WebSocket 连接**                           | PoC-12       |
+| 存储协议             | `surrealkv://`，数据目录 `~/Library/.../RecaplySense/db/` | PoC-12       |
+| Engine/DB 可远程部署 | 改连接地址即可，架构天然支持                              | Phase 0 讨论 |
+| Embedding 模型迁移   | 可行，只需保留原始文本 + embedding_model 字段             | Phase 0 讨论 |
