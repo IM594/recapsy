@@ -66,7 +66,7 @@
 
 ## TDR-004: 使用 SurrealDB 作为统一存储
 
-**决策：** 使用 SurrealDB 作为唯一数据库，利用其多模型能力。
+**决策：** 使用 SurrealDB 3.x（v3.0.5+）作为唯一数据库，利用其多模型能力。JS SDK `surrealdb@^2.0.3`（兼容 3.x），Node 引擎绑定 `@surrealdb/node@^3.0.3`。
 
 **原因：**
 

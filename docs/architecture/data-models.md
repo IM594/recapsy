@@ -430,6 +430,9 @@ export interface Screenshot {
   purged: boolean;
   vision_pending: boolean; // 是否等待 Vision LLM 处理
   embedding: number[] | null; // BGE-M3, 1024 维
+  embedding_model: string; // e.g. "bge-m3"
+  image_embedding: number[] | null; // 预留：图像向量
+  image_embedding_model: string | null; // 预留：图像向量模型
   timezone: string; // e.g. "Asia/Shanghai"
   local_date: string; // e.g. "2026-03-31"
   local_hour: number; // 0-23
@@ -544,7 +547,11 @@ export interface ActivitySegment {
   selected_frame_count: number; // 去重后代表帧数
 
   // 元数据
-  embedding?: number[]; // summary 的 BGE-M3 向量 (1024维)
+  embedding: number[] | null; // summary 的 BGE-M3 向量 (1024维)
+  embedding_model: string; // e.g. "bge-m3"
+  schema_version: number; // 数据结构版本号
+  timezone: string; // e.g. "Asia/Shanghai"
+  local_date: string; // e.g. "2026-03-31"
   llm_model: string;
   llm_tokens_in: number;
   llm_tokens_out: number;

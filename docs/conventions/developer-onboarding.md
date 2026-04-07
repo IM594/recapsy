@@ -4,13 +4,13 @@
 
 ## 1. 系统要求
 
-| 需求      | 最低版本   | 说明                  |
-| --------- | ---------- | --------------------- |
-| macOS     | 13 Ventura | ScreenCaptureKit 要求 |
-| Xcode     | 15+        | Swift 6, SwiftUI      |
-| Bun       | 1.2+       | TypeScript 运行时     |
-| SurrealDB | 2.x        | 数据库                |
-| Git       | 2.39+      | 版本控制              |
+| 需求      | 最低版本   | 说明                                         |
+| --------- | ---------- | -------------------------------------------- |
+| macOS     | 13 Ventura | ScreenCaptureKit 要求                        |
+| Xcode     | 15+        | Swift 6, SwiftUI                             |
+| Bun       | 1.2+       | TypeScript 运行时                            |
+| SurrealDB | 3.x        | 数据库（JS SDK `surrealdb@^2.0.3` 兼容 3.x） |
+| Git       | 2.39+      | 版本控制                                     |
 
 ### 可选
 

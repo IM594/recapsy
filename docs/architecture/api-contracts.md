@@ -173,7 +173,7 @@ Frontend 通过 WebSocket 接收进度通知。
 
 - `"vector"` — 仅向量语义搜索
 - `"fulltext"` — 仅全文搜索
-- `"graph"` — 仅图关系搜索
+- `"graph"` — 仅图关系搜索 _(MVP-Deferred: 推迟到 MVP 后，数据量不足时效果有限)_
 - `"hybrid"` — 向量 + 全文混合（默认）
 
 > **activity_segment 搜索：** `hybrid` 和 `vector` 策略自动包含 `activity_segment` 的向量/全文搜索。
@@ -224,6 +224,8 @@ Frontend 通过 WebSocket 接收进度通知。
 ```
 
 ### `POST /api/v1/search/suggest`
+
+> **MVP-Deferred**：此端点已推迟到 MVP 后实现，待 UI 需要自动补全时再做。
 
 搜索建议 / 自动补全。
 
@@ -404,6 +406,7 @@ Frontend 通过 WebSocket 接收进度通知。
 **Response 200 (非流式):**
 
 > **流式 vs 非流式选择策略：**
+>
 > - **推荐路径：** Frontend 使用 WebSocket `chat:send` 获取流式回复（实时打字效果）
 > - **HTTP POST 非流式路径** 作为降级方案：WS 连接不可用时使用，等待完整回复后一次性返回
 > - 不提供 HTTP SSE 方案以避免三套流式协议的维护成本
@@ -623,13 +626,15 @@ Frontend 通过 WebSocket 接收进度通知。
 
 > **实现说明：** `previous_screenshot` 和 `next_screenshot` 不通过图边关系获取（已移除 `follows` 边），
 > 而是通过 timestamp 索引查询相邻记录：
+>
 > ```surql
 > -- previous
 > SELECT id FROM screenshot WHERE timestamp < $current.timestamp ORDER BY timestamp DESC LIMIT 1;
 > -- next
 > SELECT id FROM screenshot WHERE timestamp > $current.timestamp ORDER BY timestamp ASC LIMIT 1;
 > ```
-```
+
+````
 
 ### `GET /api/v1/screenshots/:id/image`
 
@@ -691,7 +696,7 @@ Frontend 通过 WebSocket 接收进度通知。
     "language": "zh-CN"
   }
 }
-```
+````
 
 ### `PATCH /api/v1/settings`
 
@@ -908,6 +913,8 @@ Collector 上报心跳状态（随 config 轮询一起，或独立发送）。
 
 ### `POST /api/v1/export`
 
+> **MVP-Deferred**：此端点已推迟到 MVP 后实现，暂未排入开发计划。
+
 导出用户数据为人类可读格式。
 
 **Request:**
@@ -915,7 +922,13 @@ Collector 上报心跳状态（随 config 轮询一起，或独立发送）。
 ```json
 {
   "format": "portable",
-  "include": ["screenshots", "metadata", "entities", "chat_history", "activity_segments"],
+  "include": [
+    "screenshots",
+    "metadata",
+    "entities",
+    "chat_history",
+    "activity_segments"
+  ],
   "output_path": "/Volumes/ExternalDisk/recaply-export"
 }
 ```
@@ -936,6 +949,8 @@ Collector 上报心跳状态（随 config 轮询一起，或独立发送）。
 
 ### `GET /api/v1/stats/ai-usage`
 
+> **MVP-Deferred**：此端点已推迟到 MVP 后实现，暂未排入开发计划。
+
 获取 AI 模型使用量和费用估算。
 
 **Response 200:**
@@ -952,7 +967,7 @@ Collector 上报心跳状态（随 config 轮询一起，或独立发送）。
   "this_month": {
     "tokens_in": 12000000,
     "tokens_out": 1500000,
-    "estimated_cost_usd": 18.50,
+    "estimated_cost_usd": 18.5,
     "segments_processed": 2400,
     "embedding_calls": 350000
   },
