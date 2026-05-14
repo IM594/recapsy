@@ -9,13 +9,15 @@
       "cache": false,
       "persistent": true
     },
-    "test": {
-      "dependsOn": ["build"],
-      "cache": false
+    "lint": {
+      "dependsOn": ["^build"]
     },
-    "lint": {},
-    "clean": {
-      "cache": false
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"]
     }
   }
 }

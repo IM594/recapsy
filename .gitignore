@@ -1,40 +1,37 @@
 # Dependencies
 node_modules/
+.pnpm-store/
+
+# Build
+dist/
+*.tsbuildinfo
+
+# Turbo
 .turbo/
 
-# Build outputs
-dist/
-*.build/
-.swiftpm/
-
-# Runtime data (never commit)
-*.sqlite
-*.surql
-*.zst
+# Coverage
+coverage/
 
 # Environment
 .env
 .env.local
 .env.*.local
 
-# IDE
-.vscode/settings.json
-.idea/
-*.xcuserdata/
+# Data
+data/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Logs
-*.log
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Models (too large)
-*.onnx
-*.bin
+# Bun (we use pnpm, not bun for installs)
+bun.lockb
 
-# Test coverage
-coverage/
-
-# Claude Code local config (skills/ should be tracked)
-.claude/settings.local.json
+# Generated
+*.gen.ts
