@@ -3,8 +3,8 @@ import { z } from 'zod';
 /** Search query parameters */
 export const SearchQuerySchema = z.object({
   query: z.string().min(1),
-  limit: z.number().int().positive().max(100).default(20),
-  offset: z.number().int().nonnegative().default(0),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+  offset: z.coerce.number().int().nonnegative().default(0),
   /** Filter by app name */
   appName: z.string().optional(),
   /** Filter by time range */
