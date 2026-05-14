@@ -18,8 +18,7 @@ export type IngestRequest = z.infer<typeof IngestRequestSchema>;
 export const IngestResponseSchema = z.object({
   id: z.string().uuid(),
   capturedAt: z.string().datetime(),
-  ocrTextLength: z.number().int().nonnegative(),
-  hasEmbedding: z.boolean(),
+  status: z.enum(['queued']),
 });
 
 export type IngestResponse = z.infer<typeof IngestResponseSchema>;
@@ -32,6 +31,7 @@ export const CaptureSchema = z.object({
   windowTitle: z.string().nullable(),
   ocrText: z.string().nullable(),
   storagePath: z.string().nullable(),
+  status: z.enum(['pending', 'processing', 'completed', 'failed']),
   metadata: z.record(z.string(), z.unknown()).nullable(),
   createdAt: z.string().datetime(),
 });
