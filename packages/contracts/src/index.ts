@@ -1,4 +1,4 @@
-export const VERSION = '0.0.1';
-
-// Zod schemas will be defined here in Phase 2
-// Example: ScreenCapture, SearchQuery, IngestResponse, etc.
+export { VERSION } from './version.js';
+export * from './schemas/capture.js';
+export * from './schemas/search.js';
+export * from './schemas/common.js';
