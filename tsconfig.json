@@ -1,7 +1,6 @@
 {
   "files": [],
   "references": [
-    { "path": "apps/mcp" },
     { "path": "apps/server" },
     { "path": "apps/sensor" },
     { "path": "packages/contracts" }
