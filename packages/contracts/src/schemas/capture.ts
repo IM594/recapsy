@@ -9,6 +9,8 @@ export const IngestRequestSchema = z.object({
   imageBase64: z.string().optional(),
   /** Pre-extracted OCR text (if sensor did local OCR) */
   ocrText: z.string().optional(),
+  /** OCR provider name (if sensor did local OCR) */
+  ocrProvider: z.string().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
