@@ -1,6 +1,7 @@
 {
   "name": "recapsy",
   "private": true,
+  "type": "module",
   "packageManager": "pnpm@10.19.0",
   "engines": {
     "node": ">=22",
