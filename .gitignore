@@ -35,4 +35,6 @@ bun.lockb
 
 # Generated
 *.gen.ts
-.claude/
+.claude/settings.local.json
+.claude/launch.json
+.claude/worktrees/
