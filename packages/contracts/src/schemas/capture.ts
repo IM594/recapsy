@@ -7,10 +7,12 @@ export const IngestRequestSchema = z.object({
   windowTitle: z.string().optional(),
   /** Base64-encoded screenshot image */
   imageBase64: z.string().optional(),
-  /** Pre-extracted OCR text (if sensor did local OCR) */
-  ocrText: z.string().optional(),
-  /** OCR provider name (if sensor did local OCR) */
-  ocrProvider: z.string().optional(),
+  /** Pre-extracted raw text (if sensor did local OCR or transcription) */
+  rawText: z.string().optional(),
+  /** Raw text provider name (if sensor did local OCR or transcription) */
+  rawProvider: z.string().optional(),
+  type: z.enum(['screenshot', 'audio']).default('screenshot').optional(),
+  durationMs: z.number().int().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -31,9 +33,13 @@ export const CaptureSchema = z.object({
   capturedAt: z.string().datetime(),
   appName: z.string().nullable(),
   windowTitle: z.string().nullable(),
-  ocrText: z.string().nullable(),
+  searchText: z.string().nullable(),
   storagePath: z.string().nullable(),
   status: z.enum(['pending', 'processing', 'completed', 'failed']),
+  extractions: z.array(z.unknown()).nullable(),
+  enrichment: z.record(z.string(), z.unknown()).nullable(),
+  type: z.enum(['screenshot', 'audio']).nullable(),
+  durationMs: z.number().int().nullable(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
   createdAt: z.string().datetime(),
 });

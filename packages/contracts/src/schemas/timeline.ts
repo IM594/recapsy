@@ -19,7 +19,7 @@ export const TimelineCaptureSchema = z.object({
   capturedAt: z.string().datetime(),
   appName: z.string().nullable(),
   windowTitle: z.string().nullable(),
-  ocrText: z.string().nullable(),
+  searchText: z.string().nullable(),
 });
 
 export type TimelineCapture = z.infer<typeof TimelineCaptureSchema>;
