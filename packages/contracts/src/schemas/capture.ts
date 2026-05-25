@@ -22,7 +22,7 @@ export type IngestRequest = z.infer<typeof IngestRequestSchema>;
 export const IngestResponseSchema = z.object({
   id: z.string().uuid(),
   capturedAt: z.string().datetime(),
-  status: z.enum(['queued']),
+  status: z.enum(['queued', 'pending']),
 });
 
 export type IngestResponse = z.infer<typeof IngestResponseSchema>;
