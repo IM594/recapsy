@@ -40,7 +40,7 @@ export const CaptureSchema = z.object({
   status: z.enum(['pending', 'processing', 'completed', 'failed']),
   extractions: z.array(z.unknown()).nullable(),
   enrichment: z.record(z.string(), z.unknown()).nullable(),
-  type: z.enum(['screenshot', 'audio']).nullable(),
+  type: z.enum(['screenshot', 'audio', 'blocked']).nullable(),
   durationMs: z.number().int().nullable(),
   metadata: z.record(z.string(), z.unknown()).nullable(),
   createdAt: z.string().datetime(),
