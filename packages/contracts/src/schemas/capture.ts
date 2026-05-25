@@ -11,6 +11,8 @@ export const IngestRequestSchema = z.object({
   rawText: z.string().optional(),
   /** Raw text provider name (if sensor did local OCR or transcription) */
   rawProvider: z.string().optional(),
+  /** Pre-extracted visible text only (no structural/AX markers) */
+  rawVisibleText: z.string().optional(),
   type: z.enum(['screenshot', 'audio']).default('screenshot').optional(),
   durationMs: z.number().int().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
