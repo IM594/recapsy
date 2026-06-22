@@ -6,6 +6,17 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# Build artifacts
+*.apk
+*.dmg
+
+# Database dumps
+*.dump
+backup_*.sql
+
+# Flutter build
+apps/client/build/
+
 # Turbo
 .turbo/
 
@@ -38,3 +49,6 @@ bun.lockb
 .claude/settings.local.json
 .claude/launch.json
 .claude/worktrees/
+
+# Git worktrees
+.worktrees/
