@@ -5,7 +5,18 @@ export default {
       rules: {
         'scope-required-except': (parsed) => {
           const { type, scope } = parsed;
-          const allowedWithoutScope = ['chore', 'ci', 'build', 'revert'];
+          // Core development types require scope
+          // Auxiliary types (chore, docs, test, perf, style, ci, build, revert) are optional
+          const allowedWithoutScope = [
+            'chore',
+            'docs',
+            'test',
+            'perf',
+            'style',
+            'ci',
+            'build',
+            'revert',
+          ];
 
           if (allowedWithoutScope.includes(type)) {
             return [true];
@@ -14,7 +25,7 @@ export default {
           if (!scope) {
             return [
               false,
-              `scope is required for type '${type}' (allowed without scope: ${allowedWithoutScope.join(', ')})`,
+              `scope is required for type '${type}' (optional for: ${allowedWithoutScope.join(', ')})`,
             ];
           }
 
