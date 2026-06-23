@@ -52,3 +52,6 @@ bun.lockb
 
 # Git worktrees
 .worktrees/
+
+# Private local docs (not committed)
+CLAUDE.local.md
