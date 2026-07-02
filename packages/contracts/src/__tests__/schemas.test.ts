@@ -24,6 +24,25 @@ describe('IngestRequestSchema', () => {
 
     expect(result.success).toBe(false);
   });
+
+  test('rejects rawText without rawProvider', () => {
+    const result = IngestRequestSchema.safeParse({
+      capturedAt: '2024-01-01T00:00:00Z',
+      rawText: 'hello world',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects rawVisibleText without rawText', () => {
+    const result = IngestRequestSchema.safeParse({
+      capturedAt: '2024-01-01T00:00:00Z',
+      rawProvider: 'macos-ax',
+      rawVisibleText: 'visible only',
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
 
 describe('SearchQuerySchema', () => {
@@ -62,5 +81,45 @@ describe('CaptureSchema', () => {
     if (result.success) {
       expect(result.data.status).toBe('completed');
     }
+  });
+
+  test('parses degraded capture status', () => {
+    const result = CaptureSchema.safeParse({
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      capturedAt: '2024-01-01T00:00:00Z',
+      appName: 'Chrome',
+      windowTitle: 'GitHub',
+      searchText: 'Some text',
+      storagePath: 'screenshots/test.png',
+      status: 'degraded',
+      extractions: null,
+      enrichment: null,
+      type: 'screenshot',
+      durationMs: null,
+      metadata: null,
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  test('parses deleted capture status', () => {
+    const result = CaptureSchema.safeParse({
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      capturedAt: '2024-01-01T00:00:00Z',
+      appName: 'Chrome',
+      windowTitle: 'GitHub',
+      searchText: null,
+      storagePath: null,
+      status: 'deleted',
+      extractions: null,
+      enrichment: null,
+      type: 'screenshot',
+      durationMs: null,
+      metadata: null,
+      createdAt: '2024-01-01T00:00:00Z',
+    });
+
+    expect(result.success).toBe(true);
   });
 });
