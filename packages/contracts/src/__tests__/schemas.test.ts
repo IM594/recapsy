@@ -34,6 +34,15 @@ describe('IngestRequestSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  test('rejects rawProvider without rawText', () => {
+    const result = IngestRequestSchema.safeParse({
+      capturedAt: '2024-01-01T00:00:00Z',
+      rawProvider: 'macos-ax',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   test('rejects rawVisibleText without rawText', () => {
     const result = IngestRequestSchema.safeParse({
       capturedAt: '2024-01-01T00:00:00Z',

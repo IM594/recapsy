@@ -12,6 +12,14 @@ function addRawExtractionIssues(
     });
   }
 
+  if (value.rawProvider && !value.rawText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'rawText is required when rawProvider is provided',
+      path: ['rawText'],
+    });
+  }
+
   if (value.rawVisibleText && !value.rawText) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
