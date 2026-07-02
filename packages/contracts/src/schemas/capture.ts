@@ -16,6 +16,12 @@ export const IngestRequestSchema = z.object({
   type: z.enum(['screenshot', 'audio']).default('screenshot').optional(),
   durationMs: z.number().int().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
+  /** Perceptual hash from client W20 filter (keyframe uploads). */
+  imageHash: z.string().min(1).optional(),
+  bundleId: z.string().min(1).optional(),
+  contextFingerprint: z.string().min(1).optional(),
+  /** Client-generated idempotency key for screenshot uploads. */
+  clientEventId: z.string().min(1).optional(),
 });
 
 export type IngestRequest = z.infer<typeof IngestRequestSchema>;
