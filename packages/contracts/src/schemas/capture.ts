@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+const optionalTextField = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().optional(),
+);
+
+const optionalNonEmptyTextField = z.preprocess(
+  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 function addRawExtractionIssues(
   value: { rawProvider?: string; rawText?: string; rawVisibleText?: string },
   ctx: z.RefinementCtx,
@@ -33,25 +43,25 @@ function addRawExtractionIssues(
 export const IngestRequestSchema = z
   .object({
     capturedAt: z.string().datetime(),
-    appName: z.string().optional(),
-    windowTitle: z.string().optional(),
+    appName: optionalTextField,
+    windowTitle: optionalTextField,
     /** Base64-encoded screenshot image */
-    imageBase64: z.string().optional(),
+    imageBase64: optionalTextField,
     /** Pre-extracted raw text (if sensor did local OCR or transcription) */
-    rawText: z.string().optional(),
+    rawText: optionalTextField,
     /** Raw text provider name (if sensor did local OCR or transcription) */
-    rawProvider: z.string().optional(),
+    rawProvider: optionalTextField,
     /** Pre-extracted visible text only (no structural/AX markers) */
-    rawVisibleText: z.string().optional(),
+    rawVisibleText: optionalTextField,
     type: z.enum(['screenshot', 'audio']).default('screenshot').optional(),
     durationMs: z.number().int().optional(),
     metadata: z.record(z.string(), z.unknown()).optional(),
     /** Perceptual hash from client W20 filter (keyframe uploads). */
-    imageHash: z.string().min(1).optional(),
-    bundleId: z.string().min(1).optional(),
-    contextFingerprint: z.string().min(1).optional(),
+    imageHash: optionalNonEmptyTextField,
+    bundleId: optionalNonEmptyTextField,
+    contextFingerprint: optionalNonEmptyTextField,
     /** Client-generated idempotency key for screenshot uploads. */
-    clientEventId: z.string().min(1).optional(),
+    clientEventId: optionalNonEmptyTextField,
   })
   .superRefine(addRawExtractionIssues);
 

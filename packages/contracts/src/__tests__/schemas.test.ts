@@ -17,6 +17,20 @@ describe('IngestRequestSchema', () => {
     }
   });
 
+  test('normalizes blank optional text fields to undefined', () => {
+    const result = IngestRequestSchema.safeParse({
+      capturedAt: '2024-01-01T00:00:00Z',
+      appName: '',
+      windowTitle: '   ',
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appName).toBeUndefined();
+      expect(result.data.windowTitle).toBeUndefined();
+    }
+  });
+
   test('rejects invalid capturedAt', () => {
     const result = IngestRequestSchema.safeParse({
       capturedAt: 'not-a-date',
