@@ -31,6 +31,7 @@ describe('TimelineEventEnvelopeSchema', () => {
   test('parses valid context_focus', () => {
     const result = TimelineEventEnvelopeSchema.safeParse({
       ...baseEnvelope,
+      appName: 'Chrome',
       type: 'context_focus',
       payload: {
         appName: 'Chrome',
@@ -107,6 +108,46 @@ describe('TimelineEventEnvelopeSchema', () => {
       reason: 'secure_input',
       appName: '1Password',
       imageHash: 'deadbeef',
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects app_focus when payload appName differs from envelope appName', () => {
+    const result = TimelineEventEnvelopeSchema.safeParse({
+      ...baseEnvelope,
+      appName: 'Warp',
+      type: 'app_focus',
+      payload: { appName: 'Terminal', bundleId: 'dev.warp.Warp-Stable' },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects context_focus when payload appName differs from envelope appName', () => {
+    const result = TimelineEventEnvelopeSchema.safeParse({
+      ...baseEnvelope,
+      appName: 'Chrome',
+      type: 'context_focus',
+      payload: {
+        appName: 'Safari',
+        windowTitle: 'GitHub',
+        contextFingerprint: 'chrome:github',
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  test('rejects blocked when payload appName differs from envelope appName', () => {
+    const result = TimelineEventEnvelopeSchema.safeParse({
+      ...baseEnvelope,
+      appName: 'Chrome',
+      type: 'blocked',
+      payload: {
+        reason: 'incognito',
+        appName: '1Password',
+      },
     });
 
     expect(result.success).toBe(false);

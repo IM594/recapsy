@@ -71,25 +71,48 @@ const timelineEventEnvelopeBaseSchema = z.object({
   windowTitle: z.string().nullable().optional(),
 });
 
+function hasPayloadAppName(payload: unknown): payload is { appName: string } {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'appName' in payload &&
+    typeof payload.appName === 'string'
+  );
+}
+
 /** Unified timeline event envelope for light-weight client uploads. */
-export const TimelineEventEnvelopeSchema = z.discriminatedUnion('type', [
-  timelineEventEnvelopeBaseSchema.extend({
-    type: z.literal('app_focus'),
-    payload: AppFocusPayloadSchema,
-  }),
-  timelineEventEnvelopeBaseSchema.extend({
-    type: z.literal('context_focus'),
-    payload: ContextFocusPayloadSchema,
-  }),
-  timelineEventEnvelopeBaseSchema.extend({
-    type: z.literal('dedup'),
-    payload: DedupPayloadSchema,
-  }),
-  timelineEventEnvelopeBaseSchema.extend({
-    type: z.literal('blocked'),
-    payload: BlockedPayloadSchema,
-  }),
-]);
+export const TimelineEventEnvelopeSchema = z
+  .discriminatedUnion('type', [
+    timelineEventEnvelopeBaseSchema.extend({
+      type: z.literal('app_focus'),
+      payload: AppFocusPayloadSchema,
+    }),
+    timelineEventEnvelopeBaseSchema.extend({
+      type: z.literal('context_focus'),
+      payload: ContextFocusPayloadSchema,
+    }),
+    timelineEventEnvelopeBaseSchema.extend({
+      type: z.literal('dedup'),
+      payload: DedupPayloadSchema,
+    }),
+    timelineEventEnvelopeBaseSchema.extend({
+      type: z.literal('blocked'),
+      payload: BlockedPayloadSchema,
+    }),
+  ])
+  .superRefine((envelope, ctx) => {
+    if (!hasPayloadAppName(envelope.payload)) {
+      return;
+    }
+
+    if (envelope.payload.appName !== envelope.appName) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'payload.appName must match envelope.appName',
+        path: ['payload', 'appName'],
+      });
+    }
+  });
 
 export type TimelineEventEnvelope = z.infer<typeof TimelineEventEnvelopeSchema>;
 
