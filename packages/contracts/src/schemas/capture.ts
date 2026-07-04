@@ -1,96 +1,65 @@
 import { z } from 'zod';
+import { IdSchema, IsoDateTimeSchema, MetadataSchema, PageInfoSchema } from './common.js';
+import { AssetSchema } from './storage.js';
 
-const optionalTextField = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-  z.string().optional(),
-);
+export const CaptureStatusSchema = z.enum([
+  'local_only',
+  'queued',
+  'processing',
+  'ready',
+  'failed',
+  'deleted',
+]);
 
-const optionalNonEmptyTextField = z.preprocess(
-  (value) => (typeof value === 'string' && value.trim() === '' ? undefined : value),
-  z.string().min(1).optional(),
-);
+export const CaptureSyncStateSchema = z.enum(['local', 'pending_upload', 'synced', 'conflicted']);
 
-function addRawExtractionIssues(
-  value: { rawProvider?: string; rawText?: string; rawVisibleText?: string },
-  ctx: z.RefinementCtx,
-) {
-  if (value.rawText && !value.rawProvider) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'rawProvider is required when rawText is provided',
-      path: ['rawProvider'],
-    });
-  }
-
-  if (value.rawProvider && !value.rawText) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'rawText is required when rawProvider is provided',
-      path: ['rawText'],
-    });
-  }
-
-  if (value.rawVisibleText && !value.rawText) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: 'rawText is required when rawVisibleText is provided',
-      path: ['rawText'],
-    });
-  }
-}
-
-/** Request to ingest a new screen capture */
-export const IngestRequestSchema = z
-  .object({
-    capturedAt: z.string().datetime(),
-    appName: optionalTextField,
-    windowTitle: optionalTextField,
-    /** Base64-encoded screenshot image */
-    imageBase64: optionalTextField,
-    /** Pre-extracted raw text (if sensor did local OCR or transcription) */
-    rawText: optionalTextField,
-    /** Raw text provider name (if sensor did local OCR or transcription) */
-    rawProvider: optionalTextField,
-    /** Pre-extracted visible text only (no structural/AX markers) */
-    rawVisibleText: optionalTextField,
-    type: z.enum(['screenshot', 'audio']).default('screenshot').optional(),
-    durationMs: z.number().int().optional(),
-    metadata: z.record(z.string(), z.unknown()).optional(),
-    /** Perceptual hash from client W20 filter (keyframe uploads). */
-    imageHash: optionalNonEmptyTextField,
-    bundleId: optionalNonEmptyTextField,
-    contextFingerprint: optionalNonEmptyTextField,
-    /** Client-generated idempotency key for screenshot uploads. */
-    clientEventId: optionalNonEmptyTextField,
-  })
-  .superRefine(addRawExtractionIssues);
-
-export type IngestRequest = z.infer<typeof IngestRequestSchema>;
-
-/** Response after successful ingestion */
-export const IngestResponseSchema = z.object({
-  id: z.string().uuid(),
-  capturedAt: z.string().datetime(),
-  status: z.enum(['queued', 'pending']),
-});
-
-export type IngestResponse = z.infer<typeof IngestResponseSchema>;
-
-/** A capture record returned from queries */
 export const CaptureSchema = z.object({
-  id: z.string().uuid(),
-  capturedAt: z.string().datetime(),
-  appName: z.string().nullable(),
-  windowTitle: z.string().nullable(),
-  searchText: z.string().nullable(),
-  storagePath: z.string().nullable(),
-  status: z.enum(['pending', 'processing', 'completed', 'degraded', 'failed', 'deleted']),
-  extractions: z.array(z.unknown()).nullable(),
-  enrichment: z.record(z.string(), z.unknown()).nullable(),
-  type: z.enum(['screenshot', 'audio', 'blocked']).nullable(),
-  durationMs: z.number().int().nullable(),
-  metadata: z.record(z.string(), z.unknown()).nullable(),
-  createdAt: z.string().datetime(),
+  id: IdSchema,
+  tenantId: IdSchema,
+  userId: IdSchema.nullable().optional(),
+  clientCaptureId: z.string().min(1),
+  sourceDeviceId: z.string().optional(),
+  capturedAt: IsoDateTimeSchema,
+  sourceType: z.string().min(1).default('screen'),
+  sourceApp: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  status: CaptureStatusSchema,
+  syncState: CaptureSyncStateSchema,
+  ocrText: z.string().nullable().optional(),
+  ocrProcessedAt: IsoDateTimeSchema.nullable().optional(),
+  metadata: MetadataSchema.default({}),
+  createdAt: IsoDateTimeSchema,
+  updatedAt: IsoDateTimeSchema,
 });
 
+export const CaptureAssetSchema = z.object({
+  captureId: IdSchema,
+  assetId: IdSchema,
+  role: z.string().min(1).default('primary'),
+  sortOrder: z.number().int().default(0),
+  asset: AssetSchema.optional(),
+});
+
+export const CreateCaptureSchema = z.object({
+  tenantId: IdSchema,
+  clientCaptureId: z.string().min(1),
+  sourceDeviceId: z.string().optional(),
+  capturedAt: IsoDateTimeSchema,
+  sourceType: z.string().min(1).default('screen'),
+  sourceApp: z.string().optional(),
+  title: z.string().optional(),
+  metadata: MetadataSchema.default({}),
+  assetIds: z.array(IdSchema).default([]),
+});
+
+export const CaptureListResponseSchema = z.object({
+  captures: z.array(CaptureSchema),
+  pageInfo: PageInfoSchema,
+});
+
+export type CaptureStatus = z.infer<typeof CaptureStatusSchema>;
+export type CaptureSyncState = z.infer<typeof CaptureSyncStateSchema>;
 export type Capture = z.infer<typeof CaptureSchema>;
+export type CaptureAsset = z.infer<typeof CaptureAssetSchema>;
+export type CreateCapture = z.infer<typeof CreateCaptureSchema>;
+export type CaptureListResponse = z.infer<typeof CaptureListResponseSchema>;

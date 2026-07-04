@@ -15,8 +15,7 @@
     "typecheck": "turbo typecheck",
     "format": "biome format --write .",
     "check": "biome check --write .",
-    "prepare": "lefthook install",
-    "dogfood:assert": "bun scripts/dogfood/assert-metrics.ts"
+    "prepare": "lefthook install"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.0",

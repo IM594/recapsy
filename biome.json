@@ -23,6 +23,6 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", "coverage", ".turbo", "*.gen.ts", "apps/client/build"]
+    "ignore": ["node_modules", "dist", "coverage", ".turbo", "*.gen.ts"]
   }
 }
