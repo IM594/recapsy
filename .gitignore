@@ -14,9 +14,6 @@ dist/
 *.dump
 backup_*.sql
 
-# Flutter build
-apps/client/build/
-
 # Turbo
 .turbo/
 
