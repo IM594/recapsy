@@ -14,6 +14,7 @@ import {
   CapabilitiesResponseSchema,
   EffectiveProviderSettingsResponseSchema,
   ProviderSettingMaskSchema,
+  SessionResponseSchema,
   SubscriptionStatusSchema,
 } from '../index.js';
 
@@ -33,8 +34,8 @@ const ids = {
 
 const plan = {
   id: ids.plan,
-  code: 'v0_manual',
-  name: 'V0 Manual',
+  code: 'manual_access',
+  name: 'Manual Access',
   status: 'active',
   version: 1,
 } as const;
@@ -105,12 +106,12 @@ const capabilities = {
     invite: { enabled: true },
     manualSubscription: { enabled: true },
     providerSettings: { enabled: true },
-    captureIngestion: { enabled: false, reason: 'not_implemented_in_slice_01' },
-    temporaryOcr: { enabled: false, reason: 'not_implemented_in_slice_01' },
-    textSearch: { enabled: false, reason: 'not_implemented_in_slice_01' },
+    captureIngestion: { enabled: true },
+    temporaryOcr: { enabled: true },
+    textSearch: { enabled: true },
     embeddingSearch: { enabled: false, reason: 'provider_not_configured' },
-    hybridSearch: { enabled: false, reason: 'not_implemented_in_slice_01' },
-    cloudSync: { enabled: false, reason: 'not_implemented_in_v0' },
+    hybridSearch: { enabled: false, reason: 'hybrid_search_not_enabled' },
+    cloudSync: { enabled: false, reason: 'cloud_sync_not_enabled' },
   },
   limits: { ocrJobsPerMonth: 100 },
   usage: { ocrJobsThisMonth: 0 },
@@ -169,10 +170,10 @@ const sessionSnapshot = {
   providerSettings,
 } as const;
 
-describe('Slice 01 auth and workspace contracts', () => {
+describe('Account management auth and workspace contracts', () => {
   it('parses register/login requests and auth responses', () => {
     const registerRequest: AuthRegisterRequest = AuthRegisterRequestSchema.parse({
-      inviteCode: 'invite-code-for-v0',
+      inviteCode: 'invite-code-for-manual-access',
       email: 'user@example.test',
       password: 'correct horse battery staple',
     });
@@ -216,9 +217,39 @@ describe('Slice 01 auth and workspace contracts', () => {
       }).success,
     ).toBe(false);
   });
+
+  it('parses standalone session responses using workspace terminology only', () => {
+    const response = {
+      user: {
+        id: ids.user,
+        email: 'user@example.test',
+        displayName: 'Recapsy User',
+      },
+      workspaces: [
+        {
+          id: ids.workspace,
+          slug: 'personal',
+          displayName: 'Personal Workspace',
+          role: 'owner',
+        },
+      ],
+      activeWorkspaceId: ids.workspace,
+      settings: {},
+      issuedAt: now,
+    } as const;
+
+    expect(SessionResponseSchema.safeParse(response).success).toBe(true);
+    expect(
+      SessionResponseSchema.safeParse({
+        ...response,
+        tenants: response.workspaces,
+        activeTenantId: ids.workspace,
+      }).success,
+    ).toBe(false);
+  });
 });
 
-describe('Slice 01 invite contracts', () => {
+describe('Account management invite contracts', () => {
   it('parses single-use invite create responses', () => {
     expect(
       AdminInviteCreateRequestSchema.safeParse({
@@ -263,7 +294,7 @@ describe('Slice 01 invite contracts', () => {
   });
 });
 
-describe('Slice 01 provider settings contracts', () => {
+describe('Account management provider settings contracts', () => {
   it('accepts write-only secret input and masks read responses', () => {
     const createRequest = AdminProviderSettingCreateRequestSchema.parse({
       service: 'ocr',
@@ -308,7 +339,7 @@ describe('Slice 01 provider settings contracts', () => {
   });
 });
 
-describe('Slice 01 subscription and capabilities contracts', () => {
+describe('Account management subscription and capabilities contracts', () => {
   it('parses subscription status responses', () => {
     expect(SubscriptionStatusSchema.parse('active')).toBe('active');
     expect(SubscriptionStatusSchema.parse('paused')).toBe('paused');
@@ -343,11 +374,11 @@ describe('Slice 01 subscription and capabilities contracts', () => {
     const parsed = CapabilitiesResponseSchema.parse(capabilities);
 
     expect(parsed.features.cloudSync.enabled).toBe(false);
-    expect(parsed.features.cloudSync.reason).toBe('not_implemented_in_v0');
+    expect(parsed.features.cloudSync.reason).toBe('cloud_sync_not_enabled');
   });
 });
 
-describe('Slice 01 error contracts', () => {
+describe('Account management error contracts', () => {
   it('parses reusable categorized error envelopes', () => {
     const parsed = ApiErrorSchema.parse({
       error: {
