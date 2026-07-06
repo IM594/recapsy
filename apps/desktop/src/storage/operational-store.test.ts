@@ -59,6 +59,51 @@ describe('in-memory operational store', () => {
     expect(await store.listOutboxJobs({ workspaceId: 'workspace_1' })).toHaveLength(1);
   });
 
+  it('normalizes capture privacy decisions with a required decidedAt timestamp', async () => {
+    const store = createInMemoryOperationalStore();
+
+    const defaulted = await store.createOutboxJob(createJob());
+    const explicit = await store.createOutboxJob(
+      createJob({
+        capture: {
+          observedAt: '2026-07-06T00:00:05.000Z',
+          privacyDecision: {
+            action: 'redact_context',
+            decidedAt: '2026-07-06T00:00:04.000Z',
+            policyVersion: 'policy_explicit',
+            reasons: ['domain_rule'],
+          },
+        },
+        id: 'job_2',
+        idempotencyKey: 'idem_2',
+      }),
+    );
+
+    expect(defaulted).toMatchObject({
+      ok: true,
+      value: {
+        capture: {
+          observedAt: now,
+          privacyDecision: {
+            decidedAt: now,
+          },
+        },
+      },
+    });
+    expect(explicit).toMatchObject({
+      ok: true,
+      value: {
+        capture: {
+          observedAt: '2026-07-06T00:00:05.000Z',
+          privacyDecision: {
+            action: 'redact_context',
+            decidedAt: '2026-07-06T00:00:04.000Z',
+          },
+        },
+      },
+    });
+  });
+
   it('enforces unique idempotency keys per workspace', async () => {
     const store = createInMemoryOperationalStore();
 
@@ -181,7 +226,7 @@ describe('in-memory operational store', () => {
       ok: false,
       error: {
         code: 'terminal_state_conflict',
-        message: 'Terminal outbox jobs cannot transition to a non-terminal state.',
+        message: 'Terminal outbox jobs cannot transition to another state.',
       },
     });
     expect(retry).toEqual({
@@ -193,6 +238,39 @@ describe('in-memory operational store', () => {
     });
     expect(claimed).toBeNull();
     expect(await store.getOutboxJob('job_1')).toMatchObject({
+      state: 'cancelled',
+      terminalReason: 'user_cancelled',
+    });
+  });
+
+  it('rejects terminal-to-terminal overwrites so late success cannot revive cancellation', async () => {
+    const store = createInMemoryOperationalStore();
+    await store.createOutboxJob(createJob());
+    await store.markOutboxJobTerminal('job_1', {
+      now: '2026-07-06T00:00:10.000Z',
+      reason: 'user_cancelled',
+      state: 'cancelled',
+    });
+
+    const lateSuccess = await store.markOutboxJobTerminal('job_1', {
+      now: '2026-07-06T00:00:11.000Z',
+      reason: 'ocr_succeeded',
+      serverCaptureId: 'capture_1',
+      serverOcrJobId: 'ocr_job_1',
+      state: 'synced',
+    });
+
+    expect(lateSuccess).toEqual({
+      ok: false,
+      error: {
+        code: 'terminal_state_conflict',
+        message: 'Terminal outbox jobs cannot transition to another terminal state.',
+      },
+    });
+    const stored = await store.getOutboxJob('job_1');
+    expect(stored?.serverCaptureId).toBeUndefined();
+    expect(stored?.serverOcrJobId).toBeUndefined();
+    expect(stored).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',
     });

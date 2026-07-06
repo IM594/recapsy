@@ -28,6 +28,10 @@ importers:
         version: 5.9.3
 
   apps/desktop:
+    dependencies:
+      '@recapsy/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
     devDependencies:
       '@types/bun':
         specifier: ^1.2.0

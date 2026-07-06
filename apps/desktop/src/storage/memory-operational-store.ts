@@ -79,6 +79,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
     const created: OutboxJob = {
       assetRefId: job.assetRefId,
       attempt: 0,
+      capture: normalizeCapturePayload(job),
       createdAt: job.createdAt,
       deviceId: job.deviceId,
       id: job.id,
@@ -117,7 +118,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
       return failure(notFound('outbox_job_not_found', 'Outbox job was not found.'));
     }
 
-    if (isTerminalOutboxState(job.state) && !isTerminalOutboxState(update.state)) {
+    if (isTerminalOutboxState(job.state) && job.state !== update.state) {
       return failure(terminalTransitionConflict());
     }
 
@@ -175,6 +176,13 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
 
     if (!job) {
       return failure(notFound('outbox_job_not_found', 'Outbox job was not found.'));
+    }
+
+    if (isTerminalOutboxState(job.state)) {
+      return failure({
+        code: 'terminal_state_conflict',
+        message: 'Terminal outbox jobs cannot transition to another terminal state.',
+      });
     }
 
     const updated: OutboxJob = {
@@ -361,7 +369,7 @@ function isTerminalOutboxState(state: OutboxJobState): state is OutboxTerminalSt
 function terminalTransitionConflict(): OperationalStoreError {
   return {
     code: 'terminal_state_conflict',
-    message: 'Terminal outbox jobs cannot transition to a non-terminal state.',
+    message: 'Terminal outbox jobs cannot transition to another state.',
   };
 }
 
@@ -405,7 +413,60 @@ function deleteMatching<T>(map: Map<string, T>, predicate: (value: T) => boolean
 function cloneOutboxJob(job: OutboxJob): OutboxJob {
   return {
     ...job,
+    capture: cloneCapturePayload(job.capture),
     ...(job.lastSafeError ? { lastSafeError: { ...job.lastSafeError } } : {}),
+  };
+}
+
+function normalizeCapturePayload(job: OutboxJobCreateInput): OutboxJob['capture'] {
+  return {
+    appName: job.capture?.appName ?? 'Recapsy Desktop',
+    capturedAt: job.capture?.capturedAt ?? job.createdAt,
+    captureType: job.capture?.captureType ?? 'screen',
+    observedAt: job.capture?.observedAt ?? job.createdAt,
+    privacyDecision: {
+      action: job.capture?.privacyDecision?.action ?? 'allow',
+      decidedAt:
+        job.capture?.privacyDecision?.decidedAt ??
+        job.capture?.observedAt ??
+        job.capture?.capturedAt ??
+        job.createdAt,
+      policyVersion: job.capture?.privacyDecision?.policyVersion ?? 'desktop-default',
+      reasons: [...(job.capture?.privacyDecision?.reasons ?? [])],
+    },
+    ...(job.capture?.bundleId ? { bundleId: job.capture.bundleId } : {}),
+    ...(job.capture?.contextConfidence ? { contextConfidence: job.capture.contextConfidence } : {}),
+    ...(job.capture?.contextFingerprint
+      ? { contextFingerprint: job.capture.contextFingerprint }
+      : {}),
+    ...(job.capture?.documentPathCandidate
+      ? { documentPathCandidate: { ...job.capture.documentPathCandidate } }
+      : {}),
+    ...(job.capture?.localEventId ? { localEventId: job.capture.localEventId } : {}),
+    ...(job.capture?.metadata ? { metadata: { ...job.capture.metadata } } : {}),
+    ...(job.capture?.urlCandidate ? { urlCandidate: { ...job.capture.urlCandidate } } : {}),
+    ...(job.capture?.userId ? { userId: job.capture.userId } : {}),
+    ...(job.capture?.windowTitleCandidate
+      ? { windowTitleCandidate: { ...job.capture.windowTitleCandidate } }
+      : {}),
+  };
+}
+
+function cloneCapturePayload(capture: OutboxJob['capture']): OutboxJob['capture'] {
+  return {
+    ...capture,
+    privacyDecision: {
+      ...capture.privacyDecision,
+      reasons: [...capture.privacyDecision.reasons],
+    },
+    ...(capture.documentPathCandidate
+      ? { documentPathCandidate: { ...capture.documentPathCandidate } }
+      : {}),
+    ...(capture.metadata ? { metadata: { ...capture.metadata } } : {}),
+    ...(capture.urlCandidate ? { urlCandidate: { ...capture.urlCandidate } } : {}),
+    ...(capture.windowTitleCandidate
+      ? { windowTitleCandidate: { ...capture.windowTitleCandidate } }
+      : {}),
   };
 }
 

@@ -7,6 +7,16 @@ export type {
   DesktopConfigResult,
 } from './config/config';
 export {
+  createInMemoryTokenStore,
+  createMacOsKeychainTokenStore,
+} from './auth/token-store';
+export type {
+  AuthTokenSet,
+  KeychainSecretStore,
+  MacOsKeychainTokenStoreOptions,
+  TokenStore,
+} from './auth/token-store';
+export {
   IPC_CHANNEL_REGISTRY,
   IPC_ERROR_CODES,
   assertRendererSafeDto,
@@ -90,6 +100,48 @@ export type {
   RuntimeSnapshot,
   RuntimeStatus,
 } from './runtime/types';
+export { ServerApiError, createServerApiClient } from './server-api/client';
+export type {
+  CaptureIngestInput,
+  CaptureIngestResult,
+  CapturePoliciesInput,
+  CapturePoliciesResult,
+  AxAllowlistResult,
+  OcrJobCancelResult,
+  OcrJobCreateInput,
+  OcrJobCreateResult,
+  OcrJobSafeError,
+  OcrJobSafeErrorCode,
+  OcrJobStatus,
+  OcrJobStatusResult,
+  SearchQueryInput,
+  ServerApiClient,
+  ServerApiClientOptions,
+  ServerCapabilitiesResult,
+  ServerCapabilityFeature,
+  ServerApiErrorCode,
+  ServerApiErrorShape,
+  ServerApiTransport,
+  ServerApiTransportRequest,
+  ServerApiTransportResponse,
+  ServerProviderCapability,
+  TemporaryByteUploadInput,
+  TemporaryByteUploadResult,
+  TemporaryUploadInput,
+  TemporaryUploadResult,
+  TimelineQueryInput,
+} from './server-api/client';
+export { createSyncQueueSummary, createSyncScheduler } from './sync/scheduler';
+export type {
+  SyncAssetReader,
+  SyncCancelResult,
+  SyncClock,
+  SyncRunResult,
+  SyncRunStatus,
+  SyncSchedulerOptions,
+  SyncServerApi,
+  SyncWorkspaceProvider,
+} from './sync/types';
 export {
   createInMemoryOperationalStore,
   evaluateOperationalStoreBackpressure,
@@ -102,6 +154,9 @@ export type {
   BackpressureConfig,
   BackpressureDecision,
   BackpressureReason,
+  CaptureOutboxPayload,
+  CaptureOutboxPayloadInput,
+  CapturePrivacyDecision,
   ClaimRetryableOutboxJobInput,
   HelperPermissionState,
   HelperRuntimeState,

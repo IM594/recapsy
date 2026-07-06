@@ -25,6 +25,7 @@ export type OutboxJob = {
   assetRefId: string;
   idempotencyKey: string;
   payloadHash: string;
+  capture: CaptureOutboxPayload;
   state: OutboxJobState;
   attempt: number;
   createdAt: string;
@@ -44,8 +45,52 @@ export type OutboxJobCreateInput = {
   assetRefId: string;
   idempotencyKey: string;
   payloadHash: string;
+  capture?: CaptureOutboxPayloadInput;
   createdAt: string;
   nextRetryAt?: string;
+};
+
+export type CapturePrivacyDecision = {
+  action: 'allow' | 'block_capture' | 'redact_context' | 'block_ocr';
+  decidedAt: string;
+  policyVersion: string;
+  reasons: string[];
+};
+
+export type CaptureOutboxPayload = {
+  capturedAt: string;
+  observedAt: string;
+  appName: string;
+  captureType: 'screen' | 'window';
+  privacyDecision: CapturePrivacyDecision;
+  localEventId?: string;
+  userId?: string;
+  bundleId?: string;
+  windowTitleCandidate?: {
+    kind: 'safe' | 'redacted' | 'omitted';
+    value?: string;
+    reason?: string;
+  };
+  urlCandidate?: {
+    kind: 'safe' | 'redacted' | 'omitted';
+    normalized?: string;
+    domain?: string;
+    hash?: string;
+    reason?: string;
+  };
+  documentPathCandidate?: {
+    kind: 'safe' | 'redacted' | 'omitted';
+    displayName?: string;
+    hash?: string;
+    reason?: string;
+  };
+  contextFingerprint?: string;
+  contextConfidence?: 'high' | 'medium' | 'low' | 'unknown';
+  metadata?: Record<string, unknown>;
+};
+
+export type CaptureOutboxPayloadInput = Partial<Omit<CaptureOutboxPayload, 'privacyDecision'>> & {
+  privacyDecision?: Partial<CapturePrivacyDecision>;
 };
 
 export type OutboxJobStateUpdate = {

@@ -63,6 +63,10 @@ export type SyncQueueSummaryDto = {
   retrying: number;
   blocked: number;
   failed: number;
+  backpressure?: {
+    active: boolean;
+    reasons: string[];
+  };
   nextRetryAt?: string;
   lastError?: IpcError;
 };
