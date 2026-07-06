@@ -1,0 +1,21 @@
+{
+  "name": "@recapsy/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check src/",
+    "check": "biome check src/"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0"
+  }
+}
