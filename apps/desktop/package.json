@@ -14,9 +14,11 @@
   },
   "scripts": {
     "test": "bun test src",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src/",
-    "check": "biome check src/"
+    "test:server-http": "bun test integration/server-http-smoke.test.ts",
+    "typecheck": "tsc --noEmit && pnpm run typecheck:integration",
+    "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",
+    "lint": "biome check src/ integration/",
+    "check": "biome check src/ integration/"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0"
