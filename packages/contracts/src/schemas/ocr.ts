@@ -18,6 +18,7 @@ export const OcrErrorCodeSchema = z.enum([
   'provider_auth_failed',
   'provider_rate_limited',
   'provider_timeout',
+  'provider_unavailable',
   'input_too_large',
   'unsupported_format',
   'temporary_location_missing',

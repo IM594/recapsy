@@ -3,6 +3,7 @@ import {
   AXAllowlistDisabledResponseSchema,
   AssetLocationSchema,
   CaptureIngestRequestSchema,
+  OcrJobSafeErrorSchema,
   SearchDocumentSchema,
   SearchResponseSchema,
 } from '../index.js';
@@ -256,6 +257,19 @@ describe('Search contracts', () => {
         results: [resultWithoutTimelineEventId],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('OCR job contracts', () => {
+  it('accepts provider_unavailable as a safe OCR job error code', () => {
+    const parsed = OcrJobSafeErrorSchema.parse({
+      code: 'provider_unavailable',
+      messageSafe: 'OCR provider is temporarily unavailable.',
+      retryable: true,
+    });
+
+    expect(parsed.code).toBe('provider_unavailable');
+    expect(parsed.retryable).toBe(true);
   });
 });
 
