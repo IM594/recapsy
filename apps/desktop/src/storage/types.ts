@@ -118,6 +118,13 @@ export type OutboxSafeErrorInput = {
   maxAttempts: number;
 };
 
+export type RecoverInterruptedOutboxJobInput = {
+  id: string;
+  now: string;
+  nextRetryAt: string;
+  lastSafeError: SafeOperationalError;
+};
+
 export type ClaimRetryableOutboxJobInput = {
   workspaceId: string;
   now: string;
@@ -275,6 +282,9 @@ export type OperationalStoreRepository = {
   recordOutboxSafeError(
     id: string,
     input: OutboxSafeErrorInput,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
+  recoverInterruptedOutboxJob(
+    input: RecoverInterruptedOutboxJobInput,
   ): Promise<OperationalStoreResult<OutboxJob>>;
   upsertAssetCacheRef(asset: AssetCacheRef): Promise<AssetCacheRef>;
   getAssetCacheRef(assetRefId: string): Promise<AssetCacheRef | null>;

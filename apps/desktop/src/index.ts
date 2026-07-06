@@ -100,6 +100,7 @@ export type {
   RuntimeSnapshot,
   RuntimeStatus,
 } from './runtime/types';
+export type { StartupRecoveryLifecycle } from './runtime/lifecycle-controller';
 export { ServerApiError, createServerApiClient } from './server-api/client';
 export type {
   CaptureIngestInput,
@@ -132,6 +133,8 @@ export type {
   TimelineQueryInput,
 } from './server-api/client';
 export { createSyncQueueSummary, createSyncScheduler } from './sync/scheduler';
+export { recoverInterruptedOutboxJobs } from './sync/startup-recovery';
+export type { StartupRecoveryOptions, StartupRecoverySummary } from './sync/startup-recovery';
 export type {
   SyncAssetReader,
   SyncCancelResult,
@@ -179,6 +182,7 @@ export type {
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
+  RecoverInterruptedOutboxJobInput,
   RendererSafeAssetRef,
   SafeOperationalError,
   SettingsCache,

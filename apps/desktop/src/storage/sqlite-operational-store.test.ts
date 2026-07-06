@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSyncQueueSummary } from '../sync/scheduler';
+import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
 import { createBunSqliteDatabase } from './bun-sqlite-driver';
 import {
   type AssetCacheRef,
@@ -147,6 +148,90 @@ describe('SQLite operational store', () => {
     expect(await reopened.getSettingsCache('workspace_1')).toMatchObject({
       captureEnabled: true,
       deviceId: 'device_1',
+    });
+
+    reopened.close();
+  });
+
+  it('persists explicit startup recovery after SQLite close and reopen', async () => {
+    const path = tempDatabasePath();
+    const firstDatabase = createBunSqliteDatabase(path);
+    const first = createSqliteOperationalStore({ database: firstDatabase });
+
+    await first.initialize();
+    await first.upsertAssetCacheRef(createAsset());
+    await first.createOutboxJob(createJob());
+    await first.updateOutboxJobState('job_1', {
+      now: '2026-07-06T00:01:00.000Z',
+      state: 'uploading',
+    });
+    await first.createOutboxJob(
+      createJob({
+        assetRefId: 'asset_2',
+        id: 'job_ocr_wait',
+        idempotencyKey: 'idem_ocr_wait',
+      }),
+    );
+    await first.updateOutboxJobState('job_ocr_wait', {
+      now: '2026-07-06T00:02:00.000Z',
+      serverCaptureId: 'capture_ocr_wait',
+      serverOcrJobId: 'server_ocr_wait',
+      state: 'ocr_wait',
+    });
+    await first.createOutboxJob(
+      createJob({
+        assetRefId: 'asset_3',
+        id: 'job_cancelled',
+        idempotencyKey: 'idem_cancelled',
+      }),
+    );
+    await first.markOutboxJobTerminal('job_cancelled', {
+      now: '2026-07-06T00:03:00.000Z',
+      reason: 'user_cancelled',
+      state: 'cancelled',
+    });
+
+    const summary = await recoverInterruptedOutboxJobs({
+      now: '2026-07-06T00:10:00.000Z',
+      store: first,
+    });
+    first.close();
+
+    const reopenedDatabase = createBunSqliteDatabase(path);
+    const reopened = createSqliteOperationalStore({ database: reopenedDatabase });
+    await reopened.initialize();
+
+    expect(summary).toEqual({
+      ocrPendingWithoutServerJob: 0,
+      ocrPolling: 1,
+      recovered: 2,
+      scanned: 3,
+      unchangedRetryable: 0,
+      unchangedTerminal: 1,
+      uploadPending: 1,
+    });
+    expect(await reopened.getOutboxJob('job_1')).toMatchObject({
+      lastSafeError: {
+        code: 'interrupted_during_upload',
+        retryable: true,
+      },
+      nextRetryAt: '2026-07-06T00:10:00.000Z',
+      state: 'pending',
+    });
+    expect((await reopened.getOutboxJob('job_1'))?.lockedAt).toBeUndefined();
+    expect(await reopened.getOutboxJob('job_ocr_wait')).toMatchObject({
+      lastSafeError: {
+        code: 'interrupted_while_waiting_for_ocr',
+        retryable: true,
+      },
+      serverCaptureId: 'capture_ocr_wait',
+      serverOcrJobId: 'server_ocr_wait',
+      state: 'pending',
+    });
+    expect((await reopened.getOutboxJob('job_ocr_wait'))?.lockedAt).toBeUndefined();
+    expect(await reopened.getOutboxJob('job_cancelled')).toMatchObject({
+      state: 'cancelled',
+      terminalReason: 'user_cancelled',
     });
 
     reopened.close();

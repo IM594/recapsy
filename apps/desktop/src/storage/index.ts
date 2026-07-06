@@ -47,6 +47,7 @@ export type {
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
+  RecoverInterruptedOutboxJobInput,
   RendererSafeAssetRef,
   SafeOperationalError,
   SettingsCache,

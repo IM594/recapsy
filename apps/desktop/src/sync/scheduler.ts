@@ -134,6 +134,10 @@ export async function createSyncQueueSummary(
 
 async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<SyncRunResult> {
   try {
+    if (job.serverOcrJobId) {
+      return pollExistingOcrJob(options, job);
+    }
+
     const asset = await options.store.getAssetCacheRef(job.assetRefId);
 
     if (!asset) {
@@ -278,11 +282,71 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
   }
 }
 
+async function pollExistingOcrJob(
+  options: SyncSchedulerOptions,
+  job: OutboxJob,
+): Promise<SyncRunResult> {
+  const serverOcrJobId = job.serverOcrJobId;
+
+  if (!serverOcrJobId) {
+    await recordSafeError(options, job, {
+      code: 'validation_failed',
+      retryable: false,
+    });
+    return { jobId: job.id, processed: 1, status: 'failed' };
+  }
+
+  if (!(await ensureWorkspaceStillActive(options, job))) {
+    return { jobId: job.id, processed: 1, status: 'retry_wait' };
+  }
+
+  const polled = await options.api.pollOcrJob(job.workspaceId, serverOcrJobId);
+
+  if (await isLocallyCancelled(options.store, job.id)) {
+    return { jobId: job.id, processed: 1, status: 'cancelled' };
+  }
+
+  if (polled.job.status === 'succeeded') {
+    await options.store.markOutboxJobTerminal(job.id, {
+      now: options.clock.now(),
+      reason: 'ocr_succeeded',
+      serverCaptureId: job.serverCaptureId,
+      serverOcrJobId,
+      state: 'synced',
+    });
+    return { jobId: job.id, processed: 1, status: 'synced' };
+  }
+
+  if (polled.job.status === 'cancelled') {
+    await options.store.markOutboxJobTerminal(job.id, {
+      now: options.clock.now(),
+      reason: 'server_cancelled',
+      serverCaptureId: job.serverCaptureId,
+      serverOcrJobId,
+      state: 'cancelled',
+    });
+    return { jobId: job.id, processed: 1, status: 'cancelled' };
+  }
+
+  if (polled.job.status === 'failed') {
+    return handleOcrFailure(options, job, polled.job.error, {
+      captureId: job.serverCaptureId,
+      ocrJobId: serverOcrJobId,
+    });
+  }
+
+  await recordSafeError(options, job, {
+    code: 'server_unavailable',
+    retryable: true,
+  });
+  return { jobId: job.id, processed: 1, status: 'retry_wait' };
+}
+
 async function handleOcrFailure(
   options: SyncSchedulerOptions,
   job: OutboxJob,
   error: OcrJobSafeError | null | undefined,
-  ids: { captureId: string; ocrJobId: string },
+  ids: { captureId?: string; ocrJobId: string },
 ): Promise<SyncRunResult> {
   const code = error?.code ?? 'unknown';
 

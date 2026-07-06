@@ -276,6 +276,34 @@ describe('in-memory operational store', () => {
     });
   });
 
+  it('rejects direct terminal updates even when the target state is unchanged', async () => {
+    const store = createInMemoryOperationalStore();
+    await store.createOutboxJob(createJob());
+    await store.markOutboxJobTerminal('job_1', {
+      now: '2026-07-06T00:00:10.000Z',
+      reason: 'user_cancelled',
+      state: 'cancelled',
+    });
+
+    const unchangedTerminal = await store.updateOutboxJobState('job_1', {
+      now: '2026-07-06T00:00:11.000Z',
+      state: 'cancelled',
+    });
+
+    expect(unchangedTerminal).toEqual({
+      ok: false,
+      error: {
+        code: 'terminal_state_conflict',
+        message: 'Terminal outbox jobs cannot transition to another state.',
+      },
+    });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      state: 'cancelled',
+      terminalReason: 'user_cancelled',
+      updatedAt: '2026-07-06T00:00:10.000Z',
+    });
+  });
+
   it('stores asset refs and returns a renderer-safe projection without local absolute paths', async () => {
     const store = createInMemoryOperationalStore();
     await store.upsertAssetCacheRef(

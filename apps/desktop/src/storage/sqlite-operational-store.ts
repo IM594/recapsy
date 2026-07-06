@@ -18,6 +18,7 @@ import type {
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
+  RecoverInterruptedOutboxJobInput,
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
@@ -379,6 +380,41 @@ class SqliteOperationalStore implements OperationalStoreRepository {
         this.missingOrTerminalOutboxError(id, {
           code: 'terminal_state_conflict',
           message: 'Terminal outbox jobs cannot be retried.',
+        }),
+      );
+    }
+
+    return success(outboxJobFromRow(row));
+  }
+
+  async recoverInterruptedOutboxJob(
+    input: RecoverInterruptedOutboxJobInput,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const row = this.options.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = 'pending',
+             updated_at = $updatedAt,
+             next_retry_at = $nextRetryAt,
+             locked_at = NULL,
+             last_safe_error_json = $lastSafeErrorJson,
+             terminal_reason = NULL
+         WHERE id = $id
+           AND state IN ('uploading', 'ocr_wait')
+         RETURNING *`,
+      )
+      .get({
+        $id: input.id,
+        $lastSafeErrorJson: JSON.stringify(input.lastSafeError),
+        $nextRetryAt: input.nextRetryAt,
+        $updatedAt: input.now,
+      });
+
+    if (!row) {
+      return failure(
+        this.missingOrTerminalOutboxError(input.id, {
+          code: 'terminal_state_conflict',
+          message: 'Only interrupted outbox jobs can be recovered at startup.',
         }),
       );
     }

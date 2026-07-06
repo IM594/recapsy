@@ -137,6 +137,67 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
+  it('polls an existing server OCR job after startup recovery without uploading bytes again', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    await store.updateOutboxJobState('job_1', {
+      now: '2026-07-06T00:00:01.000Z',
+      serverCaptureId: 'capture_existing',
+      serverOcrJobId: 'ocr_existing',
+      state: 'pending',
+    });
+    const calls: string[] = [];
+    const scheduler = createScheduler({
+      api: createApi({
+        async createOcrJob() {
+          calls.push('ocr');
+          throw new Error('createOcrJob must not run for recovered OCR polling jobs');
+        },
+        async createTemporaryUpload() {
+          calls.push('temporary');
+          throw new Error('createTemporaryUpload must not run for recovered OCR polling jobs');
+        },
+        async ingestCapture() {
+          calls.push('ingest');
+          throw new Error('ingestCapture must not run for recovered OCR polling jobs');
+        },
+        async pollOcrJob(workspaceId, jobId) {
+          calls.push(`poll:${workspaceId}:${jobId}`);
+          return {
+            job: {
+              id: jobId,
+              status: 'succeeded',
+            },
+          };
+        },
+        async putTemporaryBytes() {
+          calls.push('bytes');
+          throw new Error('putTemporaryBytes must not run for recovered OCR polling jobs');
+        },
+      }),
+      readAssetBytes: async () => {
+        calls.push('read-bytes');
+        throw new Error('readAssetBytes must not run for recovered OCR polling jobs');
+      },
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'synced',
+    });
+    expect(calls).toEqual(['poll:workspace_1:ocr_existing']);
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      serverCaptureId: 'capture_existing',
+      serverOcrJobId: 'ocr_existing',
+      state: 'synced',
+      terminalReason: 'ocr_succeeded',
+    });
+  });
+
   it('drains existing pending work even when backpressure is pausing new capture', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);

@@ -17,6 +17,7 @@ import type {
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
+  RecoverInterruptedOutboxJobInput,
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
@@ -125,7 +126,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
       return failure(notFound('outbox_job_not_found', 'Outbox job was not found.'));
     }
 
-    if (isTerminalOutboxState(job.state) && job.state !== update.state) {
+    if (isTerminalOutboxState(job.state)) {
       return failure(terminalTransitionConflict());
     }
 
@@ -249,6 +250,41 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
     }
 
     this.outboxJobs.set(id, updated);
+
+    return success(cloneOutboxJob(updated));
+  }
+
+  async recoverInterruptedOutboxJob(
+    input: RecoverInterruptedOutboxJobInput,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const job = this.outboxJobs.get(input.id);
+
+    if (!job) {
+      return failure(notFound('outbox_job_not_found', 'Outbox job was not found.'));
+    }
+
+    if (isTerminalOutboxState(job.state)) {
+      return failure(terminalTransitionConflict());
+    }
+
+    if (job.state !== 'uploading' && job.state !== 'ocr_wait') {
+      return failure({
+        code: 'terminal_state_conflict',
+        message: 'Only interrupted outbox jobs can be recovered at startup.',
+      });
+    }
+
+    const updated: OutboxJob = {
+      ...job,
+      lastSafeError: { ...input.lastSafeError },
+      lockedAt: undefined,
+      nextRetryAt: input.nextRetryAt,
+      state: 'pending',
+      terminalReason: undefined,
+      updatedAt: input.now,
+    };
+
+    this.outboxJobs.set(input.id, updated);
 
     return success(cloneOutboxJob(updated));
   }

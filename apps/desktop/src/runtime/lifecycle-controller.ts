@@ -1,18 +1,26 @@
 import type { DesktopRuntime, HelperLifecycle, RuntimeSnapshot, RuntimeStatus } from './types';
 
+export type StartupRecoveryLifecycle = {
+  recover(): Promise<void>;
+};
+
 export type DesktopRuntimeOptions = {
   helper: HelperLifecycle;
+  startupRecovery?: StartupRecoveryLifecycle;
 };
 
 export function createDesktopRuntime(options: DesktopRuntimeOptions): DesktopRuntime {
-  return new LifecycleController(options.helper);
+  return new LifecycleController(options.helper, options.startupRecovery);
 }
 
 class LifecycleController implements DesktopRuntime {
   private menuBarActive = false;
   private status: RuntimeStatus = 'stopped';
 
-  constructor(private readonly helper: HelperLifecycle) {}
+  constructor(
+    private readonly helper: HelperLifecycle,
+    private readonly startupRecovery?: StartupRecoveryLifecycle,
+  ) {}
 
   getSnapshot(): RuntimeSnapshot {
     return {
@@ -29,6 +37,7 @@ class LifecycleController implements DesktopRuntime {
     this.status = 'starting';
 
     try {
+      await this.startupRecovery?.recover();
       await this.helper.start();
       this.status = 'running';
       this.menuBarActive = false;
