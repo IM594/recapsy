@@ -215,8 +215,10 @@ export type SettingsCache = {
 export type OperationalStoreErrorCode =
   | 'outbox_job_not_found'
   | 'asset_ref_not_found'
+  | 'outbox_job_id_conflict'
   | 'idempotency_key_conflict'
   | 'terminal_state_conflict'
+  | 'storage_corruption'
   | 'capacity_exceeded';
 
 export type OperationalStoreError = {

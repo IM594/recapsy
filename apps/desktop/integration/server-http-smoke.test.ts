@@ -6,8 +6,13 @@ import { join } from 'node:path';
 import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
 import type { ServerApiClient, ServerApiTransport } from '../src/server-api/types';
-import { createInMemoryOperationalStore } from '../src/storage';
-import type { AssetCacheRef, OutboxJobCreateInput } from '../src/storage';
+import { createInMemoryOperationalStore, createSqliteOperationalStore } from '../src/storage';
+import type {
+  AssetCacheRef,
+  OperationalStoreRepository,
+  OutboxJobCreateInput,
+} from '../src/storage';
+import { createBunSqliteDatabase } from '../src/storage/bun-sqlite-driver';
 import { createSyncScheduler } from '../src/sync/scheduler';
 
 const now = '2026-07-06T00:00:00.000Z';
@@ -18,6 +23,7 @@ const leakedProviderMessage =
   'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
 
 const activeHarnesses: ServerHttpHarness[] = [];
+const activeTempDirs: string[] = [];
 
 afterEach(() => {
   const stopErrors: unknown[] = [];
@@ -25,6 +31,14 @@ afterEach(() => {
   for (const harness of activeHarnesses.splice(0)) {
     try {
       harness.stop();
+    } catch (error) {
+      stopErrors.push(error);
+    }
+  }
+
+  for (const dir of activeTempDirs.splice(0)) {
+    try {
+      rmSync(dir, { force: true, recursive: true });
     } catch (error) {
       stopErrors.push(error);
     }
@@ -80,6 +94,44 @@ describe('desktop server sync over real HTTP', () => {
       }),
     ]);
     expect(serialized).not.toContain('summary-only');
+    expect(harness.captureSnapshot().searchDocuments).toHaveLength(1);
+  });
+
+  it('syncs capture OCR over real HTTP with a SQLite-backed desktop store', async () => {
+    const bytes = new Uint8Array([21, 22, 23, 24]);
+    const harness = await startServerHttpHarness({
+      ocrRunner: fixedOcrRunner('SQLite backed OCR searchable invoice', 'SQLite sync review'),
+    });
+    const user = await harness.bootstrapUser('desktop-sqlite-positive@example.test');
+    const store = await createSqliteStore();
+    await seedPendingCapture(store, user.workspaceId, bytes);
+    const client = createHttpClient(harness.endpoint, user.accessToken);
+    const scheduler = createScheduler(store, client, user.workspaceId, bytes);
+
+    const result = await scheduler.runOnce();
+    const search = await client.querySearch({
+      workspaceId: user.workspaceId,
+      query: 'invoice',
+      limit: 10,
+    });
+
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'synced',
+    });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      serverCaptureId: expect.any(String),
+      serverOcrJobId: expect.any(String),
+      state: 'synced',
+      terminalReason: 'ocr_succeeded',
+    });
+    expect(search.items).toEqual([
+      expect.objectContaining({
+        snippet: 'SQLite backed OCR searchable invoice',
+        title: 'Retention Review',
+      }),
+    ]);
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(1);
   });
 
@@ -310,7 +362,7 @@ function createHttpClient(endpoint: string, accessToken: string) {
 }
 
 function createScheduler(
-  store: ReturnType<typeof createInMemoryOperationalStore>,
+  store: OperationalStoreRepository,
   api: ServerApiClient,
   workspaceId: string,
   bytes: Uint8Array,
@@ -333,7 +385,7 @@ function createScheduler(
 }
 
 async function seedPendingCapture(
-  store: ReturnType<typeof createInMemoryOperationalStore>,
+  store: OperationalStoreRepository,
   workspaceId: string,
   bytes: Uint8Array,
   overrides: Partial<OutboxJobCreateInput> = {},
@@ -381,6 +433,16 @@ async function seedPendingCapture(
     ...overrides,
   });
   expect(created.ok).toBe(true);
+}
+
+async function createSqliteStore(): Promise<OperationalStoreRepository> {
+  const dir = mkdtempSync(join(tmpdir(), 'recapsy-desktop-http-sqlite-'));
+  activeTempDirs.push(dir);
+  const store = createSqliteOperationalStore({
+    database: createBunSqliteDatabase(join(dir, 'operational.sqlite')),
+  });
+  await store.initialize();
+  return store;
 }
 
 function createAsset(workspaceId: string, bytes: Uint8Array): AssetCacheRef {

@@ -144,7 +144,9 @@ export type {
 } from './sync/types';
 export {
   createInMemoryOperationalStore,
+  createSqliteOperationalStore,
   evaluateOperationalStoreBackpressure,
+  runSqliteOperationalStoreMigrations,
   toRendererSafeAssetRef,
 } from './storage';
 export type {
@@ -180,6 +182,13 @@ export type {
   RendererSafeAssetRef,
   SafeOperationalError,
   SettingsCache,
+  SqliteDatabase,
+  SqliteOperationalStoreOptions,
+  SqliteParameters,
+  SqliteRow,
+  SqliteRunResult,
+  SqliteStatement,
+  SqliteValue,
   SyncCursor,
   SyncCursorKind,
 } from './storage';

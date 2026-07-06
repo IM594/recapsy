@@ -76,6 +76,13 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
       });
     }
 
+    if (this.outboxJobs.has(job.id)) {
+      return failure({
+        code: 'outbox_job_id_conflict',
+        message: 'Outbox job id already exists.',
+      });
+    }
+
     const created: OutboxJob = {
       assetRefId: job.assetRefId,
       attempt: 0,

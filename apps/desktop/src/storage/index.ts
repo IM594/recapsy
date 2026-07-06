@@ -5,6 +5,19 @@ export {
 } from './memory-operational-store';
 export { toRendererSafeAssetRef } from './projections';
 export type {
+  SqliteDatabase,
+  SqliteParameters,
+  SqliteRow,
+  SqliteRunResult,
+  SqliteStatement,
+  SqliteValue,
+} from './sqlite-driver';
+export {
+  createSqliteOperationalStore,
+  runSqliteOperationalStoreMigrations,
+  type SqliteOperationalStoreOptions,
+} from './sqlite-operational-store';
+export type {
   AssetCacheRef,
   AssetCacheRefRole,
   AssetCleanupState,
