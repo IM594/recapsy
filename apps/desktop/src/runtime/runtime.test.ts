@@ -84,6 +84,31 @@ describe('desktop runtime lifecycle', () => {
     expect(calls).toEqual(['recover', 'start']);
   });
 
+  it('runs asset ref reconciliation after startup recovery and before helper capture starts', async () => {
+    const calls: string[] = [];
+    const runtime = createDesktopRuntime({
+      assetReconciliation: {
+        async reconcile(): Promise<void> {
+          calls.push('reconcile');
+        },
+      },
+      helper: createRecordingHelper(calls),
+      startupRecovery: {
+        async recover(): Promise<void> {
+          calls.push('recover');
+        },
+      },
+    });
+
+    await runtime.start();
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      status: 'running',
+      menuBarActive: false,
+    });
+    expect(calls).toEqual(['recover', 'reconcile', 'start']);
+  });
+
   it('can wire interrupted outbox recovery into runtime startup through dependency injection', async () => {
     const store = createInMemoryOperationalStore();
     const calls: string[] = [];
@@ -144,6 +169,32 @@ describe('desktop runtime lifecycle', () => {
       menuBarActive: false,
     });
     expect(calls).toEqual(['recover']);
+  });
+
+  it('fails closed when asset ref reconciliation fails before helper capture starts', async () => {
+    const calls: string[] = [];
+    const runtime = createDesktopRuntime({
+      assetReconciliation: {
+        async reconcile(): Promise<void> {
+          calls.push('reconcile');
+          throw new Error('asset ref reconciliation failed');
+        },
+      },
+      helper: createRecordingHelper(calls),
+      startupRecovery: {
+        async recover(): Promise<void> {
+          calls.push('recover');
+        },
+      },
+    });
+
+    await expect(runtime.start()).rejects.toThrow('asset ref reconciliation failed');
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      status: 'stopped',
+      menuBarActive: false,
+    });
+    expect(calls).toEqual(['recover', 'reconcile']);
   });
 });
 

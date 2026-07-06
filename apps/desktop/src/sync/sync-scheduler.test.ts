@@ -235,6 +235,127 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
+  it('blocks jobs with a safe local asset reason when the asset ref row is missing', async () => {
+    const store = createInMemoryOperationalStore();
+    const created = await store.createOutboxJob(createJob());
+    expect(created.ok).toBe(true);
+    const scheduler = createScheduler({
+      api: createApi({
+        async ingestCapture() {
+          throw new Error('ingestCapture must not run when the asset ref row is missing');
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'blocked',
+    });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      lastSafeError: {
+        code: 'asset_ref_missing',
+        message: 'Local asset reference is missing.',
+        retryable: false,
+      },
+      state: 'blocked',
+      terminalReason: 'asset_ref_missing',
+    });
+  });
+
+  it('fails upload-required server actions when the input asset id is missing', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    const scheduler = createScheduler({
+      api: createApi({
+        async createTemporaryUpload() {
+          throw new Error('createTemporaryUpload must not run without an input asset id');
+        },
+        async ingestCapture() {
+          return {
+            captureId: 'capture_1',
+            nextAction: 'create_temporary_upload',
+            timelineEventId: 'timeline_1',
+          };
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'failed',
+    });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      lastSafeError: {
+        code: 'upload_input_missing',
+        message: 'Upload input asset is missing.',
+        retryable: false,
+      },
+      state: 'failed',
+      terminalReason: 'upload_input_missing',
+    });
+  });
+
+  it('blocks local asset byte read failures without retrying upload or OCR creation', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    const calls: string[] = [];
+    const scheduler = createScheduler({
+      api: createApi({
+        async createOcrJob() {
+          calls.push('ocr');
+          throw new Error('createOcrJob must not run when local bytes are unreadable');
+        },
+        async createTemporaryUpload(input) {
+          calls.push(`temporary:${input.assetId}`);
+          return {
+            temporaryLocationId: 'temporary_location_1',
+            uploadId: 'upload_1',
+          };
+        },
+        async putTemporaryBytes() {
+          calls.push('bytes');
+          throw new Error('putTemporaryBytes must not run when local bytes are unreadable');
+        },
+      }),
+      readAssetBytes: async () => {
+        calls.push('read');
+        throw Object.assign(new Error('/Users/alice/private.png permission denied'), {
+          code: 'local_asset_unreadable',
+          retryable: false,
+          safeMessage: 'Local asset is unreadable.',
+        });
+      },
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'blocked',
+    });
+    expect(calls).toEqual(['read']);
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      attempt: 0,
+      lastSafeError: {
+        code: 'local_asset_unreadable',
+        message: 'Local asset is unreadable.',
+        retryable: false,
+      },
+      state: 'blocked',
+      terminalReason: 'local_asset_unreadable',
+    });
+  });
+
   it('maps provider_not_configured to fail-closed blocked state', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
@@ -889,6 +1010,7 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
 function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
   return {
     assetRefId: 'asset_ref_1',
+    availabilityState: 'available',
     cleanupState: 'retained',
     createdAt: now,
     hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',

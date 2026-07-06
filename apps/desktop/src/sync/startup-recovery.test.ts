@@ -207,6 +207,7 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
 function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
   return {
     assetRefId: 'asset_job_1',
+    availabilityState: 'available',
     cleanupState: 'retained',
     createdAt: now,
     hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',

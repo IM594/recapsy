@@ -21,6 +21,7 @@ import type {
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
+  UpdateAssetRefAvailabilityInput,
 } from './types';
 
 export type InMemoryOperationalStoreOptions = {
@@ -195,6 +196,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
 
     const updated: OutboxJob = {
       ...job,
+      lastSafeError: update.lastSafeError ? { ...update.lastSafeError } : undefined,
       lockedAt: undefined,
       nextRetryAt: undefined,
       state: update.state,
@@ -300,10 +302,33 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
     return asset ? cloneAssetRef(asset) : null;
   }
 
-  async listAssetCacheRefs(workspaceId: string): Promise<AssetCacheRef[]> {
+  async listAssetCacheRefs(workspaceId?: string): Promise<AssetCacheRef[]> {
     return [...this.assetRefs.values()]
-      .filter((asset) => asset.workspaceId === workspaceId)
+      .filter((asset) => (workspaceId ? asset.workspaceId === workspaceId : true))
       .map(cloneAssetRef);
+  }
+
+  async updateAssetRefAvailability(
+    input: UpdateAssetRefAvailabilityInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>> {
+    const asset = this.assetRefs.get(input.assetRefId);
+
+    if (!asset) {
+      return failure(notFound('asset_ref_not_found', 'Asset ref was not found.'));
+    }
+
+    const updated: AssetCacheRef = {
+      ...asset,
+      availabilityCheckedAt: input.now,
+      availabilitySafeError: input.availabilitySafeError
+        ? { ...input.availabilitySafeError }
+        : undefined,
+      availabilityState: input.availabilityState,
+    };
+
+    this.assetRefs.set(input.assetRefId, updated);
+
+    return success(cloneAssetRef(updated));
   }
 
   async deleteAssetCacheRef(assetRefId: string): Promise<boolean> {
@@ -514,7 +539,12 @@ function cloneCapturePayload(capture: OutboxJob['capture']): OutboxJob['capture'
 }
 
 function cloneAssetRef(asset: AssetCacheRef): AssetCacheRef {
-  return { ...asset };
+  return {
+    ...asset,
+    ...(asset.availabilitySafeError
+      ? { availabilitySafeError: { ...asset.availabilitySafeError } }
+      : {}),
+  };
 }
 
 function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {

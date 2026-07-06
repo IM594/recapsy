@@ -100,7 +100,10 @@ export type {
   RuntimeSnapshot,
   RuntimeStatus,
 } from './runtime/types';
-export type { StartupRecoveryLifecycle } from './runtime/lifecycle-controller';
+export type {
+  AssetReconciliationLifecycle as DesktopAssetReconciliationLifecycle,
+  StartupRecoveryLifecycle,
+} from './runtime/lifecycle-controller';
 export { ServerApiError, createServerApiClient } from './server-api/client';
 export type {
   CaptureIngestInput,
@@ -133,6 +136,13 @@ export type {
   TimelineQueryInput,
 } from './server-api/client';
 export { createSyncQueueSummary, createSyncScheduler } from './sync/scheduler';
+export { reconcileAssetRefs } from './storage/asset-reconciliation';
+export type {
+  AssetAvailabilityCheck,
+  AssetAvailabilityResolver,
+  AssetReconciliationOptions,
+  AssetReconciliationSummary,
+} from './storage/asset-reconciliation';
 export { recoverInterruptedOutboxJobs } from './sync/startup-recovery';
 export type { StartupRecoveryOptions, StartupRecoverySummary } from './sync/startup-recovery';
 export type {
@@ -155,6 +165,7 @@ export {
 export type {
   AssetCacheRef,
   AssetCacheRefRole,
+  AssetAvailabilityState,
   AssetCleanupState,
   BackpressureConfig,
   BackpressureDecision,
@@ -195,4 +206,5 @@ export type {
   SqliteValue,
   SyncCursor,
   SyncCursorKind,
+  UpdateAssetRefAvailabilityInput,
 } from './storage';

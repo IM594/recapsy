@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSyncQueueSummary } from '../sync/scheduler';
 import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
+import { reconcileAssetRefs } from './asset-reconciliation';
 import { createBunSqliteDatabase } from './bun-sqlite-driver';
 import {
   type AssetCacheRef,
@@ -74,6 +75,79 @@ describe('SQLite operational store', () => {
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
         ?.count,
     ).toBe(1);
+
+    database.close();
+  });
+
+  it('adds asset availability columns to an existing early operational table', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    database.run(
+      `CREATE TABLE asset_cache_refs (
+        asset_ref_id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        hash TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        size_bytes INTEGER NOT NULL,
+        cleanup_state TEXT NOT NULL,
+        availability TEXT NOT NULL DEFAULT 'available',
+        created_at TEXT NOT NULL,
+        local_access_key TEXT NOT NULL,
+        last_availability_error_json TEXT,
+        content_address TEXT
+      )`,
+    );
+    database.run(
+      `INSERT INTO asset_cache_refs (
+        asset_ref_id,
+        workspace_id,
+        role,
+        hash,
+        mime_type,
+        size_bytes,
+        cleanup_state,
+        created_at,
+        local_access_key
+      ) VALUES (
+        'asset_early',
+        'workspace_1',
+        'capture_original',
+        'sha256:early',
+        'image/png',
+        128,
+        'retained',
+        $createdAt,
+        'content-addressed/local/asset_early'
+      )`,
+      { $createdAt: now },
+    );
+
+    runSqliteOperationalStoreMigrations(database);
+    const store = createSqliteOperationalStore({ database });
+
+    expect(await store.getAssetCacheRef('asset_early')).toMatchObject({
+      assetRefId: 'asset_early',
+      availabilityState: 'available',
+    });
+
+    const updated = await store.updateAssetRefAvailability({
+      assetRefId: 'asset_early',
+      availabilitySafeError: {
+        code: 'local_asset_missing',
+        message: 'Local asset is missing.',
+        retryable: false,
+      },
+      availabilityState: 'missing',
+      now: '2026-07-06T00:05:00.000Z',
+    });
+
+    expect(updated).toMatchObject({
+      ok: true,
+      value: {
+        availabilityCheckedAt: '2026-07-06T00:05:00.000Z',
+        availabilityState: 'missing',
+      },
+    });
 
     database.close();
   });
@@ -519,9 +593,11 @@ describe('SQLite operational store', () => {
     });
     expect(projection).toEqual({
       assetRefId: 'asset_1',
+      availabilityCheckedAt: undefined,
+      availabilitySafeError: undefined,
+      availabilityState: 'available',
       cleanupState: 'cleanup_pending',
       createdAt: now,
-      hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       mimeType: 'image/png',
       role: 'capture_original',
       sizeBytes: 4096,
@@ -529,6 +605,78 @@ describe('SQLite operational store', () => {
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('localAccessKey');
     expect(serialized).not.toContain('contentAddress');
+  });
+
+  it('persists asset ref reconciliation state and blocked jobs after close and reopen', async () => {
+    const path = tempDatabasePath();
+    const firstDatabase = createBunSqliteDatabase(path);
+    const first = createSqliteOperationalStore({ database: firstDatabase });
+
+    await first.initialize();
+    await first.upsertAssetCacheRef(
+      createAsset({
+        contentAddress: 'sha256/private-content',
+        localAccessKey: '/Users/alice/Pictures/recapsy/private.png',
+      }),
+    );
+    await first.createOutboxJob(createJob());
+
+    const summary = await reconcileAssetRefs({
+      now: '2026-07-06T00:05:00.000Z',
+      resolver: {
+        async checkAvailability() {
+          return { availabilityState: 'missing' };
+        },
+      },
+      store: first,
+      workspaceId: 'workspace_1',
+    });
+    first.close();
+
+    const reopenedDatabase = createBunSqliteDatabase(path);
+    const reopened = createSqliteOperationalStore({ database: reopenedDatabase });
+    await reopened.initialize();
+
+    const asset = await reopened.getAssetCacheRef('asset_1');
+    if (!asset) {
+      throw new Error('Expected asset ref to exist.');
+    }
+    const projection = toRendererSafeAssetRef(asset);
+    const serializedProjection = JSON.stringify(projection);
+    const serializedSummary = JSON.stringify(summary);
+
+    expect(summary).toMatchObject({
+      blocked: 1,
+      checked: 1,
+      missing: 1,
+    });
+    expect(asset).toMatchObject({
+      availabilityCheckedAt: '2026-07-06T00:05:00.000Z',
+      availabilitySafeError: {
+        code: 'local_asset_missing',
+        message: 'Local asset is missing.',
+        retryable: false,
+      },
+      availabilityState: 'missing',
+      localAccessKey: '/Users/alice/Pictures/recapsy/private.png',
+    });
+    expect(await reopened.getOutboxJob('job_1')).toMatchObject({
+      lastSafeError: {
+        code: 'local_asset_missing',
+        message: 'Local asset is missing.',
+        retryable: false,
+      },
+      state: 'blocked',
+      terminalReason: 'local_asset_missing',
+    });
+    expect(serializedProjection).not.toContain('/Users/alice');
+    expect(serializedProjection).not.toContain('localAccessKey');
+    expect(serializedProjection).not.toContain('contentAddress');
+    expect(serializedSummary).not.toContain('/Users/alice');
+    expect(serializedSummary).not.toContain('localAccessKey');
+    expect(serializedSummary).not.toContain('contentAddress');
+
+    reopened.close();
   });
 
   it('expires policy cache entries by TTL and persists sync cursor and settings cache', async () => {
@@ -734,6 +882,7 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
 function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
   return {
     assetRefId: 'asset_1',
+    availabilityState: 'available',
     cleanupState: 'retained',
     createdAt: now,
     hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',

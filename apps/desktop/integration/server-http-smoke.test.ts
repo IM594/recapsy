@@ -448,6 +448,7 @@ async function createSqliteStore(): Promise<OperationalStoreRepository> {
 function createAsset(workspaceId: string, bytes: Uint8Array): AssetCacheRef {
   return {
     assetRefId: 'asset_ref_1',
+    availabilityState: 'available',
     cleanupState: 'retained',
     createdAt: now,
     hash: sha256Hex(bytes),

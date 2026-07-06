@@ -22,6 +22,7 @@ import type {
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
+  UpdateAssetRefAvailabilityInput,
 } from './types';
 
 export type SqliteOperationalStoreOptions = {
@@ -56,6 +57,8 @@ export function runSqliteOperationalStoreMigrations(database: SqliteDatabase): v
     database.run(statement);
   }
 
+  ensureAssetAvailabilityColumns(database);
+
   database.run(
     `INSERT OR IGNORE INTO schema_migrations (version, applied_at)
      VALUES ($version, $appliedAt)`,
@@ -64,6 +67,37 @@ export function runSqliteOperationalStoreMigrations(database: SqliteDatabase): v
       $version: SCHEMA_VERSION,
     },
   );
+}
+
+function ensureAssetAvailabilityColumns(database: SqliteDatabase): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }>('PRAGMA table_info(asset_cache_refs)')
+      .all()
+      .map((column) => column.name),
+  );
+
+  if (!columns.has('availability_state')) {
+    database.run(
+      `ALTER TABLE asset_cache_refs
+       ADD COLUMN availability_state TEXT NOT NULL DEFAULT 'available'
+       CHECK (availability_state IN ('available', 'missing', 'unreadable'))`,
+    );
+  }
+
+  if (!columns.has('availability_checked_at')) {
+    database.run('ALTER TABLE asset_cache_refs ADD COLUMN availability_checked_at TEXT');
+  }
+
+  if (!columns.has('availability_safe_error_json')) {
+    database.run(
+      `ALTER TABLE asset_cache_refs
+       ADD COLUMN availability_safe_error_json TEXT
+       CHECK (
+         availability_safe_error_json IS NULL OR json_valid(availability_safe_error_json)
+       )`,
+    );
+  }
 }
 
 class SqliteOperationalStore implements OperationalStoreRepository {
@@ -308,6 +342,7 @@ class SqliteOperationalStore implements OperationalStoreRepository {
              locked_at = NULL,
              server_capture_id = $serverCaptureId,
              server_ocr_job_id = $serverOcrJobId,
+             last_safe_error_json = $lastSafeErrorJson,
              terminal_reason = $terminalReason
          WHERE id = $id
            AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
@@ -315,6 +350,7 @@ class SqliteOperationalStore implements OperationalStoreRepository {
       )
       .get({
         $id: id,
+        $lastSafeErrorJson: update.lastSafeError ? JSON.stringify(update.lastSafeError) : null,
         $serverCaptureId: update.serverCaptureId ?? null,
         $serverOcrJobId: update.serverOcrJobId ?? null,
         $state: update.state,
@@ -434,8 +470,11 @@ class SqliteOperationalStore implements OperationalStoreRepository {
           mime_type,
           size_bytes,
           cleanup_state,
+          availability_state,
+          availability_checked_at,
           created_at,
           local_access_key,
+          availability_safe_error_json,
           content_address
         ) VALUES (
           $assetRefId,
@@ -445,8 +484,11 @@ class SqliteOperationalStore implements OperationalStoreRepository {
           $mimeType,
           $sizeBytes,
           $cleanupState,
+          $availabilityState,
+          $availabilityCheckedAt,
           $createdAt,
           $localAccessKey,
+          $availabilitySafeErrorJson,
           $contentAddress
         )
         ON CONFLICT(asset_ref_id) DO UPDATE SET
@@ -456,8 +498,11 @@ class SqliteOperationalStore implements OperationalStoreRepository {
           mime_type = excluded.mime_type,
           size_bytes = excluded.size_bytes,
           cleanup_state = excluded.cleanup_state,
+          availability_state = excluded.availability_state,
+          availability_checked_at = excluded.availability_checked_at,
           created_at = excluded.created_at,
           local_access_key = excluded.local_access_key,
+          availability_safe_error_json = excluded.availability_safe_error_json,
           content_address = excluded.content_address`,
       )
       .run(assetParameters(cloned));
@@ -478,16 +523,51 @@ class SqliteOperationalStore implements OperationalStoreRepository {
     return row ? assetRefFromRow(row) : null;
   }
 
-  async listAssetCacheRefs(workspaceId: string): Promise<AssetCacheRef[]> {
-    return this.options.database
+  async listAssetCacheRefs(workspaceId?: string): Promise<AssetCacheRef[]> {
+    const rows = workspaceId
+      ? this.options.database
+          .prepare<AssetCacheRefRow>(
+            `SELECT *
+             FROM asset_cache_refs
+             WHERE workspace_id = $workspaceId
+             ORDER BY created_at ASC, asset_ref_id ASC`,
+          )
+          .all({ $workspaceId: workspaceId })
+      : this.options.database
+          .prepare<AssetCacheRefRow>(
+            'SELECT * FROM asset_cache_refs ORDER BY workspace_id ASC, created_at ASC, asset_ref_id ASC',
+          )
+          .all();
+
+    return rows.map(assetRefFromRow);
+  }
+
+  async updateAssetRefAvailability(
+    input: UpdateAssetRefAvailabilityInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>> {
+    const row = this.options.database
       .prepare<AssetCacheRefRow>(
-        `SELECT *
-         FROM asset_cache_refs
-         WHERE workspace_id = $workspaceId
-         ORDER BY created_at ASC, asset_ref_id ASC`,
+        `UPDATE asset_cache_refs
+         SET availability_state = $availabilityState,
+             availability_checked_at = $availabilityCheckedAt,
+             availability_safe_error_json = $availabilitySafeErrorJson
+         WHERE asset_ref_id = $assetRefId
+         RETURNING *`,
       )
-      .all({ $workspaceId: workspaceId })
-      .map(assetRefFromRow);
+      .get({
+        $assetRefId: input.assetRefId,
+        $availabilityCheckedAt: input.now,
+        $availabilitySafeErrorJson: input.availabilitySafeError
+          ? JSON.stringify(input.availabilitySafeError)
+          : null,
+        $availabilityState: input.availabilityState,
+      });
+
+    if (!row) {
+      return failure(notFound('asset_ref_not_found', 'Asset ref was not found.'));
+    }
+
+    return success(assetRefFromRow(row));
   }
 
   async deleteAssetCacheRef(assetRefId: string): Promise<boolean> {
@@ -790,8 +870,11 @@ type AssetCacheRefRow = SqliteRow & {
   mime_type: string;
   size_bytes: number;
   cleanup_state: AssetCacheRef['cleanupState'];
+  availability_state: AssetCacheRef['availabilityState'];
+  availability_checked_at?: string | null;
   created_at: string;
   local_access_key: string;
+  availability_safe_error_json?: string | null;
   content_address?: string | null;
 };
 
@@ -862,8 +945,15 @@ const schemaStatements = [
     cleanup_state TEXT NOT NULL CHECK (
       cleanup_state IN ('retained', 'cleanup_pending', 'cleaned', 'cleanup_failed')
     ),
+    availability_state TEXT NOT NULL DEFAULT 'available' CHECK (
+      availability_state IN ('available', 'missing', 'unreadable')
+    ),
+    availability_checked_at TEXT,
     created_at TEXT NOT NULL,
     local_access_key TEXT NOT NULL,
+    availability_safe_error_json TEXT CHECK (
+      availability_safe_error_json IS NULL OR json_valid(availability_safe_error_json)
+    ),
     content_address TEXT
   )`,
   `CREATE INDEX IF NOT EXISTS idx_asset_cache_refs_workspace
@@ -900,6 +990,11 @@ const schemaStatements = [
 function assetParameters(asset: AssetCacheRef): Record<string, string | number | null> {
   return {
     $assetRefId: asset.assetRefId,
+    $availabilityCheckedAt: asset.availabilityCheckedAt ?? null,
+    $availabilitySafeErrorJson: asset.availabilitySafeError
+      ? JSON.stringify(asset.availabilitySafeError)
+      : null,
+    $availabilityState: asset.availabilityState,
     $cleanupState: asset.cleanupState,
     $contentAddress: asset.contentAddress ?? null,
     $createdAt: asset.createdAt,
@@ -939,6 +1034,7 @@ function outboxJobFromRow(row: OutboxJobRow): OutboxJob {
 function assetRefFromRow(row: AssetCacheRefRow): AssetCacheRef {
   return cloneAssetRef({
     assetRefId: row.asset_ref_id,
+    availabilityState: row.availability_state,
     cleanupState: row.cleanup_state,
     createdAt: row.created_at,
     hash: row.hash,
@@ -947,7 +1043,15 @@ function assetRefFromRow(row: AssetCacheRefRow): AssetCacheRef {
     role: row.role,
     sizeBytes: row.size_bytes,
     workspaceId: row.workspace_id,
+    ...(row.availability_checked_at ? { availabilityCheckedAt: row.availability_checked_at } : {}),
     ...(row.content_address ? { contentAddress: row.content_address } : {}),
+    ...(row.availability_safe_error_json
+      ? {
+          availabilitySafeError: parseJson<AssetCacheRef['availabilitySafeError']>(
+            row.availability_safe_error_json,
+          ),
+        }
+      : {}),
   });
 }
 

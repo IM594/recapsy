@@ -4,13 +4,22 @@ export type StartupRecoveryLifecycle = {
   recover(): Promise<void>;
 };
 
+export type AssetReconciliationLifecycle = {
+  reconcile(): Promise<void>;
+};
+
 export type DesktopRuntimeOptions = {
   helper: HelperLifecycle;
   startupRecovery?: StartupRecoveryLifecycle;
+  assetReconciliation?: AssetReconciliationLifecycle;
 };
 
 export function createDesktopRuntime(options: DesktopRuntimeOptions): DesktopRuntime {
-  return new LifecycleController(options.helper, options.startupRecovery);
+  return new LifecycleController(
+    options.helper,
+    options.startupRecovery,
+    options.assetReconciliation,
+  );
 }
 
 class LifecycleController implements DesktopRuntime {
@@ -20,6 +29,7 @@ class LifecycleController implements DesktopRuntime {
   constructor(
     private readonly helper: HelperLifecycle,
     private readonly startupRecovery?: StartupRecoveryLifecycle,
+    private readonly assetReconciliation?: AssetReconciliationLifecycle,
   ) {}
 
   getSnapshot(): RuntimeSnapshot {
@@ -38,6 +48,7 @@ class LifecycleController implements DesktopRuntime {
 
     try {
       await this.startupRecovery?.recover();
+      await this.assetReconciliation?.reconcile();
       await this.helper.start();
       this.status = 'running';
       this.menuBarActive = false;

@@ -25,6 +25,7 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
 function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
   return {
     assetRefId: 'asset_1',
+    availabilityState: 'available',
     cleanupState: 'retained',
     createdAt: now,
     hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -328,9 +329,11 @@ describe('in-memory operational store', () => {
     });
     expect(projection).toEqual({
       assetRefId: 'asset_1',
+      availabilityCheckedAt: undefined,
+      availabilitySafeError: undefined,
+      availabilityState: 'available',
       cleanupState: 'retained',
       createdAt: now,
-      hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
       mimeType: 'image/png',
       role: 'capture_original',
       sizeBytes: 2048,

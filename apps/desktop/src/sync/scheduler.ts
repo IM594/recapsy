@@ -141,11 +141,11 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
     const asset = await options.store.getAssetCacheRef(job.assetRefId);
 
     if (!asset) {
-      await recordSafeError(options, job, {
-        code: 'validation_failed',
+      await markJobTerminalWithSafeError(options, job, 'blocked', {
+        code: 'asset_ref_missing',
         retryable: false,
       });
-      return { jobId: job.id, processed: 1, status: 'failed' };
+      return { jobId: job.id, processed: 1, status: 'blocked' };
     }
 
     if (!(await ensureWorkspaceStillActive(options, job))) {
@@ -190,7 +190,7 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       return { jobId: job.id, processed: 1, status: 'retry_wait' };
     }
 
-    if (capture.nextAction === 'none' || !capture.inputAssetId) {
+    if (capture.nextAction === 'none') {
       await options.store.markOutboxJobTerminal(job.id, {
         now: options.clock.now(),
         reason: 'metadata_synced',
@@ -199,6 +199,17 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       });
       return { jobId: job.id, processed: 1, status: 'synced' };
     }
+
+    if (!capture.inputAssetId) {
+      await markJobTerminalWithSafeError(options, job, 'failed', {
+        code: 'upload_input_missing',
+        retryable: false,
+        serverCaptureId: capture.captureId,
+      });
+      return { jobId: job.id, processed: 1, status: 'failed' };
+    }
+
+    const bytes = await options.readAssetBytes(asset.localAccessKey);
 
     const upload = await options.api.createTemporaryUpload({
       assetId: capture.inputAssetId,
@@ -209,7 +220,6 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       workspaceId: job.workspaceId,
     });
 
-    const bytes = await options.readAssetBytes(asset.localAccessKey);
     await options.api.putTemporaryBytes({
       assetId: capture.inputAssetId,
       bytes,
@@ -391,6 +401,19 @@ async function handleSyncError(
   }
 
   if (isSafeErrorShape(error)) {
+    if (isLocalAssetSafeCode(error.code)) {
+      await markJobTerminalWithSafeError(options, job, 'blocked', {
+        code: error.code,
+        retryable: false,
+      });
+      return {
+        code: undefined,
+        jobId: job.id,
+        processed: 1,
+        status: 'blocked',
+      };
+    }
+
     await recordSafeError(options, job, {
       code: error.code,
       retryable: error.retryable,
@@ -408,6 +431,31 @@ async function handleSyncError(
     retryable: true,
   });
   return { jobId: job.id, processed: 1, status: 'retry_wait' };
+}
+
+async function markJobTerminalWithSafeError(
+  options: SyncSchedulerOptions,
+  job: OutboxJob,
+  state: 'blocked' | 'failed',
+  input: {
+    code: string;
+    retryable: boolean;
+    serverCaptureId?: string;
+    serverOcrJobId?: string;
+  },
+): Promise<void> {
+  await options.store.markOutboxJobTerminal(job.id, {
+    lastSafeError: {
+      code: input.code,
+      message: syncSafeMessage(input.code),
+      retryable: input.retryable,
+    },
+    now: options.clock.now(),
+    reason: input.code,
+    serverCaptureId: input.serverCaptureId ?? job.serverCaptureId,
+    serverOcrJobId: input.serverOcrJobId ?? job.serverOcrJobId,
+    state,
+  });
 }
 
 function isSafeErrorShape(
@@ -491,6 +539,15 @@ function toIpcErrorCode(code: string): IpcErrorCode {
     return code as IpcErrorCode;
   }
 
+  if (
+    code === 'local_asset_missing' ||
+    code === 'local_asset_unreadable' ||
+    code === 'asset_ref_missing' ||
+    code === 'upload_input_missing'
+  ) {
+    return 'validation_failed';
+  }
+
   return 'unknown';
 }
 
@@ -567,9 +624,29 @@ function syncSafeMessage(code: string): string {
     return 'Request validation failed.';
   }
 
+  if (code === 'local_asset_missing') {
+    return 'Local asset is missing.';
+  }
+
+  if (code === 'local_asset_unreadable') {
+    return 'Local asset is unreadable.';
+  }
+
+  if (code === 'asset_ref_missing') {
+    return 'Local asset reference is missing.';
+  }
+
+  if (code === 'upload_input_missing') {
+    return 'Upload input asset is missing.';
+  }
+
   if (code === 'cancelled') {
     return 'Request was cancelled.';
   }
 
   return 'Sync failed.';
+}
+
+function isLocalAssetSafeCode(code: string): boolean {
+  return code === 'local_asset_missing' || code === 'local_asset_unreadable';
 }

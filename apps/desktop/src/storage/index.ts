@@ -4,6 +4,13 @@ export {
   type InMemoryOperationalStoreOptions,
 } from './memory-operational-store';
 export { toRendererSafeAssetRef } from './projections';
+export { reconcileAssetRefs } from './asset-reconciliation';
+export type {
+  AssetAvailabilityCheck,
+  AssetAvailabilityResolver,
+  AssetReconciliationOptions,
+  AssetReconciliationSummary,
+} from './asset-reconciliation';
 export type {
   SqliteDatabase,
   SqliteParameters,
@@ -20,6 +27,7 @@ export {
 export type {
   AssetCacheRef,
   AssetCacheRefRole,
+  AssetAvailabilityState,
   AssetCleanupState,
   BackpressureConfig,
   BackpressureDecision,
@@ -53,4 +61,5 @@ export type {
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
+  UpdateAssetRefAvailabilityInput,
 } from './types';

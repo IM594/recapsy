@@ -107,6 +107,7 @@ export type OutboxTerminalUpdate = {
   reason: string;
   serverCaptureId?: string;
   serverOcrJobId?: string;
+  lastSafeError?: SafeOperationalError;
 };
 
 export type OutboxSafeErrorInput = {
@@ -143,6 +144,7 @@ export type AssetCacheRefRole =
   | 'derived_asset';
 
 export type AssetCleanupState = 'retained' | 'cleanup_pending' | 'cleaned' | 'cleanup_failed';
+export type AssetAvailabilityState = 'available' | 'missing' | 'unreadable';
 
 export type AssetCacheRef = {
   assetRefId: string;
@@ -152,15 +154,32 @@ export type AssetCacheRef = {
   mimeType: string;
   sizeBytes: number;
   cleanupState: AssetCleanupState;
+  availabilityState: AssetAvailabilityState;
+  availabilityCheckedAt?: string;
+  availabilitySafeError?: SafeOperationalError;
   createdAt: string;
   localAccessKey: string;
   contentAddress?: string;
 };
 
-export type RendererSafeAssetRef = Omit<
-  AssetCacheRef,
-  'workspaceId' | 'localAccessKey' | 'contentAddress'
->;
+export type RendererSafeAssetRef = {
+  assetRefId: string;
+  role: AssetCacheRefRole;
+  mimeType: string;
+  sizeBytes: number;
+  cleanupState: AssetCleanupState;
+  availabilityState: AssetAvailabilityState;
+  availabilityCheckedAt?: string;
+  availabilitySafeError?: Pick<SafeOperationalError, 'code' | 'retryable'>;
+  createdAt: string;
+};
+
+export type UpdateAssetRefAvailabilityInput = {
+  assetRefId: string;
+  availabilityState: AssetAvailabilityState;
+  now: string;
+  availabilitySafeError?: SafeOperationalError;
+};
 
 export type HelperPermissionState = 'granted' | 'denied' | 'not_determined' | 'unknown';
 
@@ -288,7 +307,10 @@ export type OperationalStoreRepository = {
   ): Promise<OperationalStoreResult<OutboxJob>>;
   upsertAssetCacheRef(asset: AssetCacheRef): Promise<AssetCacheRef>;
   getAssetCacheRef(assetRefId: string): Promise<AssetCacheRef | null>;
-  listAssetCacheRefs(workspaceId: string): Promise<AssetCacheRef[]>;
+  listAssetCacheRefs(workspaceId?: string): Promise<AssetCacheRef[]>;
+  updateAssetRefAvailability(
+    input: UpdateAssetRefAvailabilityInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>>;
   deleteAssetCacheRef(assetRefId: string): Promise<boolean>;
   setHelperState(state: HelperRuntimeState): Promise<HelperRuntimeState>;
   getHelperState(): Promise<HelperRuntimeState | null>;
