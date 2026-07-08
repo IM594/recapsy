@@ -113,10 +113,33 @@ export type ElectronMainRuntimeHandle = {
   ready: Promise<ElectronMainRuntimeReadyState>;
 };
 
+/**
+ * Sized against the actual product target (2026-07-08): captures every 2-5s,
+ * at least 8h/day, ~100-800KB per compressed asset. `evaluateOperationalStoreBackpressure`
+ * pauses on whichever limit is hit first, so both are sized to the same
+ * worst-case tolerance window (worst-case cadence: 1 capture/2s) rather than
+ * to independent, unrelated budgets:
+ * - `maxAssetBytes`: 900 captures (30min / 2s) * 800KB (largest observed
+ *   size) ≈ 703MB, rounded up to 750MB for margin.
+ * - `maxQueuedJobs`: 900 captures in that same 30min window, rounded up to
+ *   1000 so it isn't the tighter constraint under the worst-case byte
+ *   assumption.
+ * Still a planning estimate, not a product-confirmed SLA — revisit once
+ * there is real device telemetry on sustained offline duration.
+ */
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
-  maxAssetBytes: 25 * 1024 * 1024,
-  maxQueuedJobs: 500,
-  maxRetryAttempts: 8,
+  maxAssetBytes: 750 * 1024 * 1024,
+  maxQueuedJobs: 1000,
+  // `maxRetryAttempts` pairs with `sync/scheduler.ts`'s `SyncSchedulerOptions.retryDelayMs`
+  // (not yet wired into this file — the sync loop itself is a separate,
+  // still-open gap, see docs/NEXT_HANDOFF.md). At a flat (non-exponential)
+  // 60s retry delay, 15 attempts gives ~15 minutes of tolerance for a
+  // transient network/provider outage before a job is marked permanently
+  // failed. A real exponential-backoff curve would need `retryDelayMs` to
+  // become a per-attempt function instead of a single flat number, which is
+  // a breaking change to `sync/scheduler.ts` and its existing tests — out
+  // of scope here, flagged for follow-up.
+  maxRetryAttempts: 15,
 };
 
 const DEFAULT_QUIT_TIMEOUT_MS = 5000;
