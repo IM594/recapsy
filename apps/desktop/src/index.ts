@@ -83,6 +83,12 @@ export type {
 } from './helper/protocol';
 export { createSafeCaptureResultPayload } from './helper/projection';
 export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './helper/projection';
+export { createSpawnCaptureHelperClient } from './helper/spawn-capture-helper-client';
+export type {
+  SpawnCaptureHelperClientOptions,
+  SpawnedHelperProcess,
+  SpawnHelperProcessFn,
+} from './helper/spawn-capture-helper-client';
 export { createMockHelperController } from './helper/mock-controller';
 export type {
   MockHelperCommandResult,
