@@ -196,6 +196,51 @@ describe('desktop runtime lifecycle', () => {
     });
     expect(calls).toEqual(['recover', 'reconcile']);
   });
+
+  it('fails closed when helper start fails after operational checks', async () => {
+    const calls: string[] = [];
+    const runtime = createDesktopRuntime({
+      assetReconciliation: {
+        async reconcile(): Promise<void> {
+          calls.push('reconcile');
+        },
+      },
+      helper: {
+        async pauseCapture(): Promise<void> {
+          calls.push('pauseCapture');
+        },
+        async resumeCapture(): Promise<void> {
+          calls.push('resumeCapture');
+        },
+        async shutdown(): Promise<void> {
+          calls.push('shutdown');
+        },
+        async start(): Promise<void> {
+          calls.push('start');
+          throw new Error('helper launch failed');
+        },
+      },
+      startupRecovery: {
+        async recover(): Promise<void> {
+          calls.push('recover');
+        },
+      },
+    });
+
+    await expect(runtime.start()).rejects.toThrow('helper launch failed');
+
+    expect(runtime.getSnapshot()).toMatchObject({
+      status: 'stopped',
+      menuBarActive: false,
+      captureHelper: {
+        state: 'failed',
+        lastSafeError: {
+          code: 'helper_start_failed',
+        },
+      },
+    });
+    expect(calls).toEqual(['recover', 'reconcile', 'start']);
+  });
 });
 
 function createRecordingHelper(calls: string[]): HelperLifecycle {

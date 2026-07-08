@@ -32,6 +32,7 @@ export type {
   BackpressureConfig,
   BackpressureDecision,
   BackpressureReason,
+  CaptureOutboxEntryCreateInput,
   CaptureOutboxPayload,
   CaptureOutboxPayloadInput,
   CapturePrivacyDecision,

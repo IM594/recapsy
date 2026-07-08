@@ -126,6 +126,64 @@ describe('in-memory operational store', () => {
     });
   });
 
+  it('creates capture outbox entries atomically and rolls back asset refs on capacity failure', async () => {
+    const store = createInMemoryOperationalStore({ maxActiveOutboxJobs: 0 });
+
+    const result = await store.createCaptureOutboxEntry({
+      ...createJob(),
+      assetRefs: [createAsset()],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'capacity_exceeded',
+        message: 'Outbox active job capacity has been reached.',
+      },
+    });
+    expect(await store.getAssetCacheRef('asset_1')).toBeNull();
+    expect(await store.getOutboxJob('job_1')).toBeNull();
+  });
+
+  it('treats identical capture outbox idempotency conflicts as success and divergent ones as conflicts', async () => {
+    const store = createInMemoryOperationalStore();
+    const entry = {
+      ...createJob(),
+      assetRefs: [createAsset()],
+    };
+
+    const first = await store.createCaptureOutboxEntry(entry);
+    const identical = await store.createCaptureOutboxEntry(entry);
+    const divergent = await store.createCaptureOutboxEntry({
+      ...entry,
+      assetRefs: [
+        createAsset({
+          hash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        }),
+      ],
+      payloadHash: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+    });
+
+    expect(first.ok).toBe(true);
+    expect(identical).toMatchObject({
+      ok: true,
+      value: {
+        id: 'job_1',
+        state: 'pending',
+      },
+    });
+    expect(divergent).toEqual({
+      ok: false,
+      error: {
+        code: 'idempotency_key_conflict',
+        message: 'Outbox idempotency key already exists for this workspace.',
+      },
+    });
+    expect(await store.getAssetCacheRef('asset_1')).toMatchObject({
+      hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    });
+  });
+
   it('claims the next retryable job by retry time and marks it as uploading', async () => {
     const store = createInMemoryOperationalStore();
     await store.createOutboxJob(
@@ -347,7 +405,7 @@ describe('in-memory operational store', () => {
     await store.setPolicyCache({
       actions: ['block_capture'],
       fetchedAt: '2026-07-06T00:00:00.000Z',
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
       ttlSeconds: 60,
       workspaceId: 'workspace_1',
     });
@@ -358,7 +416,7 @@ describe('in-memory operational store', () => {
       }),
     ).toMatchObject({
       expired: false,
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
     });
     expect(
       await store.getPolicyCache('workspace_1', {
@@ -366,7 +424,7 @@ describe('in-memory operational store', () => {
       }),
     ).toMatchObject({
       expired: true,
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
     });
   });
 

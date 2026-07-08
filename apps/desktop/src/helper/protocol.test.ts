@@ -75,9 +75,36 @@ describe('helper stdio protocol', () => {
     ]);
   });
 
+  it('accepts typed storage nacks from main to helper', () => {
+    const result = decodeHelperEnvelopeLine(
+      JSON.stringify({
+        correlationId: 'capture_message_1',
+        messageId: 'main_message_1',
+        payload: {
+          captureId: 'capture_1',
+          code: 'storage_unavailable',
+          message: 'Capture could not be queued locally.',
+        },
+        protocolVersion: HELPER_PROTOCOL_VERSION,
+        sentAt: '2026-07-06T00:00:00.000Z',
+        type: 'capture.nack',
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      envelope: {
+        payload: {
+          code: 'storage_unavailable',
+        },
+        type: 'capture.nack',
+      },
+    });
+  });
+
   it('fails closed for invalid json without exposing raw payload in the protocol error', () => {
     const result = decodeHelperEnvelopeLine(
-      '{"protocolVersion":"recapsy.helper.v1","messageId":"msg_bad","type":"capture.result","payload":{"providerToken":"secret-token"',
+      '{"protocolVersion":"recapsy.capture-helper","messageId":"msg_bad","type":"capture.result","payload":{"providerToken":"secret-token"',
     );
 
     expect(result.ok).toBe(false);

@@ -1,4 +1,4 @@
-export const HELPER_PROTOCOL_VERSION = 'recapsy.helper.v1' as const;
+export const HELPER_PROTOCOL_VERSION = 'recapsy.capture-helper' as const;
 
 export type HelperProtocolVersion = typeof HELPER_PROTOCOL_VERSION;
 
@@ -11,6 +11,9 @@ export type HelperProtocolErrorCode =
 export type HelperProtocolError = {
   code: HelperProtocolErrorCode;
   message: string;
+  captureId?: string;
+  correlationId?: string | null;
+  messageId?: string;
   messageType?: string;
 };
 
@@ -91,7 +94,13 @@ export type HelperToMainPayloadByType = {
   };
   'capture.error': {
     captureId?: string;
-    code: 'capture_failed' | 'permission_missing' | 'asset_write_failed' | 'unknown';
+    code:
+      | 'capture_failed'
+      | 'permission_missing'
+      | 'permission_revoked'
+      | 'asset_write_failed'
+      | 'helper_unavailable'
+      | 'unknown';
     message: string;
   };
   'helper.heartbeat': {
@@ -126,7 +135,14 @@ export type MainToHelperPayloadByType = {
   };
   'capture.nack': {
     captureId?: string;
-    code: 'schema_mismatch' | 'asset_unavailable' | 'policy_denied' | 'backpressure' | 'unknown';
+    code:
+      | 'schema_mismatch'
+      | 'asset_unavailable'
+      | 'policy_denied'
+      | 'backpressure'
+      | 'storage_unavailable'
+      | 'conflict'
+      | 'unknown';
     message: string;
   };
   'helper.shutdown': {
@@ -211,7 +227,7 @@ function validateHelperEnvelope(value: unknown): HelperProtocolResult<HelperEnve
     return protocolError(
       'unsupported_protocol_version',
       'Helper protocol version is not supported.',
-      safeMessageType(type),
+      protocolErrorMetadata(value, safeKnownMessageType(type)),
     );
   }
 
@@ -219,7 +235,7 @@ function validateHelperEnvelope(value: unknown): HelperProtocolResult<HelperEnve
     return protocolError(
       'schema_mismatch',
       'Helper envelope metadata is invalid.',
-      safeMessageType(type),
+      protocolErrorMetadata(value, safeKnownMessageType(type)),
     );
   }
 
@@ -227,23 +243,31 @@ function validateHelperEnvelope(value: unknown): HelperProtocolResult<HelperEnve
     return protocolError(
       'schema_mismatch',
       'Helper envelope correlation id is invalid.',
-      safeMessageType(type),
+      protocolErrorMetadata(value, safeKnownMessageType(type)),
     );
   }
 
   if (!isString(type)) {
-    return protocolError('schema_mismatch', 'Helper envelope type is invalid.');
+    return protocolError(
+      'schema_mismatch',
+      'Helper envelope type is invalid.',
+      protocolErrorMetadata(value),
+    );
   }
 
   if (!isKnownMessageType(type)) {
-    return protocolError('unknown_message_type', 'Helper envelope type is not recognized.', type);
+    return protocolError(
+      'unknown_message_type',
+      'Helper envelope type is not recognized.',
+      protocolErrorMetadata(value),
+    );
   }
 
   if (!isPayloadForType(type, value.payload)) {
     return protocolError(
       'schema_mismatch',
       'Helper envelope payload does not match its message type.',
-      type,
+      protocolErrorMetadata(value, type),
     );
   }
 
@@ -398,7 +422,9 @@ function isCaptureErrorPayload(payload: unknown): boolean {
     isOneOf(payload.code, [
       'capture_failed',
       'permission_missing',
+      'permission_revoked',
       'asset_write_failed',
+      'helper_unavailable',
       'unknown',
     ]) &&
     isSafeVisibleString(payload.message)
@@ -449,6 +475,8 @@ function isCaptureNackPayload(payload: unknown): boolean {
       'asset_unavailable',
       'policy_denied',
       'backpressure',
+      'storage_unavailable',
+      'conflict',
       'unknown',
     ]) &&
     isSafeVisibleString(payload.message)
@@ -523,23 +551,72 @@ function isKnownMessageType(type: string): type is HelperMessageType {
   ].includes(type);
 }
 
-function safeMessageType(type: unknown): string | undefined {
-  return isString(type) ? type : undefined;
+function safeKnownMessageType(type: unknown): HelperMessageType | undefined {
+  return isString(type) && isKnownMessageType(type) ? type : undefined;
 }
 
 function protocolError(
   code: HelperProtocolErrorCode,
   message: string,
-  messageType?: string,
+  metadata: ProtocolErrorMetadata = {},
 ): HelperProtocolResult<HelperEnvelope> {
   return {
     ok: false,
     error: {
       code,
       message,
-      ...(messageType ? { messageType } : {}),
+      ...(metadata.captureId ? { captureId: metadata.captureId } : {}),
+      ...(metadata.correlationId !== undefined ? { correlationId: metadata.correlationId } : {}),
+      ...(metadata.messageId ? { messageId: metadata.messageId } : {}),
+      ...(metadata.messageType ? { messageType: metadata.messageType } : {}),
     },
   };
+}
+
+type ProtocolErrorMetadata = {
+  captureId?: string;
+  correlationId?: string | null;
+  messageId?: string;
+  messageType?: HelperMessageType;
+};
+
+function protocolErrorMetadata(
+  value: Record<string, unknown>,
+  messageType?: HelperMessageType,
+): ProtocolErrorMetadata {
+  const metadata: ProtocolErrorMetadata = {
+    ...(messageType ? { messageType } : {}),
+  };
+
+  if (isSafeProtocolIdentifier(value.messageId)) {
+    metadata.messageId = value.messageId;
+  }
+
+  if (value.correlationId === null) {
+    metadata.correlationId = null;
+  } else if (isSafeProtocolIdentifier(value.correlationId)) {
+    metadata.correlationId = value.correlationId;
+  }
+
+  if (messageType?.startsWith('capture.') && isRecord(value.payload)) {
+    const captureId = value.payload.captureId;
+
+    if (isSafeProtocolIdentifier(captureId)) {
+      metadata.captureId = captureId;
+    }
+  }
+
+  return metadata;
+}
+
+function isSafeProtocolIdentifier(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9._:-]+$/.test(value) &&
+    !SECRET_WORD_PATTERN.test(value)
+  );
 }
 
 function optionalString(value: unknown): boolean {

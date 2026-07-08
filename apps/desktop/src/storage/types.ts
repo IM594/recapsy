@@ -50,6 +50,10 @@ export type OutboxJobCreateInput = {
   nextRetryAt?: string;
 };
 
+export type CaptureOutboxEntryCreateInput = OutboxJobCreateInput & {
+  assetRefs: AssetCacheRef[];
+};
+
 export type CapturePrivacyDecision = {
   action: 'allow' | 'block_capture' | 'redact_context' | 'block_ocr';
   decidedAt: string;
@@ -185,7 +189,7 @@ export type HelperPermissionState = 'granted' | 'denied' | 'not_determined' | 'u
 
 export type HelperRuntimeState = {
   helperVersion?: string;
-  transport: 'stdio_ndjson';
+  connectionKind: 'managed_helper' | 'external_helper' | 'unknown';
   pidDigest?: string;
   permissions: {
     screenRecording: HelperPermissionState;
@@ -242,6 +246,7 @@ export type OperationalStoreErrorCode =
   | 'outbox_job_not_found'
   | 'asset_ref_not_found'
   | 'outbox_job_id_conflict'
+  | 'asset_ref_conflict'
   | 'idempotency_key_conflict'
   | 'terminal_state_conflict'
   | 'storage_corruption'
@@ -287,6 +292,9 @@ export type BackpressureDecision = {
 
 export type OperationalStoreRepository = {
   createOutboxJob(job: OutboxJobCreateInput): Promise<OperationalStoreResult<OutboxJob>>;
+  createCaptureOutboxEntry(
+    entry: CaptureOutboxEntryCreateInput,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
   getOutboxJob(id: string): Promise<OutboxJob | null>;
   listOutboxJobs(filter?: OutboxJobListFilter): Promise<OutboxJob[]>;
   updateOutboxJobState(

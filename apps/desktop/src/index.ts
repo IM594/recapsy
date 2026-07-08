@@ -93,6 +93,23 @@ export type {
   MockHelperSnapshot,
   MockHelperState,
 } from './helper/mock-controller';
+export { createCaptureHelperController } from './runtime/capture-helper-controller';
+export type {
+  CaptureHelperAssetRef,
+  CaptureHelperClient,
+  CaptureHelperController,
+  CaptureHelperEvent,
+  CaptureHelperStartOptions,
+  CaptureHelperState,
+  CaptureHelperStatus,
+} from './runtime/capture-helper-controller';
+export { createCaptureHelperEventIntake } from './runtime/capture-helper-event-intake';
+export type {
+  CaptureHelperCommandClient,
+  CaptureHelperEventIntake,
+  CaptureHelperEventIntakeOptions,
+  CaptureHelperEventIntakeStatus,
+} from './runtime/capture-helper-event-intake';
 export { createDesktopRuntime } from './runtime/lifecycle-controller';
 export type {
   DesktopRuntime,

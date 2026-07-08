@@ -1,3 +1,4 @@
+import type { CaptureHelperStatus } from './capture-helper-controller';
 import type { DesktopRuntime, HelperLifecycle, RuntimeSnapshot, RuntimeStatus } from './types';
 
 export type StartupRecoveryLifecycle = {
@@ -23,6 +24,7 @@ export function createDesktopRuntime(options: DesktopRuntimeOptions): DesktopRun
 }
 
 class LifecycleController implements DesktopRuntime {
+  private captureHelperStatus: CaptureHelperStatus | undefined;
   private menuBarActive = false;
   private status: RuntimeStatus = 'stopped';
 
@@ -33,7 +35,10 @@ class LifecycleController implements DesktopRuntime {
   ) {}
 
   getSnapshot(): RuntimeSnapshot {
+    const helperStatus = this.helper.getStatus?.() ?? this.captureHelperStatus;
+
     return {
+      ...(helperStatus ? { captureHelper: helperStatus } : {}),
       menuBarActive: this.menuBarActive,
       status: this.status,
     };
@@ -49,8 +54,21 @@ class LifecycleController implements DesktopRuntime {
     try {
       await this.startupRecovery?.recover();
       await this.assetReconciliation?.reconcile();
-      await this.helper.start();
+      try {
+        await this.helper.start();
+      } catch (error) {
+        this.captureHelperStatus = {
+          lastSafeError: {
+            code: 'helper_start_failed',
+            message: 'Capture helper failed to start.',
+            retryable: true,
+          },
+          state: 'failed',
+        };
+        throw error;
+      }
       this.status = 'running';
+      this.captureHelperStatus = this.helper.getStatus?.();
       this.menuBarActive = false;
     } catch (error) {
       this.status = 'stopped';

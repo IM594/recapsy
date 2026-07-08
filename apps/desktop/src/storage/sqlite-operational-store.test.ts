@@ -165,7 +165,7 @@ describe('SQLite operational store', () => {
     await first.setPolicyCache({
       actions: ['block_ocr'],
       fetchedAt: now,
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
       ttlSeconds: 120,
       workspaceId: 'workspace_1',
     });
@@ -213,7 +213,7 @@ describe('SQLite operational store', () => {
     });
     expect(await reopened.getPolicyCache('workspace_1', { now })).toMatchObject({
       expired: false,
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
     });
     expect(await reopened.getSyncCursor('workspace_1', 'timeline')).toMatchObject({
       cursor: 'cursor_1',
@@ -351,6 +351,68 @@ describe('SQLite operational store', () => {
         code: 'outbox_job_id_conflict',
         message: 'Outbox job id already exists.',
       },
+    });
+  });
+
+  it('creates capture outbox entries in a transaction and rolls back asset refs on capacity failure', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    const store = createSqliteOperationalStore({ database, maxActiveOutboxJobs: 0 });
+    await store.initialize();
+
+    const result = await store.createCaptureOutboxEntry({
+      ...createJob(),
+      assetRefs: [createAsset()],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'capacity_exceeded',
+        message: 'Outbox active job capacity has been reached.',
+      },
+    });
+    expect(await store.getAssetCacheRef('asset_1')).toBeNull();
+    expect(await store.getOutboxJob('job_1')).toBeNull();
+
+    store.close();
+  });
+
+  it('acks identical capture outbox entries and rejects divergent idempotency without overwriting asset refs', async () => {
+    const store = await createTempStore();
+    const entry = {
+      ...createJob(),
+      assetRefs: [createAsset()],
+    };
+
+    const first = await store.createCaptureOutboxEntry(entry);
+    const identical = await store.createCaptureOutboxEntry(entry);
+    const divergent = await store.createCaptureOutboxEntry({
+      ...entry,
+      assetRefs: [
+        createAsset({
+          hash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        }),
+      ],
+      payloadHash: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+    });
+
+    expect(first.ok).toBe(true);
+    expect(identical).toMatchObject({
+      ok: true,
+      value: {
+        id: 'job_1',
+        state: 'pending',
+      },
+    });
+    expect(divergent).toEqual({
+      ok: false,
+      error: {
+        code: 'idempotency_key_conflict',
+        message: 'Outbox idempotency key already exists for this workspace.',
+      },
+    });
+    expect(await store.getAssetCacheRef('asset_1')).toMatchObject({
+      hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     });
   });
 
@@ -684,7 +746,7 @@ describe('SQLite operational store', () => {
     await store.setPolicyCache({
       actions: ['block_capture', 'redact_context'],
       fetchedAt: '2026-07-06T00:00:00.000Z',
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
       ttlSeconds: 60,
       workspaceId: 'workspace_1',
     });
@@ -713,7 +775,7 @@ describe('SQLite operational store', () => {
       }),
     ).toMatchObject({
       expired: false,
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
     });
     expect(
       await store.getPolicyCache('workspace_1', {
@@ -755,7 +817,7 @@ describe('SQLite operational store', () => {
     await store.setPolicyCache({
       actions: ['block_capture'],
       fetchedAt: now,
-      policyVersion: 'policy_v1',
+      policyVersion: 'policy_primary',
       ttlSeconds: 60,
       workspaceId: 'workspace_1',
     });
@@ -905,7 +967,7 @@ function createHelperState(overrides: Partial<HelperRuntimeState> = {}): HelperR
     },
     pidDigest: 'pid:123',
     restartCount: 1,
-    transport: 'stdio_ndjson',
+    connectionKind: 'managed_helper',
     updatedAt: now,
     ...overrides,
   };

@@ -1,8 +1,11 @@
+import type { CaptureHelperStatus } from './capture-helper-controller';
+
 export type RuntimeStatus = 'starting' | 'running' | 'paused' | 'stopping' | 'stopped';
 
 export type RuntimeSnapshot = {
   status: RuntimeStatus;
   menuBarActive: boolean;
+  captureHelper?: CaptureHelperStatus;
 };
 
 export type HelperLifecycle = {
@@ -10,6 +13,7 @@ export type HelperLifecycle = {
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;
   shutdown(): Promise<void>;
+  getStatus?(): CaptureHelperStatus;
 };
 
 export type DesktopRuntime = {

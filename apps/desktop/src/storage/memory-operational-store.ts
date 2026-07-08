@@ -1,5 +1,6 @@
 import type {
   AssetCacheRef,
+  CaptureOutboxEntryCreateInput,
   ClaimRetryableOutboxJobInput,
   HelperRuntimeState,
   OperationalStoreError,
@@ -101,6 +102,78 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
     };
 
     this.outboxJobs.set(job.id, created);
+
+    return success(cloneOutboxJob(created));
+  }
+
+  async createCaptureOutboxEntry(
+    entry: CaptureOutboxEntryCreateInput,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const activeJobCount = [...this.outboxJobs.values()].filter(
+      (job) => !isTerminalOutboxState(job.state),
+    ).length;
+
+    if (
+      this.options.maxActiveOutboxJobs !== undefined &&
+      activeJobCount >= this.options.maxActiveOutboxJobs
+    ) {
+      return failure({
+        code: 'capacity_exceeded',
+        message: 'Outbox active job capacity has been reached.',
+      });
+    }
+
+    const idempotencyConflict = [...this.outboxJobs.values()].find(
+      (job) => job.workspaceId === entry.workspaceId && job.idempotencyKey === entry.idempotencyKey,
+    );
+
+    if (idempotencyConflict) {
+      return existingCaptureOutboxEntryMatches(idempotencyConflict, entry, this.assetRefs)
+        ? success(cloneOutboxJob(idempotencyConflict))
+        : failure({
+            code: 'idempotency_key_conflict',
+            message: 'Outbox idempotency key already exists for this workspace.',
+          });
+    }
+
+    if (this.outboxJobs.has(entry.id)) {
+      return failure({
+        code: 'outbox_job_id_conflict',
+        message: 'Outbox job id already exists.',
+      });
+    }
+
+    for (const assetRef of entry.assetRefs) {
+      const existing = this.assetRefs.get(assetRef.assetRefId);
+
+      if (existing && !assetRefMatches(existing, assetRef)) {
+        return failure({
+          code: 'asset_ref_conflict',
+          message: 'Asset ref already exists with different metadata.',
+        });
+      }
+    }
+
+    const created: OutboxJob = {
+      assetRefId: entry.assetRefId,
+      attempt: 0,
+      capture: normalizeCapturePayload(entry),
+      createdAt: entry.createdAt,
+      deviceId: entry.deviceId,
+      id: entry.id,
+      idempotencyKey: entry.idempotencyKey,
+      payloadHash: entry.payloadHash,
+      state: 'pending',
+      updatedAt: entry.createdAt,
+      workspaceId: entry.workspaceId,
+      ...(entry.nextRetryAt ? { nextRetryAt: entry.nextRetryAt } : {}),
+    };
+
+    for (const assetRef of entry.assetRefs) {
+      this.assetRefs.set(assetRef.assetRefId, cloneAssetRef(assetRef));
+    }
+
+    this.outboxJobs.set(entry.id, created);
 
     return success(cloneOutboxJob(created));
   }
@@ -545,6 +618,33 @@ function cloneAssetRef(asset: AssetCacheRef): AssetCacheRef {
       ? { availabilitySafeError: { ...asset.availabilitySafeError } }
       : {}),
   };
+}
+
+function existingCaptureOutboxEntryMatches(
+  existingJob: OutboxJob,
+  entry: CaptureOutboxEntryCreateInput,
+  assetRefs: Map<string, AssetCacheRef>,
+): boolean {
+  if (
+    existingJob.assetRefId !== entry.assetRefId ||
+    existingJob.payloadHash !== entry.payloadHash ||
+    !capturePayloadMatches(existingJob.capture, normalizeCapturePayload(entry))
+  ) {
+    return false;
+  }
+
+  return entry.assetRefs.every((assetRef) => {
+    const existingAssetRef = assetRefs.get(assetRef.assetRefId);
+    return existingAssetRef ? assetRefMatches(existingAssetRef, assetRef) : false;
+  });
+}
+
+function capturePayloadMatches(left: OutboxJob['capture'], right: OutboxJob['capture']): boolean {
+  return JSON.stringify(cloneCapturePayload(left)) === JSON.stringify(cloneCapturePayload(right));
+}
+
+function assetRefMatches(left: AssetCacheRef, right: AssetCacheRef): boolean {
+  return JSON.stringify(cloneAssetRef(left)) === JSON.stringify(cloneAssetRef(right));
 }
 
 function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {

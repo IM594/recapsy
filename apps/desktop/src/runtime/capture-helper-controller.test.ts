@@ -1,0 +1,354 @@
+import { describe, expect, it } from 'bun:test';
+import {
+  HELPER_PROTOCOL_VERSION,
+  type HelperEnvelope,
+  type MainToHelperType,
+} from '../helper/protocol';
+import { type BackpressureConfig, createInMemoryOperationalStore } from '../storage';
+import {
+  type CaptureHelperClient,
+  type CaptureHelperEvent,
+  type CaptureHelperStartOptions,
+  createCaptureHelperController,
+} from './capture-helper-controller';
+import { createCaptureHelperEventIntake } from './capture-helper-event-intake';
+
+const now = '2026-07-07T08:00:00.000Z';
+const backpressure: BackpressureConfig = {
+  maxAssetBytes: 1024 * 1024,
+  maxQueuedJobs: 10,
+  maxRetryAttempts: 5,
+};
+
+describe('capture helper controller', () => {
+  it('starts the helper through explicit dependency injection and records running state', async () => {
+    const client = new RecordingCaptureHelperClient();
+    const store = createInMemoryOperationalStore();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      store,
+    });
+
+    await controller.start();
+
+    expect(client.calls).toEqual(['start']);
+    expect(controller.getStatus()).toMatchObject({
+      state: 'running',
+    });
+    expect(await store.getHelperState()).toMatchObject({
+      connectionKind: 'managed_helper',
+      restartCount: 0,
+      updatedAt: now,
+    });
+  });
+
+  it('fails closed on helper start failure without entering running state', async () => {
+    const store = createInMemoryOperationalStore();
+    const client = new RecordingCaptureHelperClient({
+      startError: new Error(
+        'spawn failed for /Users/alice/Library/Recapsy/helper with token secret and OCR raw text',
+      ),
+    });
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      store,
+    });
+
+    await expect(controller.start()).rejects.toThrow('helper_start_failed');
+
+    expect(controller.getStatus()).toMatchObject({
+      state: 'failed',
+      lastSafeError: {
+        code: 'helper_start_failed',
+        retryable: true,
+      },
+    });
+    const serialized = JSON.stringify(controller.getStatus());
+    expect(serialized).not.toContain('/Users/alice');
+    expect(serialized).not.toContain('secret');
+    expect(serialized).not.toContain('OCR raw text');
+  });
+
+  it('observes unexpected helper exit without deleting or resetting outbox jobs', async () => {
+    const store = createInMemoryOperationalStore();
+    await store.createOutboxJob({
+      assetRefId: 'asset_existing',
+      createdAt: now,
+      deviceId: 'device_1',
+      id: 'job_existing',
+      idempotencyKey: 'idem_existing',
+      payloadHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      workspaceId: 'workspace_1',
+    });
+    const client = new RecordingCaptureHelperClient();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      store,
+    });
+    await controller.start();
+
+    await controller.ingestEvent({
+      code: 1,
+      error: 'stderr /private/tmp/helper.log token secret OCR raw text',
+      reason: 'process_crashed',
+      type: 'unexpectedExit',
+    });
+
+    expect(controller.getStatus()).toMatchObject({
+      state: 'exited',
+      lastSafeError: {
+        code: 'helper_unexpected_exit',
+      },
+    });
+    expect(await store.getOutboxJob('job_existing')).toMatchObject({
+      id: 'job_existing',
+      state: 'pending',
+    });
+    expect(await store.listOutboxJobs({ workspaceId: 'workspace_1' })).toHaveLength(1);
+    expect(JSON.stringify(controller.getStatus())).not.toContain('/private/tmp');
+    expect(JSON.stringify(controller.getStatus())).not.toContain('secret');
+    expect(JSON.stringify(controller.getStatus())).not.toContain('OCR raw text');
+  });
+
+  it('routes internal capture events through the envelope intake without a second outbox path', async () => {
+    const store = createInMemoryOperationalStore();
+    const commandClient = new RecordingCommandClient();
+    const client = new RecordingCaptureHelperClient();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      eventIntake: createCaptureHelperEventIntake({
+        backpressure,
+        client: commandClient,
+        deviceId: 'device_1',
+        now: () => now,
+        store,
+        workspaceId: 'workspace_1',
+      }),
+      now: () => now,
+      store,
+    });
+    await controller.start();
+
+    await controller.ingestEvent(
+      createCaptureEvent({
+        metadata: {
+          note: 'safe metadata',
+          manifestPath: '/Users/alice/private/manifest.json',
+          providerToken: 'provider-secret',
+          ocrPayload: 'OCR raw text',
+        },
+      }),
+    );
+
+    const asset = await store.getAssetCacheRef('asset_capture_1');
+    const jobs = await store.listOutboxJobs({ workspaceId: 'workspace_1' });
+
+    expect(commandClient.commandTypes()).toEqual(['capture.ack']);
+    expect(asset).toMatchObject({
+      assetRefId: 'asset_capture_1',
+      availabilityState: 'available',
+      cleanupState: 'retained',
+      hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      localAccessKey: 'asset_capture_1',
+      role: 'capture_original',
+      workspaceId: 'workspace_1',
+    });
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({
+      assetRefId: 'asset_capture_1',
+      deviceId: 'device_1',
+      id: 'capture_1',
+      idempotencyKey: 'workspace_1:capture_1',
+      state: 'pending',
+      capture: {
+        appName: 'Safari',
+        bundleId: 'com.apple.Safari',
+        capturedAt: '2026-07-07T07:59:59.000Z',
+        localEventId: 'capture_1',
+        privacyDecision: {
+          action: 'redact_context',
+          decidedAt: '2026-07-07T07:59:59.000Z',
+          policyVersion: 'policy_desktop',
+          reasons: ['redact_context'],
+        },
+      },
+    });
+
+    const serialized = JSON.stringify({ asset, jobs });
+    expect(serialized).not.toContain('/Users/alice');
+    expect(serialized).not.toContain('provider-secret');
+    expect(serialized).not.toContain('OCR raw text');
+  });
+
+  it('does not let internal capture events write outbox jobs when intake is absent', async () => {
+    const store = createInMemoryOperationalStore();
+    const controller = createCaptureHelperController({
+      client: new RecordingCaptureHelperClient(),
+      deviceId: 'device_1',
+      now: () => now,
+      store,
+    });
+    await controller.start();
+
+    await controller.ingestEvent(createCaptureEvent());
+
+    expect(await store.getAssetCacheRef('asset_capture_1')).toBeNull();
+    expect(await store.getOutboxJob('capture_1')).toBeNull();
+    expect(controller.getStatus()).toMatchObject({
+      lastSafeError: {
+        code: 'capture_event_intake_required',
+        retryable: false,
+      },
+      state: 'running',
+    });
+  });
+
+  it('wires verified helper envelopes to injected intake during start', async () => {
+    const client = new RecordingCaptureHelperClient();
+    const observed: HelperEnvelope[] = [];
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      eventIntake: {
+        async handleEnvelope(envelope): Promise<void> {
+          observed.push(envelope);
+        },
+      },
+      now: () => now,
+      store: createInMemoryOperationalStore(),
+    });
+
+    await controller.start();
+    await client.startOptions?.onEnvelope?.(helperStatusEnvelope());
+
+    expect(observed).toEqual([helperStatusEnvelope()]);
+  });
+
+  it('stops the helper on shutdown and treats repeated stop as idempotent', async () => {
+    const client = new RecordingCaptureHelperClient();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      store: createInMemoryOperationalStore(),
+    });
+    await controller.start();
+
+    await controller.shutdown();
+    await controller.shutdown();
+
+    expect(client.calls).toEqual(['start', 'stop']);
+    expect(controller.getStatus()).toMatchObject({
+      state: 'stopped',
+    });
+  });
+});
+
+class RecordingCaptureHelperClient implements CaptureHelperClient {
+  readonly calls: string[] = [];
+  startOptions: CaptureHelperStartOptions | undefined;
+  private readonly startError?: Error;
+
+  constructor(options: { startError?: Error } = {}) {
+    this.startError = options.startError;
+  }
+
+  async start(options?: CaptureHelperStartOptions): Promise<void> {
+    this.calls.push('start');
+    this.startOptions = options;
+
+    if (this.startError) {
+      throw this.startError;
+    }
+  }
+
+  async stop(): Promise<void> {
+    this.calls.push('stop');
+  }
+
+  async pauseCapture(): Promise<void> {
+    this.calls.push('pauseCapture');
+  }
+
+  async resumeCapture(): Promise<void> {
+    this.calls.push('resumeCapture');
+  }
+}
+
+class RecordingCommandClient {
+  readonly commands: HelperEnvelope<MainToHelperType>[] = [];
+
+  async sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void> {
+    this.commands.push(command);
+  }
+
+  commandTypes(): MainToHelperType[] {
+    return this.commands.map((command) => command.type);
+  }
+}
+
+function createCaptureEvent(
+  overrides: Partial<Omit<CaptureObservedEvent, 'asset'>> & {
+    asset?: Partial<CaptureHelperEventAsset>;
+  } = {},
+): CaptureHelperEvent {
+  const { asset: assetOverrides, ...eventOverrides } = overrides;
+  const captureId = overrides.captureId ?? 'capture_1';
+  const asset = {
+    assetRefId: `asset_${captureId}`,
+    availabilityState: 'available' as const,
+    contentAddress: `sha256/${captureId}`,
+    hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    localAccessKey: '/Users/alice/Pictures/private.png',
+    mimeType: 'image/png',
+    role: 'capture_original' as const,
+    sizeBytes: 4096,
+    ...assetOverrides,
+  };
+
+  return {
+    bundleId: 'com.apple.Safari',
+    capturedAt: '2026-07-07T07:59:59.000Z',
+    captureId,
+    captureType: 'screen',
+    contextConfidence: 'high',
+    contextFingerprint: 'fingerprint_1',
+    metadata: {},
+    observedAt: '2026-07-07T07:59:59.000Z',
+    privacyDecision: {
+      action: 'redact_context',
+      decidedAt: '2026-07-07T07:59:58.000Z',
+      policyVersion: 'policy_desktop',
+      reasons: ['domain_rule'],
+    },
+    sourceAppName: 'Safari',
+    type: 'captureObserved',
+    workspaceId: 'workspace_1',
+    ...eventOverrides,
+    asset,
+  };
+}
+
+type CaptureObservedEvent = Extract<CaptureHelperEvent, { type: 'captureObserved' }>;
+
+type CaptureHelperEventAsset = Extract<CaptureHelperEvent, { type: 'captureObserved' }>['asset'];
+
+function helperStatusEnvelope(): HelperEnvelope<'helper.status'> {
+  return {
+    correlationId: null,
+    messageId: 'message_status',
+    payload: {
+      status: 'ready',
+    },
+    protocolVersion: HELPER_PROTOCOL_VERSION,
+    sentAt: now,
+    type: 'helper.status',
+  };
+}

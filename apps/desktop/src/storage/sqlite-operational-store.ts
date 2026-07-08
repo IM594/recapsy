@@ -1,6 +1,7 @@
 import type { SqliteDatabase, SqliteRow } from './sqlite-driver';
 import type {
   AssetCacheRef,
+  CaptureOutboxEntryCreateInput,
   ClaimRetryableOutboxJobInput,
   HelperRuntimeState,
   OperationalStoreError,
@@ -220,6 +221,132 @@ class SqliteOperationalStore implements OperationalStoreRepository {
     }
 
     return success(cloneOutboxJob(created));
+  }
+
+  async createCaptureOutboxEntry(
+    entry: CaptureOutboxEntryCreateInput,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    let transactionOpen = false;
+
+    try {
+      this.options.database.run('BEGIN IMMEDIATE');
+      transactionOpen = true;
+
+      const activeJobCount = this.options.database
+        .prepare<{ count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM outbox_jobs
+           WHERE state NOT IN ('synced', 'blocked', 'failed', 'cancelled')`,
+        )
+        .get()?.count;
+
+      if (
+        this.options.maxActiveOutboxJobs !== undefined &&
+        (activeJobCount ?? 0) >= this.options.maxActiveOutboxJobs
+      ) {
+        this.options.database.run('ROLLBACK');
+        transactionOpen = false;
+        return failure({
+          code: 'capacity_exceeded',
+          message: 'Outbox active job capacity has been reached.',
+        });
+      }
+
+      const conflict = this.options.database
+        .prepare<OutboxJobRow>(
+          `SELECT *
+           FROM outbox_jobs
+           WHERE workspace_id = $workspaceId AND idempotency_key = $idempotencyKey
+           LIMIT 1`,
+        )
+        .get({
+          $idempotencyKey: entry.idempotencyKey,
+          $workspaceId: entry.workspaceId,
+        });
+
+      if (conflict) {
+        const existing = outboxJobFromRow(conflict);
+        const matches = this.existingCaptureOutboxEntryMatches(existing, entry);
+
+        this.options.database.run('ROLLBACK');
+        transactionOpen = false;
+
+        return matches
+          ? success(existing)
+          : failure({
+              code: 'idempotency_key_conflict',
+              message: 'Outbox idempotency key already exists for this workspace.',
+            });
+      }
+
+      const existingJobId = this.options.database
+        .prepare<{ id: string }>(
+          `SELECT id
+           FROM outbox_jobs
+           WHERE id = $id
+           LIMIT 1`,
+        )
+        .get({ $id: entry.id });
+
+      if (existingJobId) {
+        this.options.database.run('ROLLBACK');
+        transactionOpen = false;
+        return failure({
+          code: 'outbox_job_id_conflict',
+          message: 'Outbox job id already exists.',
+        });
+      }
+
+      for (const assetRef of entry.assetRefs) {
+        const existingAssetRef = this.readAssetRef(assetRef.assetRefId);
+
+        if (existingAssetRef && !assetRefMatches(existingAssetRef, assetRef)) {
+          this.options.database.run('ROLLBACK');
+          transactionOpen = false;
+          return failure({
+            code: 'asset_ref_conflict',
+            message: 'Asset ref already exists with different metadata.',
+          });
+        }
+      }
+
+      const created: OutboxJob = {
+        assetRefId: entry.assetRefId,
+        attempt: 0,
+        capture: normalizeCapturePayload(entry),
+        createdAt: entry.createdAt,
+        deviceId: entry.deviceId,
+        id: entry.id,
+        idempotencyKey: entry.idempotencyKey,
+        payloadHash: entry.payloadHash,
+        state: 'pending',
+        updatedAt: entry.createdAt,
+        workspaceId: entry.workspaceId,
+        ...(entry.nextRetryAt ? { nextRetryAt: entry.nextRetryAt } : {}),
+      };
+
+      for (const assetRef of entry.assetRefs) {
+        this.insertAssetRef(assetRef);
+      }
+
+      this.insertOutboxJob(created);
+      this.options.database.run('COMMIT');
+      transactionOpen = false;
+
+      return success(cloneOutboxJob(created));
+    } catch (error) {
+      if (transactionOpen) {
+        this.options.database.run('ROLLBACK');
+      }
+
+      const mapped = mapCreateOutboxConstraintError(error);
+
+      if (mapped) {
+        return failure(mapped);
+      }
+
+      throw error;
+    }
   }
 
   async getOutboxJob(id: string): Promise<OutboxJob | null> {
@@ -460,52 +587,7 @@ class SqliteOperationalStore implements OperationalStoreRepository {
 
   async upsertAssetCacheRef(asset: AssetCacheRef): Promise<AssetCacheRef> {
     const cloned = cloneAssetRef(asset);
-    this.options.database
-      .prepare(
-        `INSERT INTO asset_cache_refs (
-          asset_ref_id,
-          workspace_id,
-          role,
-          hash,
-          mime_type,
-          size_bytes,
-          cleanup_state,
-          availability_state,
-          availability_checked_at,
-          created_at,
-          local_access_key,
-          availability_safe_error_json,
-          content_address
-        ) VALUES (
-          $assetRefId,
-          $workspaceId,
-          $role,
-          $hash,
-          $mimeType,
-          $sizeBytes,
-          $cleanupState,
-          $availabilityState,
-          $availabilityCheckedAt,
-          $createdAt,
-          $localAccessKey,
-          $availabilitySafeErrorJson,
-          $contentAddress
-        )
-        ON CONFLICT(asset_ref_id) DO UPDATE SET
-          workspace_id = excluded.workspace_id,
-          role = excluded.role,
-          hash = excluded.hash,
-          mime_type = excluded.mime_type,
-          size_bytes = excluded.size_bytes,
-          cleanup_state = excluded.cleanup_state,
-          availability_state = excluded.availability_state,
-          availability_checked_at = excluded.availability_checked_at,
-          created_at = excluded.created_at,
-          local_access_key = excluded.local_access_key,
-          availability_safe_error_json = excluded.availability_safe_error_json,
-          content_address = excluded.content_address`,
-      )
-      .run(assetParameters(cloned));
+    this.insertAssetRef(cloned);
 
     return cloneAssetRef(cloned);
   }
@@ -839,6 +921,134 @@ class SqliteOperationalStore implements OperationalStoreRepository {
       code: 'terminal_state_conflict',
       message: 'Outbox job state changed before the update could be applied.',
     } satisfies OperationalStoreError;
+  }
+
+  private existingCaptureOutboxEntryMatches(
+    existingJob: OutboxJob,
+    entry: CaptureOutboxEntryCreateInput,
+  ): boolean {
+    if (
+      existingJob.assetRefId !== entry.assetRefId ||
+      existingJob.payloadHash !== entry.payloadHash ||
+      !capturePayloadMatches(existingJob.capture, normalizeCapturePayload(entry))
+    ) {
+      return false;
+    }
+
+    return entry.assetRefs.every((assetRef) => {
+      const existingAssetRef = this.readAssetRef(assetRef.assetRefId);
+      return existingAssetRef ? assetRefMatches(existingAssetRef, assetRef) : false;
+    });
+  }
+
+  private readAssetRef(assetRefId: string): AssetCacheRef | null {
+    const row = this.options.database
+      .prepare<AssetCacheRefRow>(
+        `SELECT *
+         FROM asset_cache_refs
+         WHERE asset_ref_id = $assetRefId
+         LIMIT 1`,
+      )
+      .get({ $assetRefId: assetRefId });
+
+    return row ? assetRefFromRow(row) : null;
+  }
+
+  private insertAssetRef(asset: AssetCacheRef): void {
+    const cloned = cloneAssetRef(asset);
+    this.options.database
+      .prepare(
+        `INSERT INTO asset_cache_refs (
+          asset_ref_id,
+          workspace_id,
+          role,
+          hash,
+          mime_type,
+          size_bytes,
+          cleanup_state,
+          availability_state,
+          availability_checked_at,
+          created_at,
+          local_access_key,
+          availability_safe_error_json,
+          content_address
+        ) VALUES (
+          $assetRefId,
+          $workspaceId,
+          $role,
+          $hash,
+          $mimeType,
+          $sizeBytes,
+          $cleanupState,
+          $availabilityState,
+          $availabilityCheckedAt,
+          $createdAt,
+          $localAccessKey,
+          $availabilitySafeErrorJson,
+          $contentAddress
+        )
+        ON CONFLICT(asset_ref_id) DO UPDATE SET
+          workspace_id = excluded.workspace_id,
+          role = excluded.role,
+          hash = excluded.hash,
+          mime_type = excluded.mime_type,
+          size_bytes = excluded.size_bytes,
+          cleanup_state = excluded.cleanup_state,
+          availability_state = excluded.availability_state,
+          availability_checked_at = excluded.availability_checked_at,
+          created_at = excluded.created_at,
+          local_access_key = excluded.local_access_key,
+          availability_safe_error_json = excluded.availability_safe_error_json,
+          content_address = excluded.content_address`,
+      )
+      .run(assetParameters(cloned));
+  }
+
+  private insertOutboxJob(job: OutboxJob): void {
+    this.options.database
+      .prepare(
+        `INSERT INTO outbox_jobs (
+          id,
+          workspace_id,
+          device_id,
+          asset_ref_id,
+          idempotency_key,
+          payload_hash,
+          capture_json,
+          state,
+          attempt,
+          created_at,
+          updated_at,
+          next_retry_at
+        ) VALUES (
+          $id,
+          $workspaceId,
+          $deviceId,
+          $assetRefId,
+          $idempotencyKey,
+          $payloadHash,
+          $captureJson,
+          $state,
+          $attempt,
+          $createdAt,
+          $updatedAt,
+          $nextRetryAt
+        )`,
+      )
+      .run({
+        $assetRefId: job.assetRefId,
+        $attempt: job.attempt,
+        $captureJson: JSON.stringify(job.capture),
+        $createdAt: job.createdAt,
+        $deviceId: job.deviceId,
+        $id: job.id,
+        $idempotencyKey: job.idempotencyKey,
+        $nextRetryAt: job.nextRetryAt ?? null,
+        $payloadHash: job.payloadHash,
+        $state: job.state,
+        $updatedAt: job.updatedAt,
+        $workspaceId: job.workspaceId,
+      });
   }
 }
 
@@ -1185,6 +1395,14 @@ function cloneCapturePayload(capture: OutboxJob['capture']): OutboxJob['capture'
 
 function cloneAssetRef(asset: AssetCacheRef): AssetCacheRef {
   return { ...asset };
+}
+
+function capturePayloadMatches(left: OutboxJob['capture'], right: OutboxJob['capture']): boolean {
+  return JSON.stringify(cloneCapturePayload(left)) === JSON.stringify(cloneCapturePayload(right));
+}
+
+function assetRefMatches(left: AssetCacheRef, right: AssetCacheRef): boolean {
+  return JSON.stringify(cloneAssetRef(left)) === JSON.stringify(cloneAssetRef(right));
 }
 
 function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {
