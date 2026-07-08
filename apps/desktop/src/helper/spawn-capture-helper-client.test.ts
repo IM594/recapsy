@@ -123,6 +123,58 @@ describe('spawn capture helper client', () => {
     expect(resumeDecoded).toMatchObject({ envelope: { type: 'capture.resume' }, ok: true });
   });
 
+  it('writes a caller-built envelope to stdin verbatim via sendCommand', async () => {
+    const child = new FakeChildProcess();
+    const client = createSpawnCaptureHelperClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await client.start();
+    await client.sendCommand({
+      correlationId: 'incoming_1',
+      messageId: 'main_1',
+      payload: { captureId: 'cap_1' },
+      protocolVersion: 'recapsy.capture-helper',
+      sentAt: '2026-07-08T00:00:00.000Z',
+      type: 'capture.ack',
+    });
+
+    expect(child.stdin.written).toHaveLength(1);
+    const decoded = decodeHelperEnvelopeLine(child.stdin.written[0] ?? '');
+    expect(decoded).toMatchObject({
+      envelope: {
+        correlationId: 'incoming_1',
+        messageId: 'main_1',
+        payload: { captureId: 'cap_1' },
+        type: 'capture.ack',
+      },
+      ok: true,
+    });
+  });
+
+  it('drops sendCommand writes silently when no child is running', async () => {
+    const child = new FakeChildProcess();
+    const client = createSpawnCaptureHelperClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await expect(
+      client.sendCommand({
+        correlationId: null,
+        messageId: 'main_1',
+        payload: { captureId: 'cap_1' },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-08T00:00:00.000Z',
+        type: 'capture.ack',
+      }),
+    ).resolves.toBeUndefined();
+    expect(child.stdin.written).toHaveLength(0);
+  });
+
   it('reports unexpectedExit when the child exits without stop() being called', async () => {
     const child = new FakeChildProcess();
     const events: CaptureHelperEvent[] = [];

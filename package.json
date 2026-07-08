@@ -24,5 +24,8 @@
     "lefthook": "^1.11.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron"]
   }
 }

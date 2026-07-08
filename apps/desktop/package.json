@@ -23,9 +23,14 @@
     "typecheck": "tsc --noEmit && pnpm run typecheck:integration",
     "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",
     "lint": "biome check src/ integration/",
-    "check": "biome check src/ integration/"
+    "check": "biome check src/ integration/",
+    "build": "bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron",
+    "start": "electron dist/main/electron-entry.js",
+    "dev": "pnpm run build && pnpm run start"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0"
+    "@types/bun": "^1.2.0",
+    "@types/node": "^24.9.0",
+    "electron": "^43.1.0"
   }
 }

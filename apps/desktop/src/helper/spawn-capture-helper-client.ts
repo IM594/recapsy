@@ -3,6 +3,7 @@ import type {
   CaptureHelperClient,
   CaptureHelperStartOptions,
 } from '../runtime/capture-helper-controller';
+import type { CaptureHelperCommandClient } from '../runtime/capture-helper-event-intake';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
@@ -74,14 +75,22 @@ export type SpawnCaptureHelperClientOptions = {
  * executable path, or raw stdio bytes to callers — only parsed, already
  * privacy-checked protocol envelopes and safe classified events cross that
  * boundary.
+ *
+ * The returned client also implements `CaptureHelperCommandClient`
+ * (`sendCommand`), the narrow interface `CaptureHelperEventIntake` depends on
+ * to send `capture.ack` / `capture.nack` / backpressure `capture.pause`
+ * replies back to the helper over the same stdio channel this client already
+ * owns. Callers that only need `CaptureHelperClient` (start/stop/pause/
+ * resume) are unaffected; this only adds capability, it does not change any
+ * existing method's behavior.
  */
 export function createSpawnCaptureHelperClient(
   options: SpawnCaptureHelperClientOptions,
-): CaptureHelperClient {
+): CaptureHelperClient & CaptureHelperCommandClient {
   return new ProcessCaptureHelperClient(options);
 }
 
-class ProcessCaptureHelperClient implements CaptureHelperClient {
+class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCommandClient {
   private child: SpawnedHelperProcess | undefined;
   private startOptions: CaptureHelperStartOptions = {};
   private stopRequested = false;
@@ -145,6 +154,19 @@ class ProcessCaptureHelperClient implements CaptureHelperClient {
   async resumeCapture(): Promise<void> {
     if (this.child) {
       this.writeCommand(this.child, 'capture.resume', { reason: 'user_resumed' });
+    }
+  }
+
+  /**
+   * Generic command channel for `CaptureHelperEventIntake`, which already
+   * builds a fully-formed envelope (`capture.ack` / `capture.nack` /
+   * backpressure `capture.pause`) and only needs it written to the helper's
+   * stdin. This never inspects or rewrites the envelope, so it cannot drift
+   * from the header fields the intake layer already set.
+   */
+  async sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void> {
+    if (this.child) {
+      this.child.stdin?.write(encodeHelperEnvelope(command));
     }
   }
 
