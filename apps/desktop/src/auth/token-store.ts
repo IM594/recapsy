@@ -2,6 +2,19 @@ export type AuthTokenSet = {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: string;
+  /**
+   * The workspace id from the most recent real, server-confirmed session
+   * (a successful `login()` or `getActiveSession()` call in
+   * `auth/auth-client.ts`). Stored alongside the tokens — not derived
+   * separately — because its lifecycle is the same as the tokens': it is
+   * only ever set together with them, and must be cleared together with
+   * them on sign-out. Consumers (see `resolveWorkspaceId` in
+   * `main/electron-main-runtime.ts`) use this as a degraded fallback when
+   * the session cannot be re-verified because the network/server is
+   * unavailable — never as a substitute for a confirmed 401/expired
+   * session, which always forces a fresh login.
+   */
+  workspaceId?: string;
 };
 
 export type TokenStore = {
@@ -74,6 +87,7 @@ function parseStoredTokens(secret: string): AuthTokenSet | null {
       accessToken: value.accessToken,
       ...(typeof value.expiresAt === 'string' ? { expiresAt: value.expiresAt } : {}),
       ...(typeof value.refreshToken === 'string' ? { refreshToken: value.refreshToken } : {}),
+      ...(typeof value.workspaceId === 'string' ? { workspaceId: value.workspaceId } : {}),
     };
   } catch {
     return null;

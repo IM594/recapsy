@@ -1,3 +1,6 @@
+import type { AuthClient } from '../auth/auth-client';
+import type { LoginPrompter } from '../auth/login-window';
+import type { TokenStore } from '../auth/token-store';
 import {
   type CaptureEventSummaryDto,
   type CaptureStatusDto,
@@ -30,8 +33,14 @@ import {
   type SafeOperationalError,
   reconcileAssetRefs,
 } from '../storage';
-import { createSyncQueueSummary } from '../sync/scheduler';
+import { createSyncQueueSummary, createSyncScheduler } from '../sync/scheduler';
 import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
+import {
+  type SyncLoop,
+  type SyncLoopOptions,
+  createSyncLoop as createRealSyncLoop,
+} from '../sync/sync-loop';
+import type { SyncAssetReader, SyncServerApi } from '../sync/types';
 
 /**
  * Structural surface of `Electron.App` this module depends on. Kept narrow
@@ -82,12 +91,45 @@ export type ElectronMainRuntimeOptions = {
   createHelperClient(): CaptureHelperClient & CaptureHelperCommandClient;
   deviceId: string;
   /**
-   * V0 has no real session/workspace management wired into the Electron
-   * main process yet (see the "明确不做的事" scope note this file's caller
-   * documents), so the active workspace id is an injected constant rather
-   * than something read from a signed-in session.
+   * Where auth tokens live. Shared with `loginPrompter`'s own auth client
+   * (the real entry point constructs one `createAuthClient(...)` and wires
+   * it into both places) so a successful login and a later session check
+   * always agree on the same stored token.
    */
-  workspaceId: string;
+  tokenStore: TokenStore;
+  /**
+   * Used once, at startup, to check whether an already-stored token still
+   * maps to a real, live session (see `resolveWorkspaceId` below). Narrowed
+   * to just `getActiveSession` because this file never needs to call
+   * `login` itself — that only happens inside `loginPrompter`.
+   */
+  authClient: Pick<AuthClient, 'getActiveSession'>;
+  /**
+   * Shows the login window and resolves once the user has authenticated,
+   * only when `authClient.getActiveSession()` could not confirm an existing
+   * session. See `auth/login-window.ts`.
+   */
+  loginPrompter: LoginPrompter;
+  /** Creates the real server API client used by the sync loop. Injected so tests never make real HTTP calls. */
+  createServerApi(): SyncServerApi;
+  /**
+   * Reads the bytes for a local asset ref so the sync loop can upload it as
+   * OCR input. Defaults to `failClosedReadAssetBytes` below: the V0 dev
+   * helper (`helper/dev-helper-process.ts`) never writes real asset bytes to
+   * disk, so there is nothing real to read yet (same limitation
+   * `alwaysAvailableAssetResolver` documents for asset reconciliation). This
+   * is injectable so a future real helper/back-end can supply real bytes
+   * without changing this file's wiring.
+   */
+  readAssetBytes?: SyncAssetReader;
+  /** Overrides the sync loop's idle/active re-schedule delays; see `sync/sync-loop.ts`. */
+  syncIdleDelayMs?: number;
+  syncActiveDelayMs?: number;
+  /** Overrides the sync scheduler's retry budget; see `sync/scheduler.ts` and `DEFAULT_SYNC_MAX_ATTEMPTS` below. */
+  syncMaxAttempts?: number;
+  syncRetryDelayMs?: number;
+  /** Creates the self-rescheduling sync loop. Injected (defaults to the real `createSyncLoop`) so tests never start a real timer. */
+  createSyncLoop?(loopOptions: SyncLoopOptions): SyncLoop;
   backpressure?: BackpressureConfig;
   now?(): string;
   /** Hide the Dock icon once the app is ready. Defaults to true; V0 has no Tray UI, so an undocked, dockless process is the least surprising default on macOS. */
@@ -106,6 +148,20 @@ export type ElectronMainRuntimeReadyState = {
   store: OperationalStoreLifecycle;
   runtime: DesktopRuntime;
   eventIntake: CaptureHelperEventIntake;
+  /** Resolved once at startup by `resolveWorkspaceId` — see that function's doc comment. */
+  workspaceId: string;
+  /**
+   * `false` when this run could not re-confirm `workspaceId` against the
+   * real `/v1/auth/session` route at startup (network/server unavailable)
+   * and instead degraded to the last workspace id a real login or session
+   * check had actually confirmed (`AuthTokenSet.workspaceId` in
+   * `auth/token-store.ts`). `true` when a fresh login or a live session
+   * check confirmed it this run. Surfaced so this degraded-but-running state
+   * is an explicit, inspectable fact rather than a silent fallback — see
+   * `resolveWorkspaceId`.
+   */
+  workspaceIdVerified: boolean;
+  syncLoop: SyncLoop;
 };
 
 export type ElectronMainRuntimeHandle = {
@@ -130,9 +186,8 @@ export type ElectronMainRuntimeHandle = {
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 750 * 1024 * 1024,
   maxQueuedJobs: 1000,
-  // `maxRetryAttempts` pairs with `sync/scheduler.ts`'s `SyncSchedulerOptions.retryDelayMs`
-  // (not yet wired into this file — the sync loop itself is a separate,
-  // still-open gap, see docs/NEXT_HANDOFF.md). At a flat (non-exponential)
+  // `maxRetryAttempts` pairs with `DEFAULT_SYNC_RETRY_DELAY_MS` below (now
+  // wired into the sync loop this file starts). At a flat (non-exponential)
   // 60s retry delay, 15 attempts gives ~15 minutes of tolerance for a
   // transient network/provider outage before a job is marked permanently
   // failed. A real exponential-backoff curve would need `retryDelayMs` to
@@ -141,6 +196,10 @@ const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   // of scope here, flagged for follow-up.
   maxRetryAttempts: 15,
 };
+
+/** See `DEFAULT_BACKPRESSURE`'s `maxRetryAttempts` comment above for the shared rationale. */
+const DEFAULT_SYNC_MAX_ATTEMPTS = 15;
+const DEFAULT_SYNC_RETRY_DELAY_MS = 60_000;
 
 const DEFAULT_QUIT_TIMEOUT_MS = 5000;
 
@@ -159,6 +218,95 @@ const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
     return Promise.resolve({ availabilityState: 'available' });
   },
 };
+
+/**
+ * Same limitation as `alwaysAvailableAssetResolver` above, applied to the
+ * sync loop's `readAssetBytes`: the V0 dev helper never writes real bytes to
+ * disk, so there is nothing real to upload as OCR input yet. Rather than
+ * fabricating bytes to make the sync loop "look like" it works, this fails
+ * closed with the same `local_asset_unreadable` safe-error shape
+ * `sync/scheduler.ts` already has dedicated, tested handling for (it maps
+ * this to a terminal `blocked` outbox state, never a retry loop or a fake
+ * `synced`). Replace this once a real helper/backing store can produce real
+ * bytes for a `localAccessKey`.
+ */
+const failClosedReadAssetBytes: SyncAssetReader = async () => {
+  throw Object.assign(
+    new Error(
+      'Real asset bytes are not available in this Electron main phase: the V0 dev helper never writes assets to disk.',
+    ),
+    {
+      code: 'local_asset_unreadable',
+      retryable: false,
+      safeMessage: 'Local asset is unreadable.',
+    },
+  );
+};
+
+/** Result of {@link resolveWorkspaceId} — see its doc comment for what `verified` means. */
+type WorkspaceIdResolution = {
+  workspaceId: string;
+  verified: boolean;
+};
+
+/**
+ * Resolves the workspace id to run this process against. An already-stored
+ * token is treated as a *hint*, not a guarantee: it is validated against the
+ * real `/v1/auth/session` route (via `authClient.getActiveSession()`) so a
+ * revoked/expired token cannot silently pin the app to a stale workspace id.
+ *
+ * - No stored token at all (never logged in) -> prompt login. No cached
+ *   value exists to fall back to.
+ * - Stored token, and `getActiveSession()` confirms it -> use that
+ *   (verified) workspace id. `getActiveSession()` itself refreshes the
+ *   cached `AuthTokenSet.workspaceId` in this case (see `auth-client.ts`).
+ * - Stored token, and `getActiveSession()` returns `null` (server
+ *   *confirmed* the session is unauthenticated/expired/revoked, and already
+ *   cleared the token store) -> always prompt login. There is no safe
+ *   cached value to fall back to here: the session is known-bad, not
+ *   merely unconfirmed, so V0's offline mode (docs/specs — captures should
+ *   keep working without a live connection) must not be used to bypass a
+ *   confirmed sign-out.
+ * - Stored token, and `getActiveSession()` *throws* (network/server
+ *   unavailable — this is "cannot confirm", not "confirmed invalid") ->
+ *   degrade to the last workspace id a real login or session check actually
+ *   confirmed (`AuthTokenSet.workspaceId`), if one is cached. This is what
+ *   lets the app keep capturing while offline instead of blocking behind a
+ *   login screen the user cannot complete without a network. Only when no
+ *   such cached value exists (e.g. very first run's token, saved by a
+ *   `login()` before this field existed, or an edge case with no prior
+ *   confirmed session) does this fall back to prompting login.
+ */
+async function resolveWorkspaceId(
+  options: Pick<ElectronMainRuntimeOptions, 'authClient' | 'loginPrompter' | 'tokenStore'>,
+): Promise<WorkspaceIdResolution> {
+  const tokens = await options.tokenStore.getTokens();
+
+  if (tokens) {
+    try {
+      const session = await options.authClient.getActiveSession();
+
+      if (session) {
+        return { verified: true, workspaceId: session.workspaceId };
+      }
+
+      // Confirmed unauthenticated/expired/revoked — `getActiveSession()`
+      // already cleared the token store. Fall through to login below; never
+      // consult `tokens.workspaceId` on this path.
+    } catch {
+      if (tokens.workspaceId) {
+        console.warn(
+          '[recapsy-desktop] could not verify the stored session at startup (network/server unavailable); continuing offline with the last confirmed workspace id',
+        );
+        return { verified: false, workspaceId: tokens.workspaceId };
+      }
+      // No cached workspace id to degrade to — fall through to login.
+    }
+  }
+
+  const result = await options.loginPrompter.promptLogin();
+  return { verified: true, workspaceId: result.workspaceId };
+}
 
 /**
  * Wires the already-tested business logic (SQLite operational store, capture
@@ -184,6 +332,12 @@ export function createElectronMainRuntime(
   options.app.on('window-all-closed', () => {});
 
   const ready: Promise<ElectronMainRuntimeReadyState> = options.app.whenReady().then(async () => {
+    // Resolved before anything workspace-scoped (store IO itself is not
+    // workspace-scoped, but the helper/runtime/sync wiring below is) is
+    // created — see `resolveWorkspaceId`'s doc comment for what "resolved"
+    // means here (validated existing token, or a fresh login).
+    const { workspaceId, verified: workspaceIdVerified } = await resolveWorkspaceId(options);
+
     const store = options.createStore();
     await store.initialize();
 
@@ -194,7 +348,7 @@ export function createElectronMainRuntime(
       deviceId: options.deviceId,
       now,
       store,
-      workspaceId: options.workspaceId,
+      workspaceId,
     });
     const helper = createCaptureHelperController({
       client: helperClient,
@@ -211,7 +365,7 @@ export function createElectronMainRuntime(
             now: now(),
             resolver: alwaysAvailableAssetResolver,
             store,
-            workspaceId: options.workspaceId,
+            workspaceId,
           });
         },
       },
@@ -221,7 +375,7 @@ export function createElectronMainRuntime(
           await recoverInterruptedOutboxJobs({
             now: now(),
             store,
-            workspaceId: options.workspaceId,
+            workspaceId,
           });
         },
       },
@@ -229,17 +383,34 @@ export function createElectronMainRuntime(
 
     await runtime.start();
 
+    const syncScheduler = createSyncScheduler({
+      api: options.createServerApi(),
+      clock: { now },
+      maxAttempts: options.syncMaxAttempts ?? DEFAULT_SYNC_MAX_ATTEMPTS,
+      readAssetBytes: options.readAssetBytes ?? failClosedReadAssetBytes,
+      retryDelayMs: options.syncRetryDelayMs ?? DEFAULT_SYNC_RETRY_DELAY_MS,
+      store,
+      workspace: { getActiveWorkspaceId: async () => workspaceId },
+    });
+    const createLoop = options.createSyncLoop ?? createRealSyncLoop;
+    const syncLoop = createLoop({
+      activeDelayMs: options.syncActiveDelayMs,
+      idleDelayMs: options.syncIdleDelayMs,
+      scheduler: syncScheduler,
+    });
+    syncLoop.start();
+
     if (options.ipcMain) {
       registerIpcHandlers(options.ipcMain, {
         eventIntake,
         now,
         runtime,
         store,
-        workspaceId: options.workspaceId,
+        workspaceId,
       });
     }
 
-    return { eventIntake, runtime, store };
+    return { eventIntake, runtime, store, syncLoop, workspaceId, workspaceIdVerified };
   });
 
   // `before-quit` (rather than `will-quit`) is used because it fires
@@ -262,7 +433,9 @@ export function createElectronMainRuntime(
     event.preventDefault();
 
     void raceWithTimeout(
-      ready.then(({ runtime }) => runtime.requestQuit()).catch(() => undefined),
+      ready
+        .then(({ runtime, syncLoop }) => Promise.all([runtime.requestQuit(), syncLoop.stop()]))
+        .catch(() => undefined),
       quitTimeoutMs,
     ).then(() => options.app.exit(0));
   });

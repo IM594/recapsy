@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Recapsy sign in (dev)</title>
+  </head>
+  <body>
+    <!--
+      Deliberately unstyled plain HTML/JS, no framework. This is a temporary,
+      developer-facing sign-in form for the V0 Electron runtime — it exists
+      only so `runtime/electron-main-runtime.ts` has a real workspace id and
+      real tokens to work with. It is not the product's sign-in UI; a future
+      UI pass replaces this entirely. See docs/design/ELECTRON_MAIN_RUNTIME.md
+      "非目标" and the desktop auth task notes.
+
+      Security boundary: this page never calls `fetch` and never sees a
+      token. It only calls `window.recapsyAuth.login(email, password)`,
+      which the preload script (`login-window-preload.ts`) wires to the
+      `auth.login` IPC channel. The real HTTP request and token storage
+      happen entirely in the Electron main process.
+    -->
+    <h1>Recapsy sign in (dev)</h1>
+    <p>Development-only sign-in. No visual design; replaced by real product UI later.</p>
+    <form id="login-form">
+      <div>
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" autocomplete="username" required />
+      </div>
+      <div>
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+      </div>
+      <button id="submit" type="submit">Sign in</button>
+      <p id="status" role="status"></p>
+    </form>
+    <script>
+      const form = document.getElementById('login-form');
+      const submitButton = document.getElementById('submit');
+      const statusEl = document.getElementById('status');
+
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const email = document.getElementById('email').value;
+        const password = document.getElementById('password').value;
+
+        submitButton.disabled = true;
+        statusEl.textContent = 'Signing in…';
+
+        try {
+          const response = await window.recapsyAuth.login(email, password);
+
+          if (response && response.ok) {
+            statusEl.textContent = 'Signed in.';
+            return;
+          }
+
+          statusEl.textContent =
+            (response && response.error && response.error.message) || 'Sign in failed.';
+        } catch (error) {
+          statusEl.textContent = 'Sign in failed.';
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

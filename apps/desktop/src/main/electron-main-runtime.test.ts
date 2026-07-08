@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'bun:test';
+import type { AuthActiveSession, AuthClient } from '../auth/auth-client';
+import type { LoginPromptResult, LoginPrompter } from '../auth/login-window';
+import { createInMemoryTokenStore } from '../auth/token-store';
 import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/protocol';
 import type {
   CaptureHelperClient,
   CaptureHelperStartOptions,
 } from '../runtime/capture-helper-controller';
 import type { CaptureHelperCommandClient } from '../runtime/capture-helper-event-intake';
+import type { ServerApiClient } from '../server-api/types';
 import { type OperationalStoreRepository, createInMemoryOperationalStore } from '../storage';
+import type { SyncLoop, SyncLoopOptions } from '../sync/sync-loop';
 import {
   type ElectronAppLike,
   type ElectronIpcMainLike,
@@ -241,6 +246,150 @@ describe('electron main runtime wiring', () => {
     // over the same command channel real captures use.
     expect(helperClient.sentCommands.some((command) => command.type === 'capture.ack')).toBe(true);
   });
+
+  it('skips the login prompt and resolves the workspace id from an already-valid session', async () => {
+    const { app, ipcMain, helperClient, store, loginPrompter } = harness();
+    const handle = createElectronMainRuntime(
+      baseOptions({ app, helperClient, ipcMain, loginPrompter, store }),
+    );
+    app.triggerReady();
+    const state = await handle.ready;
+
+    expect(loginPrompter.promptCalls).toBe(0);
+    expect(state.workspaceId).toBe(workspaceId);
+    expect(state.workspaceIdVerified).toBe(true);
+  });
+
+  it('prompts login when there is no stored token, and uses the resulting workspace id', async () => {
+    const { app, ipcMain, helperClient, store, loginPrompter } = harness();
+    loginPrompter.result = { workspaceId: 'workspace_from_login' };
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        authClient: fakeAuthClient({ throws: new Error('should not be called: no stored token') }),
+        helperClient,
+        ipcMain,
+        loginPrompter,
+        store,
+        tokenStore: createInMemoryTokenStore(null),
+      }),
+    );
+    app.triggerReady();
+    const state = await handle.ready;
+
+    expect(loginPrompter.promptCalls).toBe(1);
+    expect(state.workspaceId).toBe('workspace_from_login');
+    expect(state.workspaceIdVerified).toBe(true);
+  });
+
+  it('prompts login when a stored token no longer maps to an active session, ignoring any cached workspace id', async () => {
+    const { app, ipcMain, helperClient, store, loginPrompter } = harness();
+    loginPrompter.result = { workspaceId: 'workspace_from_login' };
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        authClient: fakeAuthClient({ returnsNull: true }),
+        helperClient,
+        ipcMain,
+        loginPrompter,
+        store,
+        // Seeded with a cached workspace id from some earlier confirmed
+        // session, to prove a *confirmed* 401/expired/revoked session (the
+        // `returnsNull` behavior below) always forces a fresh login and
+        // never falls back to this cached value — unlike the
+        // "cannot confirm" (thrown) case covered separately below.
+        tokenStore: createInMemoryTokenStore({
+          accessToken: 'access-token-1',
+          workspaceId: 'workspace_stale_cached',
+        }),
+      }),
+    );
+    app.triggerReady();
+    const state = await handle.ready;
+
+    expect(loginPrompter.promptCalls).toBe(1);
+    expect(state.workspaceId).toBe('workspace_from_login');
+    expect(state.workspaceIdVerified).toBe(true);
+  });
+
+  it('prompts login when validating the stored token fails (offline/server error) and no workspace id is cached', async () => {
+    const { app, ipcMain, helperClient, store, loginPrompter } = harness();
+    loginPrompter.result = { workspaceId: 'workspace_from_login' };
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        authClient: fakeAuthClient({ throws: new Error('offline') }),
+        helperClient,
+        ipcMain,
+        loginPrompter,
+        store,
+        // Default `baseOptions` token store has an `accessToken` but no
+        // cached `workspaceId` (e.g. never seen a real server response
+        // before) — the offline degradation has nothing to fall back to, so
+        // this must still prompt login rather than starting with no
+        // workspace id at all.
+        tokenStore: createInMemoryTokenStore({ accessToken: 'access-token-1' }),
+      }),
+    );
+    app.triggerReady();
+    const state = await handle.ready;
+
+    expect(loginPrompter.promptCalls).toBe(1);
+    expect(state.workspaceId).toBe('workspace_from_login');
+    expect(state.workspaceIdVerified).toBe(true);
+  });
+
+  it('degrades to the cached workspace id instead of prompting login when the session check fails but a prior real session was confirmed', async () => {
+    const { app, ipcMain, helperClient, store, loginPrompter } = harness();
+    const originalWarn = console.warn;
+    const warnCalls: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+
+    try {
+      const handle = createElectronMainRuntime(
+        baseOptions({
+          app,
+          authClient: fakeAuthClient({ throws: new Error('offline') }),
+          helperClient,
+          ipcMain,
+          loginPrompter,
+          store,
+          tokenStore: createInMemoryTokenStore({
+            accessToken: 'access-token-1',
+            workspaceId: 'workspace_cached_offline',
+          }),
+        }),
+      );
+      app.triggerReady();
+      const state = await handle.ready;
+
+      expect(loginPrompter.promptCalls).toBe(0);
+      expect(state.workspaceId).toBe('workspace_cached_offline');
+      expect(state.workspaceIdVerified).toBe(false);
+      expect(warnCalls.length).toBeGreaterThan(0);
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+
+  it('starts the sync loop once ready and stops it as part of the graceful quit sequence', async () => {
+    const { app, ipcMain, helperClient, store, syncLoop } = harness();
+    const handle = createElectronMainRuntime(
+      baseOptions({ app, helperClient, ipcMain, store, syncLoop }),
+    );
+    app.triggerReady();
+    await handle.ready;
+
+    expect(syncLoop.startCalls).toBe(1);
+    expect(syncLoop.stopCalls).toBe(0);
+
+    app.emitBeforeQuit(new FakeQuitEvent());
+    await flushMicrotasks();
+
+    expect(syncLoop.stopCalls).toBe(1);
+  });
 });
 
 type Harness = {
@@ -248,6 +397,8 @@ type Harness = {
   ipcMain: FakeIpcMain;
   helperClient: FakeHelperClient;
   store: OperationalStoreLifecycle & { initializeCalls: number; closeCalls: number };
+  loginPrompter: FakeLoginPrompter;
+  syncLoop: FakeSyncLoop;
 };
 
 function harness(): Harness {
@@ -255,7 +406,9 @@ function harness(): Harness {
     app: new FakeElectronApp(),
     helperClient: new FakeHelperClient(),
     ipcMain: new FakeIpcMain(),
+    loginPrompter: new FakeLoginPrompter(),
     store: testStore(),
+    syncLoop: new FakeSyncLoop(),
   };
 }
 
@@ -265,18 +418,91 @@ function baseOptions(
     ipcMain: FakeIpcMain;
     helperClient: FakeHelperClient;
     store: OperationalStoreLifecycle;
+    loginPrompter?: LoginPrompter;
+    syncLoop?: FakeSyncLoop;
   },
 ): ElectronMainRuntimeOptions {
-  const { helperClient, ...rest } = overrides;
+  const { helperClient, loginPrompter, syncLoop, ...rest } = overrides;
+  const resolvedLoginPrompter = loginPrompter ?? new FakeLoginPrompter();
+  const resolvedSyncLoop = syncLoop ?? new FakeSyncLoop();
 
   return {
+    // A pre-seeded token plus an `authClient` that always confirms it as
+    // valid means `resolveWorkspaceId` returns `workspaceId` without ever
+    // calling `loginPrompter` — the login flow itself is covered by its own
+    // dedicated tests below.
+    authClient: fakeAuthClient({ workspaceId }),
     createHelperClient: () => helperClient,
+    createServerApi: () => notImplementedServerApi(),
     createStore: () => rest.store,
+    createSyncLoop: (_loopOptions: SyncLoopOptions) => resolvedSyncLoop,
     deviceId,
+    loginPrompter: resolvedLoginPrompter,
     now: () => now,
-    workspaceId,
+    tokenStore: createInMemoryTokenStore({ accessToken: 'access-token-1' }),
     ...rest,
   };
+}
+
+function fakeAuthClient(
+  behavior: { workspaceId: string } | { throws: unknown } | { returnsNull: true },
+): Pick<AuthClient, 'getActiveSession'> {
+  return {
+    async getActiveSession(): Promise<AuthActiveSession | null> {
+      if ('throws' in behavior) {
+        throw behavior.throws;
+      }
+
+      if ('returnsNull' in behavior) {
+        return null;
+      }
+
+      return { workspaceId: behavior.workspaceId };
+    },
+  };
+}
+
+function notImplementedServerApi(): ServerApiClient {
+  const notImplemented = () => {
+    throw new Error('server API should not be called in this test');
+  };
+
+  return {
+    cancelOcrJob: notImplemented,
+    createOcrJob: notImplemented,
+    createTemporaryUpload: notImplemented,
+    getAxAllowlist: notImplemented,
+    getCapabilities: notImplemented,
+    getCapturePolicies: notImplemented,
+    ingestCapture: notImplemented,
+    pollOcrJob: notImplemented,
+    putTemporaryBytes: notImplemented,
+    querySearch: notImplemented,
+    queryTimeline: notImplemented,
+  } as unknown as ServerApiClient;
+}
+
+class FakeLoginPrompter implements LoginPrompter {
+  promptCalls = 0;
+  result: LoginPromptResult = { workspaceId };
+
+  async promptLogin(): Promise<LoginPromptResult> {
+    this.promptCalls += 1;
+    return this.result;
+  }
+}
+
+class FakeSyncLoop implements SyncLoop {
+  startCalls = 0;
+  stopCalls = 0;
+
+  start(): void {
+    this.startCalls += 1;
+  }
+
+  async stop(): Promise<void> {
+    this.stopCalls += 1;
+  }
 }
 
 function testStore(): OperationalStoreLifecycle & { initializeCalls: number; closeCalls: number } {
