@@ -404,6 +404,58 @@ describe('capture helper event intake', () => {
       updatedAt: observedAt,
     });
   });
+
+  it('persists real permission.status into helper_state and preserves it across a later capture error', async () => {
+    const store = createInMemoryOperationalStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const intake = createCaptureHelperEventIntake({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+
+    await intake.handleEnvelope(
+      helperEnvelope('permission.status', {
+        accessibility: 'granted',
+        observedAt,
+        screenCapture: 'granted',
+      }),
+    );
+
+    expect(intake.getStatus()).toMatchObject({
+      permissions: {
+        accessibility: 'granted',
+        screenRecording: 'granted',
+      },
+    });
+    expect(await store.getHelperState()).toMatchObject({
+      permissions: {
+        accessibility: 'granted',
+        screenRecording: 'granted',
+      },
+    });
+
+    await intake.handleEnvelope(
+      helperEnvelope('capture.error', {
+        captureId: 'capture_error',
+        code: 'asset_write_failed',
+        message: 'disk full',
+      }),
+    );
+
+    expect(await store.getHelperState()).toMatchObject({
+      lastSafeError: {
+        code: 'asset_write_failed',
+      },
+      permissions: {
+        accessibility: 'granted',
+        screenRecording: 'granted',
+      },
+    });
+  });
 });
 
 class RecordingCaptureHelperCommandClient implements CaptureHelperCommandClient {

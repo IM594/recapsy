@@ -4,7 +4,11 @@ import {
   type HelperEnvelope,
   type MainToHelperType,
 } from '../helper/protocol';
-import { type BackpressureConfig, createInMemoryOperationalStore } from '../storage';
+import {
+  type BackpressureConfig,
+  type OperationalStoreRepository,
+  createInMemoryOperationalStore,
+} from '../storage';
 import {
   type CaptureHelperClient,
   type CaptureHelperEvent,
@@ -187,6 +191,97 @@ describe('capture helper controller', () => {
     expect(serialized).not.toContain('OCR raw text');
   });
 
+  it('does not double-write helper_state when routing an unexpected exit through the event intake', async () => {
+    const { store, setHelperStateCallCount } = createCountingHelperStateStore(
+      createInMemoryOperationalStore(),
+    );
+    const controller = createCaptureHelperController({
+      client: new RecordingCaptureHelperClient(),
+      deviceId: 'device_1',
+      eventIntake: createCaptureHelperEventIntake({
+        backpressure,
+        client: new RecordingCommandClient(),
+        deviceId: 'device_1',
+        now: () => now,
+        store,
+        workspaceId: 'workspace_1',
+      }),
+      now: () => now,
+      store,
+    });
+    await controller.start();
+    const callsBeforeExit = setHelperStateCallCount();
+
+    await controller.ingestEvent({
+      code: 1,
+      reason: 'process_crashed',
+      type: 'unexpectedExit',
+    });
+
+    expect(setHelperStateCallCount()).toBe(callsBeforeExit + 1);
+    expect(controller.getStatus()).toMatchObject({
+      lastSafeError: { code: 'helper_unexpected_exit' },
+      state: 'exited',
+    });
+  });
+
+  it('preserves event-intake-owned permissions when the controller persists its own status', async () => {
+    const store = createInMemoryOperationalStore();
+    const eventIntake = createCaptureHelperEventIntake({
+      backpressure,
+      client: new RecordingCommandClient(),
+      deviceId: 'device_1',
+      now: () => now,
+      store,
+      workspaceId: 'workspace_1',
+    });
+    const controller = createCaptureHelperController({
+      client: new RecordingCaptureHelperClient(),
+      deviceId: 'device_1',
+      eventIntake,
+      now: () => now,
+      store,
+    });
+    await controller.start();
+    await eventIntake.handleEnvelope({
+      correlationId: null,
+      messageId: 'message_permission',
+      payload: { accessibility: 'granted', observedAt: now, screenCapture: 'granted' },
+      protocolVersion: HELPER_PROTOCOL_VERSION,
+      sentAt: now,
+      type: 'permission.status',
+    });
+
+    await controller.pauseCapture();
+
+    expect(await store.getHelperState()).toMatchObject({
+      permissions: { accessibility: 'granted', screenRecording: 'granted' },
+    });
+  });
+
+  it('fails closed instead of mislabeling a legacy ocr_input asset as a screenshot', async () => {
+    const store = createInMemoryOperationalStore();
+    const controller = createCaptureHelperController({
+      client: new RecordingCaptureHelperClient(),
+      deviceId: 'device_1',
+      eventIntake: createCaptureHelperEventIntake({
+        backpressure,
+        client: new RecordingCommandClient(),
+        deviceId: 'device_1',
+        now: () => now,
+        store,
+        workspaceId: 'workspace_1',
+      }),
+      now: () => now,
+      store,
+    });
+    await controller.start();
+
+    await expect(
+      controller.ingestEvent(createCaptureEvent({ asset: { role: 'ocr_input' } })),
+    ).rejects.toThrow('capture_helper_legacy_adapter_ocr_input_unsupported');
+  });
+
   it('does not let internal capture events write outbox jobs when intake is absent', async () => {
     const store = createInMemoryOperationalStore();
     const controller = createCaptureHelperController({
@@ -339,6 +434,20 @@ function createCaptureEvent(
 type CaptureObservedEvent = Extract<CaptureHelperEvent, { type: 'captureObserved' }>;
 
 type CaptureHelperEventAsset = Extract<CaptureHelperEvent, { type: 'captureObserved' }>['asset'];
+
+function createCountingHelperStateStore(store: OperationalStoreRepository): {
+  store: OperationalStoreRepository;
+  setHelperStateCallCount: () => number;
+} {
+  let count = 0;
+  const wrapped = Object.create(store) as OperationalStoreRepository;
+  wrapped.setHelperState = async (state) => {
+    count += 1;
+    return store.setHelperState(state);
+  };
+
+  return { setHelperStateCallCount: () => count, store: wrapped };
+}
 
 function helperStatusEnvelope(): HelperEnvelope<'helper.status'> {
   return {

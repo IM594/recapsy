@@ -17,6 +17,7 @@ import {
   type BackpressureConfig,
   type CaptureOutboxPayloadInput,
   type CapturePrivacyDecision,
+  type HelperPermissionState,
   type HelperRuntimeState,
   type OperationalStoreRepository,
   type SafeOperationalError,
@@ -34,6 +35,10 @@ export type CaptureHelperEventIntakeStatus = {
     captureId: string;
     reason: string;
     observedAt: string;
+  };
+  permissions?: {
+    accessibility: HelperPermissionState;
+    screenRecording: HelperPermissionState;
   };
 };
 
@@ -73,6 +78,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
       ...(this.status.lastSkippedCapture
         ? { lastSkippedCapture: { ...this.status.lastSkippedCapture } }
         : {}),
+      ...(this.status.permissions ? { permissions: { ...this.status.permissions } } : {}),
     };
   }
 
@@ -91,10 +97,12 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
         case 'helper.exiting':
           await this.recordHelperExit(narrowHelperEnvelope(envelope, 'helper.exiting'));
           return;
+        case 'permission.status':
+          await this.recordPermissionStatus(narrowHelperEnvelope(envelope, 'permission.status'));
+          return;
         case 'helper.heartbeat':
         case 'helper.hello':
         case 'helper.status':
-        case 'permission.status':
           this.status = {
             ...this.status,
             lastObservedAt: envelope.sentAt,
@@ -223,7 +231,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
       lastObservedAt: envelope.sentAt,
       lastSafeError: safeError,
     };
-    await this.persistHelperState(safeError);
+    await this.persistHelperState();
   }
 
   private async recordHelperExit(envelope: HelperEnvelope<'helper.exiting'>): Promise<void> {
@@ -237,7 +245,21 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
       lastObservedAt: envelope.sentAt,
       lastSafeError: safeError,
     };
-    await this.persistHelperState(safeError);
+    await this.persistHelperState();
+  }
+
+  private async recordPermissionStatus(
+    envelope: HelperEnvelope<'permission.status'>,
+  ): Promise<void> {
+    this.status = {
+      ...this.status,
+      lastObservedAt: envelope.sentAt,
+      permissions: {
+        accessibility: envelope.payload.accessibility,
+        screenRecording: envelope.payload.screenCapture,
+      },
+    };
+    await this.persistHelperState();
   }
 
   private async recordUnexpectedIntakeFailure(envelope: HelperEnvelope): Promise<void> {
@@ -253,15 +275,25 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
     }
   }
 
-  private async persistHelperState(lastSafeError?: SafeOperationalError): Promise<void> {
+  /**
+   * `helper_state` is a single-row table also written by
+   * `CaptureHelperController` for controller-driven transitions (start,
+   * pause, resume, shutdown). `setHelperState` replaces the whole row, so
+   * this reads the current row first and only overwrites the fields this
+   * intake actually owns (`lastSafeError`, `permissions`), carrying the rest
+   * forward instead of resetting them to defaults.
+   */
+  private async persistHelperState(): Promise<void> {
+    const existing = await this.options.store.getHelperState();
     const helperState: HelperRuntimeState = {
-      connectionKind: 'managed_helper',
-      lastSafeError: lastSafeError ? { ...lastSafeError } : undefined,
-      permissions: {
-        accessibility: 'unknown',
-        screenRecording: 'unknown',
-      },
-      restartCount: 0,
+      connectionKind: existing?.connectionKind ?? 'managed_helper',
+      lastSafeError: this.status.lastSafeError ? { ...this.status.lastSafeError } : undefined,
+      permissions: this.status.permissions ??
+        existing?.permissions ?? {
+          accessibility: 'unknown',
+          screenRecording: 'unknown',
+        },
+      restartCount: existing?.restartCount ?? 0,
       updatedAt: this.options.now(),
     };
 

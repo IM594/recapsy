@@ -202,13 +202,20 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
 
   async ingestEvent(event: CaptureHelperEvent): Promise<void> {
     if (this.options.eventIntake) {
+      // The event intake is the sole writer of `helper_state` for
+      // envelope-derived facts (see `capture-helper-event-intake.ts`). Only
+      // mirror the transition into this controller's own in-memory status
+      // (used by `getStatus()`) — do not persist a second time here, or the
+      // last writer silently clobbers fields (e.g. permissions) the other
+      // side owns.
       await this.options.eventIntake.handleEnvelope(
         envelopeFromInternalEvent(event, this.options.now()),
       );
 
-      if (event.type === 'captureObserved') {
-        return;
+      if (event.type === 'unexpectedExit') {
+        this.applyUnexpectedExitStatus(event);
       }
+      return;
     }
 
     if (event.type === 'unexpectedExit') {
@@ -228,9 +235,9 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     await this.persistHelperState();
   }
 
-  private async recordUnexpectedExit(
+  private applyUnexpectedExitStatus(
     event: Extract<CaptureHelperEvent, { type: 'unexpectedExit' }>,
-  ): Promise<void> {
+  ): void {
     const safeError = safeOperationalError(
       'helper_unexpected_exit',
       'Capture helper stopped unexpectedly.',
@@ -244,20 +251,35 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
           : 'exited',
       updatedAt: this.options.now(),
     };
+  }
+
+  private async recordUnexpectedExit(
+    event: Extract<CaptureHelperEvent, { type: 'unexpectedExit' }>,
+  ): Promise<void> {
+    this.applyUnexpectedExitStatus(event);
     await this.persistHelperState();
   }
 
+  /**
+   * `helper_state` is a single-row table also written by the event intake
+   * for envelope-derived facts (permissions, envelope-sourced errors). This
+   * controller only owns controller-driven transitions (start/pause/resume/
+   * shutdown), so it reads the current row first and carries forward
+   * whatever the intake already recorded instead of resetting it to
+   * defaults on every write.
+   */
   private async persistHelperState(): Promise<void> {
     const lastSafeError = this.status.lastSafeError ? { ...this.status.lastSafeError } : undefined;
+    const existing = await this.options.store.getHelperState();
 
     await this.options.store.setHelperState({
-      connectionKind: 'managed_helper',
+      connectionKind: existing?.connectionKind ?? 'managed_helper',
       lastSafeError,
-      permissions: {
+      permissions: existing?.permissions ?? {
         accessibility: 'unknown' satisfies HelperPermissionState,
         screenRecording: 'unknown' satisfies HelperPermissionState,
       },
-      restartCount: 0,
+      restartCount: existing?.restartCount ?? 0,
       updatedAt: this.status.updatedAt ?? this.options.now(),
     });
   }
@@ -345,7 +367,16 @@ function envelopeFromInternalEvent(
 }
 
 function helperAssetRole(role: CaptureHelperAssetRef['role']): CaptureAssetPayload['role'] {
-  return role === 'capture_thumbnail' ? 'thumbnail' : 'screenshot';
+  switch (role) {
+    case 'capture_thumbnail':
+      return 'thumbnail';
+    case 'capture_original':
+      return 'screenshot';
+    case 'ocr_input':
+      // The wire protocol has no asset role for this — it fails closed
+      // instead of silently mislabeling it as a screenshot.
+      throw new Error('capture_helper_legacy_adapter_ocr_input_unsupported');
+  }
 }
 
 function helperPolicyDecision(
