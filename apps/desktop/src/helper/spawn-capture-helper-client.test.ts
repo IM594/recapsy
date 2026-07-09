@@ -104,6 +104,37 @@ describe('spawn capture helper client', () => {
     expect(protocolErrors[0]).toMatchObject({ code: 'invalid_json' });
   });
 
+  it('writes a valid capture.start envelope to stdin on beginCapture', async () => {
+    const child = new FakeChildProcess();
+    const client = createSpawnCaptureHelperClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await client.start();
+    await client.beginCapture('runtime_started');
+
+    expect(child.stdin.written).toHaveLength(1);
+    const decoded = decodeHelperEnvelopeLine(child.stdin.written[0] ?? '');
+    expect(decoded).toMatchObject({
+      envelope: { type: 'capture.start', payload: { reason: 'runtime_started' } },
+      ok: true,
+    });
+  });
+
+  it('drops beginCapture writes silently when no child is running', async () => {
+    const child = new FakeChildProcess();
+    const client = createSpawnCaptureHelperClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await expect(client.beginCapture('runtime_started')).resolves.toBeUndefined();
+    expect(child.stdin.written).toHaveLength(0);
+  });
+
   it('writes an encoded capture.pause / capture.resume command to stdin', async () => {
     const child = new FakeChildProcess();
     const client = createSpawnCaptureHelperClient({

@@ -145,6 +145,12 @@ class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCo
     }
   }
 
+  async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
+    if (this.child) {
+      this.writeCommand(this.child, 'capture.start', { reason });
+    }
+  }
+
   async pauseCapture(): Promise<void> {
     if (this.child) {
       this.writeCommand(this.child, 'capture.pause', { reason: 'user_paused' });

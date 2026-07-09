@@ -636,6 +636,7 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   stopCalls = 0;
   pauseCalls = 0;
   resumeCalls = 0;
+  beginCaptureReasons: Array<'runtime_started' | 'user_resumed'> = [];
   sentCommands: Array<HelperEnvelope<MainToHelperType>> = [];
   stopImpl: () => Promise<void> = () => Promise.resolve();
   private onEnvelope: ((envelope: HelperEnvelope<HelperToMainType>) => Promise<void>) | undefined;
@@ -643,6 +644,10 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   async start(options: CaptureHelperStartOptions = {}): Promise<void> {
     this.startCalls += 1;
     this.onEnvelope = options.onEnvelope;
+  }
+
+  async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
+    this.beginCaptureReasons.push(reason);
   }
 
   async stop(): Promise<void> {

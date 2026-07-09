@@ -37,7 +37,8 @@ describe('capture helper controller', () => {
 
     await controller.start();
 
-    expect(client.calls).toEqual(['start']);
+    expect(client.calls).toEqual(['start', 'beginCapture']);
+    expect(client.beginCaptureReasons).toEqual(['runtime_started']);
     expect(controller.getStatus()).toMatchObject({
       state: 'running',
     });
@@ -64,6 +65,8 @@ describe('capture helper controller', () => {
 
     await expect(controller.start()).rejects.toThrow('helper_start_failed');
 
+    expect(client.calls).toEqual(['start']);
+    expect(client.beginCaptureReasons).toEqual([]);
     expect(controller.getStatus()).toMatchObject({
       state: 'failed',
       lastSafeError: {
@@ -339,7 +342,7 @@ describe('capture helper controller', () => {
     await controller.shutdown();
     await controller.shutdown();
 
-    expect(client.calls).toEqual(['start', 'stop']);
+    expect(client.calls).toEqual(['start', 'beginCapture', 'stop']);
     expect(controller.getStatus()).toMatchObject({
       state: 'stopped',
     });
@@ -348,6 +351,7 @@ describe('capture helper controller', () => {
 
 class RecordingCaptureHelperClient implements CaptureHelperClient {
   readonly calls: string[] = [];
+  readonly beginCaptureReasons: Array<'runtime_started' | 'user_resumed'> = [];
   startOptions: CaptureHelperStartOptions | undefined;
   private readonly startError?: Error;
 
@@ -362,6 +366,11 @@ class RecordingCaptureHelperClient implements CaptureHelperClient {
     if (this.startError) {
       throw this.startError;
     }
+  }
+
+  async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
+    this.calls.push('beginCapture');
+    this.beginCaptureReasons.push(reason);
   }
 
   async stop(): Promise<void> {

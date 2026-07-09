@@ -39,6 +39,14 @@ export type CaptureHelperStartOptions = {
 export type CaptureHelperClient = {
   start(options?: CaptureHelperStartOptions): Promise<void>;
   stop(): Promise<void>;
+  /**
+   * Tells an already-spawned helper to begin its capture loop. `start()` only
+   * spawns the process and wires its stdio; the real Swift capture engine
+   * stays idle until it receives an explicit `capture.start`, so the
+   * controller drives this once the process is running. Named `beginCapture`
+   * (not `start`) to avoid colliding with the spawn-lifecycle `start()` above.
+   */
+  beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void>;
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;
 };
@@ -152,6 +160,12 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       updatedAt: this.options.now(),
     };
     await this.persistHelperState();
+
+    // Spawning the helper only wires up the process; the capture engine stays
+    // idle until it is explicitly told to begin. Now that the process is
+    // running, drive it to start capturing. Failure paths above return early,
+    // so this only fires when the helper actually reached `running`.
+    await this.options.client.beginCapture('runtime_started');
   }
 
   async pauseCapture(): Promise<void> {
