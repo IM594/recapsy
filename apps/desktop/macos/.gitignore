@@ -1,0 +1,5 @@
+# SwiftPM build cache
+.build/
+
+# Assembled + signed capture bundle output (dev artifact; ADR 0009 约束①)
+build/

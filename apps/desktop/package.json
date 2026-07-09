@@ -20,6 +20,8 @@
     "test": "bun test src",
     "test:server-http": "bun test integration/server-http-smoke.test.ts",
     "test:capture-helper-process": "bun test integration/capture-helper-process.test.ts",
+    "test:capture-bundle-process": "bun test integration/capture-bundle-process.test.ts",
+    "build:capture": "bash macos/build-capture-bundle.sh",
     "typecheck": "tsc --noEmit && pnpm run typecheck:integration",
     "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",
     "lint": "biome check src/ integration/",
