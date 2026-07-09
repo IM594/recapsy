@@ -8,6 +8,8 @@ import { createServerApiClient } from '../server-api/client';
 import type { ServerApiTransport } from '../server-api/types';
 import { createSqliteOperationalStore } from '../storage';
 import { createNodeSqliteDatabase } from '../storage/node-sqlite-driver';
+import type { SyncAssetReader } from '../sync/types';
+import { createLocalAssetReader } from './asset-reader';
 import { createElectronMainRuntime } from './electron-main-runtime';
 
 /**
@@ -43,6 +45,46 @@ const deviceId = process.env.RECAPSY_DESKTOP_DEVICE_ID ?? 'dev-device';
 // Dev-only default matches `apps/server`'s own dev default (`PORT=3000` in
 // `apps/server/.env.example`), not a production domain or port.
 const serverEndpoint = process.env.RECAPSY_SERVER_ENDPOINT ?? 'http://localhost:3000';
+
+/**
+ * Cross-process contract for the local asset root (ADR 0009 "真实资产字节的跨进程读取"):
+ * the capture process writes screenshots under this directory and the sync
+ * loop reads them back by relative access key. The name is passed to the
+ * capture process through the environment — never spliced into an argv string
+ * — because the derived path lives under `app.getPath('userData')`, which on
+ * macOS contains spaces (`Application Support`) that space-joined args would
+ * corrupt. The V0 real capture binary produced in a later increment reads this
+ * same variable.
+ */
+const CAPTURE_ASSET_ROOT_ENV = 'RECAPSY_CAPTURE_ASSET_ROOT';
+
+/**
+ * Single source of truth for the local asset root, derived from Electron's
+ * per-user data directory. Resolved lazily and memoized: `app.getPath(...)` is
+ * only valid after `app.whenReady()`, and every caller here runs inside a
+ * runtime callback that fires post-ready (`createHelperClient` /
+ * `readAssetBytes`), mirroring how `createStore` below already defers its own
+ * `app.getPath('userData')` read. The `captures` subdirectory is the shared
+ * root both the capture process (writer) and the sync loop (reader) agree on.
+ */
+let captureAssetRoot: string | undefined;
+function resolveCaptureAssetRoot(): string {
+  captureAssetRoot ??= path.join(app.getPath('userData'), 'captures');
+  return captureAssetRoot;
+}
+
+/**
+ * The sync loop's real asset reader, built once lazily and reused (rather than
+ * reconstructed on every read). Same post-ready-only rule as
+ * `resolveCaptureAssetRoot`: only ever invoked from the runtime's post-ready
+ * `readAssetBytes` callback, so `app.getPath('userData')` is never read before
+ * `app.whenReady()`.
+ */
+let captureAssetReader: SyncAssetReader | undefined;
+function resolveCaptureAssetReader(): SyncAssetReader {
+  captureAssetReader ??= createLocalAssetReader({ assetRoot: resolveCaptureAssetRoot() });
+  return captureAssetReader;
+}
 
 /**
  * V0 has no macOS Keychain integration yet (see `auth/token-store.ts`'s
@@ -123,7 +165,13 @@ const { ready } = createElectronMainRuntime({
   app,
   authClient,
   createHelperClient: () =>
-    createSpawnCaptureHelperClient({ args: helperArgs, command: helperCommand }),
+    createSpawnCaptureHelperClient({
+      args: helperArgs,
+      command: helperCommand,
+      // Hand the shared asset root to the capture process via env (see the
+      // `CAPTURE_ASSET_ROOT_ENV` doc above for why it is not an argv value).
+      env: { [CAPTURE_ASSET_ROOT_ENV]: resolveCaptureAssetRoot() },
+    }),
   createServerApi: () =>
     createServerApiClient({ endpoint: serverEndpoint, tokenStore, transport: fetchTransport }),
   createStore: () => {
@@ -136,6 +184,15 @@ const { ready } = createElectronMainRuntime({
   deviceId,
   ipcMain,
   loginPrompter,
+  // Real asset-byte reader for the sync loop, replacing the runtime's
+  // fail-closed default. Bound to the same `resolveCaptureAssetRoot()` the
+  // capture process is handed above, so writer and reader share one root. In
+  // the dev-helper fallback (no real capture binary configured) the dev helper
+  // writes nothing to this root, so every read fails closed with
+  // `local_asset_unreadable` and the job settles to `blocked` — the same,
+  // honest end state as before, now reached through the real filesystem path
+  // rather than an unconditional stub.
+  readAssetBytes: (localAccessKey) => resolveCaptureAssetReader()(localAccessKey),
   tokenStore,
 });
 
