@@ -1,6 +1,7 @@
 import type { AuthClient } from '../auth/auth-client';
 import type { LoginPrompter } from '../auth/login-window';
 import type { TokenStore } from '../auth/token-store';
+import type { HelperEnvelope, HelperToMainType } from '../helper/protocol';
 import {
   type CaptureEventSummaryDto,
   type CaptureStatusDto,
@@ -40,7 +41,7 @@ import {
   type SyncLoopOptions,
   createSyncLoop as createRealSyncLoop,
 } from '../sync/sync-loop';
-import type { SyncAssetReader, SyncServerApi } from '../sync/types';
+import type { SyncAssetReader, SyncRunResult, SyncServerApi } from '../sync/types';
 
 /**
  * Structural surface of `Electron.App` this module depends on. Kept narrow
@@ -134,6 +135,22 @@ export type ElectronMainRuntimeOptions = {
   now?(): string;
   /** Hide the Dock icon once the app is ready. Defaults to true; V0 has no Tray UI, so an undocked, dockless process is the least surprising default on macOS. */
   hideDockIcon?: boolean;
+  /**
+   * Dev-visibility hook (see `RECAPSY_DESKTOP_DEV_VISIBILITY` in
+   * `electron-entry.ts`): invoked synchronously with every inbound helper
+   * envelope just before it reaches `eventIntake.handleEnvelope`. Not used by
+   * V0's default wiring — undefined here means no wrapping happens and
+   * `eventIntake` behaves exactly as `createCaptureHelperEventIntake` built
+   * it.
+   */
+  onHelperEnvelope?(envelope: HelperEnvelope<HelperToMainType>): void;
+  /**
+   * Same dev-visibility purpose as `onHelperEnvelope`, forwarded straight
+   * through to the sync loop's own `onResult`/`onError` hooks (see
+   * `sync/sync-loop.ts`).
+   */
+  onSyncResult?(result: SyncRunResult): void;
+  onSyncError?(error: unknown): void;
   /**
    * Upper bound on how long `before-quit` waits for `runtime.requestQuit()`
    * (startup recovery/helper shutdown) before forcing the process to exit
@@ -342,7 +359,7 @@ export function createElectronMainRuntime(
     await store.initialize();
 
     const helperClient = options.createHelperClient();
-    const eventIntake = createCaptureHelperEventIntake({
+    const rawEventIntake = createCaptureHelperEventIntake({
       backpressure,
       client: helperClient,
       deviceId: options.deviceId,
@@ -350,6 +367,23 @@ export function createElectronMainRuntime(
       store,
       workspaceId,
     });
+    // Decorator: only wraps `handleEnvelope` (to fire the dev-visibility
+    // hook before delegating), leaving `capture-helper-event-intake.ts`'s
+    // well-tested logic completely untouched. `getStatus`/`handleProtocolResult`
+    // delegate straight through unchanged. A plain object literal is used
+    // instead of `{ ...rawEventIntake }` because `rawEventIntake` is a class
+    // instance whose methods live on the prototype, not as own enumerable
+    // properties — a spread would silently drop them.
+    const eventIntake: CaptureHelperEventIntake = options.onHelperEnvelope
+      ? {
+          getStatus: () => rawEventIntake.getStatus(),
+          handleEnvelope: async (envelope) => {
+            options.onHelperEnvelope?.(envelope);
+            await rawEventIntake.handleEnvelope(envelope);
+          },
+          handleProtocolResult: (result) => rawEventIntake.handleProtocolResult(result),
+        }
+      : rawEventIntake;
     const helper = createCaptureHelperController({
       client: helperClient,
       deviceId: options.deviceId,
@@ -398,6 +432,8 @@ export function createElectronMainRuntime(
     const syncLoop = createLoop({
       activeDelayMs: options.syncActiveDelayMs,
       idleDelayMs: options.syncIdleDelayMs,
+      onError: options.onSyncError,
+      onResult: options.onSyncResult,
       scheduler: syncScheduler,
     });
     syncLoop.start();

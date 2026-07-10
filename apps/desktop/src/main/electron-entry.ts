@@ -3,12 +3,13 @@ import { BrowserWindow, app, ipcMain } from 'electron';
 import { createAuthClient } from '../auth/auth-client';
 import { createLoginWindowPrompter } from '../auth/login-window';
 import { createInMemoryTokenStore } from '../auth/token-store';
+import type { HelperEnvelope, HelperToMainType } from '../helper/protocol';
 import { createSpawnCaptureHelperClient } from '../helper/spawn-capture-helper-client';
 import { createServerApiClient } from '../server-api/client';
 import type { ServerApiTransport } from '../server-api/types';
 import { createSqliteOperationalStore } from '../storage';
 import { createNodeSqliteDatabase } from '../storage/node-sqlite-driver';
-import type { SyncAssetReader } from '../sync/types';
+import type { SyncAssetReader, SyncRunResult } from '../sync/types';
 import { createLocalAssetReader } from './asset-reader';
 import { createElectronMainRuntime } from './electron-main-runtime';
 
@@ -45,6 +46,18 @@ const deviceId = process.env.RECAPSY_DESKTOP_DEVICE_ID ?? 'dev-device';
 // Dev-only default matches `apps/server`'s own dev default (`PORT=3000` in
 // `apps/server/.env.example`), not a production domain or port.
 const serverEndpoint = process.env.RECAPSY_SERVER_ENDPOINT ?? 'http://localhost:3000';
+
+/**
+ * Opt-in diagnostic mode for local development (the #1 complaint blocking
+ * easy manual testing: after login this app has no window and no Dock icon,
+ * so a developer has zero visibility that anything is happening). When set,
+ * this keeps the Dock icon visible and prints concise, one-line capture/sync
+ * progress logs to stdout via `logHelperEnvelope`/`logSyncResult`/
+ * `logSyncError` below. Off by default — this must never change V0's default
+ * dockless, silent behavior; see the `undefined` fallbacks passed to
+ * `createElectronMainRuntime` below when this is false.
+ */
+const devVisibilityEnabled = process.env.RECAPSY_DESKTOP_DEV_VISIBILITY === '1';
 
 /**
  * Cross-process contract for the local asset root (ADR 0009 "真实资产字节的跨进程读取"):
@@ -182,8 +195,12 @@ const { ready } = createElectronMainRuntime({
     return createSqliteOperationalStore({ database: createNodeSqliteDatabase(sqlitePath) });
   },
   deviceId,
+  hideDockIcon: devVisibilityEnabled ? false : undefined,
   ipcMain,
   loginPrompter,
+  onHelperEnvelope: devVisibilityEnabled ? logHelperEnvelope : undefined,
+  onSyncError: devVisibilityEnabled ? logSyncError : undefined,
+  onSyncResult: devVisibilityEnabled ? logSyncResult : undefined,
   // Real asset-byte reader for the sync loop, replacing the runtime's
   // fail-closed default. Bound to the same `resolveCaptureAssetRoot()` the
   // capture process is handed above, so writer and reader share one root. In
@@ -203,6 +220,123 @@ ready.catch((error: unknown) => {
   console.error('[recapsy-desktop] desktop runtime failed to start', error);
   app.exit(1);
 });
+
+/**
+ * `HelperEnvelope<TType>`'s `payload` type is a conditional type keyed off
+ * its own generic parameter (see `helper/protocol.ts`), so a plain
+ * `switch (envelope.type)` does not narrow `envelope.payload` per case — the
+ * same limitation `capture-helper-event-intake.ts`'s own
+ * `narrowHelperEnvelope` works around. This is a type-level cast only: the
+ * caller must already have confirmed `envelope.type === type` (e.g. inside
+ * the matching `switch` case below).
+ */
+function narrowHelperEnvelope<TType extends HelperToMainType>(
+  envelope: HelperEnvelope<HelperToMainType>,
+  _type: TType,
+): HelperEnvelope<TType> {
+  return envelope as HelperEnvelope<TType>;
+}
+
+/**
+ * Dev-visibility log line for one inbound capture-helper envelope, only ever
+ * wired up when `RECAPSY_DESKTOP_DEV_VISIBILITY` is set (see
+ * `onHelperEnvelope` below). `helper.heartbeat` is intentionally skipped —
+ * it fires every few seconds and would just flood the terminal with
+ * nothing-happened noise; the goal is "a developer can tell captures are
+ * happening at a glance," not a firehose of every heartbeat.
+ */
+function logHelperEnvelope(envelope: HelperEnvelope<HelperToMainType>): void {
+  switch (envelope.type) {
+    case 'capture.result': {
+      const { captureId, assets } = narrowHelperEnvelope(envelope, 'capture.result').payload;
+      const primaryAsset = assets.find((asset) => asset.role === 'screenshot') ?? assets[0];
+      const assetInfo = primaryAsset
+        ? `${primaryAsset.mimeType} ${primaryAsset.sizeBytes}B`
+        : 'no-asset';
+      console.log(
+        `[recapsy:capture] result captureId=${captureId} assets=${assets.length} ${assetInfo}`,
+      );
+      return;
+    }
+    case 'capture.skipped': {
+      const payload = narrowHelperEnvelope(envelope, 'capture.skipped').payload;
+      console.log(
+        `[recapsy:capture] skipped captureId=${payload.captureId} reason=${payload.reason}`,
+      );
+      return;
+    }
+    case 'capture.error': {
+      const payload = narrowHelperEnvelope(envelope, 'capture.error').payload;
+      console.log(
+        `[recapsy:capture] error code=${payload.code}${
+          payload.captureId ? ` captureId=${payload.captureId}` : ''
+        }`,
+      );
+      return;
+    }
+    case 'helper.exiting': {
+      const payload = narrowHelperEnvelope(envelope, 'helper.exiting').payload;
+      console.log(
+        `[recapsy:capture] helper exiting reason=${payload.reason} code=${payload.code ?? 'null'}`,
+      );
+      return;
+    }
+    case 'permission.status': {
+      const payload = narrowHelperEnvelope(envelope, 'permission.status').payload;
+      console.log(
+        `[recapsy:capture] permissions accessibility=${payload.accessibility} screenRecording=${payload.screenCapture}`,
+      );
+      return;
+    }
+    case 'helper.hello': {
+      const payload = narrowHelperEnvelope(envelope, 'helper.hello').payload;
+      console.log(
+        `[recapsy:capture] helper hello version=${payload.helperVersion} pid=${payload.pid ?? 'unknown'}`,
+      );
+      return;
+    }
+    case 'helper.status': {
+      const payload = narrowHelperEnvelope(envelope, 'helper.status').payload;
+      console.log(
+        `[recapsy:capture] helper status=${payload.status}${
+          payload.reason ? ` reason=${payload.reason}` : ''
+        }`,
+      );
+      return;
+    }
+    case 'helper.heartbeat':
+      return;
+  }
+}
+
+/**
+ * Dev-visibility log line for one sync loop outcome. `idle` is deliberately
+ * not logged: the sync loop reschedules itself every `idleDelayMs` (default
+ * 2000ms) whenever there is nothing to do, so logging it would flood the
+ * terminal with nothing-happened noise. `skipped`/`synced`/`retry_wait`/
+ * `blocked`/`failed`/`cancelled` all reflect real job activity.
+ */
+function logSyncResult(result: SyncRunResult): void {
+  if (result.status === 'idle') {
+    return;
+  }
+
+  const parts = [`status=${result.status}`];
+
+  if (result.jobId) {
+    parts.push(`jobId=${result.jobId}`);
+  }
+
+  if (result.code) {
+    parts.push(`code=${result.code}`);
+  }
+
+  console.log(`[recapsy:sync] ${parts.join(' ')}`);
+}
+
+function logSyncError(error: unknown): void {
+  console.error('[recapsy:sync] error', error);
+}
 
 function encodeTransportBody(body: unknown, headers: Headers): BodyInit | undefined {
   if (body === undefined) {

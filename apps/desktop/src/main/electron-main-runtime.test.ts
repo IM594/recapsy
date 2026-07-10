@@ -11,6 +11,7 @@ import type { CaptureHelperCommandClient } from '../runtime/capture-helper-event
 import type { ServerApiClient } from '../server-api/types';
 import { type OperationalStoreRepository, createInMemoryOperationalStore } from '../storage';
 import type { SyncLoop, SyncLoopOptions } from '../sync/sync-loop';
+import type { SyncRunResult } from '../sync/types';
 import {
   type ElectronAppLike,
   type ElectronIpcMainLike,
@@ -389,6 +390,93 @@ describe('electron main runtime wiring', () => {
     await flushMicrotasks();
 
     expect(syncLoop.stopCalls).toBe(1);
+  });
+
+  it('invokes onHelperEnvelope with the same envelope before it reaches the real intake', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const receivedEnvelopes: HelperEnvelope<HelperToMainType>[] = [];
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        helperClient,
+        ipcMain,
+        onHelperEnvelope: (envelope) => {
+          receivedEnvelopes.push(envelope);
+        },
+        store,
+      }),
+    );
+    app.triggerReady();
+    await handle.ready;
+
+    const envelope: HelperEnvelope<HelperToMainType> = {
+      correlationId: null,
+      messageId: 'perm_1',
+      payload: { accessibility: 'granted', observedAt: now, screenCapture: 'granted' },
+      protocolVersion: 'recapsy.capture-helper',
+      sentAt: now,
+      type: 'permission.status',
+    };
+    await helperClient.emit(envelope);
+
+    expect(receivedEnvelopes).toEqual([envelope]);
+
+    // The wrapper must still delegate to the real (well-tested) intake —
+    // this envelope should be reflected in capture.getStatus exactly as it
+    // would be without onHelperEnvelope wired up.
+    const response = await ipcMain.invoke('capture.getStatus', undefined);
+    expect(response).toMatchObject({
+      data: { permissions: { accessibility: 'granted', screenRecording: 'granted' } },
+      ok: true,
+    });
+  });
+
+  it('does not wrap the event intake when onHelperEnvelope is not supplied', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
+    app.triggerReady();
+    await handle.ready;
+
+    // No onHelperEnvelope wired up; a real envelope must still flow through
+    // to the intake exactly as today (no behavior change when the dev flag
+    // is off).
+    await helperClient.emit({
+      correlationId: null,
+      messageId: 'perm_1',
+      payload: { accessibility: 'granted', observedAt: now, screenCapture: 'granted' },
+      protocolVersion: 'recapsy.capture-helper',
+      sentAt: now,
+      type: 'permission.status',
+    });
+
+    const response = await ipcMain.invoke('capture.getStatus', undefined);
+    expect(response).toMatchObject({
+      data: { permissions: { accessibility: 'granted', screenRecording: 'granted' } },
+      ok: true,
+    });
+  });
+
+  it('forwards onSyncResult/onSyncError to the injected createSyncLoop', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    let capturedOptions: SyncLoopOptions | undefined;
+    const fakeLoop = new FakeSyncLoop();
+    const onSyncResult = (_result: SyncRunResult): void => {};
+    const onSyncError = (_error: unknown): void => {};
+
+    const handle = createElectronMainRuntime({
+      ...baseOptions({ app, helperClient, ipcMain, store }),
+      createSyncLoop: (loopOptions) => {
+        capturedOptions = loopOptions;
+        return fakeLoop;
+      },
+      onSyncError,
+      onSyncResult,
+    });
+    app.triggerReady();
+    await handle.ready;
+
+    expect(capturedOptions?.onResult).toBe(onSyncResult);
+    expect(capturedOptions?.onError).toBe(onSyncError);
   });
 });
 
