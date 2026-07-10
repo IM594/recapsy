@@ -41,6 +41,9 @@ export type ServerApiErrorCode =
   | 'provider_timeout'
   | 'input_too_large'
   | 'unsupported_format'
+  | 'temporary_location_missing'
+  | 'result_invalid'
+  | 'cleanup_failed'
   | 'validation_failed'
   | 'cancelled'
   | 'unknown';
@@ -65,6 +68,20 @@ export type CaptureIngestResult = {
   timelineEventId: string;
   nextAction: 'create_temporary_upload' | 'queue_ocr' | 'none';
   inputAssetId?: string;
+};
+
+export type CaptureOcrStatus =
+  | 'not_requested'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'blocked';
+
+export type CaptureDetailResult = {
+  captureId: string;
+  ocrStatus: CaptureOcrStatus;
+  ocrJobId?: string;
 };
 
 export type TemporaryUploadInput = {
@@ -220,6 +237,7 @@ export type AxAllowlistResult = {
 
 export type ServerApiClient = {
   ingestCapture(input: CaptureIngestInput): Promise<CaptureIngestResult>;
+  getCapture(workspaceId: string, captureId: string): Promise<CaptureDetailResult>;
   createTemporaryUpload(input: TemporaryUploadInput): Promise<TemporaryUploadResult>;
   putTemporaryBytes(input: TemporaryByteUploadInput): Promise<TemporaryByteUploadResult>;
   createOcrJob(input: OcrJobCreateInput): Promise<OcrJobCreateResult>;

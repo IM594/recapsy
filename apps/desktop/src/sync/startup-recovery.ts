@@ -1,9 +1,14 @@
+import type { ServerApiClient } from '../server-api/types';
 import type { OperationalStoreRepository, OutboxJob, SafeOperationalError } from '../storage';
+import { reconcileOutboxJobFromServerCapture } from './scheduler';
+import type { SyncClock } from './types';
 
 export type StartupRecoveryOptions = {
   store: OperationalStoreRepository;
   now: string;
   workspaceId?: string;
+  api?: Pick<ServerApiClient, 'getCapture'>;
+  clock?: SyncClock;
 };
 
 export type StartupRecoverySummary = {
@@ -12,6 +17,7 @@ export type StartupRecoverySummary = {
   uploadPending: number;
   ocrPolling: number;
   ocrPendingWithoutServerJob: number;
+  reconciledSynced: number;
   unchangedRetryable: number;
   unchangedTerminal: number;
 };
@@ -50,6 +56,7 @@ export async function recoverInterruptedOutboxJobs(
   const summary: StartupRecoverySummary = {
     ocrPendingWithoutServerJob: 0,
     ocrPolling: 0,
+    reconciledSynced: 0,
     recovered: 0,
     scanned: jobs.length,
     unchangedRetryable: 0,
@@ -66,6 +73,13 @@ export async function recoverInterruptedOutboxJobs(
     if (job.state === 'pending') {
       summary.unchangedRetryable += 1;
       continue;
+    }
+
+    if (options.api && job.serverCaptureId && !job.serverOcrJobId) {
+      const reconciled = await reconcileInterruptedCaptureJob(options, job, summary);
+      if (reconciled) {
+        continue;
+      }
     }
 
     if (job.state === 'uploading') {
@@ -90,6 +104,42 @@ export async function recoverInterruptedOutboxJobs(
   }
 
   return summary;
+}
+
+async function reconcileInterruptedCaptureJob(
+  options: StartupRecoveryOptions,
+  job: OutboxJob,
+  summary: StartupRecoverySummary,
+): Promise<boolean> {
+  if (!options.api) {
+    return false;
+  }
+
+  const clock = options.clock ?? { now: () => options.now };
+  const reconciled = await reconcileOutboxJobFromServerCapture(
+    {
+      api: options.api,
+      clock,
+      store: options.store,
+    },
+    job,
+  );
+
+  if (reconciled?.status === 'synced') {
+    summary.recovered += 1;
+    summary.reconciledSynced += 1;
+    return true;
+  }
+
+  const refreshed = await options.store.getOutboxJob(job.id);
+  if (!refreshed?.serverOcrJobId) {
+    return false;
+  }
+
+  await recoverJob(options, refreshed, STARTUP_RECOVERY_ERRORS.interrupted_while_waiting_for_ocr);
+  summary.recovered += 1;
+  summary.ocrPolling += 1;
+  return true;
 }
 
 async function recoverJob(

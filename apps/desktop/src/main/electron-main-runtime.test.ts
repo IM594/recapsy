@@ -474,6 +474,7 @@ function notImplementedServerApi(): ServerApiClient {
     getAxAllowlist: notImplemented,
     getCapabilities: notImplemented,
     getCapturePolicies: notImplemented,
+    getCapture: notImplemented,
     ingestCapture: notImplemented,
     pollOcrJob: notImplemented,
     putTemporaryBytes: notImplemented,

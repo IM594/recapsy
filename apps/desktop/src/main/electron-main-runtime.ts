@@ -373,6 +373,8 @@ export function createElectronMainRuntime(
       startupRecovery: {
         async recover() {
           await recoverInterruptedOutboxJobs({
+            api: options.createServerApi(),
+            clock: { now },
             now: now(),
             store,
             workspaceId,

@@ -506,6 +506,81 @@ describe('desktop server API client', () => {
       retryable: false,
     });
   });
+
+  it('parses capture detail responses for OCR reconcile', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async (request) => {
+      expect(request.path).toBe('/v1/captures/capture_1');
+      expect(request.query).toMatchObject({ workspaceId: 'workspace_1' });
+      return createJsonResponse({
+        assetLocations: [],
+        assets: [],
+        capture: {
+          appName: 'Code',
+          captureStatus: 'synced',
+          captureType: 'screen',
+          capturedAt: now,
+          contextConfidence: 'unknown',
+          createdAt: now,
+          deviceId: 'device_1',
+          id: 'capture_1',
+          indexStatus: 'indexed',
+          metadata: {},
+          observedAt: now,
+          ocrStatus: 'succeeded',
+          privacyDecision: createPrivacyDecision(),
+          timelineStatus: 'projected',
+          updatedAt: now,
+          workspaceId: 'workspace_1',
+        },
+        captureAssets: [],
+        ocr: {
+          jobId: 'ocr_job_1',
+          resultId: 'ocr_result_1',
+          resultVersion: 1,
+          status: 'succeeded',
+        },
+        search: {
+          bodySource: 'faithful_image_ocr',
+          searchDocumentId: 'search_1',
+          status: 'indexed',
+        },
+        timeline: {
+          status: 'projected',
+          timelineEventId: 'timeline_1',
+        },
+      });
+    });
+
+    const capture = await client.getCapture('workspace_1', 'capture_1');
+
+    expect(capture).toEqual({
+      captureId: 'capture_1',
+      ocrJobId: 'ocr_job_1',
+      ocrStatus: 'succeeded',
+    });
+  });
+
+  it('maps OCR result_invalid server codes without collapsing them to unknown', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async () => {
+      return createJsonResponse(
+        {
+          error: {
+            code: 'ocr.result_invalid',
+            message: 'OCR output failed semantic validation.',
+          },
+        },
+        400,
+      );
+    });
+
+    await expect(client.getCapture('workspace_1', 'capture_1')).rejects.toMatchObject({
+      code: 'result_invalid',
+      retryable: false,
+      safeMessage: 'OCR result is invalid.',
+    });
+  });
 });
 
 function createClient(calls: ServerApiTransportRequest[], handler: ServerApiTransport) {

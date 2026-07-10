@@ -1,6 +1,7 @@
 import { CaptureIngestRequestSchema } from '@recapsy/contracts';
 import { redactLogPayload } from '../logging/redaction';
 import type {
+  CaptureDetailResult,
   CaptureIngestInput,
   CaptureIngestResult,
   CapturePoliciesResult,
@@ -92,6 +93,14 @@ export function createServerApiClient(options: ServerApiClientOptions): ServerAp
         }),
       });
       return toCapturePoliciesResult(body);
+    },
+    async getCapture(workspaceId, captureId) {
+      const body = await request(options, endpoint, {
+        method: 'GET',
+        path: `/v1/captures/${captureId}`,
+        query: { workspaceId },
+      });
+      return toCaptureDetailResult(body);
     },
     async createOcrJob(input) {
       const body = await request(options, endpoint, {
@@ -452,6 +461,17 @@ function toCaptureIngestResult(body: unknown): CaptureIngestResult {
   };
 }
 
+function toCaptureDetailResult(body: unknown): CaptureDetailResult {
+  const capture = readObject(readObject(body, 'capture'), undefined);
+  const ocr = readObject(body, 'ocr');
+
+  return {
+    captureId: readString(capture, 'id'),
+    ocrStatus: readString(ocr, 'status') as CaptureDetailResult['ocrStatus'],
+    ...(readOptionalString(ocr, 'jobId') ? { ocrJobId: readOptionalString(ocr, 'jobId') } : {}),
+  };
+}
+
 function toTemporaryUploadResult(body: unknown): TemporaryUploadResult {
   const upload = readObject(readObject(body, 'upload'), undefined);
   const location = readObject(readObject(body, 'assetLocation'), undefined);
@@ -579,6 +599,9 @@ function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
     'provider_timeout',
     'input_too_large',
     'unsupported_format',
+    'temporary_location_missing',
+    'result_invalid',
+    'cleanup_failed',
     'validation_failed',
     'cancelled',
     'unknown',
@@ -654,6 +677,18 @@ function defaultSafeMessage(code: ServerApiErrorCode): string {
 
   if (code === 'unsupported_format') {
     return 'Input format is unsupported.';
+  }
+
+  if (code === 'temporary_location_missing') {
+    return 'Temporary OCR input is unavailable.';
+  }
+
+  if (code === 'result_invalid') {
+    return 'OCR result is invalid.';
+  }
+
+  if (code === 'cleanup_failed') {
+    return 'OCR cleanup failed.';
   }
 
   if (code === 'validation_failed') {
@@ -736,11 +771,14 @@ function isRetryableCode(code: ServerApiErrorCode): boolean {
 function isRetryableByStatus(code: ServerApiErrorCode): boolean {
   return ![
     'cancelled',
+    'cleanup_failed',
     'input_too_large',
     'policy_denied',
     'provider_auth_failed',
     'provider_not_configured',
     'quota_exceeded',
+    'result_invalid',
+    'temporary_location_missing',
     'unsupported_format',
     'unauthenticated',
     'validation_failed',
@@ -833,6 +871,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export type {
+  CaptureDetailResult,
   CaptureIngestInput,
   CaptureIngestResult,
   CapturePoliciesInput,

@@ -278,6 +278,7 @@ describe('SQLite operational store', () => {
     expect(summary).toEqual({
       ocrPendingWithoutServerJob: 0,
       ocrPolling: 1,
+      reconciledSynced: 0,
       recovered: 2,
       scanned: 3,
       unchangedRetryable: 0,

@@ -63,6 +63,7 @@ describe('desktop startup recovery', () => {
     expect(summary).toEqual({
       ocrPendingWithoutServerJob: 1,
       ocrPolling: 1,
+      reconciledSynced: 0,
       recovered: 3,
       scanned: 8,
       unchangedRetryable: 1,
@@ -154,6 +155,48 @@ describe('desktop startup recovery', () => {
     });
     expect(await store.getOutboxJob('job_workspace_1')).toMatchObject({ state: 'pending' });
     expect(await store.getOutboxJob('job_workspace_2')).toMatchObject({ state: 'pending' });
+  });
+
+  it('reconciles capture-only interrupted jobs to synced when server OCR already succeeded', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedJob(store, createJob({ id: 'job_reconcile', idempotencyKey: 'idem_reconcile' }));
+    await store.updateOutboxJobState('job_reconcile', {
+      now: '2026-07-06T00:03:00.000Z',
+      serverCaptureId: 'capture_reconcile',
+      state: 'ocr_wait',
+    });
+    const calls: string[] = [];
+
+    const summary = await recoverInterruptedOutboxJobs({
+      api: {
+        async getCapture(workspaceId, captureId) {
+          calls.push(`capture:${workspaceId}:${captureId}`);
+          return {
+            captureId,
+            ocrJobId: 'ocr_reconcile',
+            ocrStatus: 'succeeded',
+          };
+        },
+      },
+      now: recoveryNow,
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    expect(summary).toMatchObject({
+      ocrPendingWithoutServerJob: 0,
+      ocrPolling: 0,
+      reconciledSynced: 1,
+      recovered: 1,
+      scanned: 1,
+    });
+    expect(calls).toEqual(['capture:workspace_1:capture_reconcile']);
+    expect(await store.getOutboxJob('job_reconcile')).toMatchObject({
+      serverCaptureId: 'capture_reconcile',
+      serverOcrJobId: 'ocr_reconcile',
+      state: 'synced',
+      terminalReason: 'ocr_succeeded',
+    });
   });
 });
 

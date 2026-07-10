@@ -1,6 +1,6 @@
 import type { IpcErrorCode, SyncQueueSummaryDto } from '../ipc';
 import { ServerApiError } from '../server-api/client';
-import type { OcrJobSafeError } from '../server-api/types';
+import type { OcrJobSafeError, OcrJobStatusResult } from '../server-api/types';
 import type {
   BackpressureDecision,
   OperationalStoreRepository,
@@ -17,6 +17,7 @@ const TERMINAL_BLOCKING_OCR_ERRORS = new Set([
 const TERMINAL_FAILED_OCR_ERRORS = new Set([
   'input_too_large',
   'provider_auth_failed',
+  'result_invalid',
   'unsupported_format',
 ]);
 const RETRYABLE_OCR_ERRORS = new Set([
@@ -133,80 +134,97 @@ export async function createSyncQueueSummary(
 }
 
 async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<SyncRunResult> {
+  let activeJob = job;
   try {
-    if (job.serverOcrJobId) {
-      return pollExistingOcrJob(options, job);
+    if (activeJob.serverOcrJobId) {
+      return pollExistingOcrJob(options, activeJob);
     }
 
-    const asset = await options.store.getAssetCacheRef(job.assetRefId);
+    if (activeJob.serverCaptureId) {
+      const reconciled = await reconcileOutboxJobFromServerCapture(options, activeJob);
+      if (reconciled?.status === 'synced') {
+        return reconciled;
+      }
+
+      const refreshed = await options.store.getOutboxJob(activeJob.id);
+      if (refreshed?.serverOcrJobId) {
+        return pollExistingOcrJob(options, refreshed);
+      }
+
+      if (refreshed) {
+        activeJob = refreshed;
+      }
+    }
+
+    const asset = await options.store.getAssetCacheRef(activeJob.assetRefId);
 
     if (!asset) {
-      await markJobTerminalWithSafeError(options, job, 'blocked', {
+      await markJobTerminalWithSafeError(options, activeJob, 'blocked', {
         code: 'asset_ref_missing',
         retryable: false,
       });
-      return { jobId: job.id, processed: 1, status: 'blocked' };
+      return { jobId: activeJob.id, processed: 1, status: 'blocked' };
     }
 
-    if (!(await ensureWorkspaceStillActive(options, job))) {
-      return { jobId: job.id, processed: 1, status: 'retry_wait' };
+    if (!(await ensureWorkspaceStillActive(options, activeJob))) {
+      return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
     }
 
     const capture = await options.api.ingestCapture({
-      ...job.capture,
+      ...activeJob.capture,
       asset,
-      deviceId: job.deviceId,
-      idempotencyKey: job.idempotencyKey,
-      workspaceId: job.workspaceId,
+      deviceId: activeJob.deviceId,
+      idempotencyKey: activeJob.idempotencyKey,
+      workspaceId: activeJob.workspaceId,
     });
 
-    await options.store.updateOutboxJobState(job.id, {
+    await options.store.updateOutboxJobState(activeJob.id, {
       now: options.clock.now(),
       serverCaptureId: capture.captureId,
       state: 'uploading',
     });
 
-    if (job.capture.privacyDecision.action === 'block_capture') {
-      await options.store.markOutboxJobTerminal(job.id, {
+    if (activeJob.capture.privacyDecision.action === 'block_capture') {
+      await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'capture_blocked_by_local_policy',
         serverCaptureId: capture.captureId,
         state: 'synced',
       });
-      return { jobId: job.id, processed: 1, status: 'synced' };
+      return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
-    if (job.capture.privacyDecision.action === 'block_ocr') {
-      await options.store.markOutboxJobTerminal(job.id, {
+    if (activeJob.capture.privacyDecision.action === 'block_ocr') {
+      await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'ocr_blocked_by_local_policy',
         serverCaptureId: capture.captureId,
         state: 'synced',
       });
-      return { jobId: job.id, processed: 1, status: 'synced' };
+      return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
-    if (!(await ensureWorkspaceStillActive(options, job))) {
-      return { jobId: job.id, processed: 1, status: 'retry_wait' };
+    if (!(await ensureWorkspaceStillActive(options, activeJob))) {
+      return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
     }
 
     if (capture.nextAction === 'none') {
-      await options.store.markOutboxJobTerminal(job.id, {
+      await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'metadata_synced',
         serverCaptureId: capture.captureId,
         state: 'synced',
       });
-      return { jobId: job.id, processed: 1, status: 'synced' };
+      return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
     if (!capture.inputAssetId) {
-      await markJobTerminalWithSafeError(options, job, 'failed', {
+      await markJobTerminalWithSafeError(options, activeJob, 'failed', {
         code: 'upload_input_missing',
         retryable: false,
         serverCaptureId: capture.captureId,
       });
-      return { jobId: job.id, processed: 1, status: 'failed' };
+      return { jobId: activeJob.id, processed: 1, status: 'failed' };
     }
 
     const bytes = await options.readAssetBytes(asset.localAccessKey);
@@ -214,81 +232,102 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
     const upload = await options.api.createTemporaryUpload({
       assetId: capture.inputAssetId,
       contentHash: asset.hash,
-      idempotencyKey: `${job.idempotencyKey}:temporary`,
+      idempotencyKey: `${activeJob.idempotencyKey}:temporary`,
       mimeType: asset.mimeType,
       sizeBytes: asset.sizeBytes,
-      workspaceId: job.workspaceId,
+      workspaceId: activeJob.workspaceId,
     });
 
     await options.api.putTemporaryBytes({
       assetId: capture.inputAssetId,
       bytes,
       mimeType: asset.mimeType,
-      workspaceId: job.workspaceId,
+      workspaceId: activeJob.workspaceId,
     });
 
-    if (!(await ensureWorkspaceStillActive(options, job))) {
-      return { jobId: job.id, processed: 1, status: 'retry_wait' };
+    if (!(await ensureWorkspaceStillActive(options, activeJob))) {
+      return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
     }
 
     const created = await options.api.createOcrJob({
       captureId: capture.captureId,
-      idempotencyKey: `${job.idempotencyKey}:ocr`,
+      idempotencyKey: `${activeJob.idempotencyKey}:ocr`,
       inputAssetId: capture.inputAssetId,
       temporaryLocationId: upload.temporaryLocationId,
-      workspaceId: job.workspaceId,
+      workspaceId: activeJob.workspaceId,
     });
 
-    await options.store.updateOutboxJobState(job.id, {
+    await options.store.updateOutboxJobState(activeJob.id, {
       now: options.clock.now(),
       serverCaptureId: capture.captureId,
-      serverOcrJobId: created.job.id,
+      serverOcrJobId: created.activeJob.id,
       state: 'ocr_wait',
     });
 
-    const polled = await options.api.pollOcrJob(job.workspaceId, created.job.id);
+    let polled: OcrJobStatusResult;
+    try {
+      polled = await options.api.pollOcrJob(activeJob.workspaceId, created.activeJob.id);
+    } catch (error) {
+      const persisted = await options.store.getOutboxJob(activeJob.id);
+      const jobWithPersistedIds = persisted ?? {
+        ...activeJob,
+        serverCaptureId: capture.captureId,
+        serverOcrJobId: created.activeJob.id,
+        state: 'ocr_wait' as const,
+      };
 
-    if (await isLocallyCancelled(options.store, job.id)) {
-      return { jobId: job.id, processed: 1, status: 'cancelled' };
+      if (jobWithPersistedIds.serverOcrJobId) {
+        await recordSafeError(options, jobWithPersistedIds, {
+          code: 'server_unavailable',
+          retryable: true,
+        });
+        return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
+      }
+
+      return handleSyncError(options, jobWithPersistedIds, error);
     }
 
-    if (polled.job.status === 'succeeded') {
-      const current = await options.store.getOutboxJob(job.id);
-      await options.store.markOutboxJobTerminal(job.id, {
+    if (await isLocallyCancelled(options.store, activeJob.id)) {
+      return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
+    }
+
+    if (polled.activeJob.status === 'succeeded') {
+      const current = await options.store.getOutboxJob(activeJob.id);
+      await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'ocr_succeeded',
         serverCaptureId: current?.serverCaptureId ?? capture.captureId,
-        serverOcrJobId: current?.serverOcrJobId ?? created.job.id,
+        serverOcrJobId: current?.serverOcrJobId ?? created.activeJob.id,
         state: 'synced',
       });
-      return { jobId: job.id, processed: 1, status: 'synced' };
+      return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
-    if (polled.job.status === 'cancelled') {
-      await options.store.markOutboxJobTerminal(job.id, {
+    if (polled.activeJob.status === 'cancelled') {
+      await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'server_cancelled',
         serverCaptureId: capture.captureId,
-        serverOcrJobId: created.job.id,
+        serverOcrJobId: created.activeJob.id,
         state: 'cancelled',
       });
-      return { jobId: job.id, processed: 1, status: 'cancelled' };
+      return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
     }
 
-    if (polled.job.status === 'failed') {
-      return handleOcrFailure(options, job, polled.job.error, {
+    if (polled.activeJob.status === 'failed') {
+      return handleOcrFailure(options, activeJob, polled.activeJob.error, {
         captureId: capture.captureId,
-        ocrJobId: created.job.id,
+        ocrJobId: created.activeJob.id,
       });
     }
 
-    await recordSafeError(options, job, {
+    await recordSafeError(options, activeJob, {
       code: 'server_unavailable',
       retryable: true,
     });
-    return { jobId: job.id, processed: 1, status: 'retry_wait' };
+    return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
   } catch (error) {
-    return handleSyncError(options, job, error);
+    return handleSyncError(options, activeJob, error);
   }
 }
 
@@ -358,7 +397,7 @@ async function handleOcrFailure(
   error: OcrJobSafeError | null | undefined,
   ids: { captureId?: string; ocrJobId: string },
 ): Promise<SyncRunResult> {
-  const code = error?.code ?? 'unknown';
+  const code = error?.code ?? 'validation_failed';
 
   if (TERMINAL_BLOCKING_OCR_ERRORS.has(code)) {
     await options.store.markOutboxJobTerminal(job.id, {
@@ -426,11 +465,100 @@ async function handleSyncError(
     };
   }
 
-  await recordSafeError(options, job, {
-    code: 'unknown',
-    retryable: true,
-  });
-  return { jobId: job.id, processed: 1, status: 'retry_wait' };
+  const classified = classifyUnhandledSyncError(error);
+  await recordSafeError(options, job, classified);
+  return {
+    jobId: job.id,
+    processed: 1,
+    status: classified.retryable ? 'retry_wait' : 'failed',
+  };
+}
+
+export async function reconcileOutboxJobFromServerCapture(
+  options: {
+    api: Pick<SyncSchedulerOptions['api'], 'getCapture'>;
+    clock: SyncSchedulerOptions['clock'];
+    store: SyncSchedulerOptions['store'];
+  },
+  job: OutboxJob,
+): Promise<SyncRunResult | null> {
+  if (!job.serverCaptureId || job.serverOcrJobId) {
+    return null;
+  }
+
+  if (['synced', 'blocked', 'failed', 'cancelled'].includes(job.state)) {
+    return null;
+  }
+
+  const capture = await options.api.getCapture(job.workspaceId, job.serverCaptureId);
+
+  if (capture.ocrStatus === 'succeeded') {
+    await options.store.markOutboxJobTerminal(job.id, {
+      now: options.clock.now(),
+      reason: 'ocr_succeeded',
+      serverCaptureId: job.serverCaptureId,
+      serverOcrJobId: capture.ocrJobId,
+      state: 'synced',
+    });
+    return { jobId: job.id, processed: 1, status: 'synced' };
+  }
+
+  if (capture.ocrJobId && (capture.ocrStatus === 'queued' || capture.ocrStatus === 'running')) {
+    await options.store.updateOutboxJobState(job.id, {
+      now: options.clock.now(),
+      serverCaptureId: job.serverCaptureId,
+      serverOcrJobId: capture.ocrJobId,
+      state: 'ocr_wait',
+    });
+  }
+
+  return null;
+}
+
+function classifyUnhandledSyncError(error: unknown): { code: string; retryable: boolean } {
+  if (error instanceof SyntaxError || error instanceof TypeError) {
+    return { code: 'validation_failed', retryable: false };
+  }
+
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) {
+      if (isLocalAssetSafeCode(code)) {
+        return { code, retryable: false };
+      }
+
+      if (isClassifiableSyncErrorCode(code)) {
+        return {
+          code,
+          retryable: isRetryableClassifiableSyncCode(code),
+        };
+      }
+    }
+
+    const message = error.message.toLowerCase();
+    if (message.includes('sqlite') || message.includes('database')) {
+      return { code: 'server_unavailable', retryable: true };
+    }
+  }
+
+  return { code: 'validation_failed', retryable: false };
+}
+
+function isClassifiableSyncErrorCode(code: string): boolean {
+  return [
+    'offline',
+    'server_unavailable',
+    'validation_failed',
+    'workspace_required',
+    'unknown',
+    'result_invalid',
+    'temporary_location_missing',
+    'cleanup_failed',
+  ].includes(code);
+}
+
+function isRetryableClassifiableSyncCode(code: string): boolean {
+  return code === 'offline' || code === 'server_unavailable' || code === 'unknown';
 }
 
 async function markJobTerminalWithSafeError(
@@ -532,6 +660,7 @@ function toIpcErrorCode(code: string): IpcErrorCode {
       'input_too_large',
       'unsupported_format',
       'validation_failed',
+      'result_invalid',
       'cancelled',
       'unknown',
     ].includes(code)
@@ -543,7 +672,8 @@ function toIpcErrorCode(code: string): IpcErrorCode {
     code === 'local_asset_missing' ||
     code === 'local_asset_unreadable' ||
     code === 'asset_ref_missing' ||
-    code === 'upload_input_missing'
+    code === 'upload_input_missing' ||
+    code === 'result_invalid'
   ) {
     return 'validation_failed';
   }
@@ -622,6 +752,14 @@ function syncSafeMessage(code: string): string {
 
   if (code === 'validation_failed') {
     return 'Request validation failed.';
+  }
+
+  if (code === 'result_invalid') {
+    return 'OCR result is invalid.';
+  }
+
+  if (code === 'unknown') {
+    return 'Sync failed due to an unexpected error.';
   }
 
   if (code === 'local_asset_missing') {

@@ -478,6 +478,12 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
         workspaceId: 'workspace_1',
       };
     },
+    async getCapture() {
+      return {
+        captureId: 'capture_1',
+        ocrStatus: 'not_requested',
+      };
+    },
     async ingestCapture() {
       throw new Error('ingestCapture must not run for recovered OCR polling jobs');
     },

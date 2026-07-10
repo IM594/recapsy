@@ -768,6 +768,83 @@ describe('desktop server sync scheduler', () => {
     expect(serialized).not.toContain('OCR raw text');
   });
 
+  it('persists serverOcrJobId when poll fails after OCR create succeeds', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    const scheduler = createScheduler({
+      api: createApi({
+        async pollOcrJob() {
+          throw new Error('poll interrupted');
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+    const job = await store.getOutboxJob('job_1');
+
+    expect(result).toMatchObject({
+      processed: 1,
+      status: 'retry_wait',
+    });
+    expect(job).toMatchObject({
+      serverCaptureId: 'capture_1',
+      serverOcrJobId: 'ocr_job_1',
+      state: 'pending',
+      lastSafeError: {
+        code: 'server_unavailable',
+        retryable: true,
+      },
+    });
+  });
+
+  it('reconciles capture-only jobs to synced when server OCR already succeeded', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    await store.updateOutboxJobState('job_1', {
+      now: '2026-07-06T00:00:01.000Z',
+      serverCaptureId: 'capture_existing',
+      state: 'pending',
+    });
+    const calls: string[] = [];
+    const scheduler = createScheduler({
+      api: createApi({
+        async createOcrJob() {
+          calls.push('ocr');
+          throw new Error('createOcrJob must not run when server OCR already succeeded');
+        },
+        async getCapture(workspaceId, captureId) {
+          calls.push(`capture:${workspaceId}:${captureId}`);
+          return {
+            captureId,
+            ocrJobId: 'ocr_existing',
+            ocrStatus: 'succeeded',
+          };
+        },
+        async ingestCapture() {
+          calls.push('ingest');
+          throw new Error('ingestCapture must not run during capture reconcile');
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'synced',
+    });
+    expect(calls).toEqual(['capture:workspace_1:capture_existing']);
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      serverCaptureId: 'capture_existing',
+      serverOcrJobId: 'ocr_existing',
+      state: 'synced',
+      terminalReason: 'ocr_succeeded',
+    });
+  });
+
   it('maps explanatory safe error codes to IPC summaries without collapsing them to unknown', async () => {
     const cases = [
       ['policy_denied', 'policy_denied', undefined],
@@ -906,6 +983,12 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
           temporaryTtlSeconds: 1800,
         },
         workspaceId: 'workspace_1',
+      };
+    },
+    async getCapture() {
+      return {
+        captureId: 'capture_1',
+        ocrStatus: 'not_requested',
       };
     },
     async ingestCapture() {
