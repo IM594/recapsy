@@ -4,6 +4,7 @@ import {
   AssetLocationSchema,
   CaptureIngestRequestSchema,
   OcrJobSafeErrorSchema,
+  OcrResultSchema,
   SearchDocumentSchema,
   SearchResponseSchema,
 } from '../index.js';
@@ -261,6 +262,41 @@ describe('Search contracts', () => {
 });
 
 describe('OCR job contracts', () => {
+  it('allows empty searchText on OCR results for blank-image successes', () => {
+    const parsed = OcrResultSchema.parse({
+      id: ids.ocrResult,
+      workspaceId: ids.workspace,
+      captureId: ids.capture,
+      jobId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      resultVersion: 1,
+      sourceAssetHash: 'sha256:ocr-input-hash',
+      faithful: {
+        source: 'image_ocr',
+        blocks: [],
+        readingOrder: 'top_to_bottom_left_to_right',
+      },
+      auxiliary: {
+        layoutNotes: [],
+        visualHints: [],
+        detectedTables: 0,
+        metadata: {},
+      },
+      semantics: {
+        activitySummary: 'Processed screenshot OCR',
+        entities: [],
+        actionHints: [],
+        embeddingCandidateText: 'Processed screenshot OCR',
+        metadata: {},
+      },
+      searchText: '',
+      qualityFlags: [],
+      createdAt: now,
+    });
+
+    expect(parsed.searchText).toBe('');
+    expect(parsed.faithful.blocks).toEqual([]);
+  });
+
   it('accepts provider_unavailable as a safe OCR job error code', () => {
     const parsed = OcrJobSafeErrorSchema.parse({
       code: 'provider_unavailable',

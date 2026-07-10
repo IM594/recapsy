@@ -154,7 +154,7 @@ export const OcrResultSchema = z
     faithful: OcrFaithfulResultSchema,
     auxiliary: OcrAuxiliaryResultSchema,
     semantics: OcrSemanticsResultSchema,
-    searchText: z.string().min(1),
+    searchText: z.string(),
     qualityFlags: z.array(OcrQualityFlagSchema).default([]),
     createdAt: IsoDateTimeSchema,
   })
