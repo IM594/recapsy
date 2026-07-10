@@ -206,7 +206,7 @@ public enum HelperEncodingError: Error {
 /// Pure NDJSON line encoder: one JSON object + trailing `\n`, matching
 /// `encodeHelperEnvelope` in `protocol.ts`. `sortedKeys` makes output
 /// deterministic so unit tests can assert on the exact string. `withoutEscapingSlashes`
-/// keeps relative refs such as `<captureId>/screenshot.jpg` readable and, more
+/// keeps relative refs such as `<captureId>/screenshot.webp` readable and, more
 /// importantly, byte-identical to the relative key the sync loop joins onto the
 /// asset root.
 public func encodeEnvelopeLine<Payload: Encodable>(

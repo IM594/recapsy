@@ -27,7 +27,7 @@ final class LineEmitter {
 /// The capture process state machine and I/O orchestration (ADR 0009 §进程生命周期).
 ///
 /// All mutable state lives behind `stateQueue` (serial); the heavy, blocking
-/// ScreenCaptureKit + JPEG work runs on `captureQueue` so a slow capture never
+/// ScreenCaptureKit + WebP work runs on `captureQueue` so a slow capture never
 /// stalls command handling or heartbeats. Reentrancy is guarded by
 /// `captureInFlight`, so overlapping timer ticks collapse to a single in-flight
 /// capture.
@@ -61,6 +61,11 @@ final class CaptureEngine {
     private var policyVersion = CaptureEngine.unconfiguredPolicyVersion
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
+    // Edge-tracks the "no capturable active window" condition so a long stretch
+    // of windowless ticks logs one line on entry and one on recovery, instead of
+    // dribbling a line every tick. Only ever touched inside `performCapture`,
+    // which `captureInFlight` keeps single-in-flight on `captureQueue`.
+    private var skippingNoActiveWindow = false
 
     private var captureTimer: DispatchSourceTimer?
     private var heartbeatTimer: DispatchSourceTimer?
@@ -251,6 +256,19 @@ final class CaptureEngine {
                 message: "Screen recording permission is required."
             )
             return
+        } catch ScreenshotError.noActiveWindow {
+            // No capturable foreground window this tick (e.g. Finder desktop
+            // with nothing open). Emit nothing — no result, no error — and let
+            // the next interval try again. Log a single stderr breadcrumb only on
+            // entering the windowless state, so a long windowless stretch does
+            // not dribble a line every tick. No protocol reason code is invented.
+            if !skippingNoActiveWindow {
+                skippingNoActiveWindow = true
+                FileHandle.standardError.write(
+                    Data("capture skipped: no active window (since \(captureId))\n".utf8)
+                )
+            }
+            return
         } catch ScreenshotError.encodeFailed {
             emitCaptureError(
                 captureId: captureId,
@@ -267,6 +285,15 @@ final class CaptureEngine {
             return
         }
 
+        // A capturable window is back: close the windowless breadcrumb opened
+        // above with one recovery line (edge-triggered, matching entry).
+        if skippingNoActiveWindow {
+            skippingNoActiveWindow = false
+            FileHandle.standardError.write(
+                Data("capture resumed: active window captured (\(captureId))\n".utf8)
+            )
+        }
+
         let fileURL = CaptureAsset.screenshotFileURL(assetRoot: assetRoot, captureId: captureId)
         let directory = CaptureAsset.captureDirectoryURL(assetRoot: assetRoot, captureId: captureId)
         do {
@@ -274,7 +301,7 @@ final class CaptureEngine {
                 at: directory,
                 withIntermediateDirectories: true
             )
-            try encoded.jpegData.write(to: fileURL, options: .atomic)
+            try encoded.imageData.write(to: fileURL, options: .atomic)
         } catch {
             emitCaptureError(
                 captureId: captureId,
@@ -285,14 +312,14 @@ final class CaptureEngine {
         }
 
         let relativeKey = CaptureAsset.screenshotRelativeKey(captureId: captureId)
-        let hash = CaptureAsset.contentHash(for: encoded.jpegData)
+        let hash = CaptureAsset.contentHash(for: encoded.imageData)
 
         let asset = CaptureAssetPayload(
             role: "screenshot",
             ref: relativeKey,
             hash: hash,
             mimeType: CaptureAsset.screenshotMimeType,
-            sizeBytes: encoded.jpegData.count
+            sizeBytes: encoded.imageData.count
         )
         // Manifest is a synthetic relative ref only: the main-process sync layer
         // drops the `manifest` role (never reads its bytes), so 1B does not

@@ -1,33 +1,36 @@
 import Foundation
+import AppKit
 import CoreGraphics
-import ImageIO
 import ScreenCaptureKit
-import UniformTypeIdentifiers
+import CaptureCore
+import CWebP
 
-/// Outcome of one screenshot attempt: the encoded JPEG bytes, ready to write.
+/// Outcome of one screenshot attempt: the encoded WebP bytes, ready to write.
 struct EncodedScreenshot {
-    let jpegData: Data
-    let pixelWidth: Int
-    let pixelHeight: Int
+    let imageData: Data
 }
 
 enum ScreenshotError: Error {
     case permissionMissing
+    /// The foreground app has no capturable window this tick (e.g. Finder
+    /// desktop with nothing open). Not an error surface — the caller skips the
+    /// tick and retries on the next interval; no `capture.result` / `capture.error`.
+    case noActiveWindow
     case captureFailed
     case encodeFailed
 }
 
-/// Captures a single image of the main display via ScreenCaptureKit and encodes
-/// it to a JPEG whose size lands in the product's ~100–800KB target band. The
-/// ScreenCaptureKit call is async; this bridges it to a synchronous result with
-/// a semaphore + timeout, matching the pattern proven in the old capture plugin,
-/// and is always invoked off the main queue by `CaptureEngine`.
+/// Captures a single image of the *current active window* via ScreenCaptureKit
+/// and encodes it to a WebP whose size lands in the product's ~100–800KB target
+/// band. The ScreenCaptureKit call is async; this bridges it to a synchronous
+/// result with a semaphore + timeout, matching the pattern proven in the old
+/// capture plugin, and is always invoked off the main queue by `CaptureEngine`.
 enum ScreenshotCapturer {
-    /// Lossy-compression qualities tried in order. The first encoding at or
+    /// Lossy WebP qualities tried in order (0–100). The first encoding at or
     /// below the upper size bound wins; if none fit, the smallest (last) is
-    /// used. A near-blank screen may fall under the lower bound — accepted, as
+    /// used. A near-blank window may fall under the lower bound — accepted, as
     /// the band is a product target, not a hard invariant.
-    private static let jpegQualities: [CGFloat] = [0.8, 0.65, 0.5, 0.35, 0.25]
+    private static let webpQualities: [Float] = [80, 65, 50, 35, 25]
     private static let maxTargetBytes = 800 * 1024
     private static let captureTimeout: DispatchTimeInterval = .seconds(5)
 
@@ -39,23 +42,39 @@ enum ScreenshotCapturer {
             throw ScreenshotError.permissionMissing
         }
 
-        guard let cgImage = captureMainDisplayImage() else {
-            throw ScreenshotError.captureFailed
+        guard let frontmostPid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            // No frontmost app resolvable (rare, transient) — treat like "no
+            // window": skip this tick rather than emit a spurious error.
+            throw ScreenshotError.noActiveWindow
         }
 
-        guard let encoded = encodeJPEG(cgImage: cgImage) else {
-            throw ScreenshotError.encodeFailed
+        let outcome = captureActiveWindowImage(frontmostPid: Int(frontmostPid))
+        switch outcome {
+        case .noWindow:
+            throw ScreenshotError.noActiveWindow
+        case .failed:
+            throw ScreenshotError.captureFailed
+        case .image(let cgImage):
+            guard let encoded = encodeWebP(cgImage: cgImage) else {
+                throw ScreenshotError.encodeFailed
+            }
+            return encoded
         }
-        return encoded
     }
 
     static var isScreenCaptureGranted: Bool {
         return CGPreflightScreenCaptureAccess()
     }
 
-    private static func captureMainDisplayImage() -> CGImage? {
+    private enum CaptureOutcome {
+        case image(CGImage)
+        case noWindow
+        case failed
+    }
+
+    private static func captureActiveWindowImage(frontmostPid: Int) -> CaptureOutcome {
         let semaphore = DispatchSemaphore(value: 0)
-        var result: CGImage?
+        var outcome: CaptureOutcome = .failed
 
         Task.detached {
             defer { semaphore.signal() }
@@ -64,15 +83,31 @@ enum ScreenshotCapturer {
                     false,
                     onScreenWindowsOnly: true
                 )
-                let mainDisplayId = CGMainDisplayID()
-                let display =
-                    content.displays.first(where: { $0.displayID == mainDisplayId })
-                    ?? content.displays.first
-                guard let display else {
+
+                let infos = content.windows.map { window in
+                    CaptureWindowInfo(
+                        windowId: Int(window.windowID),
+                        ownerProcessId: Int(window.owningApplication?.processID ?? -1),
+                        layer: window.windowLayer,
+                        isOnScreen: window.isOnScreen,
+                        width: Double(window.frame.width),
+                        height: Double(window.frame.height),
+                        hasTitle: !(window.title ?? "").isEmpty
+                    )
+                }
+
+                guard
+                    let selectedId = ActiveWindowSelector.selectWindowId(
+                        windows: infos,
+                        frontmostProcessId: frontmostPid
+                    ),
+                    let window = content.windows.first(where: { Int($0.windowID) == selectedId })
+                else {
+                    outcome = .noWindow
                     return
                 }
 
-                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let filter = SCContentFilter(desktopIndependentWindow: window)
                 let config = SCStreamConfiguration()
                 let scale = filter.pointPixelScale
                 config.width = Int(filter.contentRect.width * CGFloat(scale))
@@ -80,27 +115,35 @@ enum ScreenshotCapturer {
                 config.showsCursor = false
                 config.captureResolution = .best
 
-                result = try await SCScreenshotManager.captureImage(
+                let image = try await SCScreenshotManager.captureImage(
                     contentFilter: filter,
                     configuration: config
                 )
+                outcome = .image(image)
             } catch {
                 // Swallowed intentionally: the caller reports a generic
                 // capture_failed; the underlying error may carry no useful,
                 // privacy-safe detail across the process boundary.
+                outcome = .failed
             }
         }
 
         if semaphore.wait(timeout: .now() + captureTimeout) == .timedOut {
-            return nil
+            return .failed
         }
-        return result
+        return outcome
     }
 
-    private static func encodeJPEG(cgImage: CGImage) -> EncodedScreenshot? {
+    // MARK: - WebP encoding
+
+    private static func encodeWebP(cgImage: CGImage) -> EncodedScreenshot? {
+        guard let rgb = rgbBytes(from: cgImage) else {
+            return nil
+        }
+
         var best: Data?
-        for quality in jpegQualities {
-            guard let data = encode(cgImage: cgImage, quality: quality) else {
+        for quality in webpQualities {
+            guard let data = encode(rgb: rgb, quality: quality) else {
                 continue
             }
             best = data
@@ -111,32 +154,102 @@ enum ScreenshotCapturer {
         guard let data = best else {
             return nil
         }
-        return EncodedScreenshot(
-            jpegData: data,
-            pixelWidth: cgImage.width,
-            pixelHeight: cgImage.height
-        )
+        return EncodedScreenshot(imageData: data)
     }
 
-    private static func encode(cgImage: CGImage, quality: CGFloat) -> Data? {
-        let data = NSMutableData()
-        guard
-            let destination = CGImageDestinationCreateWithData(
-                data as CFMutableData,
-                UTType.jpeg.identifier as CFString,
-                1,
-                nil
+    private struct RGBImage {
+        let bytes: [UInt8]
+        let width: Int
+        let height: Int
+        /// Bytes per row of the packed 24-bit buffer: exactly `width * 3`.
+        let bytesPerRow: Int
+    }
+
+    /// Produces a tightly-packed, fully *opaque* 24-bit RGB buffer for WebP.
+    ///
+    /// A screenshot is opaque, but a window capture carries anti-aliased,
+    /// rounded corners whose edge pixels have partial alpha. CoreGraphics has no
+    /// supported 8-bit-per-component *24-bit* RGB context, so we render into a
+    /// 32-bit buffer with `CGImageAlphaInfo.noneSkipLast` — that forces every
+    /// pixel opaque (source alpha ignored, no premultiplication) and leaves the
+    /// 4th byte as unused padding. We then pack RGBX → RGB and encode with
+    /// `WebPEncodeRGB`. This is why we do *not* feed the buffer to
+    /// `WebPEncodeRGBA`: the padding byte is not a reliable 255, and WebP expects
+    /// straight (not premultiplied) alpha, so treating padding as alpha would
+    /// darken the rounded-corner edge pixels. Going through opaque RGB avoids
+    /// that class of bug entirely.
+    private static func rgbBytes(from cgImage: CGImage) -> RGBImage? {
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0 else {
+            return nil
+        }
+
+        let srcBytesPerRow = width * 4
+        var rgbx = [UInt8](repeating: 0, count: srcBytesPerRow * height)
+        // Explicit sRGB (not device-dependent) so encoded colors are stable
+        // across displays; fall back to device RGB only if sRGB is unavailable.
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.noneSkipLast.rawValue
+
+        let drawn: Bool = rgbx.withUnsafeMutableBytes { raw in
+            guard
+                let context = CGContext(
+                    data: raw.baseAddress,
+                    width: width,
+                    height: height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: srcBytesPerRow,
+                    space: colorSpace,
+                    bitmapInfo: bitmapInfo
+                )
+            else {
+                return false
+            }
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else {
+            return nil
+        }
+
+        // Pack RGBX (4 bytes/pixel, 4th byte = padding) down to RGB (3
+        // bytes/pixel). The source has no row padding (bytesPerRow == width*4),
+        // so pixels are contiguous and index `i` maps to byte offset `i*4`.
+        let dstBytesPerRow = width * 3
+        var rgb = [UInt8](repeating: 0, count: dstBytesPerRow * height)
+        rgbx.withUnsafeBufferPointer { src in
+            rgb.withUnsafeMutableBufferPointer { dst in
+                let pixelCount = width * height
+                for i in 0..<pixelCount {
+                    dst[i * 3 + 0] = src[i * 4 + 0]
+                    dst[i * 3 + 1] = src[i * 4 + 1]
+                    dst[i * 3 + 2] = src[i * 4 + 2]
+                }
+            }
+        }
+        return RGBImage(bytes: rgb, width: width, height: height, bytesPerRow: dstBytesPerRow)
+    }
+
+    private static func encode(rgb: RGBImage, quality: Float) -> Data? {
+        var output: UnsafeMutablePointer<UInt8>?
+        let size = rgb.bytes.withUnsafeBufferPointer { buffer -> Int in
+            guard let base = buffer.baseAddress else {
+                return 0
+            }
+            return WebPEncodeRGB(
+                base,
+                Int32(rgb.width),
+                Int32(rgb.height),
+                Int32(rgb.bytesPerRow),
+                quality,
+                &output
             )
-        else {
+        }
+        guard size > 0, let output else {
             return nil
         }
-        let options: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: quality
-        ]
-        CGImageDestinationAddImage(destination, cgImage, options as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else {
-            return nil
-        }
-        return data as Data
+        defer { WebPFree(output) }
+        return Data(bytes: output, count: size)
     }
 }

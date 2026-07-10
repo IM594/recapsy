@@ -8,9 +8,22 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 
 | 目标 | 类型 | 职责 |
 | --- | --- | --- |
-| `CaptureCore` | Swift library | 纯逻辑:相对键生成、JPEG 落盘路径拼接、NDJSON envelope 编码、SHA-256 内容哈希、capture id 生成。全部有单测。 |
-| `RecapsyCapture` | Swift executable | 采集体:`SCScreenshotManager` 单张主屏截图 → ImageIO JPEG(压后约 100–800KB)→ 写资产根 → NDJSON stdio 主循环。组装进 bundle 时**重命名为 `Recapsy`**(隐私面板显示名,ADR 约束③)。 |
+| `CaptureCore` | Swift library | 纯逻辑:相对键生成、资产落盘路径拼接、活跃窗口选择规则、NDJSON envelope 编码、SHA-256 内容哈希、capture id 生成。全部有单测,且完全不依赖 libwebp / ScreenCaptureKit。 |
+| `CWebP` | system library shim | 把 libwebp 的 C 编码 API(`webp/encode.h`)以 `CWebP` 模块暴露给 Swift。头/库路径**不写死**,由 `build-capture-bundle.sh` 经 `brew --prefix webp` 动态传入。 |
+| `RecapsyCapture` | Swift executable | 采集体:取前台 app → `SCShareableContent` 选主窗口 → `SCContentFilter(desktopIndependentWindow:)` 只截该活跃窗口 → CGImage 转 RGBA → libwebp `WebPEncodeRGBA` 有损编码(压后约 100–800KB)→ 写资产根 → NDJSON stdio 主循环。组装进 bundle 时**重命名为 `Recapsy`**(隐私面板显示名,ADR 约束③)。 |
 | `CaptureLauncher` | C executable | 极小 disclaim 启动器:`posix_spawn` + `responsibility_spawnattrs_setdisclaim`,`waitpid` 到采集体退出并镜像其退出码。 |
+
+前台 app 无可截窗口时(如 Finder 桌面、无窗口应用),采集体**静默跳过本次 tick**:不发 `capture.result`、不发 `capture.error`(仅 stderr 记一行),下个 interval 再试。
+
+## 依赖(dev)
+
+采集体用 libwebp 编码 WebP,dev 环境需先安装:
+
+```bash
+brew install webp
+```
+
+`build-capture-bundle.sh` 用 `brew --prefix webp` 动态解析头/库路径并**静态链接** `libwebp.a` + `libsharpyuv.a`(libwebp 的编码器会引用 SharpYuv 符号),使产物二进制自足、运行时不依赖 libwebp dylib(`otool -L` 无 libwebp 条目)。路径绝不写死进 `Package.swift` 或脚本。
 
 ## 构建与签名
 
@@ -19,7 +32,7 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 pnpm run build:capture
 ```
 
-该脚本 `swift build -c release`,组装并**用 `Recapsy Developer` 自签名证书**签整个 bundle,产物落在 gitignored 的 `apps/desktop/macos/build/Recapsy.app`(绝不落系统临时目录 —— macOS 拒绝为 `/tmp` 下的 bundle 持久化授权,ADR 约束①)。签名身份可用环境变量 `RECAPSY_CAPTURE_SIGN_IDENTITY` 覆盖。
+该脚本 `swift build -c release`(带上述 libwebp include / 静态归档 flag),组装并**用 `Recapsy Developer` 自签名证书**签整个 bundle,产物落在 gitignored 的 `apps/desktop/macos/build/Recapsy.app`(绝不落系统临时目录 —— macOS 拒绝为 `/tmp` 下的 bundle 持久化授权,ADR 约束①)。签名身份可用环境变量 `RECAPSY_CAPTURE_SIGN_IDENTITY` 覆盖。
 
 产物路径:
 
@@ -36,16 +49,25 @@ codesign -dv --verbose=4 macos/build/Recapsy.app
 ## 自动化测试(不依赖屏幕录制授权)
 
 ```bash
-# Swift 纯逻辑单测
-swift test --package-path macos
+# Swift 纯逻辑单测(相对键、活跃窗口选择、协议编码、哈希)——不碰 libwebp。
+# 因 SwiftPM 的 `swift test` 会编译整个包(含依赖 libwebp 的采集体),这里
+# target-scoped 只构建测试目标再跑,即使未装 libwebp 也能独立跑绿:
+cd macos
+swift build --target CaptureCoreTests
+swift test --skip-build
+# 注:裸 `swift test` 会连带编译采集体,需要上文的 libwebp include/静态归档
+# flag(否则找不到 <webp/encode.h> / 链接失败)——那条路径由 build 脚本覆盖。
 
 # 真实 spawn 已签名 bundle(经 disclaim 启动器)+ 协议握手
+cd ..
 pnpm run test:capture-bundle-process
 ```
 
+`test:capture-bundle-process` 接受三种诚实结果:授权且有活跃窗口 → `capture.result`(WebP 资产);无授权 → `capture.error`;前台无可截窗口 → 无 capture 信封(采集体静默跳过),此时断言心跳仍在推进以证明主循环存活未挂死。
+
 集成测试断言:经启动器真实 spawn → 收到真实 `helper.hello`(`capabilities.mock === false`,即这是真采集体而非 dev 占位)、上报权限状态、`capture.start` 后跑出协议合法的 capture 信封、`stop()` 后启动器与采集体干净退出无僵尸。
 
-## 手动 E2E 清单(真实 JPEG → server,需人工授权)
+## 手动 E2E 清单(真实 WebP → server,需人工授权)
 
 新 bundle id `one.recapsy.desktop.capture` 是**全新 TCC 身份**,屏幕录制授权只能由你在系统设置手动完成,自动化无法代点。按下列步骤验证整条链路从 `blocked` 走到 `synced`:
 
@@ -74,7 +96,7 @@ pnpm run test:capture-bundle-process
 
 5. **辅助功能本阶段不做**(ADR 约束②,阶段 3 才引导);采集体对 `accessibility` 恒报 `not_determined`,不影响截图。
 
-6. **观察闭环**:授权后采集体产出真实 JPEG 写入 `userData/captures/<captureId>/screenshot.jpg`,`capture.result` 的 `asset.ref` 为相对键 `<captureId>/screenshot.jpg`;主进程按同一资产根读回字节,sync job 从 `blocked` 转为 `synced`。
+6. **观察闭环**:授权后采集体截取当前活跃窗口、产出真实 WebP 写入 `userData/captures/<captureId>/screenshot.webp`,`capture.result` 的 `asset.ref` 为相对键 `<captureId>/screenshot.webp`、`asset.mimeType` 为 `image/webp`;主进程按同一资产根读回字节,sync job 从 `blocked` 转为 `synced`。
 
 7. (可选)彻底清理残留 TCC 条目:
 

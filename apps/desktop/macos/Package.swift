@@ -3,9 +3,14 @@ import PackageDescription
 
 // macOS screen-capture process for Recapsy desktop (ADR 0009).
 //
-// Three artifacts:
-//   - CaptureCore     : pure, dependency-free logic (relative keys, JPEG path
-//                       joins, NDJSON envelope encoding, hashing) — unit tested.
+// Artifacts:
+//   - CaptureCore     : pure, dependency-free logic (relative keys, asset path
+//                       joins, NDJSON envelope encoding, hashing, active-window
+//                       selection) — unit tested, never touches libwebp.
+//   - CWebP           : system-library shim exposing libwebp's C encoder API.
+//                       Header/library paths are supplied at build time by
+//                       `build-capture-bundle.sh` (via `brew --prefix webp`),
+//                       never hard-coded here — see `Sources/CWebP/shim.h`.
 //   - RecapsyCapture  : the capture executable. Physically renamed to `Recapsy`
 //                       when assembled into `Recapsy.app` so the screen-recording
 //                       privacy panel shows the product name (ADR 0009 约束③).
@@ -13,6 +18,12 @@ import PackageDescription
 //                       executable with `responsibility_spawnattrs_setdisclaim`
 //                       so the capture process becomes its own TCC responsible
 //                       process under bundle id `one.recapsy.desktop.capture`.
+//
+// `swift test` builds only CaptureCore + its tests, so it needs no libwebp and
+// runs standalone. `swift build` of RecapsyCapture requires the libwebp include
+// path; run it through `build-capture-bundle.sh` (or pass the same
+// `-Xcc -I$(brew --prefix webp)/include` flag) — a bare `swift build` without
+// that flag cannot resolve `<webp/encode.h>` and is expected to fail.
 let package = Package(
     name: "RecapsyCapture",
     platforms: [
@@ -22,9 +33,22 @@ let package = Package(
         .target(
             name: "CaptureCore"
         ),
+        // No `pkgConfig`/path here on purpose: pkg-config would inject a dynamic
+        // `-lwebp`, which pulls libwebp.dylib and defeats the self-contained,
+        // statically-linked capture binary we want. `build-capture-bundle.sh`
+        // resolves libwebp from `brew --prefix webp` and passes the header search
+        // path (`-Xcc -I…/include`) plus the static archives
+        // (`-Xlinker …/libwebp.a -Xlinker …/libsharpyuv.a`) to `swift build`.
+        // Because this target has no default header/library path, a bare
+        // `swift build`/`swift test` of the *executable* cannot resolve
+        // `<webp/encode.h>`; the pure-logic tests are built target-scoped
+        // (`swift build --target CaptureCoreTests`) so they never need libwebp.
+        .systemLibrary(
+            name: "CWebP"
+        ),
         .executableTarget(
             name: "RecapsyCapture",
-            dependencies: ["CaptureCore"]
+            dependencies: ["CaptureCore", "CWebP"]
         ),
         .executableTarget(
             name: "CaptureLauncher"

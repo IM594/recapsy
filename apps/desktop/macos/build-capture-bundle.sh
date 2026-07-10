@@ -21,15 +21,39 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 APP_DIR="${BUILD_DIR}/Recapsy.app"
 MACOS_DIR="${APP_DIR}/Contents/MacOS"
 
+# libwebp is resolved dynamically from Homebrew — never hard-coded, so the build
+# works on any machine that has run `brew install webp`. The capture executable
+# imports the `CWebP` module (Sources/CWebP/shim.h -> <webp/encode.h>); we pass
+# the include path so the shim resolves and statically link libwebp.a +
+# libsharpyuv.a (libwebp's encoder pulls SharpYuv symbols from that companion
+# archive) so the assembled binary carries no runtime libwebp dylib dependency.
+if ! WEBP_PREFIX="$(brew --prefix webp 2>/dev/null)" || [[ ! -d "${WEBP_PREFIX}" ]]; then
+	echo "error: libwebp not found. Run 'brew install webp' first." >&2
+	exit 1
+fi
+WEBP_INCLUDE="${WEBP_PREFIX}/include"
+WEBP_LIB="${WEBP_PREFIX}/lib"
+for archive in "${WEBP_LIB}/libwebp.a" "${WEBP_LIB}/libsharpyuv.a"; do
+	if [[ ! -f "${archive}" ]]; then
+		echo "error: expected static archive missing: ${archive}" >&2
+		exit 1
+	fi
+done
+WEBP_BUILD_FLAGS=(
+	-Xcc -I"${WEBP_INCLUDE}"
+	-Xlinker "${WEBP_LIB}/libwebp.a"
+	-Xlinker "${WEBP_LIB}/libsharpyuv.a"
+)
+
 # Dev signing identity. Overridable for other machines / channels; defaults to
 # the self-signed cert ADR 0009 pins for dev. Not a secret — a local keychain
 # identity name.
 SIGN_IDENTITY="${RECAPSY_CAPTURE_SIGN_IDENTITY:-Recapsy Developer}"
 
-echo "==> swift build -c ${BUILD_CONFIG}"
-swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}"
+echo "==> swift build -c ${BUILD_CONFIG} (libwebp: ${WEBP_PREFIX})"
+swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" "${WEBP_BUILD_FLAGS[@]}"
 
-BIN_DIR="$(swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" --show-bin-path)"
+BIN_DIR="$(swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" "${WEBP_BUILD_FLAGS[@]}" --show-bin-path)"
 CAPTURE_BIN="${BIN_DIR}/RecapsyCapture"
 LAUNCHER_BIN="${BIN_DIR}/CaptureLauncher"
 

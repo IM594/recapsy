@@ -3,17 +3,21 @@ import Foundation
 @testable import CaptureCore
 
 final class AssetPathsTests: XCTestCase {
-    func testScreenshotRelativeKeyIsCaptureScopedJpeg() {
+    func testScreenshotRelativeKeyIsCaptureScopedWebp() {
         XCTAssertEqual(
             CaptureAsset.screenshotRelativeKey(captureId: "cap-1720000000000-3"),
-            "cap-1720000000000-3/screenshot.jpg"
+            "cap-1720000000000-3/screenshot.webp"
         )
+    }
+
+    func testScreenshotMimeTypeIsWebp() {
+        XCTAssertEqual(CaptureAsset.screenshotMimeType, "image/webp")
     }
 
     func testScreenshotFileURLJoinsRootAndKey() {
         let root = URL(fileURLWithPath: "/Users/example/Application Support/captures", isDirectory: true)
         let url = CaptureAsset.screenshotFileURL(assetRoot: root, captureId: "cap-42-1")
-        XCTAssertEqual(url.path, "/Users/example/Application Support/captures/cap-42-1/screenshot.jpg")
+        XCTAssertEqual(url.path, "/Users/example/Application Support/captures/cap-42-1/screenshot.webp")
     }
 
     func testCaptureDirectoryURLIsCaptureScoped() {
@@ -120,9 +124,9 @@ final class ProtocolEncodingTests: XCTestCase {
     func testCaptureResultKeepsRelativeRefSlashUnescaped() throws {
         let asset = CaptureAssetPayload(
             role: "screenshot",
-            ref: "cap-100-1/screenshot.jpg",
+            ref: "cap-100-1/screenshot.webp",
             hash: "sha256:abc",
-            mimeType: "image/jpeg",
+            mimeType: "image/webp",
             sizeBytes: 204800
         )
         let manifest = CaptureAssetPayload(
@@ -152,8 +156,8 @@ final class ProtocolEncodingTests: XCTestCase {
         let line = try encodeEnvelopeLine(envelope)
         // The relative key must be byte-identical to what the sync loop joins
         // onto the asset root — no escaped `\/`.
-        XCTAssertTrue(line.contains("cap-100-1/screenshot.jpg"))
-        XCTAssertFalse(line.contains("screenshot.jpg\\/"))
+        XCTAssertTrue(line.contains("cap-100-1/screenshot.webp"))
+        XCTAssertFalse(line.contains("screenshot.webp\\/"))
         XCTAssertFalse(line.contains("\\/"))
 
         let object = try decode(line)
@@ -161,11 +165,99 @@ final class ProtocolEncodingTests: XCTestCase {
         let decodedPayload = try XCTUnwrap(object["payload"] as? [String: Any])
         let assets = try XCTUnwrap(decodedPayload["assets"] as? [[String: Any]])
         XCTAssertEqual(assets.count, 1)
-        XCTAssertEqual(assets[0]["ref"] as? String, "cap-100-1/screenshot.jpg")
+        XCTAssertEqual(assets[0]["ref"] as? String, "cap-100-1/screenshot.webp")
         XCTAssertEqual(assets[0]["role"] as? String, "screenshot")
         let context = try XCTUnwrap(decodedPayload["context"] as? [String: Any])
         let policy = try XCTUnwrap(context["policy"] as? [String: Any])
         XCTAssertEqual(policy["decision"] as? String, "allow")
         XCTAssertEqual(policy["version"] as? String, "policy-1")
+    }
+}
+
+final class ActiveWindowSelectorTests: XCTestCase {
+    private func window(
+        id: Int,
+        pid: Int,
+        layer: Int = 0,
+        onScreen: Bool = true,
+        width: Double = 1200,
+        height: Double = 800,
+        titled: Bool = true
+    ) -> CaptureWindowInfo {
+        return CaptureWindowInfo(
+            windowId: id,
+            ownerProcessId: pid,
+            layer: layer,
+            isOnScreen: onScreen,
+            width: width,
+            height: height,
+            hasTitle: titled
+        )
+    }
+
+    func testReturnsNilWhenNoWindowBelongsToFrontmostApp() {
+        let windows = [window(id: 1, pid: 999), window(id: 2, pid: 999)]
+        XCTAssertNil(ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42))
+    }
+
+    func testReturnsNilWhenFrontmostAppHasNoOnScreenWindow() {
+        // Finder-desktop-like case: the app is frontmost but owns nothing
+        // capturable — must skip, not pick.
+        let windows = [window(id: 1, pid: 42, onScreen: false)]
+        XCTAssertNil(ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42))
+    }
+
+    func testIgnoresNonZeroLayerAndTinyWindows() {
+        let windows = [
+            window(id: 1, pid: 42, layer: 25),           // status-item layer
+            window(id: 2, pid: 42, width: 80, height: 60), // sub-100 floor
+        ]
+        XCTAssertNil(ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42))
+    }
+
+    func testPicksLargestTitledWindowOfFrontmostApp() {
+        let windows = [
+            window(id: 1, pid: 7, width: 400, height: 300),
+            window(id: 2, pid: 42, width: 800, height: 600),   // frontmost, medium
+            window(id: 3, pid: 42, width: 1600, height: 1000),  // frontmost, largest
+            window(id: 4, pid: 42, width: 500, height: 500, titled: false),
+        ]
+        XCTAssertEqual(
+            ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42),
+            3
+        )
+    }
+
+    func testPrefersTitledWindowsEvenWhenAnUntitledOneIsLarger() {
+        let windows = [
+            window(id: 1, pid: 42, width: 900, height: 700, titled: true),
+            window(id: 2, pid: 42, width: 1600, height: 1200, titled: false),
+        ]
+        XCTAssertEqual(
+            ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42),
+            1
+        )
+    }
+
+    func testFallsBackToUntitledWhenNoTitledCandidate() {
+        let windows = [
+            window(id: 5, pid: 42, width: 900, height: 700, titled: false),
+            window(id: 6, pid: 42, width: 1200, height: 800, titled: false),
+        ]
+        XCTAssertEqual(
+            ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42),
+            6
+        )
+    }
+
+    func testEqualAreaTieBreaksToLowerWindowId() {
+        let windows = [
+            window(id: 9, pid: 42, width: 1000, height: 1000),
+            window(id: 4, pid: 42, width: 1000, height: 1000),
+        ]
+        XCTAssertEqual(
+            ActiveWindowSelector.selectWindowId(windows: windows, frontmostProcessId: 42),
+            4
+        )
     }
 }
