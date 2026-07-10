@@ -1,8 +1,12 @@
 import path from 'node:path';
-import { BrowserWindow, app, ipcMain } from 'electron';
+import { BrowserWindow, app, ipcMain, safeStorage } from 'electron';
 import { createAuthClient } from '../auth/auth-client';
 import { createLoginWindowPrompter } from '../auth/login-window';
-import { createInMemoryTokenStore } from '../auth/token-store';
+import {
+  type TokenStore,
+  createInMemoryTokenStore,
+  createMacOsKeychainTokenStore,
+} from '../auth/token-store';
 import type { HelperEnvelope, HelperToMainType } from '../helper/protocol';
 import { createSpawnCaptureHelperClient } from '../helper/spawn-capture-helper-client';
 import { createServerApiClient } from '../server-api/client';
@@ -12,6 +16,7 @@ import { createNodeSqliteDatabase } from '../storage/node-sqlite-driver';
 import type { SyncAssetReader, SyncRunResult } from '../sync/types';
 import { createLocalAssetReader } from './asset-reader';
 import { createElectronMainRuntime } from './electron-main-runtime';
+import { createElectronKeychainSecretStore } from './keychain-secret-store';
 
 /**
  * Thin, genuinely-`electron`-importing entry point. Everything with actual
@@ -100,13 +105,86 @@ function resolveCaptureAssetReader(): SyncAssetReader {
 }
 
 /**
- * V0 has no macOS Keychain integration yet (see `auth/token-store.ts`'s
- * `createMacOsKeychainTokenStore` — implemented but not wired in here, per
- * this task's explicit scope). An in-memory token store means every process
- * restart starts signed out again; this is a known, honest limitation, not a
- * silent stand-in for real persistence.
+ * Reverse-DNS-style Keychain "service" identifier for the encrypted token
+ * file (see `keychain-secret-store.ts`'s filename hash, which folds this in).
+ * `'default'` is the account: V0 is single-profile (no multi-account
+ * switching yet), so this literally names "this device's one local session"
+ * — a real business concept, not a placeholder.
  */
-const tokenStore = createInMemoryTokenStore();
+const AUTH_KEYCHAIN_SERVICE = 'one.recapsy.desktop.auth';
+const AUTH_KEYCHAIN_ACCOUNT = 'default';
+
+/**
+ * Directory the encrypted auth-token file lives under, derived from
+ * Electron's per-user data directory. Resolved lazily and memoized for the
+ * same reason as `resolveCaptureAssetRoot` above: `app.getPath('userData')`
+ * is only valid after `app.whenReady()`, and `resolveTokenStore()` below is
+ * only ever invoked from inside that post-ready window.
+ */
+let secureDirectory: string | undefined;
+function resolveSecureDirectory(): string {
+  secureDirectory ??= path.join(app.getPath('userData'), 'secure');
+  return secureDirectory;
+}
+
+/**
+ * Real persistence for login across restarts, backed by Electron's built-in
+ * `safeStorage` (see `keychain-secret-store.ts` for the full rationale: it is
+ * genuinely Keychain-backed on macOS via its per-app encryption key, without
+ * shelling out to the `security` CLI — which would leak the raw secret via
+ * `ps`/process listing — or adding the `keytar` native dependency).
+ *
+ * `safeStorage.isEncryptionAvailable()` can be false in some environments
+ * (CI, or a locked/unavailable OS keychain); when it is, this falls back to
+ * the previous in-memory store rather than crashing the app, at the cost of
+ * losing login across restarts — the same known, honest limitation V0 always
+ * had, now only hit in that degraded case instead of unconditionally.
+ *
+ * Resolved lazily (like `resolveCaptureAssetRoot`/`resolveCaptureAssetReader`
+ * above) so `safeStorage.isEncryptionAvailable()` and `app.getPath` are never
+ * touched before `app.whenReady()`.
+ */
+let tokenStoreInstance: TokenStore | undefined;
+function resolveTokenStore(): TokenStore {
+  if (tokenStoreInstance) {
+    return tokenStoreInstance;
+  }
+
+  if (safeStorage.isEncryptionAvailable()) {
+    tokenStoreInstance = createMacOsKeychainTokenStore({
+      account: AUTH_KEYCHAIN_ACCOUNT,
+      secrets: createElectronKeychainSecretStore({
+        directory: resolveSecureDirectory(),
+        safeStorage,
+      }),
+      service: AUTH_KEYCHAIN_SERVICE,
+    });
+  } else {
+    console.warn(
+      '[recapsy-desktop] OS keychain encryption unavailable; falling back to in-memory token store (login will not persist across restarts).',
+    );
+    tokenStoreInstance = createInMemoryTokenStore();
+  }
+
+  return tokenStoreInstance;
+}
+
+/**
+ * Lazy facade handed to both `createAuthClient` (below) and
+ * `createElectronMainRuntime` (further below) so they share the exact same
+ * underlying store once it's built. Constructing *this* object touches
+ * neither `app.getPath` nor `safeStorage` — it only calls `resolveTokenStore()`
+ * when one of its methods actually runs, which happens from inside the auth
+ * client / runtime's own post-ready call paths, never at this module's
+ * top-level eval time. This mirrors `readAssetBytes: (key) =>
+ * resolveCaptureAssetReader()(key)` further below: an eagerly-handed-out
+ * function whose lazy resolver only fires on first real call.
+ */
+const tokenStore: TokenStore = {
+  clearTokens: () => resolveTokenStore().clearTokens(),
+  getTokens: () => resolveTokenStore().getTokens(),
+  setTokens: (tokens) => resolveTokenStore().setTokens(tokens),
+};
 
 /**
  * `fetch`-backed transport shared by the auth client and the server API
