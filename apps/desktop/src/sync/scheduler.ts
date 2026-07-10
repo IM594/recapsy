@@ -260,19 +260,19 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
     await options.store.updateOutboxJobState(activeJob.id, {
       now: options.clock.now(),
       serverCaptureId: capture.captureId,
-      serverOcrJobId: created.activeJob.id,
+      serverOcrJobId: created.job.id,
       state: 'ocr_wait',
     });
 
     let polled: OcrJobStatusResult;
     try {
-      polled = await options.api.pollOcrJob(activeJob.workspaceId, created.activeJob.id);
+      polled = await options.api.pollOcrJob(activeJob.workspaceId, created.job.id);
     } catch (error) {
       const persisted = await options.store.getOutboxJob(activeJob.id);
       const jobWithPersistedIds = persisted ?? {
         ...activeJob,
         serverCaptureId: capture.captureId,
-        serverOcrJobId: created.activeJob.id,
+        serverOcrJobId: created.job.id,
         state: 'ocr_wait' as const,
       };
 
@@ -291,33 +291,33 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
     }
 
-    if (polled.activeJob.status === 'succeeded') {
+    if (polled.job.status === 'succeeded') {
       const current = await options.store.getOutboxJob(activeJob.id);
       await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'ocr_succeeded',
         serverCaptureId: current?.serverCaptureId ?? capture.captureId,
-        serverOcrJobId: current?.serverOcrJobId ?? created.activeJob.id,
+        serverOcrJobId: current?.serverOcrJobId ?? created.job.id,
         state: 'synced',
       });
       return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
-    if (polled.activeJob.status === 'cancelled') {
+    if (polled.job.status === 'cancelled') {
       await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
         reason: 'server_cancelled',
         serverCaptureId: capture.captureId,
-        serverOcrJobId: created.activeJob.id,
+        serverOcrJobId: created.job.id,
         state: 'cancelled',
       });
       return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
     }
 
-    if (polled.activeJob.status === 'failed') {
-      return handleOcrFailure(options, activeJob, polled.activeJob.error, {
+    if (polled.job.status === 'failed') {
+      return handleOcrFailure(options, activeJob, polled.job.error, {
         captureId: capture.captureId,
-        ocrJobId: created.activeJob.id,
+        ocrJobId: created.job.id,
       });
     }
 
