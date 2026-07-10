@@ -79,30 +79,27 @@ enum ScreenshotCapturer {
         Task.detached {
             defer { semaphore.signal() }
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(
+                // Prefer on-screen-only first; if selection still fails, retry
+                // with the broader SCK enumeration before giving up.
+                var content = try await SCShareableContent.excludingDesktopWindows(
                     false,
                     onScreenWindowsOnly: true
                 )
-
-                let infos = content.windows.map { window in
-                    CaptureWindowInfo(
-                        windowId: Int(window.windowID),
-                        ownerProcessId: Int(window.owningApplication?.processID ?? -1),
-                        layer: window.windowLayer,
-                        isOnScreen: window.isOnScreen,
-                        width: Double(window.frame.width),
-                        height: Double(window.frame.height),
-                        hasTitle: !(window.title ?? "").isEmpty
+                var window = selectShareableWindow(
+                    content: content,
+                    frontmostPid: frontmostPid
+                )
+                if window == nil {
+                    content = try await SCShareableContent.excludingDesktopWindows(
+                        false,
+                        onScreenWindowsOnly: false
+                    )
+                    window = selectShareableWindow(
+                        content: content,
+                        frontmostPid: frontmostPid
                     )
                 }
-
-                guard
-                    let selectedId = ActiveWindowSelector.selectWindowId(
-                        windows: infos,
-                        frontmostProcessId: frontmostPid
-                    ),
-                    let window = content.windows.first(where: { Int($0.windowID) == selectedId })
-                else {
+                guard let window else {
                     outcome = .noWindow
                     return
                 }
@@ -132,6 +129,89 @@ enum ScreenshotCapturer {
             return .failed
         }
         return outcome
+    }
+
+    /// Resolve an `SCWindow` for this tick.
+    ///
+    /// Order:
+    /// 1. Frontmost app via SCK + `ActiveWindowSelector`.
+    /// 2. Same rule over CGWindowList, then re-attach by `windowID` in SCK
+    ///    (covers SCK `owningApplication` holes).
+    /// 3. If the frontmost app has no capturable window, take the topmost
+    ///    capturable on-screen window (CG front-to-back) and re-attach in SCK.
+    ///    This covers hosts that remain NSWorkspace-frontmost with no visible
+    ///    window (e.g. a dock-hidden Electron after its login window closes).
+    private static func selectShareableWindow(
+        content: SCShareableContent,
+        frontmostPid: Int
+    ) -> SCWindow? {
+        let excluded: Set<Int> = [Int(getpid())]
+        let sckInfos = content.windows.map(captureWindowInfo(from:))
+
+        if let selectedId = ActiveWindowSelector.selectWindowId(
+            windows: sckInfos,
+            frontmostProcessId: frontmostPid
+        ),
+            let window = content.windows.first(where: { Int($0.windowID) == selectedId })
+        {
+            return window
+        }
+
+        let cgInfos = cgWindowInfos()
+        if let cgSelectedId = ActiveWindowSelector.selectWindowId(
+            windows: cgInfos,
+            frontmostProcessId: frontmostPid
+        ),
+            let window = content.windows.first(where: { Int($0.windowID) == cgSelectedId })
+        {
+            return window
+        }
+
+        if let topId = ActiveWindowSelector.selectTopmostCapturableWindowId(
+            windowsFrontToBack: cgInfos,
+            excludingOwnerProcessIds: excluded
+        ),
+            let window = content.windows.first(where: { Int($0.windowID) == topId })
+        {
+            return window
+        }
+
+        return nil
+    }
+
+    private static func captureWindowInfo(from window: SCWindow) -> CaptureWindowInfo {
+        CaptureWindowInfo(
+            windowId: Int(window.windowID),
+            ownerProcessId: Int(window.owningApplication?.processID ?? -1),
+            layer: window.windowLayer,
+            isOnScreen: window.isOnScreen,
+            width: Double(window.frame.width),
+            height: Double(window.frame.height),
+            hasTitle: !(window.title ?? "").isEmpty
+        )
+    }
+
+    private static func cgWindowInfos() -> [CaptureWindowInfo] {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let raw = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return raw.compactMap { entry in
+            guard let pid = entry[kCGWindowOwnerPID as String] as? Int else {
+                return nil
+            }
+            let bounds = entry[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]
+            let title = entry[kCGWindowName as String] as? String ?? ""
+            return CaptureWindowInfo(
+                windowId: entry[kCGWindowNumber as String] as? Int ?? -1,
+                ownerProcessId: pid,
+                layer: entry[kCGWindowLayer as String] as? Int ?? -1,
+                isOnScreen: (entry[kCGWindowIsOnscreen as String] as? Int ?? 0) == 1,
+                width: Double(bounds["Width"] ?? 0),
+                height: Double(bounds["Height"] ?? 0),
+                hasTitle: !title.isEmpty
+            )
+        }
     }
 
     // MARK: - WebP encoding

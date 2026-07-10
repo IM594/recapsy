@@ -260,4 +260,33 @@ final class ActiveWindowSelectorTests: XCTestCase {
             4
         )
     }
+
+    func testTopmostCapturableSkipsNonQualifyingThenPicksFirst() {
+        // Front-to-back: non-capturable junk, then the first real window.
+        let windows = [
+            window(id: 1, pid: 100, width: 80, height: 60),
+            window(id: 2, pid: 100, layer: 25),
+            window(id: 3, pid: 100, onScreen: false),
+            window(id: 4, pid: 200, width: 1920, height: 1055),
+            window(id: 5, pid: 300, width: 800, height: 600),
+        ]
+        XCTAssertEqual(
+            ActiveWindowSelector.selectTopmostCapturableWindowId(windowsFrontToBack: windows),
+            4
+        )
+    }
+
+    func testTopmostCapturableExcludesOwnerPids() {
+        let windows = [
+            window(id: 1, pid: 50, width: 1920, height: 1055),
+            window(id: 2, pid: 200, width: 800, height: 600),
+        ]
+        XCTAssertEqual(
+            ActiveWindowSelector.selectTopmostCapturableWindowId(
+                windowsFrontToBack: windows,
+                excludingOwnerProcessIds: [50]
+            ),
+            2
+        )
+    }
 }

@@ -33,35 +33,37 @@ public struct CaptureWindowInfo: Equatable {
     }
 }
 
-/// Pure rule that picks *which* window represents the foreground app, mirroring
-/// the behaviour proven in the old capture plugin's `findWindows` + main-window
-/// pick, but as a side-effect-free function over plain data.
+/// Pure rule that picks *which* window to capture, as a side-effect-free
+/// function over plain data (no ScreenCaptureKit dependency).
 ///
-/// The rule:
+/// Frontmost-app selection:
 ///   1. keep only windows that belong to the frontmost process, are on screen,
 ///      sit on the normal window layer (0), and are larger than a tiny 100×100
 ///      floor (drops shadows, status items, and off-screen scratch windows);
-///   2. prefer titled windows over untitled ones (a titled window is almost
-///      always the real document window, not an inspector/toolbar);
+///   2. prefer titled windows over untitled ones;
 ///   3. among the preferred pool pick the largest by area, breaking ties on the
 ///      lower window id so the choice is deterministic and testable.
 ///
-/// Returns `nil` when the foreground app has no capturable window (e.g. the
-/// Finder desktop with no open window); the caller treats that as "skip this
-/// tick", never as an error.
+/// When the frontmost app owns no capturable window, callers fall back to
+/// `selectTopmostCapturableWindowId` over a front-to-back ordered list
+/// (CGWindowList order) so a host that remains NSWorkspace-frontmost without a
+/// visible window does not permanently starve capture.
 public enum ActiveWindowSelector {
     public static let minimumWindowEdge: Double = 100
+
+    public static func isCapturable(_ window: CaptureWindowInfo) -> Bool {
+        window.isOnScreen
+            && window.layer == 0
+            && window.width > minimumWindowEdge
+            && window.height > minimumWindowEdge
+    }
 
     public static func selectWindowId(
         windows: [CaptureWindowInfo],
         frontmostProcessId: Int
     ) -> Int? {
         let candidates = windows.filter { window in
-            window.ownerProcessId == frontmostProcessId
-                && window.isOnScreen
-                && window.layer == 0
-                && window.width > minimumWindowEdge
-                && window.height > minimumWindowEdge
+            window.ownerProcessId == frontmostProcessId && isCapturable(window)
         }
         if candidates.isEmpty {
             return nil
@@ -79,6 +81,20 @@ public enum ActiveWindowSelector {
             // Deterministic tie-break: prefer the lower window id so equal-area
             // windows never make the pick depend on enumeration order.
             return lhs.windowId > rhs.windowId
+        }?.windowId
+    }
+
+    /// First capturable window in a front-to-back ordered list.
+    ///
+    /// `windowsFrontToBack` must already be ordered frontmost-first (as returned
+    /// by `CGWindowListCopyWindowInfo`). Optionally skip owner PIDs that must
+    /// never be captured (e.g. the capture helper itself).
+    public static func selectTopmostCapturableWindowId(
+        windowsFrontToBack: [CaptureWindowInfo],
+        excludingOwnerProcessIds: Set<Int> = []
+    ) -> Int? {
+        windowsFrontToBack.first { window in
+            isCapturable(window) && !excludingOwnerProcessIds.contains(window.ownerProcessId)
         }?.windowId
     }
 }
