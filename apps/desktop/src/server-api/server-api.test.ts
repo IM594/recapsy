@@ -581,6 +581,168 @@ describe('desktop server API client', () => {
       safeMessage: 'OCR result is invalid.',
     });
   });
+
+  it('runs the OCR proxy with raw bytes and validates the normalized response', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async (request) => {
+      expect(request.path).toBe('/v1/ai/ocr');
+      expect(request.method).toBe('POST');
+      expect(request.body).toBeInstanceOf(Uint8Array);
+      expect(request.headers['content-type']).toBe('image/webp');
+      expect(request.query).toMatchObject({ workspaceId });
+      return createJsonResponse({
+        blocks: [{ order: 0, text: 'quarterly plan draft' }],
+        durationMs: 1200,
+        model: 'ocr-model-1',
+        providerName: 'openai',
+        text: 'quarterly plan draft',
+      });
+    });
+
+    const result = await client.runOcrProxy({
+      bytes: new Uint8Array([1, 2, 3]),
+      mimeType: 'image/webp',
+      workspaceId,
+    });
+
+    expect(result).toEqual({
+      blocks: [{ order: 0, text: 'quarterly plan draft' }],
+      durationMs: 1200,
+      model: 'ocr-model-1',
+      providerName: 'openai',
+      text: 'quarterly plan draft',
+    });
+  });
+
+  it('maps proxy rate_limit.exceeded to a retryable throttle instead of a server outage', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async () => {
+      return createJsonResponse(
+        {
+          error: {
+            code: 'rate_limit.exceeded',
+            message: 'Too many concurrent OCR requests for this user.',
+          },
+        },
+        429,
+      );
+    });
+
+    await expect(
+      client.runOcrProxy({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: 'image/webp',
+        workspaceId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider_rate_limited',
+      retryable: true,
+    });
+  });
+
+  it('maps workspace.forbidden to a terminal policy block instead of unknown', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async () => {
+      return createJsonResponse(
+        {
+          error: {
+            code: 'workspace.forbidden',
+            message: 'Workspace access is forbidden.',
+          },
+        },
+        403,
+      );
+    });
+
+    await expect(
+      client.runOcrProxy({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: 'image/webp',
+        workspaceId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'policy_denied',
+      retryable: false,
+    });
+  });
+
+  it('submits the locally parsed OCR result and validates the summary response', async () => {
+    const sourceAssetHash =
+      'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    const resultId = '33333333-3333-4333-8333-333333333333';
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async (request) => {
+      expect(request.path).toBe('/v1/captures/capture_1/ocr-result');
+      expect(request.method).toBe('POST');
+      expect(request.body).toMatchObject({
+        durationMs: 1200,
+        model: 'ocr-model-1',
+        providerName: 'openai',
+        sourceAssetHash,
+        workspaceId,
+      });
+      return createJsonResponse({
+        result: {
+          createdAt: now,
+          id: resultId,
+          qualityFlags: [],
+          resultVersion: 1,
+          sourceAssetHash,
+        },
+      });
+    });
+
+    const result = await client.submitOcrResult({
+      captureId: 'capture_1',
+      durationMs: 1200,
+      model: 'ocr-model-1',
+      providerName: 'openai',
+      screenText: {
+        blocks: [
+          { kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'quarterly plan draft' },
+        ],
+        source: 'image_ocr',
+        readingOrder: 'top_to_bottom_left_to_right',
+      },
+      sourceAssetHash,
+      workspaceId,
+    });
+
+    expect(result.result).toMatchObject({
+      id: resultId,
+      resultVersion: 1,
+      sourceAssetHash,
+    });
+  });
+
+  it('rejects an OCR result submission that violates the public contract before any transport call', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async () => {
+      throw new Error('transport should not be called for an invalid contract payload');
+    });
+
+    await expect(
+      client.submitOcrResult({
+        captureId: 'capture_1',
+        durationMs: 1200,
+        model: 'ocr-model-1',
+        providerName: 'openai',
+        screenText: {
+          blocks: [
+            { kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'quarterly plan draft' },
+          ],
+          source: 'image_ocr',
+          readingOrder: 'top_to_bottom_left_to_right',
+        },
+        sourceAssetHash: 'short',
+        workspaceId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'validation_failed',
+      retryable: false,
+    });
+    expect(calls).toEqual([]);
+  });
 });
 
 function createClient(calls: ServerApiTransportRequest[], handler: ServerApiTransport) {

@@ -1,4 +1,9 @@
-import { CaptureIngestRequestSchema } from '@recapsy/contracts';
+import {
+  AiOcrResponseSchema,
+  CaptureIngestRequestSchema,
+  OcrResultSubmitRequestSchema,
+  OcrResultSubmitResponseSchema,
+} from '@recapsy/contracts';
 import { redactLogPayload } from '../logging/redaction';
 import type {
   CaptureDetailResult,
@@ -10,13 +15,17 @@ import type {
   OcrJobSafeError,
   OcrJobSafeErrorCode,
   OcrJobStatusResult,
+  RunOcrProxyResult,
   ServerApiClient,
   ServerApiClientOptions,
   ServerApiErrorCode,
   ServerApiErrorShape,
+  ServerApiOcrProxyClient,
   ServerApiTransportRequest,
   ServerApiTransportResponse,
   ServerCapabilitiesResult,
+  SubmitOcrResultInput,
+  SubmitOcrResultResult,
   TemporaryUploadResult,
 } from './types';
 
@@ -51,7 +60,9 @@ export class ServerApiError extends Error implements ServerApiErrorShape {
   }
 }
 
-export function createServerApiClient(options: ServerApiClientOptions): ServerApiClient {
+export function createServerApiClient(
+  options: ServerApiClientOptions,
+): ServerApiClient & ServerApiOcrProxyClient {
   const endpoint = normalizeEndpoint(options.endpoint);
 
   return {
@@ -163,6 +174,36 @@ export function createServerApiClient(options: ServerApiClientOptions): ServerAp
         ...toTemporaryUploadResult(body),
         uploadReceipt: readString(body, 'uploadReceipt'),
       };
+    },
+    async runOcrProxy(input): Promise<RunOcrProxyResult> {
+      const body = await request(options, endpoint, {
+        body: input.bytes,
+        headers: { 'content-type': input.mimeType },
+        method: 'POST',
+        path: '/v1/ai/ocr',
+        query: { workspaceId: input.workspaceId },
+      });
+      const parsed = AiOcrResponseSchema.safeParse(body);
+
+      if (!parsed.success) {
+        throw invalidResponse();
+      }
+
+      return parsed.data;
+    },
+    async submitOcrResult(input): Promise<SubmitOcrResultResult> {
+      const body = await request(options, endpoint, {
+        body: toOcrResultSubmitBody(input),
+        method: 'POST',
+        path: `/v1/captures/${input.captureId}/ocr-result`,
+      });
+      const parsed = OcrResultSubmitResponseSchema.safeParse(body);
+
+      if (!parsed.success) {
+        throw invalidResponse();
+      }
+
+      return parsed.data;
     },
     async querySearch(input) {
       const body = await request(options, endpoint, {
@@ -446,6 +487,30 @@ function toCaptureIngestBody(input: CaptureIngestInput): Record<string, unknown>
   return parsed.data;
 }
 
+function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unknown> {
+  const body = {
+    durationMs: input.durationMs,
+    model: input.model,
+    providerName: input.providerName,
+    screenText: input.screenText,
+    sourceAssetHash: input.sourceAssetHash,
+    workspaceId: input.workspaceId,
+    ...(input.usage ? { usage: input.usage } : {}),
+  };
+  const parsed = OcrResultSubmitRequestSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new ServerApiError({
+      code: 'validation_failed',
+      details: redactLogPayload(parsed.error.flatten()),
+      retryable: false,
+      safeMessage: 'OCR result submission payload does not match the public contract.',
+    });
+  }
+
+  return parsed.data;
+}
+
 function toCaptureIngestResult(body: unknown): CaptureIngestResult {
   const capture = readObject(readObject(body, 'capture'), undefined);
   const timelineEvent = readObject(readObject(body, 'timelineEvent'), undefined);
@@ -571,6 +636,19 @@ function mapNamespacedErrorCode(
     if (normalized === 'timeout') {
       return 'provider_timeout';
     }
+  }
+
+  // OCR proxy backpressure surfaces as `rate_limit.exceeded`; it is a retryable
+  // throttle, not a server outage, so it must not collapse to
+  // `server_unavailable`.
+  if (namespace === 'rate_limit' && normalized === 'exceeded') {
+    return 'provider_rate_limited';
+  }
+
+  // `workspace.forbidden` is a policy/authorization block on the workspace: a
+  // terminal denial the sync flow treats as blocked, not a retryable failure.
+  if (namespace === 'workspace' && normalized === 'forbidden') {
+    return 'policy_denied';
   }
 
   return normalized;
@@ -884,9 +962,12 @@ export type {
   OcrJobSafeErrorCode,
   OcrJobStatus,
   OcrJobStatusResult,
+  RunOcrProxyInput,
+  RunOcrProxyResult,
   SearchQueryInput,
   ServerApiClient,
   ServerApiClientOptions,
+  ServerApiOcrProxyClient,
   ServerCapabilitiesResult,
   ServerCapabilityFeature,
   ServerApiErrorCode,
@@ -895,6 +976,8 @@ export type {
   ServerApiTransportRequest,
   ServerApiTransportResponse,
   ServerProviderCapability,
+  SubmitOcrResultInput,
+  SubmitOcrResultResult,
   TemporaryByteUploadInput,
   TemporaryByteUploadResult,
   TemporaryUploadInput,

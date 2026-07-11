@@ -1,3 +1,9 @@
+import type {
+  AiOcrResponse,
+  AiOcrUsage,
+  OcrResultSubmitResponse,
+  OcrScreenTextResult,
+} from '@recapsy/contracts';
 import type { TokenStore } from '../auth/token-store';
 import type { SearchQueryResponseDto, TimelineQueryResponseDto } from '../ipc/dto';
 import type { AssetCacheRef, CaptureOutboxPayload } from '../storage/types';
@@ -160,6 +166,32 @@ export type OcrJobCancelResult = {
   cleanupStatus: 'not_required' | 'pending' | 'cleaned' | 'failed' | 'expired';
 };
 
+// Thin-proxy OCR: the desktop runs the provider OCR synchronously through the
+// authenticated proxy (`POST /v1/ai/ocr`), then hands the locally parsed
+// transcript back for server-side persistence (`POST
+// /v1/captures/:captureId/ocr-result`). Both are additive alongside the legacy
+// temporary-upload + async OCR-job methods.
+export type RunOcrProxyInput = {
+  workspaceId: string;
+  mimeType: string;
+  bytes: Uint8Array;
+};
+
+export type RunOcrProxyResult = AiOcrResponse;
+
+export type SubmitOcrResultInput = {
+  workspaceId: string;
+  captureId: string;
+  sourceAssetHash: string;
+  screenText: OcrScreenTextResult;
+  model: string;
+  providerName: string;
+  durationMs: number;
+  usage?: AiOcrUsage;
+};
+
+export type SubmitOcrResultResult = OcrResultSubmitResponse;
+
 export type TimelineQueryInput = {
   workspaceId: string;
   cursor?: string;
@@ -248,4 +280,15 @@ export type ServerApiClient = {
   getCapabilities(): Promise<ServerCapabilitiesResult>;
   getCapturePolicies(input: CapturePoliciesInput): Promise<CapturePoliciesResult>;
   getAxAllowlist(workspaceId: string): Promise<AxAllowlistResult>;
+};
+
+// OCR thin-proxy capabilities layered onto the concrete client. Kept separate
+// from `ServerApiClient` during this additive increment so existing consumers
+// of the base interface (notably the sync scheduler, whose `SyncServerApi`
+// aliases `ServerApiClient`) are not forced to implement methods they do not
+// yet call. The scheduler is rewired onto these in a later increment, at which
+// point they fold into the base contract.
+export type ServerApiOcrProxyClient = {
+  runOcrProxy(input: RunOcrProxyInput): Promise<RunOcrProxyResult>;
+  submitOcrResult(input: SubmitOcrResultInput): Promise<SubmitOcrResultResult>;
 };
