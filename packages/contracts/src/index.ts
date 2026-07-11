@@ -1,4 +1,5 @@
 export { VERSION } from './version.js';
+export * from './schemas/ai-ocr.js';
 export * from './schemas/auth.js';
 export * from './schemas/capabilities.js';
 export * from './schemas/capture.js';
