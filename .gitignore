@@ -28,6 +28,9 @@ coverage/
 # Data
 data/
 
+# Server runtime temporary assets (TEMP_UPLOAD_DIR / SERVER_TEMP_ASSET_DIR defaults)
+apps/server/tmp/
+
 # OS
 .DS_Store
 Thumbs.db
