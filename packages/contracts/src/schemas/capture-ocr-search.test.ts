@@ -173,7 +173,7 @@ describe('Asset location contracts', () => {
 });
 
 describe('Search contracts', () => {
-  it('allows only faithful image OCR as search document body source', () => {
+  it('allows only screen-text image OCR as search document body source', () => {
     expect(
       SearchDocumentSchema.safeParse({
         id: ids.searchDocument,
@@ -182,7 +182,7 @@ describe('Search contracts', () => {
         timelineEventId: ids.timelineEvent,
         ocrResultId: ids.ocrResult,
         bodyText: 'Visible OCR text from the screenshot.',
-        bodySource: 'faithful_image_ocr',
+        bodySource: 'screen_text_image_ocr',
         language: 'en',
         bodyHash: 'sha256:body-hash',
         indexStatus: 'indexed',
@@ -200,8 +200,8 @@ describe('Search contracts', () => {
         captureId: ids.capture,
         timelineEventId: ids.timelineEvent,
         ocrResultId: ids.ocrResult,
-        bodyText: 'A semantic summary must not be indexed as body text.',
-        bodySource: 'semantics_summary',
+        bodyText: 'An activity summary must not be indexed as body text.',
+        bodySource: 'activity_summary',
         language: 'en',
         bodyHash: 'sha256:body-hash',
         indexStatus: 'indexed',
@@ -231,7 +231,7 @@ describe('Search contracts', () => {
           bundleId: 'com.apple.Safari',
           snippet: {
             text: 'Visible <mark>text</mark> from the screenshot.',
-            source: 'faithful_image_ocr',
+            source: 'screen_text_image_ocr',
           },
           score: 0.92,
           indexStatus: 'indexed',
@@ -270,18 +270,18 @@ describe('OCR job contracts', () => {
       jobId: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
       resultVersion: 1,
       sourceAssetHash: 'sha256:ocr-input-hash',
-      faithful: {
+      screenText: {
         source: 'image_ocr',
         blocks: [],
         readingOrder: 'top_to_bottom_left_to_right',
       },
-      auxiliary: {
+      layout: {
         layoutNotes: [],
         visualHints: [],
         detectedTables: 0,
         metadata: {},
       },
-      semantics: {
+      activity: {
         activitySummary: 'Processed screenshot OCR',
         entities: [],
         actionHints: [],
@@ -294,7 +294,7 @@ describe('OCR job contracts', () => {
     });
 
     expect(parsed.searchText).toBe('');
-    expect(parsed.faithful.blocks).toEqual([]);
+    expect(parsed.screenText.blocks).toEqual([]);
   });
 
   it('accepts provider_unavailable as a safe OCR job error code', () => {

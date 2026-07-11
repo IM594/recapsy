@@ -3,7 +3,7 @@ import { IdSchema, IsoDateTimeSchema, MetadataSchema, PageInfoSchema } from './c
 import { AssetAvailabilityStatusSchema, ContentHashSchema } from './storage.js';
 
 export const SearchModeSchema = z.enum(['text', 'embedding', 'hybrid']);
-export const SearchDocumentBodySourceSchema = z.literal('faithful_image_ocr');
+export const SearchDocumentBodySourceSchema = z.literal('screen_text_image_ocr');
 export const SearchDocumentIndexStatusSchema = z.enum(['pending', 'indexed', 'failed', 'stale']);
 export const SearchIndexHealthStatusSchema = z.enum([
   'ready',
@@ -19,8 +19,8 @@ export const SearchEmbeddingStatusSchema = z.enum([
 ]);
 export const SearchEmbeddingInputKindSchema = z.enum([
   'none',
-  'faithful_ocr_text',
-  'semantics_summary',
+  'screen_text_ocr',
+  'activity_summary',
 ]);
 export const SearchFallbackReasonSchema = z.enum([
   'embedding_unavailable',

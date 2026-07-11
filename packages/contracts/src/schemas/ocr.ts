@@ -10,7 +10,7 @@ export const OcrJobStatusSchema = z.enum([
   'cancelled',
   'expired',
 ]);
-export const OcrResultLayerSchema = z.enum(['faithful', 'auxiliary', 'semantics']);
+export const OcrResultLayerSchema = z.enum(['screen_text', 'layout', 'activity']);
 export const OcrErrorCodeSchema = z.enum([
   'policy_denied',
   'quota_exceeded',
@@ -26,8 +26,8 @@ export const OcrErrorCodeSchema = z.enum([
   'cleanup_failed',
   'unknown',
 ]);
-export const OcrFaithfulBlockSourceSchema = z.literal('image_ocr');
-export const OcrFaithfulBlockKindSchema = z.enum([
+export const OcrScreenTextBlockSourceSchema = z.literal('image_ocr');
+export const OcrScreenTextBlockKindSchema = z.enum([
   'text',
   'heading',
   'label',
@@ -71,7 +71,7 @@ export const OcrJobSchema = z
     providerSettingId: IdSchema.nullable().optional(),
     providerModel: z.string().min(1).max(256).nullable().optional(),
     status: OcrJobStatusSchema,
-    requestedLayers: z.array(OcrResultLayerSchema).default(['faithful', 'auxiliary', 'semantics']),
+    requestedLayers: z.array(OcrResultLayerSchema).default(['screen_text', 'layout', 'activity']),
     attempt: z.number().int().nonnegative().default(0),
     maxAttempts: z.number().int().positive().default(3),
     queuedAt: IsoDateTimeSchema,
@@ -95,7 +95,7 @@ export const OcrJobCreateRequestSchema = z
     captureId: IdSchema,
     inputAssetId: IdSchema,
     temporaryLocationId: IdSchema,
-    requestedLayers: z.array(OcrResultLayerSchema).default(['faithful', 'auxiliary', 'semantics']),
+    requestedLayers: z.array(OcrResultLayerSchema).default(['screen_text', 'layout', 'activity']),
     providerSettingId: IdSchema.nullable().optional(),
     providerModel: z.string().min(1).max(256).nullable().optional(),
     idempotencyKey: z.string().min(1).max(256),
@@ -103,27 +103,27 @@ export const OcrJobCreateRequestSchema = z
   })
   .strict();
 
-export const OcrFaithfulBlockSchema = z
+export const OcrScreenTextBlockSchema = z
   .object({
     id: z.string().min(1).max(128).optional(),
-    source: OcrFaithfulBlockSourceSchema,
+    source: OcrScreenTextBlockSourceSchema,
     text: z.string().min(1),
     readingOrder: z.number().int().nonnegative(),
-    kind: OcrFaithfulBlockKindSchema.default('text'),
+    kind: OcrScreenTextBlockKindSchema.default('text'),
     confidence: z.number().min(0).max(1).nullable().optional(),
     bbox: OcrBoundingBoxSchema.nullable().optional(),
   })
   .strict();
 
-export const OcrFaithfulResultSchema = z
+export const OcrScreenTextResultSchema = z
   .object({
-    source: OcrFaithfulBlockSourceSchema,
-    blocks: z.array(OcrFaithfulBlockSchema),
+    source: OcrScreenTextBlockSourceSchema,
+    blocks: z.array(OcrScreenTextBlockSchema),
     readingOrder: z.literal('top_to_bottom_left_to_right').default('top_to_bottom_left_to_right'),
   })
   .strict();
 
-export const OcrAuxiliaryResultSchema = z
+export const OcrLayoutResultSchema = z
   .object({
     layoutNotes: z.array(z.string().min(1).max(1024)).default([]),
     visualHints: z.array(z.string().min(1).max(1024)).default([]),
@@ -132,7 +132,7 @@ export const OcrAuxiliaryResultSchema = z
   })
   .strict();
 
-export const OcrSemanticsResultSchema = z
+export const OcrActivityResultSchema = z
   .object({
     activitySummary: z.string().min(1).max(2048).nullable().optional(),
     entities: z.array(z.string().min(1).max(256)).default([]),
@@ -151,9 +151,9 @@ export const OcrResultSchema = z
     resultVersion: z.number().int().positive(),
     providerSettingId: IdSchema.nullable().optional(),
     sourceAssetHash: ContentHashSchema,
-    faithful: OcrFaithfulResultSchema,
-    auxiliary: OcrAuxiliaryResultSchema,
-    semantics: OcrSemanticsResultSchema,
+    screenText: OcrScreenTextResultSchema,
+    layout: OcrLayoutResultSchema,
+    activity: OcrActivityResultSchema,
     searchText: z.string(),
     qualityFlags: z.array(OcrQualityFlagSchema).default([]),
     createdAt: IsoDateTimeSchema,
@@ -221,17 +221,17 @@ export const OcrJobCancelResponseSchema = z
 export type OcrJobStatus = z.infer<typeof OcrJobStatusSchema>;
 export type OcrResultLayer = z.infer<typeof OcrResultLayerSchema>;
 export type OcrErrorCode = z.infer<typeof OcrErrorCodeSchema>;
-export type OcrFaithfulBlockSource = z.infer<typeof OcrFaithfulBlockSourceSchema>;
-export type OcrFaithfulBlockKind = z.infer<typeof OcrFaithfulBlockKindSchema>;
+export type OcrScreenTextBlockSource = z.infer<typeof OcrScreenTextBlockSourceSchema>;
+export type OcrScreenTextBlockKind = z.infer<typeof OcrScreenTextBlockKindSchema>;
 export type OcrQualityFlag = z.infer<typeof OcrQualityFlagSchema>;
 export type OcrBoundingBox = z.infer<typeof OcrBoundingBoxSchema>;
 export type OcrJobSafeError = z.infer<typeof OcrJobSafeErrorSchema>;
 export type OcrJob = z.infer<typeof OcrJobSchema>;
 export type OcrJobCreateRequest = z.infer<typeof OcrJobCreateRequestSchema>;
-export type OcrFaithfulBlock = z.infer<typeof OcrFaithfulBlockSchema>;
-export type OcrFaithfulResult = z.infer<typeof OcrFaithfulResultSchema>;
-export type OcrAuxiliaryResult = z.infer<typeof OcrAuxiliaryResultSchema>;
-export type OcrSemanticsResult = z.infer<typeof OcrSemanticsResultSchema>;
+export type OcrScreenTextBlock = z.infer<typeof OcrScreenTextBlockSchema>;
+export type OcrScreenTextResult = z.infer<typeof OcrScreenTextResultSchema>;
+export type OcrLayoutResult = z.infer<typeof OcrLayoutResultSchema>;
+export type OcrActivityResult = z.infer<typeof OcrActivityResultSchema>;
 export type OcrResult = z.infer<typeof OcrResultSchema>;
 export type OcrResultSummary = z.infer<typeof OcrResultSummarySchema>;
 export type OcrJobCreateResponse = z.infer<typeof OcrJobCreateResponseSchema>;

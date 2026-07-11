@@ -108,7 +108,7 @@ export function createServerApiClient(options: ServerApiClientOptions): ServerAp
           captureId: input.captureId,
           idempotencyKey: input.idempotencyKey,
           inputAssetId: input.inputAssetId,
-          requestedLayers: ['faithful', 'auxiliary', 'semantics'],
+          requestedLayers: ['screen_text', 'layout', 'activity'],
           temporaryLocationId: input.temporaryLocationId,
           workspaceId: input.workspaceId,
         },

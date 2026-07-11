@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe('desktop server sync over real HTTP', () => {
-  it('syncs capture OCR through public /v1 routes and reads faithful text from timeline/search', async () => {
+  it('syncs capture OCR through public /v1 routes and reads screen text from timeline/search', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const harness = await startServerHttpHarness({
       ocrRunner: fixedOcrRunner('Visible retention graph and roadmap notes', 'Retention review'),

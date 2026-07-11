@@ -239,7 +239,7 @@ describe('desktop server API client', () => {
             capturedAt: now,
             score: 1.2,
             searchDocumentId: 'search_1',
-            snippet: { text: 'quarterly plan draft', source: 'faithful_image_ocr' },
+            snippet: { text: 'quarterly plan draft', source: 'screen_text_image_ocr' },
             timelineEventId: 'timeline_1',
             windowTitleSafe: 'Project notes',
           },
@@ -541,7 +541,7 @@ describe('desktop server API client', () => {
           status: 'succeeded',
         },
         search: {
-          bodySource: 'faithful_image_ocr',
+          bodySource: 'screen_text_image_ocr',
           searchDocumentId: 'search_1',
           status: 'indexed',
         },
