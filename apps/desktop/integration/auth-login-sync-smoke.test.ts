@@ -101,7 +101,7 @@ describe('real login through to the sync loop over real HTTP', () => {
       clock: { now: () => now },
       maxAttempts: 3,
       readAssetBytes: failClosedReadAssetBytes,
-      retryDelayMs: 60_000,
+      retryBackoff: { baseMs: 60_000, factor: 2, jitterRatio: 0, maxMs: 300_000 },
       store,
       workspace: { getActiveWorkspaceId: async () => registered.workspaceId },
     });

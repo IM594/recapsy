@@ -56,6 +56,31 @@ describe('sync loop', () => {
     await loop.stop();
   });
 
+  it('defaults the active delay to 150ms as a hot-spin guard when not overridden', async () => {
+    const timers = new FakeTimers();
+    const scheduler = {
+      runOnce: async (): Promise<SyncRunResult> => ({
+        jobId: 'job_1',
+        processed: 1,
+        status: 'retry_wait',
+      }),
+    };
+
+    const loop = createSyncLoop({
+      clearTimeoutFn: timers.clear,
+      idleDelayMs: 2000,
+      scheduler,
+      setTimeoutFn: timers.set,
+    });
+
+    loop.start();
+    await flush();
+
+    expect(timers.scheduledDelays).toEqual([150]);
+
+    await loop.stop();
+  });
+
   it('never overlaps two runOnce() calls: the next run is only scheduled after the previous settles', async () => {
     const timers = new FakeTimers();
     let concurrentCalls = 0;

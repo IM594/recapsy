@@ -41,7 +41,12 @@ import {
   type SyncLoopOptions,
   createSyncLoop as createRealSyncLoop,
 } from '../sync/sync-loop';
-import type { SyncAssetReader, SyncRunResult, SyncServerApi } from '../sync/types';
+import type {
+  RetryBackoffConfig,
+  SyncAssetReader,
+  SyncRunResult,
+  SyncServerApi,
+} from '../sync/types';
 
 /**
  * Structural surface of `Electron.App` this module depends on. Kept narrow
@@ -128,7 +133,8 @@ export type ElectronMainRuntimeOptions = {
   syncActiveDelayMs?: number;
   /** Overrides the sync scheduler's retry budget; see `sync/scheduler.ts` and `DEFAULT_SYNC_MAX_ATTEMPTS` below. */
   syncMaxAttempts?: number;
-  syncRetryDelayMs?: number;
+  /** Overrides the sync scheduler's exponential-backoff policy; see `DEFAULT_SYNC_RETRY_BACKOFF` below. */
+  syncRetryBackoff?: RetryBackoffConfig;
   /** Creates the self-rescheduling sync loop. Injected (defaults to the real `createSyncLoop`) so tests never start a real timer. */
   createSyncLoop?(loopOptions: SyncLoopOptions): SyncLoop;
   backpressure?: BackpressureConfig;
@@ -203,20 +209,31 @@ export type ElectronMainRuntimeHandle = {
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 750 * 1024 * 1024,
   maxQueuedJobs: 1000,
-  // `maxRetryAttempts` pairs with `DEFAULT_SYNC_RETRY_DELAY_MS` below (now
-  // wired into the sync loop this file starts). At a flat (non-exponential)
-  // 60s retry delay, 15 attempts gives ~15 minutes of tolerance for a
-  // transient network/provider outage before a job is marked permanently
-  // failed. A real exponential-backoff curve would need `retryDelayMs` to
-  // become a per-attempt function instead of a single flat number, which is
-  // a breaking change to `sync/scheduler.ts` and its existing tests — out
-  // of scope here, flagged for follow-up.
+  // `maxRetryAttempts` is the backpressure decision's own attempt ceiling; it
+  // mirrors `DEFAULT_SYNC_MAX_ATTEMPTS` (the scheduler's per-job budget) at 15
+  // but is a separate knob — the two are intentionally not unified so they can
+  // diverge if daytime tuning wants a different backpressure threshold. With
+  // the exponential backoff below capping at 5 minutes, 15 attempts now spans
+  // a far wider tolerance window than the old flat-60s curve, so both values
+  // are candidates for retuning against real device telemetry.
   maxRetryAttempts: 15,
 };
 
 /** See `DEFAULT_BACKPRESSURE`'s `maxRetryAttempts` comment above for the shared rationale. */
 const DEFAULT_SYNC_MAX_ATTEMPTS = 15;
-const DEFAULT_SYNC_RETRY_DELAY_MS = 60_000;
+/**
+ * Exponential-backoff defaults for retryable sync failures (see
+ * `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §4.2): first retry ~2s, doubling
+ * each attempt up to a 5-minute ceiling, with ±20% jitter to de-synchronize
+ * retries across jobs/devices and spare the 2-core co-hosted server from
+ * lockstep retry storms. Overridable via `ElectronMainRuntimeOptions.syncRetryBackoff`.
+ */
+const DEFAULT_SYNC_RETRY_BACKOFF: RetryBackoffConfig = {
+  baseMs: 2000,
+  factor: 2,
+  maxMs: 300_000,
+  jitterRatio: 0.2,
+};
 
 const DEFAULT_QUIT_TIMEOUT_MS = 5000;
 
@@ -424,7 +441,7 @@ export function createElectronMainRuntime(
       clock: { now },
       maxAttempts: options.syncMaxAttempts ?? DEFAULT_SYNC_MAX_ATTEMPTS,
       readAssetBytes: options.readAssetBytes ?? failClosedReadAssetBytes,
-      retryDelayMs: options.syncRetryDelayMs ?? DEFAULT_SYNC_RETRY_DELAY_MS,
+      retryBackoff: options.syncRetryBackoff ?? DEFAULT_SYNC_RETRY_BACKOFF,
       store,
       workspace: { getActiveWorkspaceId: async () => workspaceId },
     });

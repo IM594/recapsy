@@ -408,7 +408,7 @@ function createPollingScheduler(input: {
     clock: createClock(),
     maxAttempts: 3,
     readAssetBytes: input.readAssetBytes ?? (async () => new Uint8Array([1, 2, 3, 4])),
-    retryDelayMs: 60_000,
+    retryBackoff: { baseMs: 60_000, factor: 2, jitterRatio: 0, maxMs: 300_000 },
     store: input.store,
     workspace: {
       getActiveWorkspaceId: async () => 'workspace_1',

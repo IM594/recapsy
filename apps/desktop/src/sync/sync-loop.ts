@@ -22,10 +22,14 @@ export type SyncLoopOptions = {
   idleDelayMs?: number;
   /**
    * Delay before the next `runOnce()` when the last call actually processed
-   * a job (`synced`/`retry_wait`/`blocked`/`failed`/`cancelled`). Default 0:
-   * `claimNextRetryableOutboxJob` already only returns jobs that are due, so
-   * an immediate re-run just drains the rest of the ready queue without an
-   * artificial pause between each job.
+   * a job (`synced`/`retry_wait`/`blocked`/`failed`/`cancelled`). Default
+   * 150ms: `claimNextRetryableOutboxJob` only returns jobs that are due, so
+   * steady-state draining is naturally serialized by the synchronous OCR proxy
+   * call. The small non-zero gap is a cheap guard against a hot spin when a run
+   * of ready jobs all fail fast (immediate 429/5xx) — it caps the drain rate
+   * so a fast-failing queue can't hammer the server, while the exponential
+   * backoff and the server's per-user in-flight limit remain the primary
+   * throttles (see `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §4.3).
    */
   activeDelayMs?: number;
   /** Injection points so tests can drive this deterministically. */
@@ -60,7 +64,7 @@ export type SyncLoop = {
  */
 export function createSyncLoop(options: SyncLoopOptions): SyncLoop {
   const idleDelayMs = options.idleDelayMs ?? 2000;
-  const activeDelayMs = options.activeDelayMs ?? 0;
+  const activeDelayMs = options.activeDelayMs ?? 150;
   // Wrapped (rather than passing `setTimeout`/`clearTimeout` directly) so
   // this compiles the same way regardless of which ambient `Timeout`/`Timer`
   // lib types are in scope, and so the injected function signatures in
