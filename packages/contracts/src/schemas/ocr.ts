@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AiOcrUsageSchema } from './ai-ocr.js';
 import { IdSchema, IsoDateTimeSchema, MetadataSchema } from './common.js';
 import { ContentHashSchema, TemporaryLocationCleanupStatusSchema } from './storage.js';
 
@@ -67,7 +68,7 @@ export const OcrJobSchema = z
     workspaceId: IdSchema,
     captureId: IdSchema,
     inputAssetId: IdSchema,
-    temporaryLocationId: IdSchema,
+    temporaryLocationId: IdSchema.nullable(),
     providerSettingId: IdSchema.nullable().optional(),
     providerModel: z.string().min(1).max(256).nullable().optional(),
     status: OcrJobStatusSchema,
@@ -170,6 +171,31 @@ export const OcrResultSummarySchema = z
   })
   .strict();
 
+// Client-submitted OCR result for the thin-proxy flow: the desktop runs the
+// proxy call, parses screenText locally, then hands the transcript back for
+// server-side persistence and indexing. `captureId` is a path parameter, not a
+// body field. Idempotency key is (capture + sourceAssetHash) — no independent
+// idempotencyKey and no resultVersion in the request (server derives it).
+// layout/activity are never client-supplied; the server synthesizes empty
+// defaults, matching the current server-side OCR behavior.
+export const OcrResultSubmitRequestSchema = z
+  .object({
+    workspaceId: IdSchema,
+    sourceAssetHash: ContentHashSchema,
+    screenText: OcrScreenTextResultSchema,
+    model: z.string().min(1).max(256),
+    providerName: z.string().min(1).max(120),
+    durationMs: z.number().int().nonnegative(),
+    usage: AiOcrUsageSchema.optional(),
+  })
+  .strict();
+
+export const OcrResultSubmitResponseSchema = z
+  .object({
+    result: OcrResultSummarySchema,
+  })
+  .strict();
+
 export const OcrJobCreateResponseSchema = z
   .object({
     job: OcrJobSchema,
@@ -234,6 +260,8 @@ export type OcrLayoutResult = z.infer<typeof OcrLayoutResultSchema>;
 export type OcrActivityResult = z.infer<typeof OcrActivityResultSchema>;
 export type OcrResult = z.infer<typeof OcrResultSchema>;
 export type OcrResultSummary = z.infer<typeof OcrResultSummarySchema>;
+export type OcrResultSubmitRequest = z.infer<typeof OcrResultSubmitRequestSchema>;
+export type OcrResultSubmitResponse = z.infer<typeof OcrResultSubmitResponseSchema>;
 export type OcrJobCreateResponse = z.infer<typeof OcrJobCreateResponseSchema>;
 export type OcrJobStatusResponse = z.infer<typeof OcrJobStatusResponseSchema>;
 export type OcrJobResultResponse = z.infer<typeof OcrJobResultResponseSchema>;
