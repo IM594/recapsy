@@ -915,29 +915,6 @@ function createScheduler(input: {
 
 function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
   return {
-    async cancelOcrJob(jobId) {
-      return {
-        cleanupStatus: 'pending',
-        job: {
-          id: jobId,
-          status: 'cancelled',
-        },
-      };
-    },
-    async createOcrJob() {
-      return {
-        job: {
-          id: 'ocr_job_1',
-          status: 'queued',
-        },
-      };
-    },
-    async createTemporaryUpload() {
-      return {
-        temporaryLocationId: 'temporary_location_1',
-        uploadId: 'upload_1',
-      };
-    },
     async getAxAllowlist() {
       return {
         axTextUploadEnabled: false,
@@ -995,21 +972,6 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
         inputAssetId: 'asset_server_1',
         nextAction: 'queue_ocr',
         timelineEventId: 'timeline_1',
-      };
-    },
-    async pollOcrJob() {
-      return {
-        job: {
-          id: 'ocr_job_1',
-          status: 'succeeded',
-        },
-      };
-    },
-    async putTemporaryBytes() {
-      return {
-        temporaryLocationId: 'temporary_location_1',
-        uploadId: 'upload_1',
-        uploadReceipt: 'receipt_1',
       };
     },
     async querySearch() {

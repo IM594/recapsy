@@ -10,11 +10,6 @@ import type {
   CaptureIngestInput,
   CaptureIngestResult,
   CapturePoliciesResult,
-  OcrJobCancelResult,
-  OcrJobCreateResult,
-  OcrJobSafeError,
-  OcrJobSafeErrorCode,
-  OcrJobStatusResult,
   RunOcrProxyResult,
   ServerApiClient,
   ServerApiClientOptions,
@@ -26,7 +21,6 @@ import type {
   ServerCapabilitiesResult,
   SubmitOcrResultInput,
   SubmitOcrResultResult,
-  TemporaryUploadResult,
 } from './types';
 
 export class ServerApiError extends Error implements ServerApiErrorShape {
@@ -66,19 +60,6 @@ export function createServerApiClient(
   const endpoint = normalizeEndpoint(options.endpoint);
 
   return {
-    async cancelOcrJob(jobId, workspaceId, reason) {
-      const body = await request(options, endpoint, {
-        body: reason ? { reason } : {},
-        method: 'POST',
-        path: `/v1/ocr/jobs/${jobId}/cancel`,
-        query: { workspaceId },
-      });
-      const job = readObject(readObject(body, 'job'), undefined);
-      return {
-        cleanupStatus: readString(body, 'cleanupStatus') as OcrJobCancelResult['cleanupStatus'],
-        job: toOcrJobSummary(job),
-      };
-    },
     async getAxAllowlist(workspaceId) {
       const body = await request(options, endpoint, {
         method: 'GET',
@@ -113,37 +94,6 @@ export function createServerApiClient(
       });
       return toCaptureDetailResult(body);
     },
-    async createOcrJob(input) {
-      const body = await request(options, endpoint, {
-        body: {
-          captureId: input.captureId,
-          idempotencyKey: input.idempotencyKey,
-          inputAssetId: input.inputAssetId,
-          requestedLayers: ['screen_text', 'layout', 'activity'],
-          temporaryLocationId: input.temporaryLocationId,
-          workspaceId: input.workspaceId,
-        },
-        method: 'POST',
-        path: '/v1/ocr/jobs',
-      });
-      return toOcrJobCreateResult(body);
-    },
-    async createTemporaryUpload(input) {
-      const body = await request(options, endpoint, {
-        body: {
-          assetId: input.assetId,
-          byteSize: input.sizeBytes,
-          contentHash: input.contentHash,
-          idempotencyKey: input.idempotencyKey,
-          mimeType: input.mimeType,
-          purpose: 'ocr_input',
-          workspaceId: input.workspaceId,
-        },
-        method: 'POST',
-        path: '/v1/assets/temporary-uploads',
-      });
-      return toTemporaryUploadResult(body);
-    },
     async ingestCapture(input) {
       const body = await request(options, endpoint, {
         body: toCaptureIngestBody(input),
@@ -151,29 +101,6 @@ export function createServerApiClient(
         path: '/v1/captures/ingest',
       });
       return toCaptureIngestResult(body);
-    },
-    async pollOcrJob(workspaceId, jobId) {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: `/v1/ocr/jobs/${jobId}`,
-        query: { workspaceId },
-      });
-      return {
-        job: toOcrJobSummary(readObject(readObject(body, 'job'), undefined)),
-      };
-    },
-    async putTemporaryBytes(input) {
-      const body = await request(options, endpoint, {
-        body: input.bytes,
-        headers: { 'content-type': input.mimeType },
-        method: 'PUT',
-        path: `/v1/assets/${input.assetId}/temporary-bytes`,
-        query: { workspaceId: input.workspaceId },
-      });
-      return {
-        ...toTemporaryUploadResult(body),
-        uploadReceipt: readString(body, 'uploadReceipt'),
-      };
     },
     async runOcrProxy(input): Promise<RunOcrProxyResult> {
       const body = await request(options, endpoint, {
@@ -537,43 +464,6 @@ function toCaptureDetailResult(body: unknown): CaptureDetailResult {
   };
 }
 
-function toTemporaryUploadResult(body: unknown): TemporaryUploadResult {
-  const upload = readObject(readObject(body, 'upload'), undefined);
-  const location = readObject(readObject(body, 'assetLocation'), undefined);
-
-  return {
-    temporaryLocationId: readString(location, 'id'),
-    uploadId: readString(upload, 'id'),
-  };
-}
-
-function toOcrJobCreateResult(body: unknown): OcrJobCreateResult {
-  return {
-    job: toOcrJobSummary(readObject(readObject(body, 'job'), undefined)),
-  };
-}
-
-function toOcrJobSummary(job: Record<string, unknown>): OcrJobStatusResult['job'] {
-  return {
-    id: readString(job, 'id'),
-    status: readString(job, 'status') as OcrJobStatusResult['job']['status'],
-    ...(isRecord(job.error) ? { error: toOcrSafeError(job.error) } : {}),
-  };
-}
-
-function toOcrSafeError(error: Record<string, unknown>): OcrJobSafeError {
-  const code = normalizeOcrJobErrorCode(readString(error, 'code'));
-
-  return {
-    code,
-    messageSafe: defaultOcrJobSafeMessage(code),
-    retryable: readBoolean(error, 'retryable'),
-    ...(readOptionalString(error, 'retryAfter')
-      ? { retryAfter: readOptionalString(error, 'retryAfter') }
-      : {}),
-  };
-}
-
 function toServerApiError(response: ServerApiTransportResponse): ServerApiError {
   const payload = isRecord(response.body) ? response.body : {};
   const apiError = isRecord(payload.error) ? payload.error : {};
@@ -654,14 +544,6 @@ function mapNamespacedErrorCode(
   return normalized;
 }
 
-function normalizeOcrJobErrorCode(code: string): OcrJobSafeErrorCode {
-  if (isOcrJobSafeErrorCode(code)) {
-    return code;
-  }
-
-  return 'unknown';
-}
-
 function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
   return [
     'unauthenticated',
@@ -682,24 +564,6 @@ function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
     'cleanup_failed',
     'validation_failed',
     'cancelled',
-    'unknown',
-  ].includes(code);
-}
-
-function isOcrJobSafeErrorCode(code: string): code is OcrJobSafeErrorCode {
-  return [
-    'policy_denied',
-    'quota_exceeded',
-    'provider_not_configured',
-    'provider_auth_failed',
-    'provider_rate_limited',
-    'provider_timeout',
-    'provider_unavailable',
-    'input_too_large',
-    'unsupported_format',
-    'temporary_location_missing',
-    'result_invalid',
-    'cleanup_failed',
     'unknown',
   ].includes(code);
 }
@@ -778,58 +642,6 @@ function defaultSafeMessage(code: ServerApiErrorCode): string {
   }
 
   return 'Request failed.';
-}
-
-function defaultOcrJobSafeMessage(code: OcrJobSafeErrorCode): string {
-  if (code === 'policy_denied') {
-    return 'Capture policy denied OCR.';
-  }
-
-  if (code === 'quota_exceeded') {
-    return 'OCR quota has been exceeded.';
-  }
-
-  if (code === 'provider_not_configured') {
-    return 'OCR provider is not configured.';
-  }
-
-  if (code === 'provider_auth_failed') {
-    return 'OCR provider authentication failed.';
-  }
-
-  if (code === 'provider_rate_limited') {
-    return 'OCR provider is rate limited.';
-  }
-
-  if (code === 'provider_timeout') {
-    return 'OCR provider timed out.';
-  }
-
-  if (code === 'provider_unavailable') {
-    return 'OCR provider is unavailable.';
-  }
-
-  if (code === 'input_too_large') {
-    return 'OCR input is too large.';
-  }
-
-  if (code === 'unsupported_format') {
-    return 'OCR input format is unsupported.';
-  }
-
-  if (code === 'temporary_location_missing') {
-    return 'Temporary OCR input is unavailable.';
-  }
-
-  if (code === 'result_invalid') {
-    return 'OCR result is invalid.';
-  }
-
-  if (code === 'cleanup_failed') {
-    return 'OCR cleanup failed.';
-  }
-
-  return 'OCR job failed.';
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -955,13 +767,6 @@ export type {
   CapturePoliciesInput,
   CapturePoliciesResult,
   AxAllowlistResult,
-  OcrJobCancelResult,
-  OcrJobCreateInput,
-  OcrJobCreateResult,
-  OcrJobSafeError,
-  OcrJobSafeErrorCode,
-  OcrJobStatus,
-  OcrJobStatusResult,
   RunOcrProxyInput,
   RunOcrProxyResult,
   SearchQueryInput,
@@ -978,9 +783,5 @@ export type {
   ServerProviderCapability,
   SubmitOcrResultInput,
   SubmitOcrResultResult,
-  TemporaryByteUploadInput,
-  TemporaryByteUploadResult,
-  TemporaryUploadInput,
-  TemporaryUploadResult,
   TimelineQueryInput,
 } from './types';

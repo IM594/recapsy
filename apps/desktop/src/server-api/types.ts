@@ -90,82 +90,6 @@ export type CaptureDetailResult = {
   ocrJobId?: string;
 };
 
-export type TemporaryUploadInput = {
-  workspaceId: string;
-  assetId: string;
-  mimeType: string;
-  sizeBytes: number;
-  contentHash: string;
-  idempotencyKey: string;
-};
-
-export type TemporaryUploadResult = {
-  uploadId: string;
-  temporaryLocationId: string;
-};
-
-export type TemporaryByteUploadInput = {
-  workspaceId: string;
-  assetId: string;
-  mimeType: string;
-  bytes: Uint8Array;
-};
-
-export type TemporaryByteUploadResult = TemporaryUploadResult & {
-  uploadReceipt: string;
-};
-
-export type OcrJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired';
-
-export type OcrJobSafeErrorCode =
-  | 'policy_denied'
-  | 'quota_exceeded'
-  | 'provider_not_configured'
-  | 'provider_auth_failed'
-  | 'provider_rate_limited'
-  | 'provider_timeout'
-  | 'provider_unavailable'
-  | 'input_too_large'
-  | 'unsupported_format'
-  | 'temporary_location_missing'
-  | 'result_invalid'
-  | 'cleanup_failed'
-  | 'unknown';
-
-export type OcrJobSafeError = {
-  code: OcrJobSafeErrorCode;
-  messageSafe: string;
-  retryable: boolean;
-  retryAfter?: string | null;
-};
-
-export type OcrJobSummary = {
-  id: string;
-  status: OcrJobStatus;
-  error?: OcrJobSafeError | null;
-};
-
-export type OcrJobCreateInput = {
-  workspaceId: string;
-  captureId: string;
-  inputAssetId: string;
-  temporaryLocationId: string;
-  idempotencyKey: string;
-};
-
-export type OcrJobCreateResult = {
-  job: OcrJobSummary;
-};
-
-export type OcrJobStatusResult = {
-  job: OcrJobSummary;
-};
-
-export type OcrJobCancelResult = {
-  job: OcrJobSummary;
-  cleanupStatus: 'not_required' | 'pending' | 'cleaned' | 'failed' | 'expired';
-};
-
 // Thin-proxy OCR: the desktop runs the provider OCR synchronously through the
 // authenticated proxy (`POST /v1/ai/ocr`), then hands the locally parsed
 // transcript back for server-side persistence (`POST
@@ -270,11 +194,6 @@ export type AxAllowlistResult = {
 export type ServerApiClient = {
   ingestCapture(input: CaptureIngestInput): Promise<CaptureIngestResult>;
   getCapture(workspaceId: string, captureId: string): Promise<CaptureDetailResult>;
-  createTemporaryUpload(input: TemporaryUploadInput): Promise<TemporaryUploadResult>;
-  putTemporaryBytes(input: TemporaryByteUploadInput): Promise<TemporaryByteUploadResult>;
-  createOcrJob(input: OcrJobCreateInput): Promise<OcrJobCreateResult>;
-  pollOcrJob(workspaceId: string, jobId: string): Promise<OcrJobStatusResult>;
-  cancelOcrJob(jobId: string, workspaceId: string, reason?: string): Promise<OcrJobCancelResult>;
   queryTimeline(input: TimelineQueryInput): Promise<TimelineQueryResponseDto>;
   querySearch(input: SearchQueryInput): Promise<SearchQueryResponseDto>;
   getCapabilities(): Promise<ServerCapabilitiesResult>;

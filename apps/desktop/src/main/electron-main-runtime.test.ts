@@ -555,16 +555,11 @@ function notImplementedServerApi(): SyncServerApi {
   };
 
   return {
-    cancelOcrJob: notImplemented,
-    createOcrJob: notImplemented,
-    createTemporaryUpload: notImplemented,
     getAxAllowlist: notImplemented,
     getCapabilities: notImplemented,
     getCapturePolicies: notImplemented,
     getCapture: notImplemented,
     ingestCapture: notImplemented,
-    pollOcrJob: notImplemented,
-    putTemporaryBytes: notImplemented,
     querySearch: notImplemented,
     queryTimeline: notImplemented,
     runOcrProxy: notImplemented,
