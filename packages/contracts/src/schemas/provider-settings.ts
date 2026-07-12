@@ -91,6 +91,16 @@ export const AdminProviderSettingResponseSchema = z
   })
   .strict();
 
+export const AdminProviderModelsResponseSchema = z
+  .object({
+    settingId: IdSchema,
+    provider: z.string().min(1),
+    endpointMask: z.string().nullable().optional(),
+    models: z.array(z.string().min(1)),
+    fetchedAt: IsoDateTimeSchema,
+  })
+  .strict();
+
 export const EffectiveProviderSettingSchema = z
   .object({
     service: ProviderServiceSchema,
@@ -127,6 +137,7 @@ export type AdminProviderSettingListResponse = z.infer<
   typeof AdminProviderSettingListResponseSchema
 >;
 export type AdminProviderSettingResponse = z.infer<typeof AdminProviderSettingResponseSchema>;
+export type AdminProviderModelsResponse = z.infer<typeof AdminProviderModelsResponseSchema>;
 export type EffectiveProviderSetting = z.infer<typeof EffectiveProviderSettingSchema>;
 export type EffectiveProviderSettingsResponse = z.infer<
   typeof EffectiveProviderSettingsResponseSchema

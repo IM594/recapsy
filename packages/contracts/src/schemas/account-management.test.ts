@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   AdminInviteCreateRequestSchema,
   AdminInviteCreateResponseSchema,
+  AdminProviderModelsResponseSchema,
   AdminProviderSettingCreateRequestSchema,
   AdminProviderSettingResponseSchema,
   AdminSubscriptionResponseSchema,
@@ -336,6 +337,26 @@ describe('Account management provider settings contracts', () => {
 
     expect(parsed.resolutionOrder).toEqual(['user', 'workspace', 'global']);
     expect(parsed.settings[0]?.resolvedFrom).toBe('global');
+  });
+
+  it('parses a provider models response and rejects blank model ids', () => {
+    const parsed = AdminProviderModelsResponseSchema.parse({
+      settingId: ids.providerSetting,
+      provider: 'openai-compatible',
+      endpointMask: 'https://api.example.test/v1',
+      models: ['bge-m3', 'Qwen3.6-35B-A3B'],
+      fetchedAt: now,
+    });
+    expect(parsed.models).toHaveLength(2);
+
+    expect(
+      AdminProviderModelsResponseSchema.safeParse({
+        settingId: ids.providerSetting,
+        provider: 'openai-compatible',
+        models: [''],
+        fetchedAt: now,
+      }).success,
+    ).toBe(false);
   });
 });
 
