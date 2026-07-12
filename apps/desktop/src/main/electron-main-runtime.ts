@@ -661,8 +661,8 @@ function toCaptureEventSummaryDto(job: OutboxJob): CaptureEventSummaryDto {
 function toCaptureEventState(state: OutboxJob['state']): CaptureEventSummaryDto['state'] {
   switch (state) {
     case 'pending':
-    case 'uploading':
-    case 'ocr_wait':
+    case 'syncing':
+    case 'result_pending':
     case 'synced':
       return 'accepted';
     case 'blocked':

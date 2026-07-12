@@ -81,7 +81,6 @@ describe('capture helper event intake', () => {
       },
     });
     expect((await store.getOutboxJob('capture_1'))?.serverCaptureId).toBeUndefined();
-    expect((await store.getOutboxJob('capture_1'))?.serverOcrJobId).toBeUndefined();
   });
 
   it('nacks before writing asset refs or outbox jobs when backpressure is active', async () => {

@@ -10,6 +10,7 @@ import {
   type AssetCacheRef,
   type HelperRuntimeState,
   type OutboxJobCreateInput,
+  type StoredOcrResult,
   evaluateOperationalStoreBackpressure,
   toRendererSafeAssetRef,
 } from './index';
@@ -69,7 +70,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 1,
+      version: 2,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -148,6 +149,130 @@ describe('SQLite operational store', () => {
         availabilityState: 'missing',
       },
     });
+
+    database.close();
+  });
+
+  it('rebuilds a v1 outbox_jobs table into the v2 shape, remapping the retired states', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    // Build the pre-migration (v1) shape: the old state CHECK set, a
+    // `server_ocr_job_id` column, and no `ocr_result_json`.
+    database.run(
+      `CREATE TABLE outbox_jobs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        asset_ref_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        capture_json TEXT NOT NULL CHECK (json_valid(capture_json)),
+        state TEXT NOT NULL CHECK (
+          state IN ('pending', 'uploading', 'ocr_wait', 'synced', 'blocked', 'failed', 'cancelled')
+        ),
+        attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        next_retry_at TEXT,
+        locked_at TEXT,
+        server_capture_id TEXT,
+        server_ocr_job_id TEXT,
+        last_safe_error_json TEXT,
+        terminal_reason TEXT,
+        UNIQUE(workspace_id, idempotency_key)
+      )`,
+    );
+
+    const insertV1Row = (row: {
+      id: string;
+      idempotencyKey: string;
+      state: string;
+      nextRetryAt?: string;
+      lockedAt?: string;
+      serverCaptureId?: string;
+      serverOcrJobId?: string;
+    }): void => {
+      database.run(
+        `INSERT INTO outbox_jobs (
+          id, workspace_id, device_id, asset_ref_id, idempotency_key, payload_hash,
+          capture_json, state, attempt, created_at, updated_at, next_retry_at,
+          locked_at, server_capture_id, server_ocr_job_id
+        ) VALUES (
+          $id, 'workspace_1', 'device_1', 'asset_1', $idempotencyKey, 'sha256:aa',
+          '{}', $state, 0, $now, $now, $nextRetryAt, $lockedAt, $serverCaptureId, $serverOcrJobId
+        )`,
+        {
+          $id: row.id,
+          $idempotencyKey: row.idempotencyKey,
+          $lockedAt: row.lockedAt ?? null,
+          $nextRetryAt: row.nextRetryAt ?? null,
+          $now: now,
+          $serverCaptureId: row.serverCaptureId ?? null,
+          $serverOcrJobId: row.serverOcrJobId ?? null,
+          $state: row.state,
+        },
+      );
+    };
+
+    insertV1Row({
+      id: 'job_uploading',
+      idempotencyKey: 'idem_uploading',
+      lockedAt: now,
+      state: 'uploading',
+    });
+    insertV1Row({
+      id: 'job_ocr_wait',
+      idempotencyKey: 'idem_ocr_wait',
+      lockedAt: now,
+      nextRetryAt: '2026-07-06T00:05:00.000Z',
+      serverCaptureId: 'capture_ocr_wait',
+      serverOcrJobId: 'server_ocr_wait',
+      state: 'ocr_wait',
+    });
+    insertV1Row({ id: 'job_synced', idempotencyKey: 'idem_synced', state: 'synced' });
+
+    runSqliteOperationalStoreMigrations(database);
+
+    const columns = new Set(
+      database
+        .prepare<{ name: string }>('PRAGMA table_info(outbox_jobs)')
+        .all()
+        .map((column) => column.name),
+    );
+    expect(columns.has('server_ocr_job_id')).toBe(false);
+    expect(columns.has('ocr_result_json')).toBe(true);
+    expect(
+      database
+        .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
+        .get()?.version,
+    ).toBe(2);
+
+    const rowById = (id: string) =>
+      database
+        .prepare<{
+          state: string;
+          next_retry_at: string | null;
+          locked_at: string | null;
+          server_capture_id: string | null;
+        }>(
+          'SELECT state, next_retry_at, locked_at, server_capture_id FROM outbox_jobs WHERE id = $id',
+        )
+        .get({ $id: id });
+
+    // `uploading` → `syncing`, in-flight lock preserved for startup recovery.
+    expect(rowById('job_uploading')).toMatchObject({ locked_at: now, state: 'syncing' });
+    // `ocr_wait` → `pending`, next_retry_at/locked_at cleared so it replays
+    // immediately; the dropped server job id is gone, server_capture_id kept.
+    expect(rowById('job_ocr_wait')).toMatchObject({
+      locked_at: null,
+      next_retry_at: null,
+      server_capture_id: 'capture_ocr_wait',
+      state: 'pending',
+    });
+    // Terminal rows copy across untouched — no queued work lost.
+    expect(rowById('job_synced')).toMatchObject({ state: 'synced' });
+    expect(
+      database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM outbox_jobs').get()?.count,
+    ).toBe(3);
 
     database.close();
   });
@@ -237,20 +362,20 @@ describe('SQLite operational store', () => {
     await first.createOutboxJob(createJob());
     await first.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:01:00.000Z',
-      state: 'uploading',
+      state: 'syncing',
     });
     await first.createOutboxJob(
       createJob({
         assetRefId: 'asset_2',
-        id: 'job_ocr_wait',
-        idempotencyKey: 'idem_ocr_wait',
+        id: 'job_result_pending',
+        idempotencyKey: 'idem_result_pending',
       }),
     );
-    await first.updateOutboxJobState('job_ocr_wait', {
+    await first.updateOutboxJobState('job_result_pending', {
       now: '2026-07-06T00:02:00.000Z',
-      serverCaptureId: 'capture_ocr_wait',
-      serverOcrJobId: 'server_ocr_wait',
-      state: 'ocr_wait',
+      ocrResult: createStoredOcrResult(),
+      serverCaptureId: 'capture_result_pending',
+      state: 'result_pending',
     });
     await first.createOutboxJob(
       createJob({
@@ -276,34 +401,35 @@ describe('SQLite operational store', () => {
     await reopened.initialize();
 
     expect(summary).toEqual({
-      ocrPendingWithoutServerJob: 0,
-      ocrPolling: 1,
       reconciledSynced: 0,
       recovered: 2,
+      resultSubmitInterrupted: 1,
       scanned: 3,
+      syncInterrupted: 1,
       unchangedRetryable: 0,
       unchangedTerminal: 1,
-      uploadPending: 1,
     });
     expect(await reopened.getOutboxJob('job_1')).toMatchObject({
       lastSafeError: {
-        code: 'interrupted_during_upload',
+        code: 'interrupted_during_sync',
         retryable: true,
       },
       nextRetryAt: '2026-07-06T00:10:00.000Z',
       state: 'pending',
     });
     expect((await reopened.getOutboxJob('job_1'))?.lockedAt).toBeUndefined();
-    expect(await reopened.getOutboxJob('job_ocr_wait')).toMatchObject({
+    expect(await reopened.getOutboxJob('job_result_pending')).toMatchObject({
       lastSafeError: {
-        code: 'interrupted_while_waiting_for_ocr',
+        code: 'interrupted_before_result_submit',
         retryable: true,
       },
-      serverCaptureId: 'capture_ocr_wait',
-      serverOcrJobId: 'server_ocr_wait',
+      ocrResult: {
+        sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      },
+      serverCaptureId: 'capture_result_pending',
       state: 'pending',
     });
-    expect((await reopened.getOutboxJob('job_ocr_wait'))?.lockedAt).toBeUndefined();
+    expect((await reopened.getOutboxJob('job_result_pending'))?.lockedAt).toBeUndefined();
     expect(await reopened.getOutboxJob('job_cancelled')).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',
@@ -462,16 +588,15 @@ describe('SQLite operational store', () => {
     });
     const lateSuccess = await store.markOutboxJobTerminal('job_ready', {
       now: '2026-07-06T00:05:00.000Z',
-      reason: 'ocr_succeeded',
+      reason: 'ocr_synced',
       serverCaptureId: 'capture_1',
-      serverOcrJobId: 'ocr_1',
       state: 'synced',
     });
 
     expect(claimed).toMatchObject({
       id: 'job_ready',
       lockedAt: '2026-07-06T00:02:00.000Z',
-      state: 'uploading',
+      state: 'syncing',
     });
     expect(retry).toMatchObject({
       ok: true,
@@ -515,7 +640,7 @@ describe('SQLite operational store', () => {
       }),
     ).toMatchObject({
       id: 'job_later',
-      state: 'uploading',
+      state: 'syncing',
     });
   });
 
@@ -538,7 +663,6 @@ describe('SQLite operational store', () => {
     const lateSuccess = await store.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:00:11.000Z',
       serverCaptureId: 'capture_late',
-      serverOcrJobId: 'ocr_late',
       state: 'synced',
     });
     const stored = await store.getOutboxJob('job_1');
@@ -551,7 +675,6 @@ describe('SQLite operational store', () => {
       },
     });
     expect(stored?.serverCaptureId).toBeUndefined();
-    expect(stored?.serverOcrJobId).toBeUndefined();
     expect(stored).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',
@@ -954,6 +1077,21 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
     role: 'capture_original',
     sizeBytes: 2048,
     workspaceId: 'workspace_1',
+    ...overrides,
+  };
+}
+
+function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): StoredOcrResult {
+  return {
+    durationMs: 1200,
+    model: 'test-model',
+    providerName: 'test-provider',
+    screenText: {
+      blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'hello' }],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    },
+    sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     ...overrides,
   };
 }

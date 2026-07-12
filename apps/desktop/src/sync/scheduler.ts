@@ -1,12 +1,13 @@
 import type { IpcErrorCode, SyncQueueSummaryDto } from '../ipc';
 import { ServerApiError } from '../server-api/client';
-import type { OcrJobSafeError, OcrJobStatusResult } from '../server-api/types';
 import type {
   BackpressureDecision,
   OperationalStoreRepository,
   OutboxJob,
   SafeOperationalError,
+  StoredOcrResult,
 } from '../storage';
+import { OcrResultInvalidError, deriveScreenTextFromOcrResponse } from './ocr-screen-text-mapping';
 import type {
   RetryBackoffConfig,
   RetryJitterSource,
@@ -15,21 +16,16 @@ import type {
   SyncSchedulerOptions,
 } from './types';
 
+// Proxy/submit failures the sync flow routes to a terminal `blocked` state
+// (policy/authorization denials and unconfigured providers) rather than a
+// retryable failure or a generic `failed`. The server-api client already
+// computes `retryable`; this set only redirects the non-retryable *policy*
+// denials, which are a block rather than a hard failure. See
+// `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
 const TERMINAL_BLOCKING_OCR_ERRORS = new Set([
   'policy_denied',
   'provider_not_configured',
   'quota_exceeded',
-]);
-const TERMINAL_FAILED_OCR_ERRORS = new Set([
-  'input_too_large',
-  'provider_auth_failed',
-  'result_invalid',
-  'unsupported_format',
-]);
-const RETRYABLE_OCR_ERRORS = new Set([
-  'provider_unavailable',
-  'provider_rate_limited',
-  'provider_timeout',
 ]);
 
 export function createSyncScheduler(options: SyncSchedulerOptions) {
@@ -49,26 +45,17 @@ export function createSyncScheduler(options: SyncSchedulerOptions) {
         return { cancelled: false, jobId };
       }
 
+      // No server-side OCR job exists to cancel in the thin-proxy model, so a
+      // cancellation is purely local: the terminal state stops further retries.
       const terminal = await options.store.markOutboxJobTerminal(job.id, {
         now: options.clock.now(),
         reason,
         serverCaptureId: job.serverCaptureId,
-        serverOcrJobId: job.serverOcrJobId,
         state: 'cancelled',
       });
 
       if (!terminal.ok) {
         return { cancelled: false, jobId };
-      }
-
-      const activeWorkspaceId = await options.workspace.getActiveWorkspaceId();
-
-      if (job.serverOcrJobId && activeWorkspaceId === job.workspaceId) {
-        try {
-          await options.api.cancelOcrJob(job.serverOcrJobId, job.workspaceId, reason);
-        } catch {
-          // Server-side cancellation is best-effort; local terminal state stops retries.
-        }
       }
 
       return { cancelled: true, jobId };
@@ -121,7 +108,7 @@ export async function createSyncQueueSummary(
     failed: jobs.filter((job) => job.state === 'failed').length,
     pending: jobs.filter((job) => job.state === 'pending').length,
     retrying: jobs.filter((job) => job.state === 'pending' && job.nextRetryAt).length,
-    syncing: jobs.filter((job) => job.state === 'uploading' || job.state === 'ocr_wait').length,
+    syncing: jobs.filter((job) => job.state === 'syncing' || job.state === 'result_pending').length,
     ...(options.backpressure
       ? {
           backpressure: {
@@ -142,10 +129,17 @@ export async function createSyncQueueSummary(
 async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<SyncRunResult> {
   let activeJob = job;
   try {
-    if (activeJob.serverOcrJobId) {
-      return pollExistingOcrJob(options, activeJob);
+    // Crash-recovery fast path: a job that already carries a locally stored OCR
+    // result (a `result_pending` row recovered to `pending`) only needs its
+    // transcript re-submitted — skip the proxy so the provider is not billed
+    // again. See `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
+    if (activeJob.ocrResult) {
+      const submitted = await submitStoredOcrResult(options, activeJob, activeJob.ocrResult);
+      return submitted;
     }
 
+    // Replay of an already-ingested capture: if the server already holds a
+    // succeeded OCR result, settle locally instead of re-running the proxy.
     if (activeJob.serverCaptureId) {
       const reconciled = await reconcileOutboxJobFromServerCapture(options, activeJob);
       if (reconciled?.status === 'synced') {
@@ -153,10 +147,6 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       }
 
       const refreshed = await options.store.getOutboxJob(activeJob.id);
-      if (refreshed?.serverOcrJobId) {
-        return pollExistingOcrJob(options, refreshed);
-      }
-
       if (refreshed) {
         activeJob = refreshed;
       }
@@ -187,7 +177,7 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
     await options.store.updateOutboxJobState(activeJob.id, {
       now: options.clock.now(),
       serverCaptureId: capture.captureId,
-      state: 'uploading',
+      state: 'syncing',
     });
 
     if (activeJob.capture.privacyDecision.action === 'block_capture') {
@@ -210,10 +200,6 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
-    if (!(await ensureWorkspaceStillActive(options, activeJob))) {
-      return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
-    }
-
     if (capture.nextAction === 'none') {
       await options.store.markOutboxJobTerminal(activeJob.id, {
         now: options.clock.now(),
@@ -224,127 +210,69 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
-    if (!capture.inputAssetId) {
-      await markJobTerminalWithSafeError(options, activeJob, 'failed', {
-        code: 'upload_input_missing',
-        retryable: false,
-        serverCaptureId: capture.captureId,
-      });
-      return { jobId: activeJob.id, processed: 1, status: 'failed' };
-    }
-
     const bytes = await options.readAssetBytes(asset.localAccessKey);
-
-    const upload = await options.api.createTemporaryUpload({
-      assetId: capture.inputAssetId,
-      contentHash: asset.hash,
-      idempotencyKey: `${activeJob.idempotencyKey}:temporary`,
-      mimeType: asset.mimeType,
-      sizeBytes: asset.sizeBytes,
-      workspaceId: activeJob.workspaceId,
-    });
-
-    await options.api.putTemporaryBytes({
-      assetId: capture.inputAssetId,
-      bytes,
-      mimeType: asset.mimeType,
-      workspaceId: activeJob.workspaceId,
-    });
 
     if (!(await ensureWorkspaceStillActive(options, activeJob))) {
       return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
     }
 
-    const created = await options.api.createOcrJob({
-      captureId: capture.captureId,
-      idempotencyKey: `${activeJob.idempotencyKey}:ocr`,
-      inputAssetId: capture.inputAssetId,
-      temporaryLocationId: upload.temporaryLocationId,
+    const ocrResponse = await options.api.runOcrProxy({
+      bytes,
+      mimeType: asset.mimeType,
       workspaceId: activeJob.workspaceId,
     });
 
-    await options.store.updateOutboxJobState(activeJob.id, {
-      now: options.clock.now(),
-      serverCaptureId: capture.captureId,
-      serverOcrJobId: created.job.id,
-      state: 'ocr_wait',
-    });
-
-    let polled: OcrJobStatusResult;
+    let screenText: ReturnType<typeof deriveScreenTextFromOcrResponse>;
     try {
-      polled = await options.api.pollOcrJob(activeJob.workspaceId, created.job.id);
+      screenText = deriveScreenTextFromOcrResponse(ocrResponse);
     } catch (error) {
-      const persisted = await options.store.getOutboxJob(activeJob.id);
-      const jobWithPersistedIds = persisted ?? {
-        ...activeJob,
-        serverCaptureId: capture.captureId,
-        serverOcrJobId: created.job.id,
-        state: 'ocr_wait' as const,
-      };
-
-      if (jobWithPersistedIds.serverOcrJobId) {
-        await recordSafeError(options, jobWithPersistedIds, {
-          code: 'server_unavailable',
-          retryable: true,
-        });
+      if (error instanceof OcrResultInvalidError) {
+        // A deterministic mapping failure: re-mapping the same bytes cannot
+        // succeed, so retry means a fresh proxy call (new provider response),
+        // counted against the retry budget. See §3.2.
+        await recordSafeError(options, activeJob, { code: 'result_invalid', retryable: true });
         return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
       }
 
-      return handleSyncError(options, jobWithPersistedIds, error);
+      throw error;
     }
 
-    if (await isLocallyCancelled(options.store, activeJob.id)) {
-      return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
-    }
+    const storedResult: StoredOcrResult = {
+      durationMs: ocrResponse.durationMs,
+      model: ocrResponse.model,
+      providerName: ocrResponse.providerName,
+      screenText,
+      sourceAssetHash: asset.hash,
+      ...(ocrResponse.usage ? { usage: ocrResponse.usage } : {}),
+    };
 
-    if (polled.job.status === 'succeeded') {
-      const current = await options.store.getOutboxJob(activeJob.id);
-      await options.store.markOutboxJobTerminal(activeJob.id, {
-        now: options.clock.now(),
-        reason: 'ocr_succeeded',
-        serverCaptureId: current?.serverCaptureId ?? capture.captureId,
-        serverOcrJobId: current?.serverOcrJobId ?? created.job.id,
-        state: 'synced',
-      });
-      return { jobId: activeJob.id, processed: 1, status: 'synced' };
-    }
-
-    if (polled.job.status === 'cancelled') {
-      await options.store.markOutboxJobTerminal(activeJob.id, {
-        now: options.clock.now(),
-        reason: 'server_cancelled',
-        serverCaptureId: capture.captureId,
-        serverOcrJobId: created.job.id,
-        state: 'cancelled',
-      });
-      return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
-    }
-
-    if (polled.job.status === 'failed') {
-      return handleOcrFailure(options, activeJob, polled.job.error, {
-        captureId: capture.captureId,
-        ocrJobId: created.job.id,
-      });
-    }
-
-    await recordSafeError(options, activeJob, {
-      code: 'server_unavailable',
-      retryable: true,
+    // Persist the transcript before submitting so a submit failure retries only
+    // the submit, never another billed proxy call (裁决 1 Option B, §3.2).
+    await options.store.updateOutboxJobState(activeJob.id, {
+      now: options.clock.now(),
+      ocrResult: storedResult,
+      serverCaptureId: capture.captureId,
+      state: 'result_pending',
     });
-    return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
+
+    const submitted = await submitStoredOcrResult(
+      options,
+      { ...activeJob, serverCaptureId: capture.captureId },
+      storedResult,
+    );
+    return submitted;
   } catch (error) {
     return handleSyncError(options, activeJob, error);
   }
 }
 
-async function pollExistingOcrJob(
+async function submitStoredOcrResult(
   options: SyncSchedulerOptions,
   job: OutboxJob,
+  storedResult: StoredOcrResult,
 ): Promise<SyncRunResult> {
-  const serverOcrJobId = job.serverOcrJobId;
-
-  if (!serverOcrJobId) {
-    await recordSafeError(options, job, {
+  if (!job.serverCaptureId) {
+    await markJobTerminalWithSafeError(options, job, 'failed', {
       code: 'validation_failed',
       retryable: false,
     });
@@ -355,76 +283,28 @@ async function pollExistingOcrJob(
     return { jobId: job.id, processed: 1, status: 'retry_wait' };
   }
 
-  const polled = await options.api.pollOcrJob(job.workspaceId, serverOcrJobId);
-
   if (await isLocallyCancelled(options.store, job.id)) {
     return { jobId: job.id, processed: 1, status: 'cancelled' };
   }
 
-  if (polled.job.status === 'succeeded') {
-    await options.store.markOutboxJobTerminal(job.id, {
-      now: options.clock.now(),
-      reason: 'ocr_succeeded',
-      serverCaptureId: job.serverCaptureId,
-      serverOcrJobId,
-      state: 'synced',
-    });
-    return { jobId: job.id, processed: 1, status: 'synced' };
-  }
-
-  if (polled.job.status === 'cancelled') {
-    await options.store.markOutboxJobTerminal(job.id, {
-      now: options.clock.now(),
-      reason: 'server_cancelled',
-      serverCaptureId: job.serverCaptureId,
-      serverOcrJobId,
-      state: 'cancelled',
-    });
-    return { jobId: job.id, processed: 1, status: 'cancelled' };
-  }
-
-  if (polled.job.status === 'failed') {
-    return handleOcrFailure(options, job, polled.job.error, {
-      captureId: job.serverCaptureId,
-      ocrJobId: serverOcrJobId,
-    });
-  }
-
-  await recordSafeError(options, job, {
-    code: 'server_unavailable',
-    retryable: true,
-  });
-  return { jobId: job.id, processed: 1, status: 'retry_wait' };
-}
-
-async function handleOcrFailure(
-  options: SyncSchedulerOptions,
-  job: OutboxJob,
-  error: OcrJobSafeError | null | undefined,
-  ids: { captureId?: string; ocrJobId: string },
-): Promise<SyncRunResult> {
-  const code = error?.code ?? 'validation_failed';
-
-  if (TERMINAL_BLOCKING_OCR_ERRORS.has(code)) {
-    await options.store.markOutboxJobTerminal(job.id, {
-      now: options.clock.now(),
-      reason: code,
-      serverCaptureId: ids.captureId,
-      serverOcrJobId: ids.ocrJobId,
-      state: 'blocked',
-    });
-    return { jobId: job.id, processed: 1, status: 'blocked' };
-  }
-
-  const retryable =
-    !TERMINAL_FAILED_OCR_ERRORS.has(code) &&
-    (error?.retryable === true || RETRYABLE_OCR_ERRORS.has(code));
-  await recordSafeError(options, job, {
-    code,
-    retryable,
+  await options.api.submitOcrResult({
+    captureId: job.serverCaptureId,
+    durationMs: storedResult.durationMs,
+    model: storedResult.model,
+    providerName: storedResult.providerName,
+    screenText: storedResult.screenText,
+    sourceAssetHash: storedResult.sourceAssetHash,
+    workspaceId: job.workspaceId,
+    ...(storedResult.usage ? { usage: storedResult.usage } : {}),
   });
 
-  return { jobId: job.id, processed: 1, status: retryable ? 'retry_wait' : 'failed' };
+  await options.store.markOutboxJobTerminal(job.id, {
+    now: options.clock.now(),
+    reason: 'ocr_synced',
+    serverCaptureId: job.serverCaptureId,
+    state: 'synced',
+  });
+  return { jobId: job.id, processed: 1, status: 'synced' };
 }
 
 async function handleSyncError(
@@ -433,6 +313,14 @@ async function handleSyncError(
   error: unknown,
 ): Promise<SyncRunResult> {
   if (error instanceof ServerApiError) {
+    if (TERMINAL_BLOCKING_OCR_ERRORS.has(error.code)) {
+      await markJobTerminalWithSafeError(options, job, 'blocked', {
+        code: error.code,
+        retryable: false,
+      });
+      return { jobId: job.id, processed: 1, status: 'blocked' };
+    }
+
     await recordSafeError(options, job, {
       code: error.code,
       retryable: error.retryable,
@@ -480,6 +368,13 @@ async function handleSyncError(
   };
 }
 
+/**
+ * Best-effort reconciliation used on replay and at startup recovery: if the
+ * server already reports the capture's OCR as succeeded, settle the local job
+ * as `synced` without re-running the proxy (idempotent guard against a crash
+ * between a successful submit and the local terminal write). Returns null when
+ * there is nothing to settle.
+ */
 export async function reconcileOutboxJobFromServerCapture(
   options: {
     api: Pick<SyncSchedulerOptions['api'], 'getCapture'>;
@@ -488,7 +383,7 @@ export async function reconcileOutboxJobFromServerCapture(
   },
   job: OutboxJob,
 ): Promise<SyncRunResult | null> {
-  if (!job.serverCaptureId || job.serverOcrJobId) {
+  if (!job.serverCaptureId) {
     return null;
   }
 
@@ -501,21 +396,11 @@ export async function reconcileOutboxJobFromServerCapture(
   if (capture.ocrStatus === 'succeeded') {
     await options.store.markOutboxJobTerminal(job.id, {
       now: options.clock.now(),
-      reason: 'ocr_succeeded',
+      reason: 'ocr_synced',
       serverCaptureId: job.serverCaptureId,
-      serverOcrJobId: capture.ocrJobId,
       state: 'synced',
     });
     return { jobId: job.id, processed: 1, status: 'synced' };
-  }
-
-  if (capture.ocrJobId && (capture.ocrStatus === 'queued' || capture.ocrStatus === 'running')) {
-    await options.store.updateOutboxJobState(job.id, {
-      now: options.clock.now(),
-      serverCaptureId: job.serverCaptureId,
-      serverOcrJobId: capture.ocrJobId,
-      state: 'ocr_wait',
-    });
   }
 
   return null;
@@ -575,7 +460,6 @@ async function markJobTerminalWithSafeError(
     code: string;
     retryable: boolean;
     serverCaptureId?: string;
-    serverOcrJobId?: string;
   },
 ): Promise<void> {
   await options.store.markOutboxJobTerminal(job.id, {
@@ -587,7 +471,6 @@ async function markJobTerminalWithSafeError(
     now: options.clock.now(),
     reason: input.code,
     serverCaptureId: input.serverCaptureId ?? job.serverCaptureId,
-    serverOcrJobId: input.serverOcrJobId ?? job.serverOcrJobId,
     state,
   });
 }

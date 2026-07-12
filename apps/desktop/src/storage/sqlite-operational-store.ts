@@ -21,6 +21,7 @@ import type {
   PolicyCacheReadOptions,
   RecoverInterruptedOutboxJobInput,
   SettingsCache,
+  StoredOcrResult,
   SyncCursor,
   SyncCursorKind,
   UpdateAssetRefAvailabilityInput,
@@ -31,7 +32,7 @@ export type SqliteOperationalStoreOptions = {
   maxActiveOutboxJobs?: number;
 };
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const HELPER_STATE_KEY = 'runtime';
 const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'synced',
@@ -59,6 +60,7 @@ export function runSqliteOperationalStoreMigrations(database: SqliteDatabase): v
   }
 
   ensureAssetAvailabilityColumns(database);
+  migrateOutboxJobsToV2(database);
 
   database.run(
     `INSERT OR IGNORE INTO schema_migrations (version, applied_at)
@@ -98,6 +100,95 @@ function ensureAssetAvailabilityColumns(database: SqliteDatabase): void {
          availability_safe_error_json IS NULL OR json_valid(availability_safe_error_json)
        )`,
     );
+  }
+}
+
+/**
+ * Rebuilds `outbox_jobs` into its v2 shape on an existing (v1) database: drops
+ * the dead `server_ocr_job_id` column, adds `ocr_result_json`, and remaps the
+ * retired states — `ocr_wait → pending` (clearing next_retry_at/locked_at so
+ * the row replays immediately) and `uploading → syncing`. Terminal rows copy
+ * across untouched, so no queued work is lost. SQLite cannot ALTER a CHECK
+ * constraint, so this is a full table rebuild inside one transaction. Fresh
+ * installs already have the v2 shape from `schemaStatements`, detected by the
+ * absence of the legacy `server_ocr_job_id` column, making this a no-op. See
+ * `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §2.3.
+ */
+function migrateOutboxJobsToV2(database: SqliteDatabase): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }>('PRAGMA table_info(outbox_jobs)')
+      .all()
+      .map((column) => column.name),
+  );
+
+  if (!columns.has('server_ocr_job_id')) {
+    return;
+  }
+
+  let transactionOpen = false;
+
+  try {
+    database.run('BEGIN IMMEDIATE');
+    transactionOpen = true;
+
+    database.run(buildOutboxJobsTable('outbox_jobs__v2', false));
+    database.run(
+      `INSERT INTO outbox_jobs__v2 (
+        id,
+        workspace_id,
+        device_id,
+        asset_ref_id,
+        idempotency_key,
+        payload_hash,
+        capture_json,
+        state,
+        attempt,
+        created_at,
+        updated_at,
+        next_retry_at,
+        locked_at,
+        server_capture_id,
+        ocr_result_json,
+        last_safe_error_json,
+        terminal_reason
+      )
+      SELECT
+        id,
+        workspace_id,
+        device_id,
+        asset_ref_id,
+        idempotency_key,
+        payload_hash,
+        capture_json,
+        CASE state
+          WHEN 'ocr_wait' THEN 'pending'
+          WHEN 'uploading' THEN 'syncing'
+          ELSE state
+        END,
+        attempt,
+        created_at,
+        updated_at,
+        CASE WHEN state = 'ocr_wait' THEN NULL ELSE next_retry_at END,
+        CASE WHEN state = 'ocr_wait' THEN NULL ELSE locked_at END,
+        server_capture_id,
+        NULL,
+        last_safe_error_json,
+        terminal_reason
+      FROM outbox_jobs`,
+    );
+    database.run('DROP TABLE outbox_jobs');
+    database.run('ALTER TABLE outbox_jobs__v2 RENAME TO outbox_jobs');
+    database.run(OUTBOX_JOBS_INDEX_STATEMENT);
+
+    database.run('COMMIT');
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) {
+      database.run('ROLLBACK');
+    }
+
+    throw error;
   }
 }
 
@@ -403,9 +494,9 @@ class SqliteOperationalStore implements OperationalStoreRepository {
          SET state = $state,
              updated_at = $updatedAt,
              next_retry_at = COALESCE($nextRetryAt, next_retry_at),
-             locked_at = CASE WHEN $state = 'uploading' THEN $updatedAt ELSE locked_at END,
+             locked_at = CASE WHEN $state = 'syncing' THEN $updatedAt ELSE locked_at END,
              server_capture_id = COALESCE($serverCaptureId, server_capture_id),
-             server_ocr_job_id = COALESCE($serverOcrJobId, server_ocr_job_id)
+             ocr_result_json = COALESCE($ocrResultJson, ocr_result_json)
          WHERE id = $id
            AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
          RETURNING *`,
@@ -413,8 +504,8 @@ class SqliteOperationalStore implements OperationalStoreRepository {
       .get({
         $id: id,
         $nextRetryAt: update.nextRetryAt ?? null,
+        $ocrResultJson: update.ocrResult ? JSON.stringify(update.ocrResult) : null,
         $serverCaptureId: update.serverCaptureId ?? null,
-        $serverOcrJobId: update.serverOcrJobId ?? null,
         $state: update.state,
         $updatedAt: update.now,
       });
@@ -432,7 +523,7 @@ class SqliteOperationalStore implements OperationalStoreRepository {
     const row = this.options.database
       .prepare<OutboxJobRow>(
         `UPDATE outbox_jobs
-         SET state = 'uploading',
+         SET state = 'syncing',
              locked_at = $now,
              updated_at = $now
          WHERE id = (
@@ -468,7 +559,6 @@ class SqliteOperationalStore implements OperationalStoreRepository {
              next_retry_at = NULL,
              locked_at = NULL,
              server_capture_id = $serverCaptureId,
-             server_ocr_job_id = $serverOcrJobId,
              last_safe_error_json = $lastSafeErrorJson,
              terminal_reason = $terminalReason
          WHERE id = $id
@@ -479,7 +569,6 @@ class SqliteOperationalStore implements OperationalStoreRepository {
         $id: id,
         $lastSafeErrorJson: update.lastSafeError ? JSON.stringify(update.lastSafeError) : null,
         $serverCaptureId: update.serverCaptureId ?? null,
-        $serverOcrJobId: update.serverOcrJobId ?? null,
         $state: update.state,
         $terminalReason: update.reason,
         $updatedAt: update.now,
@@ -563,7 +652,7 @@ class SqliteOperationalStore implements OperationalStoreRepository {
              last_safe_error_json = $lastSafeErrorJson,
              terminal_reason = NULL
          WHERE id = $id
-           AND state IN ('uploading', 'ocr_wait')
+           AND state IN ('syncing', 'result_pending')
          RETURNING *`,
       )
       .get({
@@ -1067,7 +1156,7 @@ type OutboxJobRow = SqliteRow & {
   next_retry_at?: string | null;
   locked_at?: string | null;
   server_capture_id?: string | null;
-  server_ocr_job_id?: string | null;
+  ocr_result_json?: string | null;
   last_safe_error_json?: string | null;
   terminal_reason?: string | null;
 };
@@ -1112,12 +1201,8 @@ type SettingsCacheRow = SqliteRow & {
   server_capabilities_json: string;
 };
 
-const schemaStatements = [
-  `CREATE TABLE IF NOT EXISTS schema_migrations (
-    version INTEGER PRIMARY KEY,
-    applied_at TEXT NOT NULL
-  )`,
-  `CREATE TABLE IF NOT EXISTS outbox_jobs (
+function buildOutboxJobsTable(tableName: string, ifNotExists: boolean): string {
+  return `CREATE TABLE ${ifNotExists ? 'IF NOT EXISTS ' : ''}${tableName} (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
@@ -1126,7 +1211,7 @@ const schemaStatements = [
     payload_hash TEXT NOT NULL,
     capture_json TEXT NOT NULL CHECK (json_valid(capture_json)),
     state TEXT NOT NULL CHECK (
-      state IN ('pending', 'uploading', 'ocr_wait', 'synced', 'blocked', 'failed', 'cancelled')
+      state IN ('pending', 'syncing', 'result_pending', 'synced', 'blocked', 'failed', 'cancelled')
     ),
     attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
     created_at TEXT NOT NULL,
@@ -1134,15 +1219,27 @@ const schemaStatements = [
     next_retry_at TEXT,
     locked_at TEXT,
     server_capture_id TEXT,
-    server_ocr_job_id TEXT,
+    ocr_result_json TEXT CHECK (
+      ocr_result_json IS NULL OR json_valid(ocr_result_json)
+    ),
     last_safe_error_json TEXT CHECK (
       last_safe_error_json IS NULL OR json_valid(last_safe_error_json)
     ),
     terminal_reason TEXT,
     UNIQUE(workspace_id, idempotency_key)
+  )`;
+}
+
+const OUTBOX_JOBS_INDEX_STATEMENT = `CREATE INDEX IF NOT EXISTS idx_outbox_jobs_workspace_state_retry
+    ON outbox_jobs(workspace_id, state, next_retry_at, created_at)`;
+
+const schemaStatements = [
+  `CREATE TABLE IF NOT EXISTS schema_migrations (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
   )`,
-  `CREATE INDEX IF NOT EXISTS idx_outbox_jobs_workspace_state_retry
-    ON outbox_jobs(workspace_id, state, next_retry_at, created_at)`,
+  buildOutboxJobsTable('outbox_jobs', true),
+  OUTBOX_JOBS_INDEX_STATEMENT,
   `CREATE TABLE IF NOT EXISTS asset_cache_refs (
     asset_ref_id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL,
@@ -1236,7 +1333,7 @@ function outboxJobFromRow(row: OutboxJobRow): OutboxJob {
     ...(row.locked_at ? { lockedAt: row.locked_at } : {}),
     ...(row.next_retry_at ? { nextRetryAt: row.next_retry_at } : {}),
     ...(row.server_capture_id ? { serverCaptureId: row.server_capture_id } : {}),
-    ...(row.server_ocr_job_id ? { serverOcrJobId: row.server_ocr_job_id } : {}),
+    ...(row.ocr_result_json ? { ocrResult: parseJson<StoredOcrResult>(row.ocr_result_json) } : {}),
     ...(row.terminal_reason ? { terminalReason: row.terminal_reason } : {}),
   });
 }

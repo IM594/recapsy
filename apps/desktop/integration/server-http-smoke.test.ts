@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
-import type { ServerApiClient, ServerApiTransport } from '../src/server-api/types';
+import type { ServerApiTransport } from '../src/server-api/types';
 import { createInMemoryOperationalStore, createSqliteOperationalStore } from '../src/storage';
 import type {
   AssetCacheRef,
@@ -14,6 +14,7 @@ import type {
 } from '../src/storage';
 import { createBunSqliteDatabase } from '../src/storage/bun-sqlite-driver';
 import { createSyncScheduler } from '../src/sync/scheduler';
+import type { SyncServerApi } from '../src/sync/types';
 
 const now = '2026-07-06T00:00:00.000Z';
 const adminToken = 'test-admin-bootstrap-token';
@@ -50,10 +51,10 @@ afterEach(() => {
 });
 
 describe('desktop server sync over real HTTP', () => {
-  it('syncs capture OCR through public /v1 routes and reads screen text from timeline/search', async () => {
+  it('runs the OCR proxy and result submission through public /v1 routes and reads screen text from timeline/search', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const harness = await startServerHttpHarness({
-      ocrRunner: fixedOcrRunner('Visible retention graph and roadmap notes', 'Retention review'),
+      aiRuntime: visionRuntimeReturning('Visible retention graph and roadmap notes'),
     });
     const user = await harness.bootstrapUser('desktop-positive@example.test');
     const store = createInMemoryOperationalStore();
@@ -68,7 +69,6 @@ describe('desktop server sync over real HTTP', () => {
       query: 'retention',
       limit: 10,
     });
-    const serialized = JSON.stringify({ search, timeline });
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -76,14 +76,18 @@ describe('desktop server sync over real HTTP', () => {
       status: 'synced',
     });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
+      serverCaptureId: expect.any(String),
       state: 'synced',
-      terminalReason: 'ocr_succeeded',
+      terminalReason: 'ocr_synced',
     });
+    // The thin-proxy flow submits screen text only; the server synthesizes a
+    // fixed activity placeholder (裁决 8), so the timeline summary/title is the
+    // placeholder rather than a generated activity label.
     expect(timeline.items).toEqual([
       expect.objectContaining({
+        snippet: 'Processed screenshot OCR',
         sourceApp: 'Code',
-        snippet: 'Retention review',
-        title: 'Retention review',
+        title: 'Processed screenshot OCR',
       }),
     ]);
     expect(search.items).toEqual([
@@ -93,14 +97,13 @@ describe('desktop server sync over real HTTP', () => {
         title: 'Retention Review',
       }),
     ]);
-    expect(serialized).not.toContain('summary-only');
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(1);
   });
 
-  it('syncs capture OCR over real HTTP with a SQLite-backed desktop store', async () => {
+  it('runs the OCR proxy over real HTTP with a SQLite-backed desktop store', async () => {
     const bytes = new Uint8Array([21, 22, 23, 24]);
     const harness = await startServerHttpHarness({
-      ocrRunner: fixedOcrRunner('SQLite backed OCR searchable invoice', 'SQLite sync review'),
+      aiRuntime: visionRuntimeReturning('SQLite backed OCR searchable invoice'),
     });
     const user = await harness.bootstrapUser('desktop-sqlite-positive@example.test');
     const store = await createSqliteStore();
@@ -122,9 +125,8 @@ describe('desktop server sync over real HTTP', () => {
     });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       serverCaptureId: expect.any(String),
-      serverOcrJobId: expect.any(String),
       state: 'synced',
-      terminalReason: 'ocr_succeeded',
+      terminalReason: 'ocr_synced',
     });
     expect(search.items).toEqual([
       expect.objectContaining({
@@ -138,7 +140,7 @@ describe('desktop server sync over real HTTP', () => {
   it('rejects missing privacyDecision.decidedAt before transport and at the server HTTP route', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     const harness = await startServerHttpHarness({
-      ocrRunner: fixedOcrRunner('Contract guard OCR'),
+      aiRuntime: visionRuntimeReturning('Contract guard OCR'),
     });
     const user = await harness.bootstrapUser('desktop-contract@example.test');
     const client = createHttpClient(harness.endpoint, user.accessToken);
@@ -219,12 +221,12 @@ describe('desktop server sync over real HTTP', () => {
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(0);
   });
 
-  it('keeps provider_unavailable job-level failures retryable without exposing provider text to desktop state or search', async () => {
+  it('keeps provider timeouts retryable without exposing provider text to desktop state or search', async () => {
     const bytes = new Uint8Array([9, 10, 11, 12]);
     const harness = await startServerHttpHarness({
-      ocrRunner: failedOcrRunner('provider_unavailable', leakedProviderMessage, true),
+      aiRuntime: visionRuntimeFailing('provider_timeout', true, leakedProviderMessage),
     });
-    const user = await harness.bootstrapUser('desktop-provider-unavailable@example.test');
+    const user = await harness.bootstrapUser('desktop-provider-timeout@example.test');
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
@@ -246,8 +248,8 @@ describe('desktop server sync over real HTTP', () => {
     });
     expect(job).toMatchObject({
       lastSafeError: {
-        code: 'provider_unavailable',
-        message: 'Provider is unavailable.',
+        code: 'provider_timeout',
+        message: 'OCR provider timed out.',
         retryable: true,
       },
       state: 'pending',
@@ -260,46 +262,40 @@ describe('desktop server sync over real HTTP', () => {
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(0);
   });
 
-  it('cancels local and server jobs as terminal and observes temporary cleanup over HTTP', async () => {
+  it('cancels an in-flight job as a purely local terminal state with no server OCR result', async () => {
     const bytes = new Uint8Array([13, 14, 15, 16]);
-    const harness = await startServerHttpHarness({ ocrRunner: deferredOcrRunner() });
+    const harness = await startServerHttpHarness({
+      aiRuntime: visionRuntimeReturning('This OCR must not be submitted'),
+    });
     const user = await harness.bootstrapUser('desktop-cancel@example.test');
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
+    // Simulate a job that has been claimed and ingested (in-flight) when the
+    // user cancels it: the thin-proxy model has no server-side OCR job to
+    // cancel, so cancellation is purely local.
+    await store.updateOutboxJobState('job_1', {
+      now,
+      serverCaptureId: 'capture_local',
+      state: 'syncing',
+    });
     const client = createHttpClient(harness.endpoint, user.accessToken);
     const scheduler = createScheduler(store, client, user.workspaceId, bytes);
 
-    const result = await scheduler.runOnce();
-    const queuedJob = await store.getOutboxJob('job_1');
-    expect(result.status).toBe('retry_wait');
-    expect(queuedJob?.serverOcrJobId).toBeString();
-
     const cancel = await scheduler.cancel('job_1', 'user_cancelled');
-    const terminalJob = await store.getOutboxJob('job_1');
-    const serverJob = await client.pollOcrJob(user.workspaceId, queuedJob?.serverOcrJobId ?? '');
 
     expect(cancel).toEqual({ cancelled: true, jobId: 'job_1' });
-    expect(terminalJob).toMatchObject({
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',
     });
-    expect(serverJob.job.status).toBe('cancelled');
     expect(harness.captureSnapshot().ocrResults).toHaveLength(0);
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(0);
-    expect(
-      harness
-        .captureSnapshot()
-        .assetLocations.some(
-          (location) =>
-            location.kind === 'server_temporary' && location.cleanupStatus === 'cleaned',
-        ),
-    ).toBe(true);
   });
 
-  it('does not upload bytes or create OCR jobs for block_ocr over real HTTP', async () => {
+  it('does not read local bytes or call the proxy for block_ocr over real HTTP', async () => {
     const bytes = new Uint8Array([17, 18, 19, 20]);
     const harness = await startServerHttpHarness({
-      ocrRunner: fixedOcrRunner('This OCR must not run'),
+      aiRuntime: visionRuntimeReturning('This OCR must not run'),
     });
     const user = await harness.bootstrapUser('desktop-block-ocr@example.test');
     const store = createInMemoryOperationalStore();
@@ -329,8 +325,7 @@ describe('desktop server sync over real HTTP', () => {
       state: 'synced',
       terminalReason: 'ocr_blocked_by_local_policy',
     });
-    expect(harness.captureSnapshot().temporaryUploads).toHaveLength(0);
-    expect(harness.captureSnapshot().ocrJobs).toHaveLength(0);
+    expect(harness.captureSnapshot().ocrResults).toHaveLength(0);
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(0);
   });
 });
@@ -363,7 +358,7 @@ function createHttpClient(endpoint: string, accessToken: string) {
 
 function createScheduler(
   store: OperationalStoreRepository,
-  api: ServerApiClient,
+  api: SyncServerApi,
   workspaceId: string,
   bytes: Uint8Array,
   readAssetBytes: () => Promise<Uint8Array> = async () => bytes,
@@ -543,13 +538,18 @@ type CaptureSnapshot = {
   temporaryUploads: unknown[];
 };
 
-type ServerHarnessOptions = {
-  ocrRunner?: OcrRunner;
-  useAppDefaultOcrRunner?: boolean;
+// Structural stand-in for the server's `RecapsyAiRuntime`, injected through the
+// dynamically imported `createApp`. Only the OCR proxy path (`runVisionText`) is
+// exercised; `runEmbedding` is present to satisfy the interface but returns an
+// empty result because keyword search indexing does not depend on embeddings.
+type FakeAiRuntime = {
+  runVisionText(input: unknown): Promise<unknown>;
+  runEmbedding(input: unknown): Promise<unknown>;
 };
 
-type OcrRunner = {
-  run(input: unknown): Promise<unknown>;
+type ServerHarnessOptions = {
+  aiRuntime?: FakeAiRuntime;
+  useAppDefaultOcrRunner?: boolean;
 };
 
 async function startServerHttpHarness(options: ServerHarnessOptions): Promise<ServerHttpHarness> {
@@ -584,7 +584,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
         info() {},
         warn() {},
       },
-      ...(options.useAppDefaultOcrRunner ? {} : { ocrRunner: options.ocrRunner }),
+      ...(options.aiRuntime ? { aiRuntime: options.aiRuntime } : {}),
     });
     server = Bun.serve({
       fetch: app.fetch,
@@ -653,49 +653,52 @@ async function loadServerModules() {
   const captureRepositoryModule = await import(
     new URL('../../server/src/capture-ocr-search/repositories/memory.ts', import.meta.url).href
   );
-  const modelsModule = await import(
-    new URL('../../server/src/capture-ocr-search/models.ts', import.meta.url).href
-  );
 
   return {
     InMemoryAccountManagementRepository:
       accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureOcrSearchRepository: captureRepositoryModule.InMemoryCaptureOcrSearchRepository,
     createApp: appModule.createApp,
-    safeOcrError: modelsModule.safeOcrError,
   };
 }
 
-function fixedOcrRunner(text: string, activitySummary = 'Processed screenshot OCR'): OcrRunner {
+function visionRuntimeReturning(text: string): FakeAiRuntime {
   return {
-    async run() {
+    async runVisionText() {
       return {
-        activitySummary,
         blocks: [{ kind: 'line', order: 0, text }],
-        entities: [],
-        status: 'succeeded',
+        durationMs: 5,
+        model: 'fake-vision-model',
+        providerName: 'fake-provider',
+        providerSettingId: 'fake-provider-setting',
+        success: true,
         text,
       };
     },
-  };
-}
-
-function failedOcrRunner(code: string, messageSafe: string, retryable: boolean): OcrRunner {
-  return {
-    async run() {
-      const modules = await loadServerModules();
+    async runEmbedding() {
       return {
-        error: modules.safeOcrError(code, messageSafe, retryable),
-        status: 'failed',
+        durationMs: 1,
+        embeddings: [],
+        model: 'fake-embed-model',
+        providerName: 'fake-provider',
+        providerSettingId: 'fake-provider-setting',
+        success: true,
       };
     },
   };
 }
 
-function deferredOcrRunner(): OcrRunner {
+function visionRuntimeFailing(
+  reason: string,
+  retryable: boolean,
+  safeMessage: string,
+): FakeAiRuntime {
   return {
-    async run() {
-      return { status: 'deferred' };
+    async runVisionText() {
+      return { reason, retryable, safeMessage, success: false };
+    },
+    async runEmbedding() {
+      return { reason: 'unknown', retryable: false, safeMessage, success: false };
     },
   };
 }

@@ -1,7 +1,9 @@
+import type { AiOcrUsage, OcrScreenTextResult } from '@recapsy/contracts';
+
 export type OutboxJobState =
   | 'pending'
-  | 'uploading'
-  | 'ocr_wait'
+  | 'syncing'
+  | 'result_pending'
   | 'synced'
   | 'blocked'
   | 'failed'
@@ -16,6 +18,24 @@ export type SafeOperationalError = {
   code: string;
   message: string;
   retryable: boolean;
+};
+
+/**
+ * OCR transcript retained locally after a successful proxy call so a failed
+ * result submission can be retried without re-running (and re-billing) the
+ * provider OCR. Persisted as `ocr_result_json`; carries the submission
+ * metadata the ocr-result endpoint records (`model`/`providerName`/
+ * `durationMs`/`usage`) plus `sourceAssetHash`, so a crash-recovered
+ * `result_pending` job can resubmit self-sufficiently without another proxy
+ * round-trip. See `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
+ */
+export type StoredOcrResult = {
+  screenText: OcrScreenTextResult;
+  sourceAssetHash: string;
+  model: string;
+  providerName: string;
+  durationMs: number;
+  usage?: AiOcrUsage;
 };
 
 export type OutboxJob = {
@@ -33,7 +53,7 @@ export type OutboxJob = {
   nextRetryAt?: string;
   lockedAt?: string;
   serverCaptureId?: string;
-  serverOcrJobId?: string;
+  ocrResult?: StoredOcrResult;
   lastSafeError?: SafeOperationalError;
   terminalReason?: string;
 };
@@ -102,7 +122,7 @@ export type OutboxJobStateUpdate = {
   now: string;
   nextRetryAt?: string;
   serverCaptureId?: string;
-  serverOcrJobId?: string;
+  ocrResult?: StoredOcrResult;
 };
 
 export type OutboxTerminalUpdate = {
@@ -110,7 +130,6 @@ export type OutboxTerminalUpdate = {
   now: string;
   reason: string;
   serverCaptureId?: string;
-  serverOcrJobId?: string;
   lastSafeError?: SafeOperationalError;
 };
 

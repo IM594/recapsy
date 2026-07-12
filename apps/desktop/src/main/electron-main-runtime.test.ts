@@ -8,10 +8,9 @@ import type {
   CaptureHelperStartOptions,
 } from '../runtime/capture-helper-controller';
 import type { CaptureHelperCommandClient } from '../runtime/capture-helper-event-intake';
-import type { ServerApiClient } from '../server-api/types';
 import { type OperationalStoreRepository, createInMemoryOperationalStore } from '../storage';
 import type { SyncLoop, SyncLoopOptions } from '../sync/sync-loop';
-import type { SyncRunResult } from '../sync/types';
+import type { SyncRunResult, SyncServerApi } from '../sync/types';
 import {
   type ElectronAppLike,
   type ElectronIpcMainLike,
@@ -550,7 +549,7 @@ function fakeAuthClient(
   };
 }
 
-function notImplementedServerApi(): ServerApiClient {
+function notImplementedServerApi(): SyncServerApi {
   const notImplemented = () => {
     throw new Error('server API should not be called in this test');
   };
@@ -568,7 +567,9 @@ function notImplementedServerApi(): ServerApiClient {
     putTemporaryBytes: notImplemented,
     querySearch: notImplemented,
     queryTimeline: notImplemented,
-  } as unknown as ServerApiClient;
+    runOcrProxy: notImplemented,
+    submitOcrResult: notImplemented,
+  } as unknown as SyncServerApi;
 }
 
 class FakeLoginPrompter implements LoginPrompter {

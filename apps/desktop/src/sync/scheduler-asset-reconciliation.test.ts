@@ -4,15 +4,13 @@ import {
   type AssetCacheRef,
   type OperationalStoreRepository,
   type OutboxJobCreateInput,
+  type StoredOcrResult,
   createInMemoryOperationalStore,
 } from '../storage';
 import {
   type AssetAvailabilityResolver,
   reconcileAssetRefs,
 } from '../storage/asset-reconciliation';
-import { createSyncScheduler } from './scheduler';
-import { recoverInterruptedOutboxJobs } from './startup-recovery';
-import type { SyncServerApi } from './types';
 
 const now = '2026-07-06T00:00:00.000Z';
 const reconcileNow = '2026-07-06T00:05:00.000Z';
@@ -34,7 +32,6 @@ describe('asset ref reconciliation', () => {
       blocked: 0,
       checked: 1,
       missing: 0,
-      skippedServerPolling: 0,
       skippedTerminal: 0,
       unreadable: 0,
     });
@@ -49,7 +46,7 @@ describe('asset ref reconciliation', () => {
     expect(job?.terminalReason).toBeUndefined();
   });
 
-  it('records missing and unreadable refs and blocks eligible outbox jobs', async () => {
+  it('records missing and unreadable refs and blocks eligible pending and syncing jobs', async () => {
     const store = createInMemoryOperationalStore();
     await createAssetBackedJob(
       store,
@@ -65,29 +62,15 @@ describe('asset ref reconciliation', () => {
         idempotencyKey: 'idem_unreadable',
       }),
     );
-    await createAssetBackedJob(
-      store,
-      createAsset({ assetRefId: 'asset_ocr_wait_without_server_job' }),
-      createJob({
-        assetRefId: 'asset_ocr_wait_without_server_job',
-        id: 'job_ocr_wait_without_server_job',
-        idempotencyKey: 'idem_ocr_wait_without_server_job',
-      }),
-    );
     await store.updateOutboxJobState('job_unreadable', {
       now,
-      state: 'uploading',
-    });
-    await store.updateOutboxJobState('job_ocr_wait_without_server_job', {
-      now,
-      state: 'ocr_wait',
+      state: 'syncing',
     });
 
     const summary = await reconcileAssetRefs({
       now: reconcileNow,
       resolver: resolverFromMap({
         asset_missing: 'missing',
-        asset_ocr_wait_without_server_job: 'missing',
         asset_unreadable: 'unreadable',
       }),
       store,
@@ -95,9 +78,9 @@ describe('asset ref reconciliation', () => {
     });
 
     expect(summary).toMatchObject({
-      blocked: 3,
-      checked: 3,
-      missing: 2,
+      blocked: 2,
+      checked: 2,
+      missing: 1,
       unreadable: 1,
     });
     expect(await store.getAssetCacheRef('asset_missing')).toMatchObject({
@@ -130,29 +113,30 @@ describe('asset ref reconciliation', () => {
       state: 'blocked',
       terminalReason: 'local_asset_unreadable',
     });
-    expect(await store.getOutboxJob('job_ocr_wait_without_server_job')).toMatchObject({
-      state: 'blocked',
-      terminalReason: 'local_asset_missing',
-    });
   });
 
-  it('does not revive terminal jobs or block OCR polling jobs that already have a server job id', async () => {
+  it('does not revive terminal jobs and leaves result_pending jobs untouched when local assets are gone', async () => {
     const store = createInMemoryOperationalStore();
     await createAssetBackedJob(store, createAsset(), createJob());
     await createAssetBackedJob(
       store,
-      createAsset({ assetRefId: 'asset_poll' }),
-      createJob({ assetRefId: 'asset_poll', id: 'job_poll', idempotencyKey: 'idem_poll' }),
+      createAsset({ assetRefId: 'asset_result_pending' }),
+      createJob({
+        assetRefId: 'asset_result_pending',
+        id: 'job_result_pending',
+        idempotencyKey: 'idem_result_pending',
+      }),
     );
     await store.markOutboxJobTerminal('job_1', {
       now,
       reason: 'already_synced',
       state: 'synced',
     });
-    await store.updateOutboxJobState('job_poll', {
+    await store.updateOutboxJobState('job_result_pending', {
       now,
-      serverOcrJobId: 'server_ocr_1',
-      state: 'ocr_wait',
+      ocrResult: createStoredOcrResult(),
+      serverCaptureId: 'capture_result_pending',
+      state: 'result_pending',
     });
 
     const summary = await reconcileAssetRefs({
@@ -166,141 +150,20 @@ describe('asset ref reconciliation', () => {
       blocked: 0,
       checked: 2,
       missing: 2,
-      skippedServerPolling: 1,
       skippedTerminal: 1,
     });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'synced',
       terminalReason: 'already_synced',
     });
-    const pollingJob = await store.getOutboxJob('job_poll');
-    expect(pollingJob).toMatchObject({
-      serverOcrJobId: 'server_ocr_1',
-      state: 'ocr_wait',
+    // A result_pending job already holds its transcript locally and no longer
+    // needs the original bytes, so a missing asset must not block it.
+    const resultPendingJob = await store.getOutboxJob('job_result_pending');
+    expect(resultPendingJob).toMatchObject({
+      serverCaptureId: 'capture_result_pending',
+      state: 'result_pending',
     });
-    expect(pollingJob?.terminalReason).toBeUndefined();
-  });
-
-  it('keeps recovered server OCR polling jobs retryable when local assets are unavailable', async () => {
-    const store = createInMemoryOperationalStore();
-    await createAssetBackedJob(
-      store,
-      createAsset({ assetRefId: 'asset_recovered_missing' }),
-      createJob({
-        assetRefId: 'asset_recovered_missing',
-        id: 'job_recovered_missing',
-        idempotencyKey: 'idem_recovered_missing',
-      }),
-    );
-    await createAssetBackedJob(
-      store,
-      createAsset({ assetRefId: 'asset_recovered_unreadable' }),
-      createJob({
-        assetRefId: 'asset_recovered_unreadable',
-        id: 'job_recovered_unreadable',
-        idempotencyKey: 'idem_recovered_unreadable',
-      }),
-    );
-    await store.updateOutboxJobState('job_recovered_missing', {
-      now,
-      serverCaptureId: 'capture_recovered_missing',
-      serverOcrJobId: 'server_ocr_missing',
-      state: 'ocr_wait',
-    });
-    await store.updateOutboxJobState('job_recovered_unreadable', {
-      now,
-      serverCaptureId: 'capture_recovered_unreadable',
-      serverOcrJobId: 'server_ocr_unreadable',
-      state: 'ocr_wait',
-    });
-
-    const recoverySummary = await recoverInterruptedOutboxJobs({
-      now,
-      store,
-      workspaceId: 'workspace_1',
-    });
-
-    expect(recoverySummary).toMatchObject({
-      ocrPolling: 2,
-      recovered: 2,
-    });
-    expect(await store.getOutboxJob('job_recovered_missing')).toMatchObject({
-      serverOcrJobId: 'server_ocr_missing',
-      state: 'pending',
-    });
-    expect(await store.getOutboxJob('job_recovered_unreadable')).toMatchObject({
-      serverOcrJobId: 'server_ocr_unreadable',
-      state: 'pending',
-    });
-
-    const reconciliationSummary = await reconcileAssetRefs({
-      now: reconcileNow,
-      resolver: resolverFromMap({
-        asset_recovered_missing: 'missing',
-        asset_recovered_unreadable: 'unreadable',
-      }),
-      store,
-      workspaceId: 'workspace_1',
-    });
-
-    expect(reconciliationSummary).toMatchObject({
-      blocked: 0,
-      checked: 2,
-      missing: 1,
-      skippedServerPolling: 2,
-      unreadable: 1,
-    });
-    expect(await store.getOutboxJob('job_recovered_missing')).toMatchObject({
-      serverOcrJobId: 'server_ocr_missing',
-      state: 'pending',
-    });
-    expect(await store.getOutboxJob('job_recovered_unreadable')).toMatchObject({
-      serverOcrJobId: 'server_ocr_unreadable',
-      state: 'pending',
-    });
-
-    const calls: string[] = [];
-    const scheduler = createPollingScheduler({
-      api: createApi({
-        async pollOcrJob(workspaceId, jobId) {
-          calls.push(`poll:${workspaceId}:${jobId}`);
-          return {
-            job: {
-              id: jobId,
-              status: 'succeeded',
-            },
-          };
-        },
-      }),
-      readAssetBytes: async () => {
-        calls.push('read-bytes');
-        throw new Error('readAssetBytes must not run for recovered OCR polling jobs');
-      },
-      store,
-    });
-
-    expect(await scheduler.runOnce()).toMatchObject({
-      processed: 1,
-      status: 'synced',
-    });
-    expect(await scheduler.runOnce()).toMatchObject({
-      processed: 1,
-      status: 'synced',
-    });
-    expect(calls.sort()).toEqual([
-      'poll:workspace_1:server_ocr_missing',
-      'poll:workspace_1:server_ocr_unreadable',
-    ]);
-    expect(await store.getOutboxJob('job_recovered_missing')).toMatchObject({
-      serverOcrJobId: 'server_ocr_missing',
-      state: 'synced',
-      terminalReason: 'ocr_succeeded',
-    });
-    expect(await store.getOutboxJob('job_recovered_unreadable')).toMatchObject({
-      serverOcrJobId: 'server_ocr_unreadable',
-      state: 'synced',
-      terminalReason: 'ocr_succeeded',
-    });
+    expect(resultPendingJob?.terminalReason).toBeUndefined();
   });
 
   it('can reconcile all workspaces without returning sensitive asset fields in the summary', async () => {
@@ -336,7 +199,6 @@ describe('asset ref reconciliation', () => {
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('localAccessKey');
     expect(serialized).not.toContain('contentAddress');
-    expect(serialized).not.toContain('ocr');
   });
 
   it('maps resolver exceptions to a fixed unreadable state without storing raw exception text', async () => {
@@ -398,129 +260,6 @@ function resolverFromMap(map: Record<string, AssetAvailabilityState>): AssetAvai
   };
 }
 
-function createPollingScheduler(input: {
-  api: SyncServerApi;
-  readAssetBytes?: (localAccessKey: string) => Promise<Uint8Array>;
-  store: OperationalStoreRepository;
-}) {
-  return createSyncScheduler({
-    api: input.api,
-    clock: createClock(),
-    maxAttempts: 3,
-    readAssetBytes: input.readAssetBytes ?? (async () => new Uint8Array([1, 2, 3, 4])),
-    retryBackoff: { baseMs: 60_000, factor: 2, jitterRatio: 0, maxMs: 300_000 },
-    store: input.store,
-    workspace: {
-      getActiveWorkspaceId: async () => 'workspace_1',
-    },
-  });
-}
-
-function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
-  return {
-    async cancelOcrJob(jobId) {
-      return {
-        cleanupStatus: 'pending',
-        job: {
-          id: jobId,
-          status: 'cancelled',
-        },
-      };
-    },
-    async createOcrJob() {
-      throw new Error('createOcrJob must not run for recovered OCR polling jobs');
-    },
-    async createTemporaryUpload() {
-      throw new Error('createTemporaryUpload must not run for recovered OCR polling jobs');
-    },
-    async getAxAllowlist() {
-      return {
-        axTextUploadEnabled: false,
-        enabled: false,
-        reason: 'ax_text_upload_disabled',
-        status: 'disabled',
-        workspaceId: 'workspace_1',
-      };
-    },
-    async getCapabilities() {
-      return {
-        features: {},
-        generatedAt: now,
-        providers: [],
-        workspaceId: 'workspace_1',
-      };
-    },
-    async getCapturePolicies() {
-      return {
-        axAllowlist: {
-          axTextUploadEnabled: false,
-          enabled: false,
-          reason: 'ax_text_upload_disabled',
-          status: 'disabled',
-          workspaceId: 'workspace_1',
-        },
-        capturePolicy: {
-          actionCounts: {},
-          axTextUploadEnabled: false,
-          defaultAction: 'allow',
-          expiresAt: now,
-          paused: false,
-          ttlSeconds: 1800,
-          version: 'policy_1',
-        },
-        generatedAt: now,
-        storagePolicy: {
-          allowLongTermRemoteOriginal: false,
-          allowTemporaryServerRead: true,
-          authoritativeOriginalLocation: 'local_device',
-          temporaryTtlSeconds: 1800,
-        },
-        workspaceId: 'workspace_1',
-      };
-    },
-    async getCapture() {
-      return {
-        captureId: 'capture_1',
-        ocrStatus: 'not_requested',
-      };
-    },
-    async ingestCapture() {
-      throw new Error('ingestCapture must not run for recovered OCR polling jobs');
-    },
-    async pollOcrJob(_workspaceId, jobId) {
-      return {
-        job: {
-          id: jobId,
-          status: 'succeeded',
-        },
-      };
-    },
-    async putTemporaryBytes() {
-      throw new Error('putTemporaryBytes must not run for recovered OCR polling jobs');
-    },
-    async querySearch() {
-      return {
-        incomplete: false,
-        items: [],
-      };
-    },
-    async queryTimeline() {
-      return {
-        incomplete: false,
-        items: [],
-      };
-    },
-    ...overrides,
-  };
-}
-
-function createClock() {
-  let tick = 0;
-  return {
-    now: () => `2026-07-06T00:00:0${tick++}.000Z`,
-  };
-}
-
 async function createAssetBackedJob(
   store: OperationalStoreRepository,
   asset: AssetCacheRef,
@@ -542,6 +281,21 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
     idempotencyKey: 'idem_1',
     payloadHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     workspaceId: 'workspace_1',
+    ...overrides,
+  };
+}
+
+function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): StoredOcrResult {
+  return {
+    durationMs: 1200,
+    model: 'test-model',
+    providerName: 'test-provider',
+    screenText: {
+      blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'hello' }],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    },
+    sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     ...overrides,
   };
 }

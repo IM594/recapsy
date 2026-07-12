@@ -29,7 +29,6 @@ export type AssetReconciliationSummary = {
   unreadable: number;
   blocked: number;
   skippedTerminal: number;
-  skippedServerPolling: number;
 };
 
 const TERMINAL_OUTBOX_STATES = new Set<OutboxJob['state']>([
@@ -64,7 +63,6 @@ export async function reconcileAssetRefs(
     blocked: 0,
     checked: assets.length,
     missing: 0,
-    skippedServerPolling: 0,
     skippedTerminal: 0,
     unreadable: 0,
   };
@@ -93,11 +91,6 @@ export async function reconcileAssetRefs(
         continue;
       }
 
-      if (hasServerOcrPollingPath(job)) {
-        summary.skippedServerPolling += 1;
-        continue;
-      }
-
       if (!requiresLocalAssetBytes(job)) {
         continue;
       }
@@ -107,7 +100,6 @@ export async function reconcileAssetRefs(
         now: options.now,
         reason: blockingError.code,
         serverCaptureId: job.serverCaptureId,
-        serverOcrJobId: job.serverOcrJobId,
         state: 'blocked',
       });
 
@@ -173,11 +165,7 @@ function requiresLocalAssetBytes(job: OutboxJob): boolean {
     return false;
   }
 
-  return job.state === 'pending' || job.state === 'uploading' || job.state === 'ocr_wait';
-}
-
-function hasServerOcrPollingPath(job: OutboxJob): boolean {
-  return Boolean(job.serverOcrJobId) && (job.state === 'pending' || job.state === 'ocr_wait');
+  return job.state === 'pending' || job.state === 'syncing';
 }
 
 function defaultAvailabilityError(availabilityState: Exclude<AssetAvailabilityState, 'available'>) {

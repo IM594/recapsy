@@ -45,7 +45,7 @@ describe('in-memory operational store', () => {
     const created = await store.createOutboxJob(createJob());
     const updated = await store.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:00:01.000Z',
-      state: 'uploading',
+      state: 'syncing',
       serverCaptureId: 'capture_server_1',
     });
 
@@ -53,7 +53,7 @@ describe('in-memory operational store', () => {
     expect(updated).toMatchObject({ ok: true });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       id: 'job_1',
-      state: 'uploading',
+      state: 'syncing',
       attempt: 0,
       serverCaptureId: 'capture_server_1',
     });
@@ -184,7 +184,7 @@ describe('in-memory operational store', () => {
     });
   });
 
-  it('claims the next retryable job by retry time and marks it as uploading', async () => {
+  it('claims the next retryable job by retry time and marks it as syncing', async () => {
     const store = createInMemoryOperationalStore();
     await store.createOutboxJob(
       createJob({
@@ -209,7 +209,7 @@ describe('in-memory operational store', () => {
 
     expect(claimed).toMatchObject({
       id: 'job_ready',
-      state: 'uploading',
+      state: 'syncing',
       lockedAt: '2026-07-06T00:02:00.000Z',
     });
   });
@@ -313,9 +313,8 @@ describe('in-memory operational store', () => {
 
     const lateSuccess = await store.markOutboxJobTerminal('job_1', {
       now: '2026-07-06T00:00:11.000Z',
-      reason: 'ocr_succeeded',
+      reason: 'ocr_synced',
       serverCaptureId: 'capture_1',
-      serverOcrJobId: 'ocr_job_1',
       state: 'synced',
     });
 
@@ -328,7 +327,6 @@ describe('in-memory operational store', () => {
     });
     const stored = await store.getOutboxJob('job_1');
     expect(stored?.serverCaptureId).toBeUndefined();
-    expect(stored?.serverOcrJobId).toBeUndefined();
     expect(stored).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',

@@ -1,7 +1,7 @@
-import type { ServerApiClient } from '../server-api/types';
+import type { ServerApiClient, ServerApiOcrProxyClient } from '../server-api/types';
 import type { BackpressureDecision, OperationalStoreRepository } from '../storage/types';
 
-export type SyncServerApi = ServerApiClient;
+export type SyncServerApi = ServerApiClient & ServerApiOcrProxyClient;
 
 export type SyncWorkspaceProvider = {
   getActiveWorkspaceId(): Promise<string | null>;

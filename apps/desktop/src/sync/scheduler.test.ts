@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { ServerApiError } from '../server-api/client';
 import { createInMemoryOperationalStore } from '../storage';
-import type { AssetCacheRef, BackpressureDecision, OutboxJobCreateInput } from '../storage';
+import type {
+  AssetCacheRef,
+  BackpressureDecision,
+  OutboxJobCreateInput,
+  StoredOcrResult,
+} from '../storage';
 import { createSyncQueueSummary, createSyncScheduler } from './scheduler';
 import type { SyncServerApi } from './types';
 
@@ -38,7 +43,7 @@ describe('desktop server sync scheduler', () => {
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
-            nextAction: 'create_temporary_upload',
+            nextAction: 'queue_ocr',
             timelineEventId: 'timeline_1',
           };
         },
@@ -63,53 +68,28 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('runs ingest, temporary upload, OCR create, and success polling', async () => {
+  it('runs ingest, the OCR proxy, and result submission to reach synced', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
     const scheduler = createScheduler({
       api: createApi({
-        async createOcrJob(input) {
-          calls.push(`ocr:${input.idempotencyKey}`);
-          return {
-            job: {
-              id: 'ocr_job_1',
-              status: 'queued',
-            },
-          };
-        },
-        async createTemporaryUpload(input) {
-          calls.push(`temporary:${input.idempotencyKey}`);
-          return {
-            temporaryLocationId: 'temporary_location_1',
-            uploadId: 'upload_1',
-          };
-        },
         async ingestCapture(input) {
           calls.push(`ingest:${input.idempotencyKey}`);
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
-            nextAction: 'create_temporary_upload',
+            nextAction: 'queue_ocr',
             timelineEventId: 'timeline_1',
           };
         },
-        async pollOcrJob() {
-          calls.push('poll');
-          return {
-            job: {
-              id: 'ocr_job_1',
-              status: 'succeeded',
-            },
-          };
+        async runOcrProxy(input) {
+          calls.push(`proxy:${input.bytes.byteLength}:${input.mimeType}`);
+          return createOcrResponse();
         },
-        async putTemporaryBytes(input) {
-          calls.push(`bytes:${input.bytes.byteLength}`);
-          return {
-            temporaryLocationId: 'temporary_location_1',
-            uploadId: 'upload_1',
-            uploadReceipt: 'receipt_1',
-          };
+        async submitOcrResult(input) {
+          calls.push(`submit:${input.captureId}:${input.sourceAssetHash}`);
+          return createSubmitResponse();
         },
       }),
       store,
@@ -122,62 +102,55 @@ describe('desktop server sync scheduler', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual([
-      'ingest:idem_1',
-      'temporary:idem_1:temporary',
-      'bytes:4',
-      'ocr:idem_1:ocr',
-      'poll',
-    ]);
-    expect(await store.getOutboxJob('job_1')).toMatchObject({
+    expect(calls).toEqual(['ingest:idem_1', 'proxy:4:image/png', `submit:capture_1:${assetHash}`]);
+    const job = await store.getOutboxJob('job_1');
+    expect(job).toMatchObject({
       serverCaptureId: 'capture_1',
-      serverOcrJobId: 'ocr_job_1',
       state: 'synced',
-      terminalReason: 'ocr_succeeded',
+      terminalReason: 'ocr_synced',
     });
   });
 
-  it('polls an existing server OCR job after startup recovery without uploading bytes again', async () => {
+  it('resubmits a crash-recovered result_pending job without re-running the proxy', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
+    // Simulate a job that reached result_pending, was recovered to pending by
+    // startup recovery, and still carries its locally stored transcript.
     await store.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:00:01.000Z',
+      ocrResult: createStoredOcrResult(),
       serverCaptureId: 'capture_existing',
-      serverOcrJobId: 'ocr_existing',
-      state: 'pending',
+      state: 'result_pending',
+    });
+    await store.recoverInterruptedOutboxJob({
+      id: 'job_1',
+      lastSafeError: {
+        code: 'interrupted_before_result_submit',
+        message: 'OCR result submission was interrupted before startup recovery.',
+        retryable: true,
+      },
+      nextRetryAt: now,
+      now,
     });
     const calls: string[] = [];
     const scheduler = createScheduler({
       api: createApi({
-        async createOcrJob() {
-          calls.push('ocr');
-          throw new Error('createOcrJob must not run for recovered OCR polling jobs');
-        },
-        async createTemporaryUpload() {
-          calls.push('temporary');
-          throw new Error('createTemporaryUpload must not run for recovered OCR polling jobs');
-        },
         async ingestCapture() {
           calls.push('ingest');
-          throw new Error('ingestCapture must not run for recovered OCR polling jobs');
+          throw new Error('ingestCapture must not run for a recovered result_pending job');
         },
-        async pollOcrJob(workspaceId, jobId) {
-          calls.push(`poll:${workspaceId}:${jobId}`);
-          return {
-            job: {
-              id: jobId,
-              status: 'succeeded',
-            },
-          };
+        async runOcrProxy() {
+          calls.push('proxy');
+          throw new Error('runOcrProxy must not run for a recovered result_pending job');
         },
-        async putTemporaryBytes() {
-          calls.push('bytes');
-          throw new Error('putTemporaryBytes must not run for recovered OCR polling jobs');
+        async submitOcrResult(input) {
+          calls.push(`submit:${input.captureId}`);
+          return createSubmitResponse();
         },
       }),
       readAssetBytes: async () => {
         calls.push('read-bytes');
-        throw new Error('readAssetBytes must not run for recovered OCR polling jobs');
+        throw new Error('readAssetBytes must not run for a recovered result_pending job');
       },
       store,
     });
@@ -189,12 +162,11 @@ describe('desktop server sync scheduler', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual(['poll:workspace_1:ocr_existing']);
+    expect(calls).toEqual(['submit:capture_existing']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       serverCaptureId: 'capture_existing',
-      serverOcrJobId: 'ocr_existing',
       state: 'synced',
-      terminalReason: 'ocr_succeeded',
+      terminalReason: 'ocr_synced',
     });
   });
 
@@ -266,63 +238,15 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('fails upload-required server actions when the input asset id is missing', async () => {
-    const store = createInMemoryOperationalStore();
-    await seedPendingCapture(store);
-    const scheduler = createScheduler({
-      api: createApi({
-        async createTemporaryUpload() {
-          throw new Error('createTemporaryUpload must not run without an input asset id');
-        },
-        async ingestCapture() {
-          return {
-            captureId: 'capture_1',
-            nextAction: 'create_temporary_upload',
-            timelineEventId: 'timeline_1',
-          };
-        },
-      }),
-      store,
-    });
-
-    const result = await scheduler.runOnce();
-
-    expect(result).toEqual({
-      jobId: 'job_1',
-      processed: 1,
-      status: 'failed',
-    });
-    expect(await store.getOutboxJob('job_1')).toMatchObject({
-      lastSafeError: {
-        code: 'upload_input_missing',
-        message: 'Upload input asset is missing.',
-        retryable: false,
-      },
-      state: 'failed',
-      terminalReason: 'upload_input_missing',
-    });
-  });
-
-  it('blocks local asset byte read failures without retrying upload or OCR creation', async () => {
+  it('blocks local asset byte read failures without running the OCR proxy', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
     const scheduler = createScheduler({
       api: createApi({
-        async createOcrJob() {
-          calls.push('ocr');
-          throw new Error('createOcrJob must not run when local bytes are unreadable');
-        },
-        async createTemporaryUpload(input) {
-          calls.push(`temporary:${input.assetId}`);
-          return {
-            temporaryLocationId: 'temporary_location_1',
-            uploadId: 'upload_1',
-          };
-        },
-        async putTemporaryBytes() {
-          calls.push('bytes');
-          throw new Error('putTemporaryBytes must not run when local bytes are unreadable');
+        async runOcrProxy() {
+          calls.push('proxy');
+          throw new Error('runOcrProxy must not run when local bytes are unreadable');
         },
       }),
       readAssetBytes: async () => {
@@ -345,7 +269,6 @@ describe('desktop server sync scheduler', () => {
     });
     expect(calls).toEqual(['read']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
-      attempt: 0,
       lastSafeError: {
         code: 'local_asset_unreadable',
         message: 'Local asset is unreadable.',
@@ -356,23 +279,17 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('maps provider_not_configured to fail-closed blocked state', async () => {
+  it('maps a provider_not_configured proxy failure to a fail-closed blocked state', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi({
-        async pollOcrJob() {
-          return {
-            job: {
-              error: {
-                code: 'provider_not_configured',
-                messageSafe: 'Provider is not configured.',
-                retryable: false,
-              },
-              id: 'ocr_job_1',
-              status: 'failed',
-            },
-          };
+        async runOcrProxy() {
+          throw new ServerApiError({
+            code: 'provider_not_configured',
+            retryable: false,
+            safeMessage: 'Provider is not configured.',
+          });
         },
       }),
       store,
@@ -380,32 +297,24 @@ describe('desktop server sync scheduler', () => {
 
     const result = await scheduler.runOnce();
 
-    expect(result).toMatchObject({
-      status: 'blocked',
-    });
+    expect(result).toMatchObject({ status: 'blocked' });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'blocked',
       terminalReason: 'provider_not_configured',
     });
   });
 
-  it('keeps provider_unavailable and offline failures retryable', async () => {
+  it('keeps provider_unavailable proxy failures and offline ingest failures retryable', async () => {
     const providerStore = createInMemoryOperationalStore();
     await seedPendingCapture(providerStore);
     const providerScheduler = createScheduler({
       api: createApi({
-        async pollOcrJob() {
-          return {
-            job: {
-              error: {
-                code: 'provider_unavailable',
-                messageSafe: 'Provider is unavailable.',
-                retryable: true,
-              },
-              id: 'ocr_job_1',
-              status: 'failed',
-            },
-          };
+        async runOcrProxy() {
+          throw new ServerApiError({
+            code: 'provider_unavailable',
+            retryable: true,
+            safeMessage: 'Provider is unavailable.',
+          });
         },
       }),
       store: providerStore,
@@ -445,23 +354,134 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('does not revive a locally cancelled job after a late server success', async () => {
+  it('fails a job when the proxy rejects the input as too large', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi({
-        async pollOcrJob() {
+        async runOcrProxy() {
+          throw new ServerApiError({
+            code: 'input_too_large',
+            retryable: false,
+            safeMessage: 'Input is too large.',
+          });
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toMatchObject({ status: 'failed' });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      lastSafeError: {
+        code: 'input_too_large',
+        retryable: false,
+      },
+      state: 'failed',
+      terminalReason: 'input_too_large',
+    });
+  });
+
+  it('retries a job as result_invalid when the proxy response maps to no usable text', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    const scheduler = createScheduler({
+      api: createApi({
+        async runOcrProxy() {
+          return {
+            blocks: [{ text: '   ' }, { text: '' }],
+            durationMs: 900,
+            model: 'test-model',
+            providerName: 'test-provider',
+            text: '',
+          };
+        },
+        async submitOcrResult() {
+          throw new Error('submitOcrResult must not run when the local mapping is invalid');
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+
+    expect(result).toMatchObject({ status: 'retry_wait' });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      attempt: 1,
+      lastSafeError: {
+        code: 'result_invalid',
+        retryable: true,
+      },
+      state: 'pending',
+    });
+  });
+
+  it('retries only the submission and keeps the transcript when result submission fails', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    let proxyCalls = 0;
+    const scheduler = createScheduler({
+      api: createApi({
+        async ingestCapture() {
+          return {
+            captureId: 'capture_1',
+            inputAssetId: 'asset_server_1',
+            nextAction: 'queue_ocr',
+            timelineEventId: 'timeline_1',
+          };
+        },
+        async runOcrProxy() {
+          proxyCalls += 1;
+          return createOcrResponse();
+        },
+        async submitOcrResult() {
+          throw new ServerApiError({
+            code: 'server_unavailable',
+            retryable: true,
+            safeMessage: 'Server is unavailable.',
+            status: 503,
+          });
+        },
+      }),
+      store,
+    });
+
+    const result = await scheduler.runOnce();
+    const job = await store.getOutboxJob('job_1');
+
+    expect(result).toMatchObject({ status: 'retry_wait' });
+    expect(proxyCalls).toBe(1);
+    expect(job).toMatchObject({
+      lastSafeError: {
+        code: 'server_unavailable',
+        retryable: true,
+      },
+      serverCaptureId: 'capture_1',
+      state: 'pending',
+    });
+    // The transcript is retained so the retry resubmits without re-billing the
+    // proxy (裁决 1 Option B).
+    expect(job?.ocrResult).toMatchObject({
+      sourceAssetHash: assetHash,
+    });
+  });
+
+  it('does not revive a locally cancelled job after the proxy returns', async () => {
+    const store = createInMemoryOperationalStore();
+    await seedPendingCapture(store);
+    const scheduler = createScheduler({
+      api: createApi({
+        async runOcrProxy() {
           await store.markOutboxJobTerminal('job_1', {
             now: '2026-07-06T00:00:03.000Z',
             reason: 'user_cancelled',
             state: 'cancelled',
           });
-          return {
-            job: {
-              id: 'ocr_job_1',
-              status: 'succeeded',
-            },
-          };
+          return createOcrResponse();
+        },
+        async submitOcrResult() {
+          throw new Error('submitOcrResult must not run for a locally cancelled job');
         },
       }),
       store,
@@ -480,24 +500,16 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('marks local cancel terminal before best-effort server cancel and keeps it terminal offline', async () => {
+  it('cancels a syncing job as a purely local terminal state', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
     await store.updateOutboxJobState('job_1', {
       now,
-      serverOcrJobId: 'ocr_job_1',
-      state: 'ocr_wait',
+      serverCaptureId: 'capture_1',
+      state: 'syncing',
     });
     const scheduler = createScheduler({
-      api: createApi({
-        async cancelOcrJob() {
-          throw new ServerApiError({
-            code: 'offline',
-            retryable: true,
-            safeMessage: 'Network is offline or unavailable.',
-          });
-        },
-      }),
+      api: createApi(),
       store,
     });
 
@@ -516,7 +528,7 @@ describe('desktop server sync scheduler', () => {
     expect(claimed).toBeNull();
   });
 
-  it('treats block_ocr server next actions as stale and never reads or uploads local bytes', async () => {
+  it('treats block_ocr captures as metadata-only and never reads or proxies local bytes', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(
       store,
@@ -534,26 +546,18 @@ describe('desktop server sync scheduler', () => {
     const calls: string[] = [];
     const scheduler = createScheduler({
       api: createApi({
-        async createOcrJob() {
-          calls.push('ocr');
-          throw new Error('createOcrJob must not be called for block_ocr');
-        },
-        async createTemporaryUpload() {
-          calls.push('temporary');
-          throw new Error('createTemporaryUpload must not be called for block_ocr');
-        },
         async ingestCapture() {
           calls.push('ingest');
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
-            nextAction: 'create_temporary_upload',
+            nextAction: 'queue_ocr',
             timelineEventId: 'timeline_1',
           };
         },
-        async putTemporaryBytes() {
-          calls.push('bytes');
-          throw new Error('putTemporaryBytes must not be called for block_ocr');
+        async runOcrProxy() {
+          calls.push('proxy');
+          throw new Error('runOcrProxy must not be called for block_ocr');
         },
       }),
       readAssetBytes: async () => {
@@ -577,7 +581,7 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('treats block_capture outbox jobs as metadata-only and does not create a syncable OCR path', async () => {
+  it('treats block_capture outbox jobs as metadata-only', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(
       store,
@@ -595,10 +599,6 @@ describe('desktop server sync scheduler', () => {
     const calls: string[] = [];
     const scheduler = createScheduler({
       api: createApi({
-        async createTemporaryUpload() {
-          calls.push('temporary');
-          throw new Error('createTemporaryUpload must not be called for block_capture');
-        },
         async ingestCapture() {
           calls.push('ingest');
           return {
@@ -607,6 +607,10 @@ describe('desktop server sync scheduler', () => {
             nextAction: 'queue_ocr',
             timelineEventId: 'timeline_1',
           };
+        },
+        async runOcrProxy() {
+          calls.push('proxy');
+          throw new Error('runOcrProxy must not be called for block_capture');
         },
       }),
       readAssetBytes: async () => {
@@ -630,24 +634,18 @@ describe('desktop server sync scheduler', () => {
     });
   });
 
-  it('redacts untrusted OCR job safe messages before storing errors or queue summaries', async () => {
+  it('redacts untrusted proxy error messages before storing errors or queue summaries', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
     const leakedText = 'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
     const scheduler = createScheduler({
       api: createApi({
-        async pollOcrJob() {
-          return {
-            job: {
-              error: {
-                code: 'provider_timeout',
-                messageSafe: `Bearer auth-token sk-provider-token /Users/alice/private.png file:///Users/alice/capture.png https://api.example.test/v1/ocr?image=secret OCR raw text provider body ${leakedText}`,
-                retryable: true,
-              },
-              id: 'ocr_job_1',
-              status: 'failed',
-            },
-          };
+        async runOcrProxy() {
+          throw new ServerApiError({
+            code: 'provider_timeout',
+            retryable: true,
+            safeMessage: `Bearer auth-token sk-provider-token /Users/alice/private.png ${leakedText}`,
+          });
         },
       }),
       store,
@@ -668,10 +666,6 @@ describe('desktop server sync scheduler', () => {
     expect(serialized).not.toContain('Bearer');
     expect(serialized).not.toContain('sk-provider-token');
     expect(serialized).not.toContain('/Users/alice');
-    expect(serialized).not.toContain('file:///Users');
-    expect(serialized).not.toContain('image=secret');
-    expect(serialized).not.toContain('OCR raw text');
-    expect(serialized).not.toContain('provider body');
     expect(serialized).not.toContain('Magnolia Rivera');
     expect(serialized).not.toContain('Project Blue Meridian');
     expect(serialized).not.toContain('oncology plan');
@@ -714,30 +708,17 @@ describe('desktop server sync scheduler', () => {
     expect(serialized).not.toContain('oncology plan');
   });
 
-  it('cancels server jobs as terminal and returns safe queue summaries under backpressure', async () => {
+  it('returns safe queue summaries under backpressure after a local cancel', async () => {
     const store = createInMemoryOperationalStore();
     await seedPendingCapture(store);
-    const cancelledJobs: string[] = [];
-    const scheduler = createScheduler({
-      api: createApi({
-        async cancelOcrJob(jobId) {
-          cancelledJobs.push(jobId);
-          return {
-            cleanupStatus: 'pending',
-            job: {
-              id: jobId,
-              status: 'cancelled',
-            },
-          };
-        },
-      }),
-      store,
-    });
-
     await store.updateOutboxJobState('job_1', {
       now,
-      serverOcrJobId: 'ocr_job_1',
-      state: 'ocr_wait',
+      serverCaptureId: 'capture_1',
+      state: 'syncing',
+    });
+    const scheduler = createScheduler({
+      api: createApi(),
+      store,
     });
 
     const result = await scheduler.cancel('job_1', 'user_cancelled');
@@ -751,7 +732,6 @@ describe('desktop server sync scheduler', () => {
     const serialized = JSON.stringify(summary);
 
     expect(result).toEqual({ cancelled: true, jobId: 'job_1' });
-    expect(cancelledJobs).toEqual(['ocr_job_1']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',
@@ -765,37 +745,6 @@ describe('desktop server sync scheduler', () => {
     });
     expect(serialized).not.toContain('/Users/');
     expect(serialized).not.toContain('token');
-    expect(serialized).not.toContain('OCR raw text');
-  });
-
-  it('persists serverOcrJobId when poll fails after OCR create succeeds', async () => {
-    const store = createInMemoryOperationalStore();
-    await seedPendingCapture(store);
-    const scheduler = createScheduler({
-      api: createApi({
-        async pollOcrJob() {
-          throw new Error('poll interrupted');
-        },
-      }),
-      store,
-    });
-
-    const result = await scheduler.runOnce();
-    const job = await store.getOutboxJob('job_1');
-
-    expect(result).toMatchObject({
-      processed: 1,
-      status: 'retry_wait',
-    });
-    expect(job).toMatchObject({
-      serverCaptureId: 'capture_1',
-      serverOcrJobId: 'ocr_job_1',
-      state: 'pending',
-      lastSafeError: {
-        code: 'server_unavailable',
-        retryable: true,
-      },
-    });
   });
 
   it('reconciles capture-only jobs to synced when server OCR already succeeded', async () => {
@@ -804,15 +753,22 @@ describe('desktop server sync scheduler', () => {
     await store.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:00:01.000Z',
       serverCaptureId: 'capture_existing',
-      state: 'pending',
+      state: 'syncing',
+    });
+    // Recover it to pending so it can be claimed again for the reconcile pass.
+    await store.recoverInterruptedOutboxJob({
+      id: 'job_1',
+      lastSafeError: {
+        code: 'interrupted_during_sync',
+        message: 'Outbox sync was interrupted before startup recovery.',
+        retryable: true,
+      },
+      nextRetryAt: now,
+      now,
     });
     const calls: string[] = [];
     const scheduler = createScheduler({
       api: createApi({
-        async createOcrJob() {
-          calls.push('ocr');
-          throw new Error('createOcrJob must not run when server OCR already succeeded');
-        },
         async getCapture(workspaceId, captureId) {
           calls.push(`capture:${workspaceId}:${captureId}`);
           return {
@@ -824,6 +780,10 @@ describe('desktop server sync scheduler', () => {
         async ingestCapture() {
           calls.push('ingest');
           throw new Error('ingestCapture must not run during capture reconcile');
+        },
+        async runOcrProxy() {
+          calls.push('proxy');
+          throw new Error('runOcrProxy must not run during capture reconcile');
         },
       }),
       store,
@@ -839,9 +799,8 @@ describe('desktop server sync scheduler', () => {
     expect(calls).toEqual(['capture:workspace_1:capture_existing']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       serverCaptureId: 'capture_existing',
-      serverOcrJobId: 'ocr_existing',
       state: 'synced',
-      terminalReason: 'ocr_succeeded',
+      terminalReason: 'ocr_synced',
     });
   });
 
@@ -880,6 +839,45 @@ describe('desktop server sync scheduler', () => {
     }
   });
 });
+
+const assetHash = 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+function createOcrResponse() {
+  return {
+    blocks: [{ kind: 'text', order: 0, text: 'hello world' }],
+    durationMs: 1200,
+    model: 'test-model',
+    providerName: 'test-provider',
+    text: 'hello world',
+  };
+}
+
+function createSubmitResponse() {
+  return {
+    result: {
+      createdAt: now,
+      id: 'ocr_result_1',
+      qualityFlags: [],
+      resultVersion: 1,
+      sourceAssetHash: assetHash,
+    },
+  };
+}
+
+function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): StoredOcrResult {
+  return {
+    durationMs: 1200,
+    model: 'test-model',
+    providerName: 'test-provider',
+    screenText: {
+      blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'hello world' }],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    },
+    sourceAssetHash: assetHash,
+    ...overrides,
+  };
+}
 
 async function seedPendingCapture(
   store: ReturnType<typeof createInMemoryOperationalStore>,
@@ -995,7 +993,7 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
       return {
         captureId: 'capture_1',
         inputAssetId: 'asset_server_1',
-        nextAction: 'create_temporary_upload',
+        nextAction: 'queue_ocr',
         timelineEventId: 'timeline_1',
       };
     },
@@ -1025,6 +1023,12 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
         incomplete: false,
         items: [],
       };
+    },
+    async runOcrProxy() {
+      return createOcrResponse();
+    },
+    async submitOcrResult() {
+      return createSubmitResponse();
     },
     ...overrides,
   };
@@ -1096,7 +1100,7 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
     availabilityState: 'available',
     cleanupState: 'retained',
     createdAt: now,
-    hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    hash: assetHash,
     localAccessKey: 'content-addressed/local/asset_ref_1',
     mimeType: 'image/png',
     role: 'ocr_input',

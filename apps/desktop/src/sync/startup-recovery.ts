@@ -14,9 +14,8 @@ export type StartupRecoveryOptions = {
 export type StartupRecoverySummary = {
   scanned: number;
   recovered: number;
-  uploadPending: number;
-  ocrPolling: number;
-  ocrPendingWithoutServerJob: number;
+  syncInterrupted: number;
+  resultSubmitInterrupted: number;
   reconciledSynced: number;
   unchangedRetryable: number;
   unchangedTerminal: number;
@@ -30,19 +29,14 @@ const TERMINAL_OUTBOX_STATES = new Set<OutboxJob['state']>([
 ]);
 
 const STARTUP_RECOVERY_ERRORS = {
-  interrupted_during_upload: {
-    code: 'interrupted_during_upload',
-    message: 'Outbox upload was interrupted before startup recovery.',
+  interrupted_during_sync: {
+    code: 'interrupted_during_sync',
+    message: 'Outbox sync was interrupted before startup recovery.',
     retryable: true,
   },
-  interrupted_while_waiting_for_ocr: {
-    code: 'interrupted_while_waiting_for_ocr',
-    message: 'OCR polling was interrupted before startup recovery.',
-    retryable: true,
-  },
-  interrupted_without_server_job: {
-    code: 'interrupted_without_server_job',
-    message: 'OCR wait state was missing a server job before startup recovery.',
+  interrupted_before_result_submit: {
+    code: 'interrupted_before_result_submit',
+    message: 'OCR result submission was interrupted before startup recovery.',
     retryable: true,
   },
 } satisfies Record<string, SafeOperationalError>;
@@ -54,14 +48,13 @@ export async function recoverInterruptedOutboxJobs(
     options.workspaceId ? { workspaceId: options.workspaceId } : undefined,
   );
   const summary: StartupRecoverySummary = {
-    ocrPendingWithoutServerJob: 0,
-    ocrPolling: 0,
     reconciledSynced: 0,
     recovered: 0,
+    resultSubmitInterrupted: 0,
     scanned: jobs.length,
+    syncInterrupted: 0,
     unchangedRetryable: 0,
     unchangedTerminal: 0,
-    uploadPending: 0,
   };
 
   for (const job of jobs) {
@@ -75,32 +68,30 @@ export async function recoverInterruptedOutboxJobs(
       continue;
     }
 
-    if (options.api && job.serverCaptureId && !job.serverOcrJobId) {
+    // A recovered `result_pending` job already holds its transcript locally, so
+    // it replays as a submit-only retry (no billed proxy re-run) — the
+    // scheduler's fast path handles the resubmission. See
+    // `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
+    if (job.state === 'result_pending') {
+      await recoverJob(options, job, STARTUP_RECOVERY_ERRORS.interrupted_before_result_submit);
+      summary.recovered += 1;
+      summary.resultSubmitInterrupted += 1;
+      continue;
+    }
+
+    // `syncing`: ingest/proxy/submit was in flight when the process stopped. If
+    // the server already finished OCR for an already-ingested capture, settle
+    // it; otherwise recover for a full replay (ingest is idempotent).
+    if (options.api && job.serverCaptureId) {
       const reconciled = await reconcileInterruptedCaptureJob(options, job, summary);
       if (reconciled) {
         continue;
       }
     }
 
-    if (job.state === 'uploading') {
-      await recoverJob(options, job, STARTUP_RECOVERY_ERRORS.interrupted_during_upload);
-      summary.recovered += 1;
-      summary.uploadPending += 1;
-      continue;
-    }
-
-    if (job.state === 'ocr_wait' && job.serverOcrJobId) {
-      await recoverJob(options, job, STARTUP_RECOVERY_ERRORS.interrupted_while_waiting_for_ocr);
-      summary.recovered += 1;
-      summary.ocrPolling += 1;
-      continue;
-    }
-
-    if (job.state === 'ocr_wait') {
-      await recoverJob(options, job, STARTUP_RECOVERY_ERRORS.interrupted_without_server_job);
-      summary.recovered += 1;
-      summary.ocrPendingWithoutServerJob += 1;
-    }
+    await recoverJob(options, job, STARTUP_RECOVERY_ERRORS.interrupted_during_sync);
+    summary.recovered += 1;
+    summary.syncInterrupted += 1;
   }
 
   return summary;
@@ -131,15 +122,7 @@ async function reconcileInterruptedCaptureJob(
     return true;
   }
 
-  const refreshed = await options.store.getOutboxJob(job.id);
-  if (!refreshed?.serverOcrJobId) {
-    return false;
-  }
-
-  await recoverJob(options, refreshed, STARTUP_RECOVERY_ERRORS.interrupted_while_waiting_for_ocr);
-  summary.recovered += 1;
-  summary.ocrPolling += 1;
-  return true;
+  return false;
 }
 
 async function recoverJob(

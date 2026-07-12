@@ -3,6 +3,7 @@ import {
   type AssetCacheRef,
   type OperationalStoreRepository,
   type OutboxJobCreateInput,
+  type StoredOcrResult,
   createInMemoryOperationalStore,
 } from '../storage';
 import { recoverInterruptedOutboxJobs } from './startup-recovery';
@@ -13,23 +14,20 @@ const recoveryNow = '2026-07-06T00:10:00.000Z';
 describe('desktop startup recovery', () => {
   it('recovers interrupted outbox jobs while preserving terminal and retryable jobs', async () => {
     const store = createInMemoryOperationalStore();
-    await seedJob(store, createJob({ id: 'job_uploading', idempotencyKey: 'idem_uploading' }));
-    await store.updateOutboxJobState('job_uploading', {
+    await seedJob(store, createJob({ id: 'job_syncing', idempotencyKey: 'idem_syncing' }));
+    await store.updateOutboxJobState('job_syncing', {
       now: '2026-07-06T00:01:00.000Z',
-      state: 'uploading',
+      state: 'syncing',
     });
-    await seedJob(store, createJob({ id: 'job_ocr_poll', idempotencyKey: 'idem_ocr_poll' }));
-    await store.updateOutboxJobState('job_ocr_poll', {
+    await seedJob(
+      store,
+      createJob({ id: 'job_result_pending', idempotencyKey: 'idem_result_pending' }),
+    );
+    await store.updateOutboxJobState('job_result_pending', {
       now: '2026-07-06T00:02:00.000Z',
-      serverCaptureId: 'capture_ocr_poll',
-      serverOcrJobId: 'server_ocr_poll',
-      state: 'ocr_wait',
-    });
-    await seedJob(store, createJob({ id: 'job_ocr_split', idempotencyKey: 'idem_ocr_split' }));
-    await store.updateOutboxJobState('job_ocr_split', {
-      now: '2026-07-06T00:03:00.000Z',
-      serverCaptureId: 'capture_ocr_split',
-      state: 'ocr_wait',
+      ocrResult: createStoredOcrResult(),
+      serverCaptureId: 'capture_result_pending',
+      state: 'result_pending',
     });
     await seedJob(
       store,
@@ -51,7 +49,7 @@ describe('desktop startup recovery', () => {
     );
     await store.updateOutboxJobState('job_other_workspace', {
       now: '2026-07-06T00:04:00.000Z',
-      state: 'uploading',
+      state: 'syncing',
     });
 
     const summary = await recoverInterruptedOutboxJobs({
@@ -61,46 +59,37 @@ describe('desktop startup recovery', () => {
     });
 
     expect(summary).toEqual({
-      ocrPendingWithoutServerJob: 1,
-      ocrPolling: 1,
       reconciledSynced: 0,
-      recovered: 3,
-      scanned: 8,
+      recovered: 2,
+      resultSubmitInterrupted: 1,
+      scanned: 7,
+      syncInterrupted: 1,
       unchangedRetryable: 1,
       unchangedTerminal: 4,
-      uploadPending: 1,
     });
-    expect(await store.getOutboxJob('job_uploading')).toMatchObject({
+    expect(await store.getOutboxJob('job_syncing')).toMatchObject({
       lastSafeError: {
-        code: 'interrupted_during_upload',
-        message: 'Outbox upload was interrupted before startup recovery.',
+        code: 'interrupted_during_sync',
+        message: 'Outbox sync was interrupted before startup recovery.',
         retryable: true,
       },
       nextRetryAt: recoveryNow,
       state: 'pending',
     });
-    expect((await store.getOutboxJob('job_uploading'))?.lockedAt).toBeUndefined();
-    expect(await store.getOutboxJob('job_ocr_poll')).toMatchObject({
+    expect((await store.getOutboxJob('job_syncing'))?.lockedAt).toBeUndefined();
+    expect(await store.getOutboxJob('job_result_pending')).toMatchObject({
       lastSafeError: {
-        code: 'interrupted_while_waiting_for_ocr',
+        code: 'interrupted_before_result_submit',
         retryable: true,
       },
       nextRetryAt: recoveryNow,
-      serverCaptureId: 'capture_ocr_poll',
-      serverOcrJobId: 'server_ocr_poll',
-      state: 'pending',
-    });
-    expect((await store.getOutboxJob('job_ocr_poll'))?.lockedAt).toBeUndefined();
-    expect(await store.getOutboxJob('job_ocr_split')).toMatchObject({
-      lastSafeError: {
-        code: 'interrupted_without_server_job',
-        retryable: true,
+      ocrResult: {
+        sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
       },
-      nextRetryAt: recoveryNow,
-      serverCaptureId: 'capture_ocr_split',
+      serverCaptureId: 'capture_result_pending',
       state: 'pending',
     });
-    expect((await store.getOutboxJob('job_ocr_split'))?.serverOcrJobId).toBeUndefined();
+    expect((await store.getOutboxJob('job_result_pending'))?.lockedAt).toBeUndefined();
     expect(await store.getOutboxJob('job_retry_wait')).toMatchObject({
       nextRetryAt: '2026-07-06T00:20:00.000Z',
       state: 'pending',
@@ -110,7 +99,7 @@ describe('desktop startup recovery', () => {
       terminalReason: 'user_cancelled',
     });
     expect(await store.getOutboxJob('job_other_workspace')).toMatchObject({
-      state: 'uploading',
+      state: 'syncing',
       workspaceId: 'workspace_2',
     });
   });
@@ -136,11 +125,11 @@ describe('desktop startup recovery', () => {
     );
     await store.updateOutboxJobState('job_workspace_1', {
       now,
-      state: 'uploading',
+      state: 'syncing',
     });
     await store.updateOutboxJobState('job_workspace_2', {
       now,
-      state: 'uploading',
+      state: 'syncing',
     });
 
     const summary = await recoverInterruptedOutboxJobs({
@@ -151,7 +140,7 @@ describe('desktop startup recovery', () => {
     expect(summary).toMatchObject({
       recovered: 2,
       scanned: 2,
-      uploadPending: 2,
+      syncInterrupted: 2,
     });
     expect(await store.getOutboxJob('job_workspace_1')).toMatchObject({ state: 'pending' });
     expect(await store.getOutboxJob('job_workspace_2')).toMatchObject({ state: 'pending' });
@@ -163,7 +152,7 @@ describe('desktop startup recovery', () => {
     await store.updateOutboxJobState('job_reconcile', {
       now: '2026-07-06T00:03:00.000Z',
       serverCaptureId: 'capture_reconcile',
-      state: 'ocr_wait',
+      state: 'syncing',
     });
     const calls: string[] = [];
 
@@ -184,8 +173,6 @@ describe('desktop startup recovery', () => {
     });
 
     expect(summary).toMatchObject({
-      ocrPendingWithoutServerJob: 0,
-      ocrPolling: 0,
       reconciledSynced: 1,
       recovered: 1,
       scanned: 1,
@@ -193,16 +180,15 @@ describe('desktop startup recovery', () => {
     expect(calls).toEqual(['capture:workspace_1:capture_reconcile']);
     expect(await store.getOutboxJob('job_reconcile')).toMatchObject({
       serverCaptureId: 'capture_reconcile',
-      serverOcrJobId: 'ocr_reconcile',
       state: 'synced',
-      terminalReason: 'ocr_succeeded',
+      terminalReason: 'ocr_synced',
     });
   });
 });
 
 async function seedTerminalJobs(store: OperationalStoreRepository): Promise<void> {
   const states = [
-    ['job_synced', 'idem_synced', 'synced', 'ocr_succeeded'],
+    ['job_synced', 'idem_synced', 'synced', 'ocr_synced'],
     ['job_blocked', 'idem_blocked', 'blocked', 'provider_not_configured'],
     ['job_failed', 'idem_failed', 'failed', 'unsupported_format'],
     ['job_cancelled', 'idem_cancelled', 'cancelled', 'user_cancelled'],
@@ -243,6 +229,21 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
     idempotencyKey: 'idem_1',
     payloadHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     workspaceId: 'workspace_1',
+    ...overrides,
+  };
+}
+
+function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): StoredOcrResult {
+  return {
+    durationMs: 1200,
+    model: 'test-model',
+    providerName: 'test-provider',
+    screenText: {
+      blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'hello' }],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    },
+    sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     ...overrides,
   };
 }

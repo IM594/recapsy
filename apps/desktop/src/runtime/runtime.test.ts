@@ -123,7 +123,7 @@ describe('desktop runtime lifecycle', () => {
     });
     await store.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:00:01.000Z',
-      state: 'uploading',
+      state: 'syncing',
     });
     const runtime = createDesktopRuntime({
       helper: createRecordingHelper(calls),
@@ -143,7 +143,7 @@ describe('desktop runtime lifecycle', () => {
     expect(calls).toEqual(['recover', 'start']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       lastSafeError: {
-        code: 'interrupted_during_upload',
+        code: 'interrupted_during_sync',
       },
       nextRetryAt: '2026-07-06T00:00:02.000Z',
       state: 'pending',

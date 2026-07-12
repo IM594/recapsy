@@ -210,10 +210,10 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
       updatedAt: update.now,
       ...(update.nextRetryAt ? { nextRetryAt: update.nextRetryAt } : {}),
       ...(update.serverCaptureId ? { serverCaptureId: update.serverCaptureId } : {}),
-      ...(update.serverOcrJobId ? { serverOcrJobId: update.serverOcrJobId } : {}),
+      ...(update.ocrResult ? { ocrResult: update.ocrResult } : {}),
     };
 
-    if (update.state === 'uploading') {
+    if (update.state === 'syncing') {
       updated.lockedAt = update.now;
     }
 
@@ -241,7 +241,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
     const claimed: OutboxJob = {
       ...job,
       lockedAt: input.now,
-      state: 'uploading',
+      state: 'syncing',
       updatedAt: input.now,
     };
 
@@ -276,7 +276,6 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
       terminalReason: update.reason,
       updatedAt: update.now,
       ...(update.serverCaptureId ? { serverCaptureId: update.serverCaptureId } : {}),
-      ...(update.serverOcrJobId ? { serverOcrJobId: update.serverOcrJobId } : {}),
     };
 
     this.outboxJobs.set(id, updated);
@@ -342,7 +341,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
       return failure(terminalTransitionConflict());
     }
 
-    if (job.state !== 'uploading' && job.state !== 'ocr_wait') {
+    if (job.state !== 'syncing' && job.state !== 'result_pending') {
       return failure({
         code: 'terminal_state_conflict',
         message: 'Only interrupted outbox jobs can be recovered at startup.',
