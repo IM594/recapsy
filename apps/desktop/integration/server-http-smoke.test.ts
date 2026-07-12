@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RecapsyAiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
+import type { AppDependencies, createApp } from '../../server/src/app';
 import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
 import type { ServerApiTransport } from '../src/server-api/types';
@@ -538,18 +540,31 @@ type CaptureSnapshot = {
   temporaryUploads: unknown[];
 };
 
-// Structural stand-in for the server's `RecapsyAiRuntime`, injected through the
-// dynamically imported `createApp`. Only the OCR proxy path (`runVisionText`) is
-// exercised; `runEmbedding` is present to satisfy the interface but returns an
-// empty result because keyword search indexing does not depend on embeddings.
-type FakeAiRuntime = {
-  runVisionText(input: unknown): Promise<unknown>;
-  runEmbedding(input: unknown): Promise<unknown>;
+type ServerHarnessOptions = {
+  aiRuntime?: RecapsyAiRuntime;
+  useAppDefaultOcrRunner?: boolean;
 };
 
-type ServerHarnessOptions = {
-  aiRuntime?: FakeAiRuntime;
-  useAppDefaultOcrRunner?: boolean;
+type CaptureRepositoryHarness = {
+  snapshot(): unknown;
+};
+
+type ServerAppDependencies = Pick<AppDependencies, 'aiRuntime' | 'config'> & {
+  accountManagementRepository: object;
+  captureOcrSearchRepository: CaptureRepositoryHarness;
+  db: object;
+  logger: {
+    debug(): void;
+    error(): void;
+    info(): void;
+    warn(): void;
+  };
+};
+
+type ServerModules = {
+  InMemoryAccountManagementRepository: new () => object;
+  InMemoryCaptureOcrSearchRepository: new () => CaptureRepositoryHarness;
+  createApp(deps: ServerAppDependencies): ReturnType<typeof createApp>;
 };
 
 async function startServerHttpHarness(options: ServerHarnessOptions): Promise<ServerHttpHarness> {
@@ -565,11 +580,16 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
       captureOcrSearchRepository,
       config: {
         ADMIN_BOOTSTRAP_TOKEN: adminToken,
+        CORS_ALLOWED_ORIGINS: [],
         DATABASE_URL: 'postgresql://test',
-        EMBEDDING_PROVIDER: 'stub',
+        EMBEDDING_INDEXER_BATCH_SIZE: 16,
+        EMBEDDING_INDEXER_INTERVAL_MS: 15_000,
+        EMBEDDING_INDEXER_MAX_ATTEMPTS: 5,
+        EMBEDDING_INDEXER_TIMEOUT_MS: 30_000,
         LOG_LEVEL: 'error',
         NODE_ENV: options.useAppDefaultOcrRunner ? 'production' : 'test',
         OCR_MAX_INPUT_BYTES: 1024 * 1024,
+        OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
         OBJECT_STORAGE_PREFIX: 'recapsy/test',
         PORT: 0,
         PROVIDER_ENCRYPTION_SECRET: providerSecret,
@@ -645,7 +665,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
   }
 }
 
-async function loadServerModules() {
+async function loadServerModules(): Promise<ServerModules> {
   const appModule = await import(new URL('../../server/src/app.ts', import.meta.url).href);
   const accountRepositoryModule = await import(
     new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href
@@ -662,7 +682,7 @@ async function loadServerModules() {
   };
 }
 
-function visionRuntimeReturning(text: string): FakeAiRuntime {
+function visionRuntimeReturning(text: string): RecapsyAiRuntime {
   return {
     async runVisionText() {
       return {
@@ -689,10 +709,10 @@ function visionRuntimeReturning(text: string): FakeAiRuntime {
 }
 
 function visionRuntimeFailing(
-  reason: string,
+  reason: RunVisionTextFailureReason,
   retryable: boolean,
   safeMessage: string,
-): FakeAiRuntime {
+): RecapsyAiRuntime {
   return {
     async runVisionText() {
       return { reason, retryable, safeMessage, success: false };
