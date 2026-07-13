@@ -251,7 +251,7 @@ describe('Search contracts', () => {
   });
 });
 
-describe('OCR job contracts', () => {
+describe('OCR result contracts', () => {
   it('allows empty searchText on OCR results for blank-image successes', () => {
     const parsed = OcrResultSchema.parse({
       id: ids.ocrResult,
