@@ -358,12 +358,9 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
         LOG_LEVEL: 'error',
         NODE_ENV: 'test',
         OCR_MAX_INPUT_BYTES: 1024 * 1024,
-        OBJECT_STORAGE_PREFIX: 'recapsy/test',
         PORT: 0,
         PROVIDER_ENCRYPTION_SECRET: providerSecret,
-        SERVER_TEMP_ASSET_DIR: serverTempAssetDir,
         SESSION_SECRET: sessionSecret,
-        TEMP_UPLOAD_DIR: serverTempAssetDir,
       },
       db: {},
       logger: {

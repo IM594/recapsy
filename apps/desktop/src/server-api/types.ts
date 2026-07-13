@@ -173,9 +173,7 @@ export type CapturePoliciesResult = {
   };
   storagePolicy: {
     authoritativeOriginalLocation: 'local_device';
-    allowTemporaryServerRead: boolean;
     allowLongTermRemoteOriginal: boolean;
-    temporaryTtlSeconds: number;
   };
   axAllowlist: AxAllowlistResult;
   generatedAt: string;

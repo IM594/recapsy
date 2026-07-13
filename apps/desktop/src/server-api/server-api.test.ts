@@ -259,9 +259,7 @@ describe('desktop server API client', () => {
           generatedAt: now,
           storagePolicy: {
             allowLongTermRemoteOriginal: false,
-            allowTemporaryServerRead: true,
             authoritativeOriginalLocation: 'local_device',
-            temporaryTtlSeconds: 1800,
           },
           workspaceId: 'workspace_1',
         });

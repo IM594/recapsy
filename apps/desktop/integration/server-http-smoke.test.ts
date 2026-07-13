@@ -590,12 +590,9 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
         NODE_ENV: options.useAppDefaultOcrRunner ? 'production' : 'test',
         OCR_MAX_INPUT_BYTES: 1024 * 1024,
         OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
-        OBJECT_STORAGE_PREFIX: 'recapsy/test',
         PORT: 0,
         PROVIDER_ENCRYPTION_SECRET: providerSecret,
-        SERVER_TEMP_ASSET_DIR: serverTempAssetDir,
         SESSION_SECRET: sessionSecret,
-        TEMP_UPLOAD_DIR: serverTempAssetDir,
       },
       db: {},
       logger: {

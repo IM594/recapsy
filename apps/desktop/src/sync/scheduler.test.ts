@@ -953,9 +953,7 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
         generatedAt: now,
         storagePolicy: {
           allowLongTermRemoteOriginal: false,
-          allowTemporaryServerRead: true,
           authoritativeOriginalLocation: 'local_device',
-          temporaryTtlSeconds: 1800,
         },
         workspaceId: 'workspace_1',
       };

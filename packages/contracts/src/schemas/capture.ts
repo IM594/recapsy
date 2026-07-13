@@ -56,9 +56,6 @@ export const CaptureStatusSchema = z.enum([
   'queued_for_sync',
   'synced_metadata',
   'timeline_projected',
-  'temporary_uploaded',
-  'ocr_queued',
-  'ocr_running',
   'ocr_succeeded',
   'search_document_indexed',
   'searchable',
@@ -87,11 +84,7 @@ export const CaptureSyncStateSchema = z.enum([
   'failed',
   'blocked',
 ]);
-export const CaptureIngestNextActionSchema = z.enum([
-  'create_temporary_upload',
-  'queue_ocr',
-  'none',
-]);
+export const CaptureIngestNextActionSchema = z.enum(['queue_ocr', 'none']);
 export const CaptureDuplicateHintStatusSchema = z.enum(['unique', 'candidate', 'duplicate']);
 
 export const CaptureSafeMetadataSchema = MetadataSchema.superRefine((value, context) => {

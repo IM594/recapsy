@@ -342,9 +342,7 @@ function toCapturePoliciesResult(body: unknown): CapturePoliciesResult {
     generatedAt: readString(body, 'generatedAt'),
     storagePolicy: {
       allowLongTermRemoteOriginal: readBoolean(storagePolicy, 'allowLongTermRemoteOriginal'),
-      allowTemporaryServerRead: readBoolean(storagePolicy, 'allowTemporaryServerRead'),
       authoritativeOriginalLocation: 'local_device',
-      temporaryTtlSeconds: readNumber(storagePolicy, 'temporaryTtlSeconds'),
     },
     workspaceId: readString(body, 'workspaceId'),
   };

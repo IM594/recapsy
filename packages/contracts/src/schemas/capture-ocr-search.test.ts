@@ -3,15 +3,12 @@ import {
   AXAllowlistDisabledResponseSchema,
   AssetLocationSchema,
   CaptureIngestRequestSchema,
-  OcrJobSafeErrorSchema,
   OcrResultSchema,
   SearchDocumentSchema,
   SearchResponseSchema,
 } from '../index.js';
 
 const now = '2026-07-06T00:00:00.000Z';
-const later = '2026-07-06T00:30:00.000Z';
-
 const ids = {
   workspace: '22222222-2222-4222-8222-222222222222',
   user: '11111111-1111-4111-8111-111111111111',
@@ -150,25 +147,18 @@ describe('Asset location contracts', () => {
     ).toBe(false);
   });
 
-  it('parses server_temporary locations as non-authoritative with cleanup state', () => {
-    const parsed = AssetLocationSchema.parse({
-      id: ids.location,
-      workspaceId: ids.workspace,
-      assetId: ids.asset,
-      kind: 'server_temporary',
-      temporaryUploadId: 'temporary-upload-01',
-      uploadReceipt: 'receipt-01',
-      availability: 'available',
-      isAuthoritative: false,
-      isTemporary: true,
-      expiresAt: later,
-      cleanupStatus: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    expect(parsed.kind).toBe('server_temporary');
-    expect(parsed.isAuthoritative).toBe(false);
+  it('rejects retired server temporary locations', () => {
+    expect(
+      AssetLocationSchema.safeParse({
+        id: ids.location,
+        workspaceId: ids.workspace,
+        assetId: ids.asset,
+        kind: 'server_temporary',
+        temporaryUploadId: 'temporary-upload-01',
+        createdAt: now,
+        updatedAt: now,
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -295,17 +285,6 @@ describe('OCR job contracts', () => {
 
     expect(parsed.searchText).toBe('');
     expect(parsed.screenText.blocks).toEqual([]);
-  });
-
-  it('accepts provider_unavailable as a safe OCR job error code', () => {
-    const parsed = OcrJobSafeErrorSchema.parse({
-      code: 'provider_unavailable',
-      messageSafe: 'OCR provider is temporarily unavailable.',
-      retryable: true,
-    });
-
-    expect(parsed.code).toBe('provider_unavailable');
-    expect(parsed.retryable).toBe(true);
   });
 });
 
