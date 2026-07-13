@@ -1,5 +1,6 @@
 import {
   AiOcrResponseSchema,
+  CaptureIngestNextActionSchema,
   CaptureIngestRequestSchema,
   OcrResultSubmitRequestSchema,
   OcrResultSubmitResponseSchema,
@@ -439,14 +440,19 @@ function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unkn
 function toCaptureIngestResult(body: unknown): CaptureIngestResult {
   const capture = readObject(readObject(body, 'capture'), undefined);
   const timelineEvent = readObject(readObject(body, 'timelineEvent'), undefined);
+  const nextAction = CaptureIngestNextActionSchema.safeParse(readString(body, 'nextAction'));
   const inputAsset = readArray(body, 'assets')
     .map((entry) => readObject(entry, undefined))
     .find((entry) => readOptionalString(entry, 'role') === 'ocr_input_image');
 
+  if (!nextAction.success) {
+    throw invalidResponse();
+  }
+
   return {
     captureId: readString(capture, 'id'),
     ...(inputAsset ? { inputAssetId: readString(inputAsset, 'id') } : {}),
-    nextAction: readString(body, 'nextAction') as CaptureIngestResult['nextAction'],
+    nextAction: nextAction.data,
     timelineEventId: readString(timelineEvent, 'id'),
   };
 }

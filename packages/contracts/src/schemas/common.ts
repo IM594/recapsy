@@ -61,7 +61,6 @@ export const ApiErrorCodeSchema = z.enum([
   'capture.invalid_context',
   'storage.asset_not_found',
   'storage.location_not_found',
-  'storage.temporary_upload_expired',
   'storage.unsupported_location',
   'storage.cleanup_failed',
   'policy.denied',

@@ -50,7 +50,7 @@ describe('desktop server API client', () => {
           workspaceId,
         },
         assets: [{ id: 'asset_server_1', role: 'ocr_input_image' }],
-        nextAction: 'create_temporary_upload',
+        nextAction: 'queue_ocr',
         timelineEvent: { id: 'timeline_1' },
       });
     });
@@ -72,10 +72,43 @@ describe('desktop server API client', () => {
     expect(response).toMatchObject({
       captureId: 'capture_1',
       inputAssetId: 'asset_server_1',
-      nextAction: 'create_temporary_upload',
+      nextAction: 'queue_ocr',
       timelineEventId: 'timeline_1',
     });
     expect(JSON.stringify(calls)).not.toContain('provider-token');
+  });
+
+  it('rejects retired temporary-upload commands in capture ingest responses', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const retiredNextAction = ['create', 'temporary', 'upload'].join('_');
+    const client = createClient(calls, async () =>
+      createJsonResponse({
+        capture: {
+          id: 'capture_1',
+          workspaceId,
+        },
+        assets: [{ id: 'asset_server_1', role: 'ocr_input_image' }],
+        nextAction: retiredNextAction,
+        timelineEvent: { id: 'timeline_1' },
+      }),
+    );
+
+    await expect(
+      client.ingestCapture({
+        appName: 'Code',
+        asset: createLocalAsset(),
+        captureType: 'screen',
+        capturedAt: now,
+        deviceId: 'device_1',
+        idempotencyKey: 'capture-idem-1',
+        observedAt: now,
+        privacyDecision: createPrivacyDecision(),
+        workspaceId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'validation_failed',
+      retryable: false,
+    });
   });
 
   it('validates capture ingest against contracts and rejects missing privacyDecision.decidedAt', async () => {

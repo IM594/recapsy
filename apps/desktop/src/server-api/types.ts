@@ -1,6 +1,7 @@
 import type {
   AiOcrResponse,
   AiOcrUsage,
+  CaptureIngestNextAction,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -72,7 +73,7 @@ export type CaptureIngestInput = CaptureOutboxPayload & {
 export type CaptureIngestResult = {
   captureId: string;
   timelineEventId: string;
-  nextAction: 'create_temporary_upload' | 'queue_ocr' | 'none';
+  nextAction: CaptureIngestNextAction;
   inputAssetId?: string;
 };
 
@@ -92,9 +93,8 @@ export type CaptureDetailResult = {
 
 // Thin-proxy OCR: the desktop runs the provider OCR synchronously through the
 // authenticated proxy (`POST /v1/ai/ocr`), then hands the locally parsed
-// transcript back for server-side persistence (`POST
-// /v1/captures/:captureId/ocr-result`). Both are additive alongside the legacy
-// temporary-upload + async OCR-job methods.
+// transcript back for server-side persistence
+// (`POST /v1/captures/:captureId/ocr-result`).
 export type RunOcrProxyInput = {
   workspaceId: string;
   mimeType: string;
