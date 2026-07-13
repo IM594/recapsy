@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'bun:test';
-import { createRuntimeHarness } from '../harness/runtime-harness';
 import { createInMemoryOperationalStore } from '../storage';
 import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
 import { createDesktopRuntime } from './lifecycle-controller';
 import type { HelperLifecycle } from './types';
 
 describe('desktop runtime lifecycle', () => {
+  it('keeps the runtime harness test double out of production modules', async () => {
+    const productionHarnessModule = Bun.file(
+      new URL('../harness/runtime-harness.ts', import.meta.url),
+    );
+
+    expect(await productionHarnessModule.exists()).toBe(false);
+  });
+
   it('enters running after a successful start', async () => {
     const harness = createRuntimeHarness();
 
@@ -243,8 +250,18 @@ describe('desktop runtime lifecycle', () => {
   });
 });
 
-function createRecordingHelper(calls: string[]): HelperLifecycle {
+function createRuntimeHarness() {
+  const helper = createRecordingHelper([]);
+
   return {
+    helper,
+    runtime: createDesktopRuntime({ helper }),
+  };
+}
+
+function createRecordingHelper(calls: string[]): HelperLifecycle & { readonly calls: string[] } {
+  return {
+    calls,
     async pauseCapture(): Promise<void> {
       calls.push('pauseCapture');
     },
