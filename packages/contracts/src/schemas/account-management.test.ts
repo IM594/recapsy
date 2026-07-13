@@ -14,6 +14,7 @@ import {
   AuthSessionSnapshotSchema,
   CapabilitiesResponseSchema,
   EffectiveProviderSettingsResponseSchema,
+  PaginationSchema,
   ProviderSettingMaskSchema,
   SessionResponseSchema,
   SubscriptionStatusSchema,
@@ -251,6 +252,17 @@ describe('Account management auth and workspace contracts', () => {
 });
 
 describe('Account management invite contracts', () => {
+  it('parses bounded admin list pagination input', () => {
+    expect(PaginationSchema.parse({})).toEqual({ limit: 50 });
+    expect(PaginationSchema.parse({ limit: 1, cursor: 'opaque-cursor' })).toEqual({
+      limit: 1,
+      cursor: 'opaque-cursor',
+    });
+    for (const limit of [0, -1, 1.5, 101]) {
+      expect(PaginationSchema.safeParse({ limit }).success).toBe(false);
+    }
+  });
+
   it('parses single-use invite create responses', () => {
     expect(
       AdminInviteCreateRequestSchema.safeParse({
