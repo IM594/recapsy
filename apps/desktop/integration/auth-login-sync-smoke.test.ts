@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
 import { createAuthClient } from '../src/auth/auth-client';
 import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
@@ -128,11 +129,13 @@ describe('real login through to the sync loop over real HTTP', () => {
     const secondRun = await scheduler.runOnce();
     expect(secondRun).toEqual({ processed: 0, status: 'idle' });
 
-    // The real server never received an OCR input for this capture, since
-    // the sync scheduler fails closed before ever calling the temporary
-    // upload or OCR job routes.
-    expect(harness.captureSnapshot().temporaryUploads).toHaveLength(0);
-    expect(harness.captureSnapshot().ocrJobs).toHaveLength(0);
+    // Capture ingest completed, but the unreadable local asset stopped the
+    // thin-proxy flow before OCR and result submission created any records.
+    const captureSnapshot = harness.captureSnapshot();
+    expect(captureSnapshot.captures).toHaveLength(1);
+    expect(captureSnapshot.ocrJobs).toHaveLength(0);
+    expect(captureSnapshot.ocrResults).toHaveLength(0);
+    expect(captureSnapshot.searchDocuments).toHaveLength(0);
   });
 
   it('keeps the last confirmed workspace id cached in the token store when the real server becomes unreachable', async () => {
@@ -331,13 +334,8 @@ function sha256Hex(bytes: Uint8Array) {
 type ServerHttpHarness = {
   endpoint: string;
   registerUser(email: string): Promise<{ accessToken: string; workspaceId: string }>;
-  captureSnapshot(): CaptureSnapshot;
+  captureSnapshot(): CaptureOcrSearchRepositorySnapshot;
   stop(): void;
-};
-
-type CaptureSnapshot = {
-  ocrJobs: unknown[];
-  temporaryUploads: unknown[];
 };
 
 async function startServerHttpHarness(): Promise<ServerHttpHarness> {
@@ -374,7 +372,7 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
     const endpoint = server.url.toString().replace(/\/$/, '');
     const harness: ServerHttpHarness = {
       captureSnapshot() {
-        return captureOcrSearchRepository.snapshot() as CaptureSnapshot;
+        return captureOcrSearchRepository.snapshot() as CaptureOcrSearchRepositorySnapshot;
       },
       endpoint,
       async registerUser(email) {
