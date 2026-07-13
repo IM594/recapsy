@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RecapsyAiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
 import type { AppDependencies, createApp } from '../../server/src/app';
+import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
 import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
 import type { ServerApiTransport } from '../src/server-api/types';
@@ -527,17 +528,8 @@ function sha256Hex(bytes: Uint8Array) {
 type ServerHttpHarness = {
   endpoint: string;
   bootstrapUser(email: string): Promise<{ accessToken: string; workspaceId: string }>;
-  captureSnapshot(): CaptureSnapshot;
+  captureSnapshot(): CaptureOcrSearchRepositorySnapshot;
   stop(): void;
-};
-
-type CaptureSnapshot = {
-  assetLocations: Array<{ kind: string; cleanupStatus?: string }>;
-  captures: unknown[];
-  ocrJobs: unknown[];
-  ocrResults: unknown[];
-  searchDocuments: unknown[];
-  temporaryUploads: unknown[];
 };
 
 type ServerHarnessOptions = {
@@ -546,7 +538,7 @@ type ServerHarnessOptions = {
 };
 
 type CaptureRepositoryHarness = {
-  snapshot(): unknown;
+  snapshot(): CaptureOcrSearchRepositorySnapshot;
 };
 
 type ServerAppDependencies = Pick<AppDependencies, 'aiRuntime' | 'config'> & {
@@ -645,7 +637,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
         };
       },
       captureSnapshot() {
-        return captureOcrSearchRepository.snapshot() as CaptureSnapshot;
+        return captureOcrSearchRepository.snapshot();
       },
       stop() {
         server?.stop(true);
