@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { createTestHttpApp } from '../../server/src/__tests__/app-harness';
-import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
+import type { createMemoryAccountPersistence } from '../../server/src/account-management/composition';
 import type { CaptureRepositorySnapshot } from '../../server/src/capture/models';
 import type { InMemoryCaptureRepository } from '../../server/src/capture/repositories/memory';
 import type { Logger } from '../../server/src/shared/logger';
@@ -356,10 +356,10 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
   let server: ReturnType<typeof Bun.serve> | undefined;
 
   try {
-    const accountManagementRepository = new modules.InMemoryAccountManagementRepository();
+    const accountPersistence = modules.createMemoryAccountPersistence();
     const captureRepository = new modules.InMemoryCaptureRepository();
     const app = modules.createTestHttpApp({
-      accountManagementRepository,
+      accountPersistence,
       captureRepository,
       config: {
         ADMIN_BOOTSTRAP_TOKEN: adminToken,
@@ -432,8 +432,8 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
 }
 
 type ServerModules = {
-  InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
   InMemoryCaptureRepository: new () => InMemoryCaptureRepository;
+  createMemoryAccountPersistence: typeof createMemoryAccountPersistence;
   createTestHttpApp: typeof createTestHttpApp;
 };
 
@@ -441,17 +441,16 @@ async function loadServerModules(): Promise<ServerModules> {
   const appHarnessModule = await import(
     new URL('../../server/src/__tests__/app-harness.ts', import.meta.url).href
   );
-  const accountRepositoryModule = await import(
-    new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href
+  const accountCompositionModule = await import(
+    new URL('../../server/src/account-management/composition.ts', import.meta.url).href
   );
   const captureRepositoryModule = await import(
     new URL('../../server/src/capture/repositories/memory.ts', import.meta.url).href
   );
 
   return {
-    InMemoryAccountManagementRepository:
-      accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureRepository: captureRepositoryModule.InMemoryCaptureRepository,
+    createMemoryAccountPersistence: accountCompositionModule.createMemoryAccountPersistence,
     createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }

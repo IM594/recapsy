@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { createTestHttpApp } from '../../server/src/__tests__/app-harness';
-import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
+import type { createMemoryAccountPersistence } from '../../server/src/account-management/composition';
 import type {
   AiRuntime,
   RunVisionTextFailureReason,
@@ -556,11 +556,11 @@ type ServerHarnessOptions = {
 };
 
 type ServerModules = {
-  InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
   InMemoryCaptureRepository: new () => InMemoryCaptureRepository;
   InMemoryProviderSettingsRepository: new () => InMemoryProviderSettingsRepository;
   createProviderCredentialResolver: typeof createProviderCredentialResolver;
   createAiRuntime: typeof createAiRuntime;
+  createMemoryAccountPersistence: typeof createMemoryAccountPersistence;
   createTestHttpApp: typeof createTestHttpApp;
 };
 
@@ -569,7 +569,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
   let server: ReturnType<typeof Bun.serve> | undefined;
 
   try {
-    const accountManagementRepository = new modules.InMemoryAccountManagementRepository();
+    const accountPersistence = modules.createMemoryAccountPersistence();
     const captureRepository = new modules.InMemoryCaptureRepository();
     const providerSettingsRepository = new modules.InMemoryProviderSettingsRepository();
     const config = {
@@ -605,7 +605,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
           })
         : undefined);
     const app = modules.createTestHttpApp({
-      accountManagementRepository,
+      accountPersistence,
       ...(aiRuntime ? { aiRuntime } : {}),
       captureRepository,
       config,
@@ -676,8 +676,8 @@ async function loadServerModules(): Promise<ServerModules> {
   const aiRuntimeModule = await import(
     new URL('../../server/src/ai/public.ts', import.meta.url).href
   );
-  const accountRepositoryModule = await import(
-    new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href
+  const accountCompositionModule = await import(
+    new URL('../../server/src/account-management/composition.ts', import.meta.url).href
   );
   const captureRepositoryModule = await import(
     new URL('../../server/src/capture/repositories/memory.ts', import.meta.url).href
@@ -687,12 +687,11 @@ async function loadServerModules(): Promise<ServerModules> {
   );
 
   return {
-    InMemoryAccountManagementRepository:
-      accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureRepository: captureRepositoryModule.InMemoryCaptureRepository,
     InMemoryProviderSettingsRepository: providerSettingsModule.InMemoryProviderSettingsRepository,
     createProviderCredentialResolver: providerSettingsModule.createProviderCredentialResolver,
     createAiRuntime: aiRuntimeModule.createAiRuntime,
+    createMemoryAccountPersistence: accountCompositionModule.createMemoryAccountPersistence,
     createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }
