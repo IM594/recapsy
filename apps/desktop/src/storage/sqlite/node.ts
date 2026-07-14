@@ -6,17 +6,17 @@ import type {
   SqliteRunResult,
   SqliteStatement,
   SqliteValue,
-} from './sqlite-driver';
+} from './driver';
 
 /**
  * `node:sqlite` backed implementation of `SqliteDatabase`.
  *
  * This is the driver the real Electron main process uses: Electron's main
- * process runs on Node (not Bun), so `bun-driver.ts` (which imports
+ * process runs on Node (not Bun), so `bun.ts` (which imports
  * `bun:sqlite`) cannot be loaded there. `node:sqlite`'s `DatabaseSync` speaks
  * the same synchronous, single-connection SQLite semantics `bun:sqlite`
  * does and needs the same positional-vs-named parameter handling, so this
- * mirrors `bun-driver.ts` structurally.
+ * mirrors `bun.ts` structurally.
  *
  * `node:sqlite` is available without any native module rebuild starting
  * with the Node version bundled by current stable Electron releases, so it
@@ -71,7 +71,7 @@ class NodeSqliteDatabaseAdapter implements SqliteDatabase {
 /**
  * `node:sqlite`'s bind types (`SQLInputValue`) do not include `boolean` even
  * though this driver's shared `SqliteValue` type does (to stay structurally
- * compatible with `bun-driver.ts`). SQLite itself has no boolean
+ * compatible with `bun.ts`). SQLite itself has no boolean
  * column type, so booleans are normalized to `0`/`1` here, matching how
  * SQLite represents them everywhere else.
  */

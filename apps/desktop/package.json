@@ -8,9 +8,9 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./storage/bun-driver": {
-      "types": "./src/storage/bun-driver.ts",
-      "import": "./src/storage/bun-driver.ts"
+    "./storage/sqlite/bun": {
+      "types": "./src/storage/sqlite/bun.ts",
+      "import": "./src/storage/sqlite/bun.ts"
     }
   },
   "dependencies": {

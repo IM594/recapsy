@@ -21,7 +21,7 @@ import { createServerApiClient } from '../src/server/client';
 import type { ServerApiTransport } from '../src/server/types';
 import { createMemoryStore, createSqliteStore } from '../src/storage';
 import type { AssetCacheRef, OutboxJobCreateInput } from '../src/storage';
-import { createBunSqliteDatabase } from '../src/storage/bun-driver';
+import { createBunSqliteDatabase } from '../src/storage/sqlite/bun';
 import { createSyncJobExecutor } from '../src/sync/job';
 import type { SyncQueueStore, SyncServerApi } from '../src/sync/types';
 import { createSyncWorker } from '../src/sync/worker';

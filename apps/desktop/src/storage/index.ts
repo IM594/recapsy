@@ -2,7 +2,7 @@ export { evaluateOperationalStoreBackpressure } from './backpressure';
 export {
   createMemoryStore,
   type MemoryStoreOptions,
-} from './memory-store';
+} from './memory';
 export { toRendererSafeAssetRef } from './projections';
 export { reconcileAssetRefs } from './reconciliation';
 export type {
@@ -18,12 +18,12 @@ export type {
   SqliteRunResult,
   SqliteStatement,
   SqliteValue,
-} from './sqlite-driver';
+} from './sqlite/driver';
 export {
   createSqliteStore,
-  migrateSqliteStore,
   type SqliteStoreOptions,
-} from './sqlite-store';
+} from './sqlite/store';
+export { migrateSqliteStore } from './sqlite/migrations';
 export type {
   AssetCacheRef,
   AssetCacheRefRole,

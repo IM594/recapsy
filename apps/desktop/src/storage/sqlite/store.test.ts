@@ -2,9 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSyncQueueSummary } from '../sync/public';
-import { recoverInterruptedOutboxJobs } from '../sync/recovery';
-import { createBunSqliteDatabase } from './bun-driver';
+import { createSyncQueueSummary } from '../../sync/public';
+import { recoverInterruptedOutboxJobs } from '../../sync/recovery';
 import {
   type AssetCacheRef,
   type HelperRuntimeState,
@@ -12,10 +11,12 @@ import {
   type StoredOcrResult,
   evaluateOperationalStoreBackpressure,
   toRendererSafeAssetRef,
-} from './index';
-import { reconcileAssetRefs } from './reconciliation';
-import type { SqliteDatabase } from './sqlite-driver';
-import { createSqliteStore, migrateSqliteStore } from './sqlite-store';
+} from '../index';
+import { reconcileAssetRefs } from '../reconciliation';
+import { createBunSqliteDatabase } from './bun';
+import type { SqliteDatabase, SqliteRow, SqliteStatement } from './driver';
+import { migrateSqliteStore } from './migrations';
+import { createSqliteStore } from './store';
 
 const now = '2026-07-06T00:00:00.000Z';
 const tempDirs: string[] = [];
@@ -274,6 +275,52 @@ describe('SQLite operational store', () => {
     database.close();
   });
 
+  it('rolls back the v1 rebuild when migration fails after copying legacy rows', () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    createLegacyOutboxTable(database);
+    database.run(
+      `INSERT INTO outbox_jobs (
+        id, workspace_id, device_id, asset_ref_id, idempotency_key, payload_hash,
+        capture_json, state, attempt, created_at, updated_at, next_retry_at,
+        locked_at, server_capture_id, server_ocr_job_id
+      ) VALUES (
+        'job_legacy', 'workspace_1', 'device_1', 'asset_1', 'idem_legacy', 'sha256:aa',
+        '{}', 'ocr_wait', 0, $now, $now, $now, $now, 'capture_1', 'ocr_legacy'
+      )`,
+      { $now: now },
+    );
+    const failingDatabase = createFailingSqliteDatabase(database, (sql) =>
+      sql.includes('DROP TABLE outbox_jobs'),
+    );
+
+    expect(() => migrateSqliteStore(failingDatabase)).toThrow('injected_sqlite_failure');
+
+    const columns = new Set(
+      database
+        .prepare<{ name: string }>('PRAGMA table_info(outbox_jobs)')
+        .all()
+        .map((column) => column.name),
+    );
+    expect(columns.has('server_ocr_job_id')).toBe(true);
+    expect(columns.has('ocr_result_json')).toBe(false);
+    expect(
+      database
+        .prepare<{ server_ocr_job_id: string; state: string }>(
+          'SELECT state, server_ocr_job_id FROM outbox_jobs WHERE id = $id',
+        )
+        .get({ $id: 'job_legacy' }),
+    ).toEqual({ server_ocr_job_id: 'ocr_legacy', state: 'ocr_wait' });
+    expect(
+      database
+        .prepare<{ count: number }>(
+          "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'outbox_jobs__v2'",
+        )
+        .get()?.count,
+    ).toBe(0);
+
+    database.close();
+  });
+
   it('initializes schema idempotently and restores operational state after close and reopen', async () => {
     const path = tempDatabasePath();
     const firstDatabase = createBunSqliteDatabase(path);
@@ -497,6 +544,41 @@ describe('SQLite operational store', () => {
     });
     expect(await store.getAssetCacheRef('asset_1')).toBeNull();
     expect(await store.getOutboxJob('job_1')).toBeNull();
+
+    store.close();
+  });
+
+  it('rolls back written asset refs when the outbox insert throws', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    let assetWriteObserved = false;
+    const failingDatabase = createFailingSqliteDatabase(
+      database,
+      (sql) => sql.includes('INSERT INTO outbox_jobs ('),
+      () => {
+        assetWriteObserved =
+          database
+            .prepare<{ count: number }>('SELECT COUNT(*) AS count FROM asset_cache_refs')
+            .get()?.count === 1;
+      },
+    );
+    const store = createSqliteStore({ database: failingDatabase });
+    await store.initialize();
+
+    await expect(
+      store.createCaptureOutboxEntry({
+        ...createJob(),
+        assetRefs: [createAsset()],
+      }),
+    ).rejects.toThrow('injected_sqlite_failure');
+
+    expect(assetWriteObserved).toBe(true);
+    expect(
+      database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM asset_cache_refs').get()
+        ?.count,
+    ).toBe(0);
+    expect(
+      database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM outbox_jobs').get()?.count,
+    ).toBe(0);
 
     store.close();
   });
@@ -1075,6 +1157,74 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
     sizeBytes: 2048,
     workspaceId: 'workspace_1',
     ...overrides,
+  };
+}
+
+function createLegacyOutboxTable(database: SqliteDatabase): void {
+  database.run(
+    `CREATE TABLE outbox_jobs (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      asset_ref_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      capture_json TEXT NOT NULL CHECK (json_valid(capture_json)),
+      state TEXT NOT NULL CHECK (
+        state IN ('pending', 'uploading', 'ocr_wait', 'synced', 'blocked', 'failed', 'cancelled')
+      ),
+      attempt INTEGER NOT NULL DEFAULT 0 CHECK (attempt >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      next_retry_at TEXT,
+      locked_at TEXT,
+      server_capture_id TEXT,
+      server_ocr_job_id TEXT,
+      last_safe_error_json TEXT,
+      terminal_reason TEXT,
+      UNIQUE(workspace_id, idempotency_key)
+    )`,
+  );
+}
+
+function createFailingSqliteDatabase(
+  database: SqliteDatabase,
+  shouldFail: (sql: string) => boolean,
+  beforeFailure?: () => void,
+): SqliteDatabase {
+  let failed = false;
+
+  const failOnce = (sql: string): void => {
+    if (failed || !shouldFail(sql)) {
+      return;
+    }
+
+    failed = true;
+    beforeFailure?.();
+    throw new Error('injected_sqlite_failure');
+  };
+
+  return {
+    close: () => database.close(),
+    prepare<Row extends SqliteRow = SqliteRow>(sql: string): SqliteStatement<Row> {
+      const statement = database.prepare<Row>(sql);
+      return {
+        all(parameters) {
+          return statement.all(parameters);
+        },
+        get(parameters) {
+          return statement.get(parameters);
+        },
+        run(parameters) {
+          failOnce(sql);
+          return statement.run(parameters);
+        },
+      };
+    },
+    run(sql, parameters) {
+      failOnce(sql);
+      return database.run(sql, parameters);
+    },
   };
 }
 

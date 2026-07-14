@@ -38,7 +38,7 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
   };
 }
 
-describe('in-memory operational store', () => {
+describe('memory operational store', () => {
   it('creates, lists, reads, and updates outbox jobs', async () => {
     const store = createMemoryStore();
 

@@ -39,6 +39,112 @@ describe('desktop architecture boundaries', () => {
     expect(compositionSource).toContain('createNodeSqliteDatabase');
   });
 
+  it('splits SQLite persistence by table ownership while keeping transactions coordinated', async () => {
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const requiredPaths = [
+      'storage/memory.ts',
+      'storage/memory.test.ts',
+      'storage/sqlite/assets.ts',
+      'storage/sqlite/bun.ts',
+      'storage/sqlite/cache.ts',
+      'storage/sqlite/driver.ts',
+      'storage/sqlite/migrations.ts',
+      'storage/sqlite/node.ts',
+      'storage/sqlite/outbox.ts',
+      'storage/sqlite/store.ts',
+      'storage/sqlite/store.test.ts',
+    ];
+    const retiredPaths = [
+      'storage/memory-store.ts',
+      'storage/store.test.ts',
+      'storage/bun-driver.ts',
+      'storage/node-driver.ts',
+      'storage/sqlite-driver.ts',
+      'storage/sqlite-store.ts',
+      'storage/sqlite-store.test.ts',
+    ];
+    const violations = [
+      ...requiredPaths
+        .filter((relativePath) => !sourceFiles.includes(relativePath))
+        .map((relativePath) => `${relativePath} is missing`),
+      ...retiredPaths
+        .filter((relativePath) => sourceFiles.includes(relativePath))
+        .map((relativePath) => `${relativePath} is still present`),
+    ];
+
+    if (sourceFiles.includes('storage/sqlite/store.ts')) {
+      const storeSource = await readSource('storage/sqlite/store.ts');
+      for (const dependency of ['./assets', './cache', './migrations', './outbox']) {
+        if (!storeSource.includes(`from '${dependency}'`)) {
+          violations.push(`storage/sqlite/store.ts does not depend on ${dependency}`);
+        }
+      }
+      for (const responsibility of [
+        'createCaptureOutboxEntry',
+        'getBackpressureSnapshot',
+        'clearWorkspaceCache',
+        'clearSignOutCache',
+        'BEGIN IMMEDIATE',
+      ]) {
+        if (!storeSource.includes(responsibility)) {
+          violations.push(`storage/sqlite/store.ts does not own ${responsibility}`);
+        }
+      }
+      for (const migrationDetail of [
+        'SCHEMA_VERSION',
+        'PRAGMA journal_mode',
+        'ensureAssetAvailabilityColumns',
+        'migrateOutboxJobsToV2',
+      ]) {
+        if (storeSource.includes(migrationDetail)) {
+          violations.push(`storage/sqlite/store.ts still owns ${migrationDetail}`);
+        }
+      }
+    }
+
+    for (const leafPath of [
+      'storage/sqlite/assets.ts',
+      'storage/sqlite/cache.ts',
+      'storage/sqlite/outbox.ts',
+    ]) {
+      if (!sourceFiles.includes(leafPath)) {
+        continue;
+      }
+      const leafSource = await readSource(leafPath);
+      for (const forbiddenDependency of [
+        './store',
+        '../capture',
+        '../sync',
+        '../main',
+        'BEGIN IMMEDIATE',
+        'COMMIT',
+        'ROLLBACK',
+      ]) {
+        if (leafSource.includes(forbiddenDependency)) {
+          violations.push(`${leafPath} depends on ${forbiddenDependency}`);
+        }
+      }
+    }
+
+    const packageSource = await readFile(
+      path.resolve(DESKTOP_SOURCE_ROOT, '../package.json'),
+      'utf8',
+    );
+    if (!packageSource.includes('"./storage/sqlite/bun"')) {
+      violations.push('package export ./storage/sqlite/bun is missing');
+    }
+    if (packageSource.includes('"./storage/bun-driver"')) {
+      violations.push('package export ./storage/bun-driver is still present');
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('limits the storage composition surface to the Electron composition root', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
@@ -769,10 +875,10 @@ describe('desktop architecture boundaries', () => {
       'auth/login-preload.ts',
       'helper/process-client.ts',
       'helper/dev-process.ts',
-      'storage/sqlite-store.ts',
-      'storage/memory-store.ts',
-      'storage/node-driver.ts',
-      'storage/bun-driver.ts',
+      'storage/sqlite/store.ts',
+      'storage/memory.ts',
+      'storage/sqlite/node.ts',
+      'storage/sqlite/bun.ts',
       'storage/reconciliation.ts',
       'sync/recovery.ts',
       'sync/loop.ts',

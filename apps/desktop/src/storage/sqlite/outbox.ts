@@ -1,0 +1,573 @@
+import type {
+  ClaimRetryableOutboxJobInput,
+  OperationalStoreError,
+  OperationalStoreResult,
+  OutboxJob,
+  OutboxJobCreateInput,
+  OutboxJobListFilter,
+  OutboxJobState,
+  OutboxJobStateUpdate,
+  OutboxSafeErrorInput,
+  OutboxTerminalState,
+  OutboxTerminalUpdate,
+  RecoverInterruptedOutboxJobInput,
+  StoredOcrResult,
+} from '../types';
+import type { SqliteDatabase, SqliteRow } from './driver';
+
+const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
+  'synced',
+  'blocked',
+  'failed',
+  'cancelled',
+]);
+
+export class SqliteOutboxPersistence {
+  constructor(
+    private readonly database: SqliteDatabase,
+    private readonly maxActiveJobs?: number,
+  ) {}
+
+  async create(job: OutboxJobCreateInput): Promise<OperationalStoreResult<OutboxJob>> {
+    if (this.capacityReached()) {
+      return failure(capacityExceeded());
+    }
+
+    if (this.hasIdempotencyKey(job.workspaceId, job.idempotencyKey)) {
+      return failure(idempotencyKeyConflict());
+    }
+
+    const created = createPendingOutboxJob(job);
+
+    try {
+      this.insert(created);
+    } catch (error) {
+      const mapped = mapCreateOutboxConstraintError(error);
+      if (mapped) return failure(mapped);
+      throw error;
+    }
+
+    return success(cloneOutboxJob(created));
+  }
+
+  async get(id: string): Promise<OutboxJob | null> {
+    return this.findById(id);
+  }
+
+  async list(filter: OutboxJobListFilter = {}): Promise<OutboxJob[]> {
+    const rows =
+      filter.workspaceId && filter.state
+        ? this.database
+            .prepare<OutboxJobRow>(
+              `SELECT *
+               FROM outbox_jobs
+               WHERE workspace_id = $workspaceId AND state = $state
+               ORDER BY created_at ASC, id ASC`,
+            )
+            .all({ $state: filter.state, $workspaceId: filter.workspaceId })
+        : filter.workspaceId
+          ? this.database
+              .prepare<OutboxJobRow>(
+                `SELECT *
+                 FROM outbox_jobs
+                 WHERE workspace_id = $workspaceId
+                 ORDER BY created_at ASC, id ASC`,
+              )
+              .all({ $workspaceId: filter.workspaceId })
+          : filter.state
+            ? this.database
+                .prepare<OutboxJobRow>(
+                  `SELECT *
+                   FROM outbox_jobs
+                   WHERE state = $state
+                   ORDER BY created_at ASC, id ASC`,
+                )
+                .all({ $state: filter.state })
+            : this.database
+                .prepare<OutboxJobRow>('SELECT * FROM outbox_jobs ORDER BY created_at ASC, id ASC')
+                .all();
+
+    return rows.map(outboxJobFromRow);
+  }
+
+  async updateState(
+    id: string,
+    update: OutboxJobStateUpdate,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = $state,
+             updated_at = $updatedAt,
+             next_retry_at = COALESCE($nextRetryAt, next_retry_at),
+             locked_at = CASE WHEN $state = 'syncing' THEN $updatedAt ELSE locked_at END,
+             server_capture_id = COALESCE($serverCaptureId, server_capture_id),
+             ocr_result_json = COALESCE($ocrResultJson, ocr_result_json)
+         WHERE id = $id
+           AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+         RETURNING *`,
+      )
+      .get({
+        $id: id,
+        $nextRetryAt: update.nextRetryAt ?? null,
+        $ocrResultJson: update.ocrResult ? JSON.stringify(update.ocrResult) : null,
+        $serverCaptureId: update.serverCaptureId ?? null,
+        $state: update.state,
+        $updatedAt: update.now,
+      });
+
+    return row
+      ? success(outboxJobFromRow(row))
+      : failure(this.missingOrTerminalError(id, terminalTransitionConflict()));
+  }
+
+  async claimNextRetryable(input: ClaimRetryableOutboxJobInput): Promise<OutboxJob | null> {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = 'syncing',
+             locked_at = $now,
+             updated_at = $now
+         WHERE id = (
+           SELECT id
+           FROM outbox_jobs
+           WHERE workspace_id = $workspaceId
+             AND state = 'pending'
+             AND attempt < $maxAttempts
+             AND (next_retry_at IS NULL OR next_retry_at <= $now)
+           ORDER BY COALESCE(next_retry_at, created_at) ASC, created_at ASC, id ASC
+           LIMIT 1
+         )
+         RETURNING *`,
+      )
+      .get({
+        $maxAttempts: input.maxAttempts,
+        $now: input.now,
+        $workspaceId: input.workspaceId,
+      });
+
+    return row ? outboxJobFromRow(row) : null;
+  }
+
+  async markTerminal(
+    id: string,
+    update: OutboxTerminalUpdate,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = $state,
+             updated_at = $updatedAt,
+             next_retry_at = NULL,
+             locked_at = NULL,
+             server_capture_id = $serverCaptureId,
+             last_safe_error_json = $lastSafeErrorJson,
+             terminal_reason = $terminalReason
+         WHERE id = $id
+           AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+         RETURNING *`,
+      )
+      .get({
+        $id: id,
+        $lastSafeErrorJson: update.lastSafeError ? JSON.stringify(update.lastSafeError) : null,
+        $serverCaptureId: update.serverCaptureId ?? null,
+        $state: update.state,
+        $terminalReason: update.reason,
+        $updatedAt: update.now,
+      });
+
+    return row
+      ? success(outboxJobFromRow(row))
+      : failure(
+          this.missingOrTerminalError(id, {
+            code: 'terminal_state_conflict',
+            message: 'Terminal outbox jobs cannot transition to another terminal state.',
+          }),
+        );
+  }
+
+  async recordSafeError(
+    id: string,
+    input: OutboxSafeErrorInput,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = CASE
+               WHEN $retryable = 1 AND attempt + 1 < $maxAttempts THEN 'pending'
+               ELSE 'failed'
+             END,
+             attempt = attempt + 1,
+             updated_at = $updatedAt,
+             next_retry_at = CASE
+               WHEN $retryable = 1 AND attempt + 1 < $maxAttempts THEN $retryAt
+               ELSE NULL
+             END,
+             locked_at = NULL,
+             last_safe_error_json = $lastSafeErrorJson,
+             terminal_reason = CASE
+               WHEN $retryable = 1 AND attempt + 1 < $maxAttempts THEN NULL
+               ELSE $terminalReason
+             END
+         WHERE id = $id
+           AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+         RETURNING *`,
+      )
+      .get({
+        $id: id,
+        $lastSafeErrorJson: JSON.stringify({
+          code: input.code,
+          message: input.message,
+          retryable: input.retryable,
+        }),
+        $maxAttempts: input.maxAttempts,
+        $retryAt: input.retryAt ?? null,
+        $retryable: input.retryable ? 1 : 0,
+        $terminalReason: input.code,
+        $updatedAt: input.now,
+      });
+
+    return row
+      ? success(outboxJobFromRow(row))
+      : failure(
+          this.missingOrTerminalError(id, {
+            code: 'terminal_state_conflict',
+            message: 'Terminal outbox jobs cannot be retried.',
+          }),
+        );
+  }
+
+  async recoverInterrupted(
+    input: RecoverInterruptedOutboxJobInput,
+  ): Promise<OperationalStoreResult<OutboxJob>> {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = 'pending',
+             updated_at = $updatedAt,
+             next_retry_at = $nextRetryAt,
+             locked_at = NULL,
+             last_safe_error_json = $lastSafeErrorJson,
+             terminal_reason = NULL
+         WHERE id = $id
+           AND state IN ('syncing', 'result_pending')
+         RETURNING *`,
+      )
+      .get({
+        $id: input.id,
+        $lastSafeErrorJson: JSON.stringify(input.lastSafeError),
+        $nextRetryAt: input.nextRetryAt,
+        $updatedAt: input.now,
+      });
+
+    return row
+      ? success(outboxJobFromRow(row))
+      : failure(
+          this.missingOrTerminalError(input.id, {
+            code: 'terminal_state_conflict',
+            message: 'Only interrupted outbox jobs can be recovered at startup.',
+          }),
+        );
+  }
+
+  capacityReached(): boolean {
+    if (this.maxActiveJobs === undefined) return false;
+    return this.activeJobCount() >= this.maxActiveJobs;
+  }
+
+  findById(id: string): OutboxJob | null {
+    const row = this.database
+      .prepare<OutboxJobRow>('SELECT * FROM outbox_jobs WHERE id = $id LIMIT 1')
+      .get({ $id: id });
+    return row ? outboxJobFromRow(row) : null;
+  }
+
+  hasId(id: string): boolean {
+    return Boolean(
+      this.database
+        .prepare<{ id: string }>('SELECT id FROM outbox_jobs WHERE id = $id LIMIT 1')
+        .get({ $id: id }),
+    );
+  }
+
+  findByIdempotencyKey(workspaceId: string, idempotencyKey: string): OutboxJob | null {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `SELECT *
+         FROM outbox_jobs
+         WHERE workspace_id = $workspaceId AND idempotency_key = $idempotencyKey
+         LIMIT 1`,
+      )
+      .get({ $idempotencyKey: idempotencyKey, $workspaceId: workspaceId });
+    return row ? outboxJobFromRow(row) : null;
+  }
+
+  hasIdempotencyKey(workspaceId: string, idempotencyKey: string): boolean {
+    return Boolean(
+      this.database
+        .prepare<{ id: string }>(
+          `SELECT id
+           FROM outbox_jobs
+           WHERE workspace_id = $workspaceId AND idempotency_key = $idempotencyKey
+           LIMIT 1`,
+        )
+        .get({ $idempotencyKey: idempotencyKey, $workspaceId: workspaceId }),
+    );
+  }
+
+  insert(job: OutboxJob): void {
+    this.database
+      .prepare(
+        `INSERT INTO outbox_jobs (
+          id, workspace_id, device_id, asset_ref_id, idempotency_key, payload_hash,
+          capture_json, state, attempt, created_at, updated_at, next_retry_at
+        ) VALUES (
+          $id, $workspaceId, $deviceId, $assetRefId, $idempotencyKey, $payloadHash,
+          $captureJson, $state, $attempt, $createdAt, $updatedAt, $nextRetryAt
+        )`,
+      )
+      .run({
+        $assetRefId: job.assetRefId,
+        $attempt: job.attempt,
+        $captureJson: JSON.stringify(job.capture),
+        $createdAt: job.createdAt,
+        $deviceId: job.deviceId,
+        $id: job.id,
+        $idempotencyKey: job.idempotencyKey,
+        $nextRetryAt: job.nextRetryAt ?? null,
+        $payloadHash: job.payloadHash,
+        $state: job.state,
+        $updatedAt: job.updatedAt,
+        $workspaceId: job.workspaceId,
+      });
+  }
+
+  private activeJobCount(): number {
+    return (
+      this.database
+        .prepare<{ count: number }>(
+          `SELECT COUNT(*) AS count
+           FROM outbox_jobs
+           WHERE state NOT IN ('synced', 'blocked', 'failed', 'cancelled')`,
+        )
+        .get()?.count ?? 0
+    );
+  }
+
+  private missingOrTerminalError(
+    id: string,
+    terminalError: OperationalStoreError,
+  ): OperationalStoreError {
+    const existing = this.database
+      .prepare<{ state: OutboxJobState }>(
+        `SELECT state
+         FROM outbox_jobs
+         WHERE id = $id
+         LIMIT 1`,
+      )
+      .get({ $id: id });
+
+    if (!existing) return { code: 'outbox_job_not_found', message: 'Outbox job was not found.' };
+    if (isTerminalOutboxState(existing.state)) return terminalError;
+    return {
+      code: 'terminal_state_conflict',
+      message: 'Outbox job state changed before the update could be applied.',
+    };
+  }
+}
+
+export function createPendingOutboxJob(job: OutboxJobCreateInput): OutboxJob {
+  return {
+    assetRefId: job.assetRefId,
+    attempt: 0,
+    capture: normalizeCapturePayload(job),
+    createdAt: job.createdAt,
+    deviceId: job.deviceId,
+    id: job.id,
+    idempotencyKey: job.idempotencyKey,
+    payloadHash: job.payloadHash,
+    state: 'pending',
+    updatedAt: job.createdAt,
+    workspaceId: job.workspaceId,
+    ...(job.nextRetryAt ? { nextRetryAt: job.nextRetryAt } : {}),
+  };
+}
+
+export function outboxJobMatchesInput(existing: OutboxJob, input: OutboxJobCreateInput): boolean {
+  return (
+    existing.assetRefId === input.assetRefId &&
+    existing.payloadHash === input.payloadHash &&
+    JSON.stringify(cloneCapturePayload(existing.capture)) ===
+      JSON.stringify(cloneCapturePayload(normalizeCapturePayload(input)))
+  );
+}
+
+export function cloneOutboxJob(job: OutboxJob): OutboxJob {
+  return {
+    ...job,
+    capture: cloneCapturePayload(job.capture),
+    ...(job.lastSafeError ? { lastSafeError: { ...job.lastSafeError } } : {}),
+  };
+}
+
+export function mapCreateOutboxConstraintError(error: unknown): OperationalStoreError | null {
+  if (!(error instanceof Error)) return null;
+  const text = [error.name, error.message, 'code' in error ? String(error.code) : '']
+    .join(' ')
+    .toLowerCase();
+  if (!text.includes('constraint')) return null;
+
+  if (text.includes('outbox_jobs.id')) {
+    return { code: 'outbox_job_id_conflict', message: 'Outbox job id already exists.' };
+  }
+  if (
+    text.includes('outbox_jobs.workspace_id') ||
+    text.includes('outbox_jobs.idempotency_key') ||
+    text.includes('outbox_jobs.workspace_id, outbox_jobs.idempotency_key')
+  ) {
+    return {
+      code: 'idempotency_key_conflict',
+      message: 'Outbox idempotency key already exists for this workspace.',
+    };
+  }
+  return null;
+}
+
+type OutboxJobRow = SqliteRow & {
+  id: string;
+  workspace_id: string;
+  device_id: string;
+  asset_ref_id: string;
+  idempotency_key: string;
+  payload_hash: string;
+  capture_json: string;
+  state: OutboxJobState;
+  attempt: number;
+  created_at: string;
+  updated_at: string;
+  next_retry_at?: string | null;
+  locked_at?: string | null;
+  server_capture_id?: string | null;
+  ocr_result_json?: string | null;
+  last_safe_error_json?: string | null;
+  terminal_reason?: string | null;
+};
+
+function outboxJobFromRow(row: OutboxJobRow): OutboxJob {
+  return cloneOutboxJob({
+    assetRefId: row.asset_ref_id,
+    attempt: row.attempt,
+    capture: parseJson<OutboxJob['capture']>(row.capture_json),
+    createdAt: row.created_at,
+    deviceId: row.device_id,
+    id: row.id,
+    idempotencyKey: row.idempotency_key,
+    payloadHash: row.payload_hash,
+    state: row.state,
+    updatedAt: row.updated_at,
+    workspaceId: row.workspace_id,
+    ...(row.last_safe_error_json
+      ? { lastSafeError: parseJson<OutboxJob['lastSafeError']>(row.last_safe_error_json) }
+      : {}),
+    ...(row.locked_at ? { lockedAt: row.locked_at } : {}),
+    ...(row.next_retry_at ? { nextRetryAt: row.next_retry_at } : {}),
+    ...(row.server_capture_id ? { serverCaptureId: row.server_capture_id } : {}),
+    ...(row.ocr_result_json ? { ocrResult: parseJson<StoredOcrResult>(row.ocr_result_json) } : {}),
+    ...(row.terminal_reason ? { terminalReason: row.terminal_reason } : {}),
+  });
+}
+
+function normalizeCapturePayload(job: OutboxJobCreateInput): OutboxJob['capture'] {
+  return {
+    appName: job.capture?.appName ?? 'Recapsy Desktop',
+    capturedAt: job.capture?.capturedAt ?? job.createdAt,
+    captureType: job.capture?.captureType ?? 'screen',
+    observedAt: job.capture?.observedAt ?? job.createdAt,
+    privacyDecision: {
+      action: job.capture?.privacyDecision?.action ?? 'allow',
+      decidedAt:
+        job.capture?.privacyDecision?.decidedAt ??
+        job.capture?.observedAt ??
+        job.capture?.capturedAt ??
+        job.createdAt,
+      policyVersion: job.capture?.privacyDecision?.policyVersion ?? 'desktop-default',
+      reasons: [...(job.capture?.privacyDecision?.reasons ?? [])],
+    },
+    ...(job.capture?.bundleId ? { bundleId: job.capture.bundleId } : {}),
+    ...(job.capture?.contextConfidence ? { contextConfidence: job.capture.contextConfidence } : {}),
+    ...(job.capture?.contextFingerprint
+      ? { contextFingerprint: job.capture.contextFingerprint }
+      : {}),
+    ...(job.capture?.documentPathCandidate
+      ? { documentPathCandidate: { ...job.capture.documentPathCandidate } }
+      : {}),
+    ...(job.capture?.localEventId ? { localEventId: job.capture.localEventId } : {}),
+    ...(job.capture?.metadata ? { metadata: { ...job.capture.metadata } } : {}),
+    ...(job.capture?.urlCandidate ? { urlCandidate: { ...job.capture.urlCandidate } } : {}),
+    ...(job.capture?.userId ? { userId: job.capture.userId } : {}),
+    ...(job.capture?.windowTitleCandidate
+      ? { windowTitleCandidate: { ...job.capture.windowTitleCandidate } }
+      : {}),
+  };
+}
+
+function cloneCapturePayload(capture: OutboxJob['capture']): OutboxJob['capture'] {
+  return {
+    ...capture,
+    privacyDecision: { ...capture.privacyDecision, reasons: [...capture.privacyDecision.reasons] },
+    ...(capture.documentPathCandidate
+      ? { documentPathCandidate: { ...capture.documentPathCandidate } }
+      : {}),
+    ...(capture.metadata ? { metadata: { ...capture.metadata } } : {}),
+    ...(capture.urlCandidate ? { urlCandidate: { ...capture.urlCandidate } } : {}),
+    ...(capture.windowTitleCandidate
+      ? { windowTitleCandidate: { ...capture.windowTitleCandidate } }
+      : {}),
+  };
+}
+
+function isTerminalOutboxState(state: OutboxJobState): state is OutboxTerminalState {
+  return TERMINAL_OUTBOX_STATES.has(state);
+}
+
+function capacityExceeded(): OperationalStoreError {
+  return { code: 'capacity_exceeded', message: 'Outbox active job capacity has been reached.' };
+}
+
+function idempotencyKeyConflict(): OperationalStoreError {
+  return {
+    code: 'idempotency_key_conflict',
+    message: 'Outbox idempotency key already exists for this workspace.',
+  };
+}
+
+function terminalTransitionConflict(): OperationalStoreError {
+  return {
+    code: 'terminal_state_conflict',
+    message: 'Terminal outbox jobs cannot transition to another state.',
+  };
+}
+
+function success<T>(value: T): OperationalStoreResult<T> {
+  return { ok: true, value };
+}
+
+function failure<T>(error: OperationalStoreError): OperationalStoreResult<T> {
+  return { error, ok: false };
+}
+
+function parseJson<T>(value: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    throw new StorageCorruptionError();
+  }
+}
+
+class StorageCorruptionError extends Error {
+  readonly code = 'storage_corruption';
+
+  constructor() {
+    super('Local operational store contains invalid JSON.');
+  }
+}

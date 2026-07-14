@@ -5,7 +5,7 @@ import type {
   SqliteRow,
   SqliteStatement,
   SqliteValue,
-} from './sqlite-driver';
+} from './driver';
 
 export function createBunSqliteDatabase(path: string): SqliteDatabase {
   return new BunSqliteDatabaseAdapter(path);
