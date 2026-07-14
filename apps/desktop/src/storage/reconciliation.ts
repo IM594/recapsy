@@ -1,9 +1,12 @@
 import type {
   AssetAvailabilityState,
   AssetCacheRef,
-  OperationalStoreRepository,
+  OperationalStoreResult,
   OutboxJob,
+  OutboxJobListFilter,
+  OutboxTerminalUpdate,
   SafeOperationalError,
+  UpdateAssetRefAvailabilityInput,
 } from './types';
 
 export type AssetAvailabilityCheck = {
@@ -15,8 +18,20 @@ export type AssetAvailabilityResolver = {
   checkAvailability(asset: AssetCacheRef): Promise<AssetAvailabilityCheck>;
 };
 
+export type AssetReconciliationStore = {
+  listAssetCacheRefs(workspaceId?: string): Promise<AssetCacheRef[]>;
+  listOutboxJobs(filter?: OutboxJobListFilter): Promise<OutboxJob[]>;
+  updateAssetRefAvailability(
+    input: UpdateAssetRefAvailabilityInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>>;
+  markOutboxJobTerminal(
+    id: string,
+    update: OutboxTerminalUpdate,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
+};
+
 export type AssetReconciliationOptions = {
-  store: OperationalStoreRepository;
+  store: AssetReconciliationStore;
   resolver: AssetAvailabilityResolver;
   now: string;
   workspaceId?: string;

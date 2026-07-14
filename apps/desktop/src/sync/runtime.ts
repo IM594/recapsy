@@ -1,9 +1,14 @@
-import type { OperationalStoreRepository } from '../storage/public';
 import { createSyncLoop as createRealSyncLoop } from './loop';
 import type { SyncLoop, SyncLoopOptions } from './loop';
 import { recoverInterruptedOutboxJobs } from './recovery';
 import { createSyncScheduler } from './scheduler';
-import type { RetryBackoffConfig, SyncAssetReader, SyncRunResult, SyncServerApi } from './types';
+import type {
+  RetryBackoffConfig,
+  SyncAssetReader,
+  SyncQueueStore,
+  SyncRunResult,
+  SyncServerApi,
+} from './types';
 
 const DEFAULT_SYNC_MAX_ATTEMPTS = 15;
 const DEFAULT_SYNC_RETRY_BACKOFF: RetryBackoffConfig = {
@@ -35,7 +40,7 @@ export type SyncRuntimeOptions = {
   onResult?(result: SyncRunResult): void;
   readAssetBytes?: SyncAssetReader;
   retryBackoff?: RetryBackoffConfig;
-  store: OperationalStoreRepository;
+  store: SyncQueueStore;
   workspaceId: string;
 };
 

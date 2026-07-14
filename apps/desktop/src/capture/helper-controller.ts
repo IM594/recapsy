@@ -12,9 +12,9 @@ import {
 import type {
   CapturePrivacyDecision,
   HelperPermissionState,
-  OperationalStoreRepository,
   SafeOperationalError,
 } from '../storage/public';
+import type { HelperStateStore } from './store';
 
 export type {
   CaptureHelperAssetRef,
@@ -32,7 +32,7 @@ export type CaptureHelperControllerOptions = {
     handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   };
   now(): string;
-  store: OperationalStoreRepository;
+  store: HelperStateStore;
 };
 
 export type CaptureHelperController = HelperLifecycle & {

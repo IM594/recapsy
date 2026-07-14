@@ -83,6 +83,67 @@ describe('desktop architecture boundaries', () => {
     expect(source).toContain('export type SyncAssetReader =');
   });
 
+  it('gives production consumers narrow operational store ports', async () => {
+    const consumers = [
+      ['capture/helper-controller.ts', ['HelperStateStore']],
+      ['capture/helper-event-handler.ts', ['CaptureIntakeStore', 'HelperStateStore']],
+      ['capture/handlers.ts', ['CaptureHistoryReader']],
+      ['capture/runtime.ts', ['CaptureRuntimeStore']],
+      ['storage/reconciliation.ts', ['AssetReconciliationStore']],
+      ['sync/runtime.ts', ['SyncQueueStore']],
+      ['main/runtime.ts', ['StoreLifecycle', 'DesktopStore']],
+    ] as const;
+    const violations: string[] = [];
+
+    for (const [relativePath, expectedPorts] of consumers) {
+      const source = await readSource(relativePath);
+      if (/\bOperationalStoreRepository\b/.test(source)) {
+        violations.push(`${relativePath} depends on OperationalStoreRepository`);
+      }
+      for (const expectedPort of expectedPorts) {
+        if (!new RegExp(`\\b${expectedPort}\\b`).test(source)) {
+          violations.push(`${relativePath} does not depend on ${expectedPort}`);
+        }
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('publishes capture and storage operational ports from capability surfaces', async () => {
+    const [capturePublicSource, storagePublicSource] = await Promise.all([
+      readSource('capture/public.ts'),
+      readSource('storage/public.ts'),
+    ]);
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const violations: string[] = [];
+    if (!sourceFiles.includes('capture/store.ts')) {
+      violations.push('capture/store.ts is missing');
+    }
+    for (const symbol of [
+      'CaptureIntakeStore',
+      'HelperStateStore',
+      'CaptureHistoryReader',
+      'CaptureRuntimeStore',
+    ]) {
+      if (!new RegExp(`\\b${symbol}\\b`).test(capturePublicSource)) {
+        violations.push(`capture/public.ts does not export ${symbol}`);
+      }
+    }
+    for (const symbol of ['AssetReconciliationStore', 'StoreLifecycle']) {
+      if (!new RegExp(`\\b${symbol}\\b`).test(storagePublicSource)) {
+        violations.push(`storage/public.ts does not export ${symbol}`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('requires an explicit access token provider at the server API boundary', async () => {
     const [typesSource, clientSource] = await Promise.all([
       readSource('server/types.ts'),

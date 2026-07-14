@@ -8,18 +8,15 @@ import {
   type IpcHandlerMap,
   createRendererSafeSuccess,
 } from '../ipc/public';
-import type {
-  OperationalStoreRepository,
-  OutboxJob,
-  SafeOperationalError,
-} from '../storage/public';
+import type { OutboxJob, SafeOperationalError } from '../storage/public';
 import type { CaptureHelperEventHandler } from './helper-event-handler';
 import type { CaptureLifecycle } from './lifecycle';
+import type { CaptureHistoryReader } from './store';
 
 export type CaptureIpcHandlerOptions = {
   eventHandler: CaptureHelperEventHandler;
   lifecycle: CaptureLifecycle;
-  store: OperationalStoreRepository;
+  store: CaptureHistoryReader;
   workspaceId: string;
 };
 

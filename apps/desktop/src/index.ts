@@ -123,13 +123,17 @@ export type {
 export { createCaptureLifecycle, createCaptureRuntime } from './capture/public';
 export type {
   CaptureAssetReconciliation,
+  CaptureHistoryReader,
+  CaptureIntakeStore,
   CaptureLifecycle,
   CaptureLifecycleOptions,
   CaptureLifecycleSnapshot,
   CaptureLifecycleStatus,
   CaptureRuntime,
   CaptureRuntimeOptions,
+  CaptureRuntimeStore,
   CaptureStartupRecovery,
+  HelperStateStore,
   HelperLifecycle,
 } from './capture/public';
 export { ServerApiError, createServerApiClient } from './server/public';
@@ -160,6 +164,7 @@ export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
   AssetReconciliationOptions,
+  AssetReconciliationStore,
   AssetReconciliationSummary,
 } from './storage/public';
 export { recoverInterruptedOutboxJobs } from './sync/public';
@@ -216,6 +221,7 @@ export type {
   RendererSafeAssetRef,
   SafeOperationalError,
   SettingsCache,
+  StoreLifecycle,
   SqliteDatabase,
   SqliteStoreOptions,
   SqliteParameters,

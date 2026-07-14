@@ -2,8 +2,8 @@ import type { HelperEnvelope, HelperToMainType } from '../helper/public';
 import type { CaptureHelperClient } from '../helper/public';
 import {
   type AssetAvailabilityResolver,
+  type AssetReconciliationStore,
   type BackpressureConfig,
-  type OperationalStoreRepository,
   reconcileAssetRefs,
 } from '../storage/public';
 import { createCaptureHelperController } from './helper-controller';
@@ -17,6 +17,7 @@ import {
   type CaptureStartupRecovery,
   createCaptureLifecycle,
 } from './lifecycle';
+import type { CaptureIntakeStore, HelperStateStore } from './store';
 
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 750 * 1024 * 1024,
@@ -30,6 +31,8 @@ const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
   },
 };
 
+export type CaptureRuntimeStore = CaptureIntakeStore & HelperStateStore & AssetReconciliationStore;
+
 export type CaptureRuntimeOptions = {
   assetResolver?: AssetAvailabilityResolver;
   backpressure?: BackpressureConfig;
@@ -38,7 +41,7 @@ export type CaptureRuntimeOptions = {
   now(): string;
   onHelperEnvelope?(envelope: HelperEnvelope<HelperToMainType>): void;
   startupRecovery: CaptureStartupRecovery;
-  store: OperationalStoreRepository;
+  store: CaptureRuntimeStore;
   workspaceId: string;
 };
 

@@ -12,11 +12,11 @@ import { type OperationalStoreRepository, createMemoryStore } from '../storage';
 import type { SyncLoop, SyncLoopOptions } from '../sync/loop';
 import type { SyncRunResult, SyncServerApi } from '../sync/types';
 import {
+  type DesktopStore,
   type ElectronAppLike,
   type ElectronIpcMainLike,
   type ElectronMainRuntimeOptions,
   type ElectronQuitEvent,
-  type OperationalStoreLifecycle,
   createElectronMainRuntime,
 } from './runtime';
 
@@ -483,7 +483,7 @@ type Harness = {
   app: FakeElectronApp;
   ipcMain: FakeIpcMain;
   helperClient: FakeHelperClient;
-  store: OperationalStoreLifecycle & { initializeCalls: number; closeCalls: number };
+  store: DesktopStore & { initializeCalls: number; closeCalls: number };
   loginPrompter: FakeLoginPrompter;
   syncLoop: FakeSyncLoop;
 };
@@ -504,7 +504,7 @@ function baseOptions(
     app: FakeElectronApp;
     ipcMain: FakeIpcMain;
     helperClient: FakeHelperClient;
-    store: OperationalStoreLifecycle;
+    store: DesktopStore;
     loginPrompter?: LoginPrompter;
     syncLoop?: FakeSyncLoop;
   },
@@ -590,7 +590,7 @@ class FakeSyncLoop implements SyncLoop {
   }
 }
 
-function testStore(): OperationalStoreLifecycle & { initializeCalls: number; closeCalls: number } {
+function testStore(): DesktopStore & { initializeCalls: number; closeCalls: number } {
   const store = createMemoryStore() as OperationalStoreRepository & {
     initializeCalls: number;
     closeCalls: number;

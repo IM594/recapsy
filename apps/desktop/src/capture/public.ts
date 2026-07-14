@@ -30,6 +30,8 @@ export { createCaptureRuntime } from './runtime';
 export type {
   CaptureRuntime,
   CaptureRuntimeOptions,
+  CaptureRuntimeStore,
 } from './runtime';
 export { createCaptureIpcHandlers } from './handlers';
 export type { CaptureIpcHandlerOptions } from './handlers';
+export type { CaptureHistoryReader, CaptureIntakeStore, HelperStateStore } from './store';

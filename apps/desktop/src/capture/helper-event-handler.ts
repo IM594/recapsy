@@ -20,10 +20,10 @@ import {
   type CapturePrivacyDecision,
   type HelperPermissionState,
   type HelperRuntimeState,
-  type OperationalStoreRepository,
   type SafeOperationalError,
   evaluateOperationalStoreBackpressure,
 } from '../storage/public';
+import type { CaptureIntakeStore, HelperStateStore } from './store';
 
 export type { CaptureHelperCommandClient } from '../helper/public';
 
@@ -52,7 +52,7 @@ export type CaptureHelperEventHandlerOptions = {
   client: CaptureHelperCommandClient;
   deviceId: string;
   now(): string;
-  store: OperationalStoreRepository;
+  store: CaptureIntakeStore & HelperStateStore;
   workspaceId: string;
 };
 

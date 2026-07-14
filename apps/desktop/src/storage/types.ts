@@ -309,6 +309,11 @@ export type BackpressureDecision = {
   reasons: BackpressureReason[];
 };
 
+export type StoreLifecycle = {
+  initialize(): Promise<void>;
+  close(): void;
+};
+
 export type OperationalStoreRepository = {
   createOutboxJob(job: OutboxJobCreateInput): Promise<OperationalStoreResult<OutboxJob>>;
   createCaptureOutboxEntry(

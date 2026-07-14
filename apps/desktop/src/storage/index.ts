@@ -60,6 +60,7 @@ export type {
   RendererSafeAssetRef,
   SafeOperationalError,
   SettingsCache,
+  StoreLifecycle,
   StoredOcrResult,
   SyncCursor,
   SyncCursorKind,

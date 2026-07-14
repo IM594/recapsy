@@ -8,19 +8,22 @@ import {
   type CaptureHelperClient,
   type CaptureHelperCommandClient,
   type CaptureHelperEventHandler,
+  type CaptureHistoryReader,
   type CaptureLifecycle,
+  type CaptureRuntimeStore,
   createCaptureIpcHandlers,
   createCaptureRuntime,
 } from '../capture/public';
 import type { HelperEnvelope, HelperToMainType } from '../helper/public';
 import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/public';
 import { createStatusHandlers } from '../status/public';
-import type { BackpressureConfig, OperationalStoreRepository } from '../storage/public';
+import type { BackpressureConfig, StoreLifecycle } from '../storage/public';
 import {
   type RetryBackoffConfig,
   type SyncAssetReader,
   type SyncLoop,
   type SyncLoopOptions,
+  type SyncQueueStore,
   type SyncRunResult,
   type SyncServerApi,
   createSyncIpcHandlers,
@@ -42,15 +45,15 @@ export type ElectronAppLike = {
 
 export type { ElectronIpcMainLike } from '../ipc/public';
 
-export type OperationalStoreLifecycle = OperationalStoreRepository & {
-  initialize(): Promise<void>;
-  close(): void;
-};
+export type DesktopStore = StoreLifecycle &
+  CaptureRuntimeStore &
+  CaptureHistoryReader &
+  SyncQueueStore;
 
 export type ElectronMainRuntimeOptions = {
   app: ElectronAppLike;
   ipcMain?: ElectronIpcMainLike;
-  createStore(): OperationalStoreLifecycle;
+  createStore(): DesktopStore;
   createHelperClient(): CaptureHelperClient & CaptureHelperCommandClient;
   deviceId: string;
   tokenStore: TokenStore;
@@ -73,7 +76,7 @@ export type ElectronMainRuntimeOptions = {
 };
 
 export type ElectronMainRuntimeReadyState = {
-  store: OperationalStoreLifecycle;
+  store: DesktopStore;
   lifecycle: CaptureLifecycle;
   eventHandler: CaptureHelperEventHandler;
   workspaceId: string;
