@@ -27,7 +27,7 @@ import {
 
 export type { CaptureHelperCommandClient } from '../helper/public';
 
-export type CaptureHelperEventIntakeStatus = {
+export type CaptureHelperEventStatus = {
   lastObservedAt?: string;
   lastSafeError?: SafeOperationalError;
   lastSkippedCapture?: {
@@ -41,13 +41,13 @@ export type CaptureHelperEventIntakeStatus = {
   };
 };
 
-export type CaptureHelperEventIntake = {
-  getStatus(): CaptureHelperEventIntakeStatus;
+export type CaptureHelperEventHandler = {
+  getStatus(): CaptureHelperEventStatus;
   handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   handleProtocolResult(result: HelperProtocolResult<HelperEnvelope>): Promise<void>;
 };
 
-export type CaptureHelperEventIntakeOptions = {
+export type CaptureHelperEventHandlerOptions = {
   backpressure: BackpressureConfig;
   client: CaptureHelperCommandClient;
   deviceId: string;
@@ -58,19 +58,19 @@ export type CaptureHelperEventIntakeOptions = {
 
 type CaptureNackCode = MainToHelperPayloadByType['capture.nack']['code'];
 
-export function createCaptureHelperEventIntake(
-  options: CaptureHelperEventIntakeOptions,
-): CaptureHelperEventIntake {
-  return new StoreBackedCaptureHelperEventIntake(options);
+export function createCaptureHelperEventHandler(
+  options: CaptureHelperEventHandlerOptions,
+): CaptureHelperEventHandler {
+  return new StoreBackedCaptureHelperEventHandler(options);
 }
 
-class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
+class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler {
   private messageSequence = 0;
-  private status: CaptureHelperEventIntakeStatus = {};
+  private status: CaptureHelperEventStatus = {};
 
-  constructor(private readonly options: CaptureHelperEventIntakeOptions) {}
+  constructor(private readonly options: CaptureHelperEventHandlerOptions) {}
 
-  getStatus(): CaptureHelperEventIntakeStatus {
+  getStatus(): CaptureHelperEventStatus {
     return {
       ...this.status,
       ...(this.status.lastSafeError ? { lastSafeError: { ...this.status.lastSafeError } } : {}),
@@ -109,7 +109,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
           return;
       }
     } catch {
-      await this.recordUnexpectedIntakeFailure(envelope);
+      await this.recordUnexpectedEventFailure(envelope);
     }
   }
 
@@ -133,7 +133,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
 
   private async handleCaptureResult(envelope: HelperEnvelope<'capture.result'>): Promise<void> {
     const captureId = envelope.payload.captureId;
-    const backpressure = await evaluateIntakeBackpressure(this.options);
+    const backpressure = await evaluateCaptureBackpressure(this.options);
 
     if (backpressure.action === 'pause') {
       await this.sendNack(envelope, 'backpressure', 'Capture queue is applying backpressure.');
@@ -261,7 +261,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
     await this.persistHelperState();
   }
 
-  private async recordUnexpectedIntakeFailure(envelope: HelperEnvelope): Promise<void> {
+  private async recordUnexpectedEventFailure(envelope: HelperEnvelope): Promise<void> {
     const safeError = safeOperationalError('unknown', 'Capture event could not be accepted.', true);
     this.status = {
       ...this.status,
@@ -279,7 +279,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
    * `CaptureHelperController` for controller-driven transitions (start,
    * pause, resume, shutdown). `setHelperState` replaces the whole row, so
    * this reads the current row first and only overwrites the fields this
-   * intake actually owns (`lastSafeError`, `permissions`), carrying the rest
+   * handler actually owns (`lastSafeError`, `permissions`), carrying the rest
    * forward instead of resetting them to defaults.
    */
   private async persistHelperState(): Promise<void> {
@@ -345,7 +345,7 @@ class StoreBackedCaptureHelperEventIntake implements CaptureHelperEventIntake {
   }
 }
 
-async function evaluateIntakeBackpressure(options: CaptureHelperEventIntakeOptions) {
+async function evaluateCaptureBackpressure(options: CaptureHelperEventHandlerOptions) {
   return evaluateOperationalStoreBackpressure(
     await options.store.getBackpressureSnapshot(options.workspaceId),
     options.backpressure,

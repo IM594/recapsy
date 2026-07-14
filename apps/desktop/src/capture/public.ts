@@ -1,4 +1,4 @@
-export { createCaptureHelperController } from './capture-helper-controller';
+export { createCaptureHelperController } from './helper-controller';
 export type {
   CaptureHelperAssetRef,
   CaptureHelperClient,
@@ -8,19 +8,19 @@ export type {
   CaptureHelperStartOptions,
   CaptureHelperState,
   CaptureHelperStatus,
-} from './capture-helper-controller';
-export { createCaptureHelperEventIntake } from './capture-helper-event-intake';
+} from './helper-controller';
+export { createCaptureHelperEventHandler } from './helper-event-handler';
 export type {
   CaptureHelperCommandClient,
-  CaptureHelperEventIntake,
-  CaptureHelperEventIntakeOptions,
-  CaptureHelperEventIntakeStatus,
-} from './capture-helper-event-intake';
-export { createCaptureRuntime } from './capture-runtime';
+  CaptureHelperEventHandler,
+  CaptureHelperEventHandlerOptions,
+  CaptureHelperEventStatus,
+} from './helper-event-handler';
+export { createCaptureRuntime } from './runtime';
 export type {
   CaptureRuntime,
   CaptureRuntimeOptions,
   CaptureStartupRecovery,
-} from './capture-runtime';
+} from './runtime';
 export { createCaptureIpcHandlers } from './ipc-handlers';
 export type { CaptureIpcHandlerOptions } from './ipc-handlers';

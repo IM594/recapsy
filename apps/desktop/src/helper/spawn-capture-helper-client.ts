@@ -77,7 +77,7 @@ export type SpawnCaptureHelperClientOptions = {
  * boundary.
  *
  * The returned client also implements `CaptureHelperCommandClient`
- * (`sendCommand`), the narrow interface `CaptureHelperEventIntake` depends on
+ * (`sendCommand`), the narrow interface `CaptureHelperEventHandler` depends on
  * to send `capture.ack` / `capture.nack` / backpressure `capture.pause`
  * replies back to the helper over the same stdio channel this client already
  * owns. Callers that only need `CaptureHelperClient` (start/stop/pause/
@@ -164,11 +164,11 @@ class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCo
   }
 
   /**
-   * Generic command channel for `CaptureHelperEventIntake`, which already
+   * Generic command channel for `CaptureHelperEventHandler`, which already
    * builds a fully-formed envelope (`capture.ack` / `capture.nack` /
    * backpressure `capture.pause`) and only needs it written to the helper's
    * stdin. This never inspects or rewrites the envelope, so it cannot drift
-   * from the header fields the intake layer already set.
+   * from the header fields the event handler already set.
    */
   async sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void> {
     if (this.child) {

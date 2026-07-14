@@ -7,7 +7,7 @@ import {
 import {
   type CaptureHelperClient,
   type CaptureHelperCommandClient,
-  type CaptureHelperEventIntake,
+  type CaptureHelperEventHandler,
   createCaptureIpcHandlers,
   createCaptureRuntime,
 } from '../capture/public';
@@ -74,7 +74,7 @@ export type ElectronMainRuntimeOptions = {
 export type ElectronMainRuntimeReadyState = {
   store: OperationalStoreLifecycle;
   runtime: DesktopRuntime;
-  eventIntake: CaptureHelperEventIntake;
+  eventHandler: CaptureHelperEventHandler;
   workspaceId: string;
   workspaceIdVerified: boolean;
   syncLoop: SyncLoop;
@@ -145,7 +145,7 @@ export function createElectronMainRuntime(
     if (options.ipcMain) {
       registerIpcHandlers(options.ipcMain, {
         ...createCaptureIpcHandlers({
-          eventIntake: captureRuntime.eventIntake,
+          eventHandler: captureRuntime.eventHandler,
           runtime: captureRuntime.runtime,
           store,
           workspaceId,
@@ -153,7 +153,7 @@ export function createElectronMainRuntime(
         ...createRuntimeIpcHandlers({
           runtime: captureRuntime.runtime,
           statusSource: {
-            getLastObservedAt: () => captureRuntime.eventIntake.getStatus().lastObservedAt,
+            getLastObservedAt: () => captureRuntime.eventHandler.getStatus().lastObservedAt,
           },
         }),
         ...createSyncIpcHandlers({ store, workspaceId }),
@@ -161,7 +161,7 @@ export function createElectronMainRuntime(
     }
 
     return {
-      eventIntake: captureRuntime.eventIntake,
+      eventHandler: captureRuntime.eventHandler,
       runtime: captureRuntime.runtime,
       store,
       syncLoop: syncRuntime,

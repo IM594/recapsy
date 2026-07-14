@@ -4,7 +4,7 @@ import type { SyncAssetReader } from '../sync/public';
 
 /**
  * Real cross-process asset-byte reader for the sync loop, replacing the
- * `failClosedReadAssetBytes` placeholder in `electron-main-runtime.ts`. The
+ * `failClosedReadAssetBytes` placeholder in `runtime.ts`. The
  * capture process writes each screenshot into a shared local asset root
  * (derived from Electron `app.getPath('userData')`) and `capture.result`
  * carries only a *relative* access key such as `<captureId>/screenshot.jpg`

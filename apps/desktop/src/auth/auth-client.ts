@@ -97,7 +97,7 @@ export type AuthClient = {
    * again. On success, also refreshes the stored `AuthTokenSet.workspaceId`
    * to the value this call just confirmed, so it stays the most recently
    * *confirmed* workspace id for later offline degradation (see
-   * `resolveWorkspaceId` in `main/electron-main-runtime.ts`). Throws
+   * `resolveWorkspaceId` in `main/runtime.ts`). Throws
    * `AuthClientError` for network/server failures, which the caller treats
    * the same as "cannot confirm a session right now" — not the same as a
    * confirmed-invalid session.
@@ -158,7 +158,7 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
       // `AuthSessionResponseSchema`), so the existing `tokens` fetched above
       // are carried through unchanged; only `workspaceId` is refreshed to
       // the value this call just confirmed with the real server. Callers
-      // (see `resolveWorkspaceId` in `main/electron-main-runtime.ts`) rely on
+      // (see `resolveWorkspaceId` in `main/runtime.ts`) rely on
       // this being kept current so an offline degradation later falls back
       // to the most recently *confirmed* workspace id, not a stale one.
       await options.tokenStore.setTokens({ ...tokens, workspaceId });

@@ -14,10 +14,10 @@ import type {
   OutboxJob,
   SafeOperationalError,
 } from '../storage/public';
-import type { CaptureHelperEventIntake } from './capture-helper-event-intake';
+import type { CaptureHelperEventHandler } from './helper-event-handler';
 
 export type CaptureIpcHandlerOptions = {
-  eventIntake: CaptureHelperEventIntake;
+  eventHandler: CaptureHelperEventHandler;
   runtime: DesktopRuntime;
   store: OperationalStoreRepository;
   workspaceId: string;
@@ -42,12 +42,12 @@ export function createCaptureIpcHandlers(options: CaptureIpcHandlerOptions): Ipc
 function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatusDto {
   const snapshot = options.runtime.getSnapshot();
   const helperStatus = snapshot.captureHelper;
-  const intakeStatus = options.eventIntake.getStatus();
-  const permissions = intakeStatus.permissions ?? {
+  const eventStatus = options.eventHandler.getStatus();
+  const permissions = eventStatus.permissions ?? {
     accessibility: 'unknown',
     screenRecording: 'unknown',
   };
-  const lastSafeError = helperStatus?.lastSafeError ?? intakeStatus.lastSafeError;
+  const lastSafeError = helperStatus?.lastSafeError ?? eventStatus.lastSafeError;
 
   return {
     paused: snapshot.status === 'paused',

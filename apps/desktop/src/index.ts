@@ -113,12 +113,12 @@ export type {
   CaptureHelperState,
   CaptureHelperStatus,
 } from './capture/public';
-export { createCaptureHelperEventIntake } from './capture/public';
+export { createCaptureHelperEventHandler } from './capture/public';
 export type {
   CaptureHelperCommandClient,
-  CaptureHelperEventIntake,
-  CaptureHelperEventIntakeOptions,
-  CaptureHelperEventIntakeStatus,
+  CaptureHelperEventHandler,
+  CaptureHelperEventHandlerOptions,
+  CaptureHelperEventStatus,
 } from './capture/public';
 export { createCaptureRuntime } from './capture/public';
 export type {

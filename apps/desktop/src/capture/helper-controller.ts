@@ -28,7 +28,7 @@ export type {
 export type CaptureHelperControllerOptions = {
   client: CaptureHelperClient;
   deviceId: string;
-  eventIntake?: {
+  eventHandler?: {
     handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   };
   now(): string;
@@ -72,8 +72,8 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
 
     try {
       await this.options.client.start({
-        onEnvelope: this.options.eventIntake
-          ? (envelope) => this.options.eventIntake?.handleEnvelope(envelope) ?? Promise.resolve()
+        onEnvelope: this.options.eventHandler
+          ? (envelope) => this.options.eventHandler?.handleEnvelope(envelope) ?? Promise.resolve()
           : undefined,
         onEvent: (event) => this.ingestEvent(event),
       });
@@ -154,14 +154,14 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   }
 
   async ingestEvent(event: CaptureHelperEvent): Promise<void> {
-    if (this.options.eventIntake) {
-      // The event intake is the sole writer of `helper_state` for
-      // envelope-derived facts (see `capture-helper-event-intake.ts`). Only
+    if (this.options.eventHandler) {
+      // The event handler is the sole writer of `helper_state` for
+      // envelope-derived facts (see `helper-event-handler.ts`). Only
       // mirror the transition into this controller's own in-memory status
       // (used by `getStatus()`) — do not persist a second time here, or the
       // last writer silently clobbers fields (e.g. permissions) the other
       // side owns.
-      await this.options.eventIntake.handleEnvelope(
+      await this.options.eventHandler.handleEnvelope(
         envelopeFromInternalEvent(event, this.options.now()),
       );
 
@@ -214,11 +214,11 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   }
 
   /**
-   * `helper_state` is a single-row table also written by the event intake
+   * `helper_state` is a single-row table also written by the event handler
    * for envelope-derived facts (permissions, envelope-sourced errors). This
    * controller only owns controller-driven transitions (start/pause/resume/
    * shutdown), so it reads the current row first and carries forward
-   * whatever the intake already recorded instead of resetting it to
+   * whatever the handler already recorded instead of resetting it to
    * defaults on every write.
    */
   private async persistHelperState(): Promise<void> {

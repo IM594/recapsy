@@ -14,8 +14,8 @@ import {
   type CaptureHelperEvent,
   type CaptureHelperStartOptions,
   createCaptureHelperController,
-} from './capture-helper-controller';
-import { createCaptureHelperEventIntake } from './capture-helper-event-intake';
+} from './helper-controller';
+import { createCaptureHelperEventHandler } from './helper-event-handler';
 
 const now = '2026-07-07T08:00:00.000Z';
 const backpressure: BackpressureConfig = {
@@ -123,14 +123,14 @@ describe('capture helper controller', () => {
     expect(JSON.stringify(controller.getStatus())).not.toContain('OCR raw text');
   });
 
-  it('routes internal capture events through the envelope intake without a second outbox path', async () => {
+  it('routes internal capture events through the envelope handler without a second outbox path', async () => {
     const store = createInMemoryOperationalStore();
     const commandClient = new RecordingCommandClient();
     const client = new RecordingCaptureHelperClient();
     const controller = createCaptureHelperController({
       client,
       deviceId: 'device_1',
-      eventIntake: createCaptureHelperEventIntake({
+      eventHandler: createCaptureHelperEventHandler({
         backpressure,
         client: commandClient,
         deviceId: 'device_1',
@@ -194,14 +194,14 @@ describe('capture helper controller', () => {
     expect(serialized).not.toContain('OCR raw text');
   });
 
-  it('does not double-write helper_state when routing an unexpected exit through the event intake', async () => {
+  it('does not double-write helper_state when routing an unexpected exit through the event handler', async () => {
     const { store, setHelperStateCallCount } = createCountingHelperStateStore(
       createInMemoryOperationalStore(),
     );
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
-      eventIntake: createCaptureHelperEventIntake({
+      eventHandler: createCaptureHelperEventHandler({
         backpressure,
         client: new RecordingCommandClient(),
         deviceId: 'device_1',
@@ -228,9 +228,9 @@ describe('capture helper controller', () => {
     });
   });
 
-  it('preserves event-intake-owned permissions when the controller persists its own status', async () => {
+  it('preserves event-handler-owned permissions when the controller persists its own status', async () => {
     const store = createInMemoryOperationalStore();
-    const eventIntake = createCaptureHelperEventIntake({
+    const eventHandler = createCaptureHelperEventHandler({
       backpressure,
       client: new RecordingCommandClient(),
       deviceId: 'device_1',
@@ -241,12 +241,12 @@ describe('capture helper controller', () => {
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
-      eventIntake,
+      eventHandler,
       now: () => now,
       store,
     });
     await controller.start();
-    await eventIntake.handleEnvelope({
+    await eventHandler.handleEnvelope({
       correlationId: null,
       messageId: 'message_permission',
       payload: { accessibility: 'granted', observedAt: now, screenCapture: 'granted' },
@@ -267,7 +267,7 @@ describe('capture helper controller', () => {
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
-      eventIntake: createCaptureHelperEventIntake({
+      eventHandler: createCaptureHelperEventHandler({
         backpressure,
         client: new RecordingCommandClient(),
         deviceId: 'device_1',
@@ -285,7 +285,7 @@ describe('capture helper controller', () => {
     ).rejects.toThrow('capture_helper_legacy_adapter_ocr_input_unsupported');
   });
 
-  it('does not let internal capture events write outbox jobs when intake is absent', async () => {
+  it('does not let internal capture events write outbox jobs when the handler is absent', async () => {
     const store = createInMemoryOperationalStore();
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
@@ -308,13 +308,13 @@ describe('capture helper controller', () => {
     });
   });
 
-  it('wires verified helper envelopes to injected intake during start', async () => {
+  it('wires verified helper envelopes to the injected handler during start', async () => {
     const client = new RecordingCaptureHelperClient();
     const observed: HelperEnvelope[] = [];
     const controller = createCaptureHelperController({
       client,
       deviceId: 'device_1',
-      eventIntake: {
+      eventHandler: {
         async handleEnvelope(envelope): Promise<void> {
           observed.push(envelope);
         },

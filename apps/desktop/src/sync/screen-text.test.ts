@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AiOcrResponse } from '@recapsy/contracts';
-import { OcrResultInvalidError, deriveScreenTextFromOcrResponse } from './ocr-screen-text-mapping';
+import { OcrResultInvalidError, mapOcrScreenText } from './screen-text';
 
 function ocrResponse(blocks: AiOcrResponse['blocks']): AiOcrResponse {
   return {
@@ -12,9 +12,9 @@ function ocrResponse(blocks: AiOcrResponse['blocks']): AiOcrResponse {
   };
 }
 
-describe('deriveScreenTextFromOcrResponse', () => {
+describe('mapOcrScreenText', () => {
   it('maps blocks with source, reading order, kind, and bounding box', () => {
-    const result = deriveScreenTextFromOcrResponse(
+    const result = mapOcrScreenText(
       ocrResponse([
         { bbox: { height: 10, width: 20, x: 1, y: 2 }, kind: 'heading', order: 0, text: 'Title' },
         { kind: 'code', order: 1, text: 'const a = 1;' },
@@ -36,7 +36,7 @@ describe('deriveScreenTextFromOcrResponse', () => {
   });
 
   it('drops empty and whitespace-only blocks while keeping the original index as reading order', () => {
-    const result = deriveScreenTextFromOcrResponse(
+    const result = mapOcrScreenText(
       ocrResponse([{ text: 'first' }, { text: '   ' }, { text: '' }, { text: 'fourth' }]),
     );
 
@@ -47,7 +47,7 @@ describe('deriveScreenTextFromOcrResponse', () => {
   });
 
   it('defaults a missing kind to text and folds unknown kinds to other', () => {
-    const result = deriveScreenTextFromOcrResponse(
+    const result = mapOcrScreenText(
       ocrResponse([
         { text: 'no kind' },
         { kind: 'paragraph', text: 'unknown kind' },
@@ -59,7 +59,7 @@ describe('deriveScreenTextFromOcrResponse', () => {
   });
 
   it('prefers an explicit order of zero over the array index', () => {
-    const result = deriveScreenTextFromOcrResponse(
+    const result = mapOcrScreenText(
       ocrResponse([
         { order: 5, text: 'later' },
         { order: 0, text: 'earlier' },
@@ -70,7 +70,7 @@ describe('deriveScreenTextFromOcrResponse', () => {
   });
 
   it('drops a zero-area bounding box but keeps the block', () => {
-    const result = deriveScreenTextFromOcrResponse(
+    const result = mapOcrScreenText(
       ocrResponse([
         { bbox: { height: 0, width: 20, x: 1, y: 2 }, text: 'zero height' },
         { bbox: { height: 10, width: 0, x: 1, y: 2 }, text: 'zero width' },
@@ -82,12 +82,12 @@ describe('deriveScreenTextFromOcrResponse', () => {
   });
 
   it('throws OcrResultInvalidError when no block has any text', () => {
-    expect(() =>
-      deriveScreenTextFromOcrResponse(ocrResponse([{ text: '' }, { text: '  ' }])),
-    ).toThrow(OcrResultInvalidError);
+    expect(() => mapOcrScreenText(ocrResponse([{ text: '' }, { text: '  ' }]))).toThrow(
+      OcrResultInvalidError,
+    );
   });
 
   it('throws OcrResultInvalidError for an empty block list', () => {
-    expect(() => deriveScreenTextFromOcrResponse(ocrResponse([]))).toThrow(OcrResultInvalidError);
+    expect(() => mapOcrScreenText(ocrResponse([]))).toThrow(OcrResultInvalidError);
   });
 });

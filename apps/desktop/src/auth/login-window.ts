@@ -3,7 +3,7 @@ import type { AuthClient, AuthClientErrorCode } from './auth-client';
 /**
  * Structural surface of the single Electron `ipcMain` this module needs.
  * Kept narrow and duck-typed (same pattern as `ElectronIpcMainLike` in
- * `main/electron-main-runtime.ts`) so the login orchestration logic below can
+ * `main/runtime.ts`) so the login orchestration logic below can
  * be exercised with `bun test` against a plain fake object, while the real
  * `electron` module's `ipcMain` singleton satisfies it as-is.
  *

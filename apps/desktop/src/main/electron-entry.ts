@@ -17,12 +17,12 @@ import { createNodeSqliteDatabase } from '../storage/composition';
 import { createSqliteOperationalStore } from '../storage/public';
 import type { SyncAssetReader, SyncRunResult } from '../sync/public';
 import { createLocalAssetReader } from './asset-reader';
-import { createElectronMainRuntime } from './electron-main-runtime';
 import { createElectronKeychainSecretStore } from './keychain-secret-store';
+import { createElectronMainRuntime } from './runtime';
 
 /**
  * Thin, genuinely-`electron`-importing entry point. Everything with actual
- * decision logic lives in `electron-main-runtime.ts` (duck-typed against
+ * decision logic lives in `runtime.ts` (duck-typed against
  * `electron`, unit-testable with `bun test`); this file only supplies real
  * `app`/`ipcMain`/`BrowserWindow` plus dev-only dependency instances. It
  * cannot itself be exercised under `bun test` (real Electron is required),
@@ -311,7 +311,7 @@ ready.catch((error: unknown) => {
  * `HelperEnvelope<TType>`'s `payload` type is a conditional type keyed off
  * its own generic parameter (see `helper/protocol.ts`), so a plain
  * `switch (envelope.type)` does not narrow `envelope.payload` per case — the
- * same limitation `capture-helper-event-intake.ts`'s own
+ * same limitation `capture/helper-event-handler.ts`'s own
  * `narrowHelperEnvelope` works around. This is a type-level cast only: the
  * caller must already have confirmed `envelope.type === type` (e.g. inside
  * the matching `switch` case below).

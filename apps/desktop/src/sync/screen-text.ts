@@ -48,7 +48,7 @@ const KNOWN_SCREEN_TEXT_KINDS = new Set<OcrScreenTextBlockKind>([
  *
  * Throws {@link OcrResultInvalidError} when nothing valid remains.
  */
-export function deriveScreenTextFromOcrResponse(response: AiOcrResponse): OcrScreenTextResult {
+export function mapOcrScreenText(response: AiOcrResponse): OcrScreenTextResult {
   const blocks: OcrScreenTextBlock[] = [];
 
   response.blocks.forEach((block, index) => {

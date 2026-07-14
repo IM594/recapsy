@@ -20,7 +20,7 @@ import type { SyncAssetReader } from '../src/sync/types';
  * through the real `createAuthClient()` (hitting the real `/v1/auth/login`
  * and `/v1/auth/session` routes, not a mock), then feed the resulting real
  * token + workspace id into `createServerApiClient` + `createSyncScheduler`
- * exactly as `main/electron-main-runtime.ts` does. This intentionally
+ * exactly as `main/runtime.ts` does. This intentionally
  * reuses the harness pattern from `server-http-smoke.test.ts`
  * (`Bun.serve()` + in-memory repositories, no real Postgres) rather than a
  * bespoke mock server.
@@ -28,7 +28,7 @@ import type { SyncAssetReader } from '../src/sync/types';
  * There is no real Swift helper yet, so there are no real asset bytes to
  * upload. That is asserted here as an honest `blocked` outbox state (via
  * the same `local_asset_unreadable` fail-closed shape
- * `main/electron-main-runtime.ts`'s `failClosedReadAssetBytes` uses), not
+ * `main/runtime.ts`'s `failClosedReadAssetBytes` uses), not
  * faked as `synced`.
  */
 
@@ -71,7 +71,7 @@ describe('real login through to the sync loop over real HTTP', () => {
 
     // 2. Real session validation: `getActiveSession()` re-confirms the just
     // stored token against the real `/v1/auth/session` route (this is the
-    // check `resolveWorkspaceId` in `main/electron-main-runtime.ts` runs on
+    // check `resolveWorkspaceId` in `main/runtime.ts` runs on
     // every startup before deciding whether to skip the login window).
     const activeSession = await authClient.getActiveSession();
     expect(activeSession).toEqual({ workspaceId: registered.workspaceId });
@@ -87,7 +87,7 @@ describe('real login through to the sync loop over real HTTP', () => {
 
     // 4. Real server API client + real sync scheduler, using the workspace
     // id and token that came out of the real login above — the same
-    // construction `main/electron-main-runtime.ts` performs after
+    // construction `main/runtime.ts` performs after
     // `resolveWorkspaceId()` resolves.
     const api = createServerApiClient({
       accessTokenProvider: {
@@ -143,7 +143,7 @@ describe('real login through to the sync loop over real HTTP', () => {
 
   it('keeps the last confirmed workspace id cached in the token store when the real server becomes unreachable', async () => {
     // Real-world foundation for `resolveWorkspaceId`'s offline degradation
-    // (`main/electron-main-runtime.ts`): a stored token whose session cannot
+    // (`main/runtime.ts`): a stored token whose session cannot
     // be re-verified because the server is down (not a confirmed 401) must
     // still carry the last real, server-confirmed workspace id, so the main
     // process can keep running against it instead of blocking behind a
@@ -219,7 +219,7 @@ const fetchTransport: ServerApiTransport = async (request) => {
 };
 
 /**
- * Mirrors `main/electron-main-runtime.ts`'s `failClosedReadAssetBytes`
+ * Mirrors `main/runtime.ts`'s `failClosedReadAssetBytes`
  * exactly (same safe-error shape `sync/scheduler.ts` already has dedicated
  * handling for), rather than importing it: that constant is not exported
  * (deliberately private to the runtime wiring module), and duplicating a

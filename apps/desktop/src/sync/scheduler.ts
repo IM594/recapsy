@@ -4,7 +4,7 @@ import type {
   SafeOperationalError,
   StoredOcrResult,
 } from '../storage/public';
-import { OcrResultInvalidError, deriveScreenTextFromOcrResponse } from './ocr-screen-text-mapping';
+import { OcrResultInvalidError, mapOcrScreenText } from './screen-text';
 import type {
   RetryBackoffConfig,
   RetryJitterSource,
@@ -222,9 +222,9 @@ async function syncJob(options: SyncSchedulerOptions, job: OutboxJob): Promise<S
       workspaceId: activeJob.workspaceId,
     });
 
-    let screenText: ReturnType<typeof deriveScreenTextFromOcrResponse>;
+    let screenText: ReturnType<typeof mapOcrScreenText>;
     try {
-      screenText = deriveScreenTextFromOcrResponse(ocrResponse);
+      screenText = mapOcrScreenText(ocrResponse);
     } catch (error) {
       if (error instanceof OcrResultInvalidError) {
         // A deterministic mapping failure: re-mapping the same bytes cannot

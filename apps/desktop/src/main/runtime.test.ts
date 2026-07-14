@@ -18,7 +18,7 @@ import {
   type ElectronQuitEvent,
   type OperationalStoreLifecycle,
   createElectronMainRuntime,
-} from './electron-main-runtime';
+} from './runtime';
 
 const now = '2026-07-08T00:00:00.000Z';
 const workspaceId = 'workspace_dev';
@@ -151,7 +151,7 @@ describe('electron main runtime wiring', () => {
     expect(response).toMatchObject({ error: { code: 'unknown' }, ok: false });
   });
 
-  it('capture.getStatus reflects helper state and permissions observed through the real intake', async () => {
+  it('capture.getStatus reflects helper state and permissions observed through the real handler', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
     app.triggerReady();
@@ -242,7 +242,7 @@ describe('electron main runtime wiring', () => {
       ok: true,
     });
 
-    // The controller/intake must have acked the capture back to the helper
+    // The controller/handler must have acked the capture back to the helper
     // over the same command channel real captures use.
     expect(helperClient.sentCommands.some((command) => command.type === 'capture.ack')).toBe(true);
   });
@@ -391,7 +391,7 @@ describe('electron main runtime wiring', () => {
     expect(syncLoop.stopCalls).toBe(1);
   });
 
-  it('invokes onHelperEnvelope with the same envelope before it reaches the real intake', async () => {
+  it('invokes onHelperEnvelope with the same envelope before it reaches the real handler', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const receivedEnvelopes: HelperEnvelope<HelperToMainType>[] = [];
     const handle = createElectronMainRuntime(
@@ -420,7 +420,7 @@ describe('electron main runtime wiring', () => {
 
     expect(receivedEnvelopes).toEqual([envelope]);
 
-    // The wrapper must still delegate to the real (well-tested) intake —
+    // The wrapper must still delegate to the real (well-tested) handler —
     // this envelope should be reflected in capture.getStatus exactly as it
     // would be without onHelperEnvelope wired up.
     const response = await ipcMain.invoke('capture.getStatus', undefined);
@@ -430,14 +430,14 @@ describe('electron main runtime wiring', () => {
     });
   });
 
-  it('does not wrap the event intake when onHelperEnvelope is not supplied', async () => {
+  it('does not wrap the event handler when onHelperEnvelope is not supplied', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
     app.triggerReady();
     await handle.ready;
 
     // No onHelperEnvelope wired up; a real envelope must still flow through
-    // to the intake exactly as today (no behavior change when the dev flag
+    // to the handler exactly as today (no behavior change when the dev flag
     // is off).
     await helperClient.emit({
       correlationId: null,

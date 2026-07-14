@@ -66,7 +66,7 @@ export type CaptureHelperEvent =
     };
 
 export type CaptureHelperStartOptions = {
-  /** @internal Legacy adapter surface for tests and mock clients. Capture events must be routed to eventIntake. */
+  /** @internal Legacy adapter surface for tests and mock clients. Capture events must be routed to eventHandler. */
   onEvent?(event: CaptureHelperEvent): Promise<void>;
   onEnvelope?(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
 };

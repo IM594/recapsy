@@ -139,7 +139,7 @@ describe('desktop architecture boundaries', () => {
   it('keeps shared runtime lifecycle types independent from the helper controller', async () => {
     const source = await readSource('runtime/types.ts');
 
-    expect(source).not.toMatch(/from ['"]\.\/capture-helper-controller['"]/);
+    expect(source).not.toMatch(/from ['"]\.\.\/capture\/helper-controller['"]/);
   });
 
   it('keeps helper adapters independent from the runtime capability', async () => {
@@ -164,9 +164,47 @@ describe('desktop architecture boundaries', () => {
     expect(compatibilityModules).toEqual([]);
   });
 
+  it('uses capability context instead of repeating it in filenames and public symbols', async () => {
+    const sourceFiles: string[] = [];
+    const productionSources: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+      if (!relativePath.endsWith('.test.ts') && !relativePath.includes('/__tests__/')) {
+        productionSources.push(await readSource(relativePath));
+      }
+    }
+
+    const retiredPaths = [
+      'capture/capture-helper-controller.ts',
+      'capture/capture-helper-event-intake.ts',
+      'capture/capture-runtime.ts',
+      'main/electron-main-runtime.ts',
+      'sync/ocr-screen-text-mapping.ts',
+    ];
+    const requiredPaths = [
+      'capture/helper-controller.ts',
+      'capture/helper-event-handler.ts',
+      'capture/runtime.ts',
+      'main/runtime.ts',
+      'sync/screen-text.ts',
+    ];
+    const source = productionSources.join('\n');
+
+    expect(retiredPaths.filter((relativePath) => sourceFiles.includes(relativePath))).toEqual([]);
+    expect(requiredPaths.filter((relativePath) => !sourceFiles.includes(relativePath))).toEqual([]);
+    expect(source).not.toMatch(/\bCaptureHelperEventIntake\b/);
+    expect(source).not.toMatch(/\bcreateCaptureHelperEventIntake\b/);
+    expect(source).not.toMatch(/\bderiveScreenTextFromOcrResponse\b/);
+    expect(source).toMatch(/\bCaptureHelperEventHandler\b/);
+    expect(source).toMatch(/\bcreateCaptureHelperEventHandler\b/);
+    expect(source).toMatch(/\bmapOcrScreenText\b/);
+  });
+
   it('keeps session startup out of the Electron lifecycle coordinator', async () => {
     const [runtimeSource, sessionStartupSource] = await Promise.all([
-      readSource('main/electron-main-runtime.ts'),
+      readSource('main/runtime.ts'),
       readSource('auth/session-startup.ts'),
     ]);
 
@@ -178,13 +216,13 @@ describe('desktop architecture boundaries', () => {
 
   it('gives capture ownership of helper orchestration and renderer projections', async () => {
     const [runtimeSource, captureRuntimeSource, captureHandlersSource] = await Promise.all([
-      readSource('main/electron-main-runtime.ts'),
-      readSource('capture/capture-runtime.ts'),
+      readSource('main/runtime.ts'),
+      readSource('capture/runtime.ts'),
       readSource('capture/ipc-handlers.ts'),
     ]);
 
     expect(runtimeSource).not.toContain('createCaptureHelperController');
-    expect(runtimeSource).not.toContain('createCaptureHelperEventIntake');
+    expect(runtimeSource).not.toContain('createCaptureHelperEventHandler');
     expect(runtimeSource).not.toContain('buildCaptureStatusDto');
     expect(runtimeSource).not.toContain('buildRecentEventsDto');
     expect(runtimeSource).toContain('createCaptureRuntime');
@@ -195,7 +233,7 @@ describe('desktop architecture boundaries', () => {
 
   it('gives sync ownership of recovery, scheduler, loop startup, and queue IPC', async () => {
     const [runtimeSource, syncRuntimeSource, syncHandlersSource] = await Promise.all([
-      readSource('main/electron-main-runtime.ts'),
+      readSource('main/runtime.ts'),
       readSource('sync/sync-runtime.ts'),
       readSource('sync/ipc-handlers.ts'),
     ]);
@@ -211,7 +249,7 @@ describe('desktop architecture boundaries', () => {
 
   it('keeps IPC contract registration in the IPC capability', async () => {
     const [runtimeSource, registrySource] = await Promise.all([
-      readSource('main/electron-main-runtime.ts'),
+      readSource('main/runtime.ts'),
       readSource('ipc/handler-registry.ts'),
     ]);
 

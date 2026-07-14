@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { createTestHttpApp } from '../../server/src/__tests__/http-app-harness';
 import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
-import type { RecapsyAiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
-import type { createRecapsyAiRuntime } from '../../server/src/ai-runtime/public';
+import type { AiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
+import type { createAiRuntime } from '../../server/src/ai-runtime/public';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
 import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
 import type { createProviderCredentialResolver } from '../../server/src/provider-settings/public';
@@ -536,7 +536,7 @@ type ServerHttpHarness = {
 };
 
 type ServerHarnessOptions = {
-  aiRuntime?: RecapsyAiRuntime;
+  aiRuntime?: AiRuntime;
   useAppDefaultOcrRunner?: boolean;
 };
 
@@ -544,7 +544,7 @@ type ServerModules = {
   InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
   InMemoryCaptureOcrSearchRepository: new () => InMemoryCaptureOcrSearchRepository;
   createProviderCredentialResolver: typeof createProviderCredentialResolver;
-  createRecapsyAiRuntime: typeof createRecapsyAiRuntime;
+  createAiRuntime: typeof createAiRuntime;
   createTestHttpApp: typeof createTestHttpApp;
 };
 
@@ -580,7 +580,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
     const aiRuntime =
       options.aiRuntime ??
       (options.useAppDefaultOcrRunner
-        ? modules.createRecapsyAiRuntime({
+        ? modules.createAiRuntime({
             providerCredentialResolver: modules.createProviderCredentialResolver({
               config,
               repository: accountManagementRepository,
@@ -673,12 +673,12 @@ async function loadServerModules(): Promise<ServerModules> {
       accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureOcrSearchRepository: captureRepositoryModule.InMemoryCaptureOcrSearchRepository,
     createProviderCredentialResolver: providerSettingsModule.createProviderCredentialResolver,
-    createRecapsyAiRuntime: aiRuntimeModule.createRecapsyAiRuntime,
+    createAiRuntime: aiRuntimeModule.createAiRuntime,
     createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }
 
-function visionRuntimeReturning(text: string): RecapsyAiRuntime {
+function visionRuntimeReturning(text: string): AiRuntime {
   return {
     async runVisionText() {
       return {
@@ -708,7 +708,7 @@ function visionRuntimeFailing(
   reason: RunVisionTextFailureReason,
   retryable: boolean,
   safeMessage: string,
-): RecapsyAiRuntime {
+): AiRuntime {
   return {
     async runVisionText() {
       return { reason, retryable, safeMessage, success: false };

@@ -8,12 +8,12 @@ import {
   type OperationalStoreRepository,
   reconcileAssetRefs,
 } from '../storage/public';
-import { createCaptureHelperController } from './capture-helper-controller';
+import { createCaptureHelperController } from './helper-controller';
 import {
   type CaptureHelperCommandClient,
-  type CaptureHelperEventIntake,
-  createCaptureHelperEventIntake,
-} from './capture-helper-event-intake';
+  type CaptureHelperEventHandler,
+  createCaptureHelperEventHandler,
+} from './helper-event-handler';
 
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 750 * 1024 * 1024,
@@ -44,12 +44,12 @@ export type CaptureRuntimeOptions = {
 };
 
 export type CaptureRuntime = {
-  eventIntake: CaptureHelperEventIntake;
+  eventHandler: CaptureHelperEventHandler;
   runtime: DesktopRuntime;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
-  const rawEventIntake = createCaptureHelperEventIntake({
+  const rawEventHandler = createCaptureHelperEventHandler({
     backpressure: options.backpressure ?? DEFAULT_BACKPRESSURE,
     client: options.client,
     deviceId: options.deviceId,
@@ -57,11 +57,11 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     store: options.store,
     workspaceId: options.workspaceId,
   });
-  const eventIntake = decorateEventIntake(rawEventIntake, options.onHelperEnvelope);
+  const eventHandler = decorateEventHandler(rawEventHandler, options.onHelperEnvelope);
   const helper = createCaptureHelperController({
     client: options.client,
     deviceId: options.deviceId,
-    eventIntake,
+    eventHandler,
     now: options.now,
     store: options.store,
   });
@@ -80,23 +80,23 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     startupRecovery: options.startupRecovery,
   });
 
-  return { eventIntake, runtime };
+  return { eventHandler, runtime };
 }
 
-function decorateEventIntake(
-  eventIntake: CaptureHelperEventIntake,
+function decorateEventHandler(
+  eventHandler: CaptureHelperEventHandler,
   onHelperEnvelope: CaptureRuntimeOptions['onHelperEnvelope'],
-): CaptureHelperEventIntake {
+): CaptureHelperEventHandler {
   if (!onHelperEnvelope) {
-    return eventIntake;
+    return eventHandler;
   }
 
   return {
-    getStatus: () => eventIntake.getStatus(),
+    getStatus: () => eventHandler.getStatus(),
     async handleEnvelope(envelope) {
       onHelperEnvelope(envelope);
-      await eventIntake.handleEnvelope(envelope);
+      await eventHandler.handleEnvelope(envelope);
     },
-    handleProtocolResult: (result) => eventIntake.handleProtocolResult(result),
+    handleProtocolResult: (result) => eventHandler.handleProtocolResult(result),
   };
 }
