@@ -6,7 +6,7 @@ const TEST_SOURCE_PATH =
 const SERVER_SOURCE_ROOT = 'apps/server/src';
 const SERVER_CAPABILITIES = [
   'account-management',
-  'ai-runtime',
+  'ai',
   'capture-ocr-search',
   'ocr-proxy',
   'provider-settings',
@@ -77,11 +77,11 @@ module.exports = {
       },
     },
     {
-      name: 'server-ai-runtime-not-to-database',
+      name: 'server-ai-not-to-database',
       severity: 'error',
       comment: 'AI runtime must not depend on Drizzle schema or other shared database details.',
       from: {
-        path: `^${SERVER_SOURCE_ROOT}/ai-runtime/`,
+        path: `^${SERVER_SOURCE_ROOT}/ai/`,
         pathNot: TEST_SOURCE_PATH,
       },
       to: {
@@ -89,12 +89,12 @@ module.exports = {
       },
     },
     {
-      name: 'server-ai-runtime-not-to-account-management',
+      name: 'server-ai-not-to-account-management',
       severity: 'error',
       comment:
         'AI runtime consumes provider credentials through the provider-settings resolver port.',
       from: {
-        path: `^${SERVER_SOURCE_ROOT}/ai-runtime/`,
+        path: `^${SERVER_SOURCE_ROOT}/ai/`,
         pathNot: TEST_SOURCE_PATH,
       },
       to: {
