@@ -231,7 +231,6 @@ describe('desktop architecture boundaries', () => {
       'isLocalAssetSyncErrorCode',
       'isTerminalBlockingSyncErrorCode',
       'syncSafeMessage',
-      'toSyncPresentationError',
     ];
     const errorsImport = schedulerSource.match(
       /import\s*\{([^}]*)\}\s*from\s*['"]\.\/errors['"]/s,
@@ -256,6 +255,95 @@ describe('desktop architecture boundaries', () => {
       if (new RegExp(`(?:const|function)\\s+${retiredDeclaration}\\b`).test(schedulerSource)) {
         violations.push(`sync/scheduler.ts still declares ${retiredDeclaration}`);
       }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('owns sync queue summary projection in a narrow read module', async () => {
+    const [schedulerSource, publicSource, handlersSource] = await Promise.all([
+      readSource('sync/scheduler.ts'),
+      readSource('sync/public.ts'),
+      readSource('sync/handlers.ts'),
+    ]);
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const violations: string[] = [];
+    for (const requiredPath of ['sync/summary.ts', 'sync/summary.test.ts']) {
+      if (!sourceFiles.includes(requiredPath)) {
+        violations.push(`${requiredPath} is missing`);
+      }
+    }
+
+    if (sourceFiles.includes('sync/summary.ts')) {
+      const summarySource = await readSource('sync/summary.ts');
+      if (!/export\s+(?:interface|type)\s+SyncSummaryStore\b/.test(summarySource)) {
+        violations.push('sync/summary.ts does not export SyncSummaryStore');
+      }
+      if (!/\blistOutboxJobs\s*\(/.test(summarySource)) {
+        violations.push('SyncSummaryStore does not declare listOutboxJobs');
+      }
+      for (const forbiddenDependency of [
+        'SyncQueueStore',
+        'OperationalStoreRepository',
+        'claimNextRetryableOutboxJob',
+        'getOutboxJob',
+        'recordOutboxSafeError',
+        'updateOutboxJobState',
+      ]) {
+        if (new RegExp(`\\b${forbiddenDependency}\\b`).test(summarySource)) {
+          violations.push(`sync/summary.ts still depends on ${forbiddenDependency}`);
+        }
+      }
+      if (
+        !/import\s*\{[^}]*\btoSyncPresentationError\b[^}]*\}\s*from\s*['"]\.\/errors['"]/s.test(
+          summarySource,
+        )
+      ) {
+        violations.push('sync/summary.ts does not import toSyncPresentationError from ./errors');
+      }
+    }
+
+    if (/\bcreateSyncQueueSummary\b/.test(schedulerSource)) {
+      violations.push('sync/scheduler.ts still owns createSyncQueueSummary');
+    }
+    if (
+      !/export\s*\{[^}]*\bcreateSyncQueueSummary\b[^}]*\}\s*from\s*['"]\.\/summary['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push('sync/public.ts does not export createSyncQueueSummary from ./summary');
+    }
+    if (
+      !/export\s+type\s*\{[^}]*\bSyncSummaryStore\b[^}]*\}\s*from\s*['"]\.\/summary['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push('sync/public.ts does not export SyncSummaryStore from ./summary');
+    }
+    if (
+      /export\s*\{[^}]*\bcreateSyncQueueSummary\b[^}]*\}\s*from\s*['"]\.\/scheduler['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push('sync/public.ts still exports createSyncQueueSummary from ./scheduler');
+    }
+    if (
+      !/import\s*\{[^}]*\bcreateSyncQueueSummary\b[^}]*\}\s*from\s*['"]\.\/summary['"]/s.test(
+        handlersSource,
+      )
+    ) {
+      violations.push('sync/handlers.ts does not import createSyncQueueSummary from ./summary');
+    }
+    if (!/\bSyncSummaryStore\b/.test(handlersSource)) {
+      violations.push('sync/handlers.ts does not depend on SyncSummaryStore');
+    }
+    if (/\bSyncQueueStore\b/.test(handlersSource)) {
+      violations.push('sync/handlers.ts still depends on SyncQueueStore');
     }
 
     expect(violations).toEqual([]);

@@ -1,9 +1,7 @@
 export { computeRetryBackoffDelayMs } from './retry';
-export {
-  createSyncQueueSummary,
-  createSyncScheduler,
-  reconcileOutboxJobFromServerCapture,
-} from './scheduler';
+export { createSyncQueueSummary } from './summary';
+export type { SyncSummaryStore } from './summary';
+export { createSyncScheduler, reconcileOutboxJobFromServerCapture } from './scheduler';
 export { recoverInterruptedOutboxJobs } from './recovery';
 export type { StartupRecoveryOptions, StartupRecoverySummary } from './recovery';
 export { createSyncLoop } from './loop';

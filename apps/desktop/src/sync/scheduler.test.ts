@@ -7,7 +7,8 @@ import type {
   OutboxJobCreateInput,
   StoredOcrResult,
 } from '../storage';
-import { createSyncQueueSummary, createSyncScheduler } from './scheduler';
+import { createSyncScheduler } from './scheduler';
+import { createSyncQueueSummary } from './summary';
 import type { SyncServerApi } from './types';
 
 const now = '2026-07-06T00:00:00.000Z';

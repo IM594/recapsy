@@ -1,9 +1,8 @@
 import { type IpcHandlerMap, createRendererSafeSuccess } from '../ipc/public';
-import { createSyncQueueSummary } from './scheduler';
-import type { SyncQueueStore } from './types';
+import { type SyncSummaryStore, createSyncQueueSummary } from './summary';
 
 export type SyncIpcHandlerOptions = {
-  store: SyncQueueStore;
+  store: SyncSummaryStore;
   workspaceId: string;
 };
 
