@@ -163,6 +163,55 @@ describe('desktop architecture boundaries', () => {
     expect(source).not.toContain('ServerApiError');
   });
 
+  it('gives retry policy its own sync module and test ownership', async () => {
+    const [schedulerSource, publicSource] = await Promise.all([
+      readSource('sync/scheduler.ts'),
+      readSource('sync/public.ts'),
+    ]);
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const violations: string[] = [];
+    if (!sourceFiles.includes('sync/retry.ts')) {
+      violations.push('sync/retry.ts is missing');
+    }
+    if (!sourceFiles.includes('sync/retry.test.ts')) {
+      violations.push('sync/retry.test.ts is missing');
+    }
+    if (sourceFiles.includes('sync/retry-backoff.test.ts')) {
+      violations.push('sync/retry-backoff.test.ts is still present');
+    }
+    if (/export function computeRetryBackoffDelayMs\s*\(/.test(schedulerSource)) {
+      violations.push('sync/scheduler.ts still declares computeRetryBackoffDelayMs');
+    }
+    if (
+      !/import\s*\{[^}]*\bcomputeRetryBackoffDelayMs\b[^}]*\}\s*from\s*['"]\.\/retry['"]/s.test(
+        schedulerSource,
+      )
+    ) {
+      violations.push('sync/scheduler.ts does not import computeRetryBackoffDelayMs from ./retry');
+    }
+    if (
+      !/export\s*\{[^}]*\bcomputeRetryBackoffDelayMs\b[^}]*\}\s*from\s*['"]\.\/retry['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push('sync/public.ts does not export computeRetryBackoffDelayMs from ./retry');
+    }
+    if (
+      /export\s*\{[^}]*\bcomputeRetryBackoffDelayMs\b[^}]*\}\s*from\s*['"]\.\/scheduler['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push('sync/public.ts still exports computeRetryBackoffDelayMs from ./scheduler');
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('routes every production import into a capability through its public surface', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('**/*.ts');

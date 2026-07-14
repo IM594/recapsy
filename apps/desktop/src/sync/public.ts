@@ -1,5 +1,5 @@
+export { computeRetryBackoffDelayMs } from './retry';
 export {
-  computeRetryBackoffDelayMs,
   createSyncQueueSummary,
   createSyncScheduler,
   reconcileOutboxJobFromServerCapture,

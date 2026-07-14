@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { computeRetryBackoffDelayMs } from './scheduler';
+import { computeRetryBackoffDelayMs } from './retry';
 import type { RetryBackoffConfig } from './types';
 
 const CONFIG: RetryBackoffConfig = {
