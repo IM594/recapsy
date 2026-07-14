@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { createTestHttpApp } from '../../server/src/__tests__/app-harness';
 import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
-import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
-import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
+import type { CaptureRepositorySnapshot } from '../../server/src/capture/models';
+import type { InMemoryCaptureRepository } from '../../server/src/capture/repositories/memory';
 import type { Logger } from '../../server/src/shared/logger';
 import { createAuthClient } from '../src/auth/client';
 import { createInMemoryTokenStore } from '../src/auth/tokens';
@@ -337,7 +337,7 @@ function sha256Hex(bytes: Uint8Array) {
 type ServerHttpHarness = {
   endpoint: string;
   registerUser(email: string): Promise<{ accessToken: string; workspaceId: string }>;
-  captureSnapshot(): CaptureOcrSearchRepositorySnapshot;
+  captureSnapshot(): CaptureRepositorySnapshot;
   stop(): void;
 };
 
@@ -347,10 +347,10 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
 
   try {
     const accountManagementRepository = new modules.InMemoryAccountManagementRepository();
-    const captureOcrSearchRepository = new modules.InMemoryCaptureOcrSearchRepository();
+    const captureRepository = new modules.InMemoryCaptureRepository();
     const app = modules.createTestHttpApp({
       accountManagementRepository,
-      captureOcrSearchRepository,
+      captureRepository,
       config: {
         ADMIN_BOOTSTRAP_TOKEN: adminToken,
         CORS_ALLOWED_ORIGINS: [],
@@ -378,7 +378,7 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
     const endpoint = server.url.toString().replace(/\/$/, '');
     const harness: ServerHttpHarness = {
       captureSnapshot() {
-        return captureOcrSearchRepository.snapshot() as CaptureOcrSearchRepositorySnapshot;
+        return captureRepository.snapshot() as CaptureRepositorySnapshot;
       },
       endpoint,
       async registerUser(email) {
@@ -423,7 +423,7 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
 
 type ServerModules = {
   InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
-  InMemoryCaptureOcrSearchRepository: new () => InMemoryCaptureOcrSearchRepository;
+  InMemoryCaptureRepository: new () => InMemoryCaptureRepository;
   createTestHttpApp: typeof createTestHttpApp;
 };
 
@@ -435,13 +435,13 @@ async function loadServerModules(): Promise<ServerModules> {
     new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href
   );
   const captureRepositoryModule = await import(
-    new URL('../../server/src/capture-ocr-search/repositories/memory.ts', import.meta.url).href
+    new URL('../../server/src/capture/repositories/memory.ts', import.meta.url).href
   );
 
   return {
     InMemoryAccountManagementRepository:
       accountRepositoryModule.InMemoryAccountManagementRepository,
-    InMemoryCaptureOcrSearchRepository: captureRepositoryModule.InMemoryCaptureOcrSearchRepository,
+    InMemoryCaptureRepository: captureRepositoryModule.InMemoryCaptureRepository,
     createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }

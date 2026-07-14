@@ -7,7 +7,7 @@ const SERVER_SOURCE_ROOT = 'apps/server/src';
 const SERVER_CAPABILITIES = [
   'account-management',
   'ai',
-  'capture-ocr-search',
+  'capture',
   'ocr-proxy',
   'provider-settings',
   'search',
