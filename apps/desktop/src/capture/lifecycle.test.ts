@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
+import type { HelperLifecycle } from '../helper/public';
 import { createInMemoryOperationalStore } from '../storage';
 import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
-import { createDesktopRuntime } from './lifecycle-controller';
-import type { HelperLifecycle } from './types';
+import { createCaptureLifecycle } from './lifecycle';
 
-describe('desktop runtime lifecycle', () => {
+describe('capture lifecycle', () => {
   it('keeps the runtime harness test double out of production modules', async () => {
     const productionHarnessModule = Bun.file(
       new URL('../harness/runtime-harness.ts', import.meta.url),
@@ -14,57 +14,57 @@ describe('desktop runtime lifecycle', () => {
   });
 
   it('enters running after a successful start', async () => {
-    const harness = createRuntimeHarness();
+    const harness = createLifecycleHarness();
 
-    await harness.runtime.start();
+    await harness.lifecycle.start();
 
-    expect(harness.runtime.getSnapshot()).toMatchObject({
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
       status: 'running',
       menuBarActive: false,
     });
     expect(harness.helper.calls).toEqual(['start']);
   });
 
-  it('keeps the runtime running in the menu bar when the last window closes', async () => {
-    const harness = createRuntimeHarness();
-    await harness.runtime.start();
+  it('keeps capture running in the menu bar when the last window closes', async () => {
+    const harness = createLifecycleHarness();
+    await harness.lifecycle.start();
 
-    await harness.runtime.handleLastWindowClosed();
+    await harness.lifecycle.handleLastWindowClosed();
 
-    expect(harness.runtime.getSnapshot()).toMatchObject({
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
       status: 'running',
       menuBarActive: true,
     });
     expect(harness.helper.calls).toEqual(['start']);
   });
 
-  it('pauses and resumes capture without stopping the runtime', async () => {
-    const harness = createRuntimeHarness();
-    await harness.runtime.start();
+  it('pauses and resumes capture without stopping the lifecycle', async () => {
+    const harness = createLifecycleHarness();
+    await harness.lifecycle.start();
 
-    await harness.runtime.pause();
+    await harness.lifecycle.pause();
 
-    expect(harness.runtime.getSnapshot()).toMatchObject({
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
       status: 'paused',
       menuBarActive: false,
     });
 
-    await harness.runtime.resume();
+    await harness.lifecycle.resume();
 
-    expect(harness.runtime.getSnapshot()).toMatchObject({
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
       status: 'running',
       menuBarActive: false,
     });
     expect(harness.helper.calls).toEqual(['start', 'pauseCapture', 'resumeCapture']);
   });
 
-  it('shuts the helper down and stops the runtime on quit', async () => {
-    const harness = createRuntimeHarness();
-    await harness.runtime.start();
+  it('shuts the helper down and stops the lifecycle on quit', async () => {
+    const harness = createLifecycleHarness();
+    await harness.lifecycle.start();
 
-    await harness.runtime.requestQuit();
+    await harness.lifecycle.requestQuit();
 
-    expect(harness.runtime.getSnapshot()).toMatchObject({
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
       status: 'stopped',
       menuBarActive: false,
     });
@@ -73,7 +73,7 @@ describe('desktop runtime lifecycle', () => {
 
   it('runs startup recovery before helper capture starts', async () => {
     const calls: string[] = [];
-    const runtime = createDesktopRuntime({
+    const lifecycle = createCaptureLifecycle({
       helper: createRecordingHelper(calls),
       startupRecovery: {
         async recover(): Promise<void> {
@@ -82,9 +82,9 @@ describe('desktop runtime lifecycle', () => {
       },
     });
 
-    await runtime.start();
+    await lifecycle.start();
 
-    expect(runtime.getSnapshot()).toMatchObject({
+    expect(lifecycle.getSnapshot()).toMatchObject({
       status: 'running',
       menuBarActive: false,
     });
@@ -93,7 +93,7 @@ describe('desktop runtime lifecycle', () => {
 
   it('runs asset ref reconciliation after startup recovery and before helper capture starts', async () => {
     const calls: string[] = [];
-    const runtime = createDesktopRuntime({
+    const lifecycle = createCaptureLifecycle({
       assetReconciliation: {
         async reconcile(): Promise<void> {
           calls.push('reconcile');
@@ -107,16 +107,16 @@ describe('desktop runtime lifecycle', () => {
       },
     });
 
-    await runtime.start();
+    await lifecycle.start();
 
-    expect(runtime.getSnapshot()).toMatchObject({
+    expect(lifecycle.getSnapshot()).toMatchObject({
       status: 'running',
       menuBarActive: false,
     });
     expect(calls).toEqual(['recover', 'reconcile', 'start']);
   });
 
-  it('can wire interrupted outbox recovery into runtime startup through dependency injection', async () => {
+  it('can wire interrupted outbox recovery into lifecycle startup through dependency injection', async () => {
     const store = createInMemoryOperationalStore();
     const calls: string[] = [];
     await store.createOutboxJob({
@@ -132,7 +132,7 @@ describe('desktop runtime lifecycle', () => {
       now: '2026-07-06T00:00:01.000Z',
       state: 'syncing',
     });
-    const runtime = createDesktopRuntime({
+    const lifecycle = createCaptureLifecycle({
       helper: createRecordingHelper(calls),
       startupRecovery: {
         async recover(): Promise<void> {
@@ -145,7 +145,7 @@ describe('desktop runtime lifecycle', () => {
       },
     });
 
-    await runtime.start();
+    await lifecycle.start();
 
     expect(calls).toEqual(['recover', 'start']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
@@ -159,7 +159,7 @@ describe('desktop runtime lifecycle', () => {
 
   it('fails closed when startup recovery fails before helper capture starts', async () => {
     const calls: string[] = [];
-    const runtime = createDesktopRuntime({
+    const lifecycle = createCaptureLifecycle({
       helper: createRecordingHelper(calls),
       startupRecovery: {
         async recover(): Promise<void> {
@@ -169,9 +169,9 @@ describe('desktop runtime lifecycle', () => {
       },
     });
 
-    await expect(runtime.start()).rejects.toThrow('startup recovery failed');
+    await expect(lifecycle.start()).rejects.toThrow('startup recovery failed');
 
-    expect(runtime.getSnapshot()).toMatchObject({
+    expect(lifecycle.getSnapshot()).toMatchObject({
       status: 'stopped',
       menuBarActive: false,
     });
@@ -180,7 +180,7 @@ describe('desktop runtime lifecycle', () => {
 
   it('fails closed when asset ref reconciliation fails before helper capture starts', async () => {
     const calls: string[] = [];
-    const runtime = createDesktopRuntime({
+    const lifecycle = createCaptureLifecycle({
       assetReconciliation: {
         async reconcile(): Promise<void> {
           calls.push('reconcile');
@@ -195,9 +195,9 @@ describe('desktop runtime lifecycle', () => {
       },
     });
 
-    await expect(runtime.start()).rejects.toThrow('asset ref reconciliation failed');
+    await expect(lifecycle.start()).rejects.toThrow('asset ref reconciliation failed');
 
-    expect(runtime.getSnapshot()).toMatchObject({
+    expect(lifecycle.getSnapshot()).toMatchObject({
       status: 'stopped',
       menuBarActive: false,
     });
@@ -206,7 +206,7 @@ describe('desktop runtime lifecycle', () => {
 
   it('fails closed when helper start fails after operational checks', async () => {
     const calls: string[] = [];
-    const runtime = createDesktopRuntime({
+    const lifecycle = createCaptureLifecycle({
       assetReconciliation: {
         async reconcile(): Promise<void> {
           calls.push('reconcile');
@@ -234,9 +234,9 @@ describe('desktop runtime lifecycle', () => {
       },
     });
 
-    await expect(runtime.start()).rejects.toThrow('helper launch failed');
+    await expect(lifecycle.start()).rejects.toThrow('helper launch failed');
 
-    expect(runtime.getSnapshot()).toMatchObject({
+    expect(lifecycle.getSnapshot()).toMatchObject({
       status: 'stopped',
       menuBarActive: false,
       captureHelper: {
@@ -250,12 +250,12 @@ describe('desktop runtime lifecycle', () => {
   });
 });
 
-function createRuntimeHarness() {
+function createLifecycleHarness() {
   const helper = createRecordingHelper([]);
 
   return {
     helper,
-    runtime: createDesktopRuntime({ helper }),
+    lifecycle: createCaptureLifecycle({ helper }),
   };
 }
 

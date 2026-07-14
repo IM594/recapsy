@@ -8,12 +8,13 @@ import {
   type CaptureHelperClient,
   type CaptureHelperCommandClient,
   type CaptureHelperEventHandler,
+  type CaptureLifecycle,
   createCaptureIpcHandlers,
   createCaptureRuntime,
 } from '../capture/public';
 import type { HelperEnvelope, HelperToMainType } from '../helper/public';
 import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/public';
-import { type DesktopRuntime, createRuntimeIpcHandlers } from '../runtime/public';
+import { createRuntimeIpcHandlers } from '../runtime/public';
 import type { BackpressureConfig, OperationalStoreRepository } from '../storage/public';
 import {
   type RetryBackoffConfig,
@@ -73,7 +74,7 @@ export type ElectronMainRuntimeOptions = {
 
 export type ElectronMainRuntimeReadyState = {
   store: OperationalStoreLifecycle;
-  runtime: DesktopRuntime;
+  lifecycle: CaptureLifecycle;
   eventHandler: CaptureHelperEventHandler;
   workspaceId: string;
   workspaceIdVerified: boolean;
@@ -139,19 +140,19 @@ export function createElectronMainRuntime(
       workspaceId,
     });
 
-    await captureRuntime.runtime.start();
+    await captureRuntime.lifecycle.start();
     syncRuntime.start();
 
     if (options.ipcMain) {
       registerIpcHandlers(options.ipcMain, {
         ...createCaptureIpcHandlers({
           eventHandler: captureRuntime.eventHandler,
-          runtime: captureRuntime.runtime,
+          lifecycle: captureRuntime.lifecycle,
           store,
           workspaceId,
         }),
         ...createRuntimeIpcHandlers({
-          runtime: captureRuntime.runtime,
+          lifecycle: captureRuntime.lifecycle,
           statusSource: {
             getLastObservedAt: () => captureRuntime.eventHandler.getStatus().lastObservedAt,
           },
@@ -162,7 +163,7 @@ export function createElectronMainRuntime(
 
     return {
       eventHandler: captureRuntime.eventHandler,
-      runtime: captureRuntime.runtime,
+      lifecycle: captureRuntime.lifecycle,
       store,
       syncLoop: syncRuntime,
       workspaceId,
@@ -182,7 +183,7 @@ export function createElectronMainRuntime(
 
     void raceWithTimeout(
       ready
-        .then(({ runtime, syncLoop }) => Promise.all([runtime.requestQuit(), syncLoop.stop()]))
+        .then(({ lifecycle, syncLoop }) => Promise.all([lifecycle.requestQuit(), syncLoop.stop()]))
         .catch(() => undefined),
       quitTimeoutMs,
     ).then(() => options.app.exit(0));

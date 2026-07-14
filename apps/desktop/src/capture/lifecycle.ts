@@ -1,26 +1,40 @@
-import type {
-  CaptureHelperStatus,
-  DesktopRuntime,
-  HelperLifecycle,
-  RuntimeSnapshot,
-  RuntimeStatus,
-} from './types';
+import type { CaptureHelperStatus, HelperLifecycle } from '../helper/public';
 
-export type StartupRecoveryLifecycle = {
+export type { HelperLifecycle } from '../helper/public';
+
+export type CaptureStartupRecovery = {
   recover(): Promise<void>;
 };
 
-export type AssetReconciliationLifecycle = {
+export type CaptureAssetReconciliation = {
   reconcile(): Promise<void>;
 };
 
-export type DesktopRuntimeOptions = {
-  helper: HelperLifecycle;
-  startupRecovery?: StartupRecoveryLifecycle;
-  assetReconciliation?: AssetReconciliationLifecycle;
+export type CaptureLifecycleStatus = 'starting' | 'running' | 'paused' | 'stopping' | 'stopped';
+
+export type CaptureLifecycleSnapshot = {
+  status: CaptureLifecycleStatus;
+  menuBarActive: boolean;
+  captureHelper?: CaptureHelperStatus;
 };
 
-export function createDesktopRuntime(options: DesktopRuntimeOptions): DesktopRuntime {
+export type CaptureLifecycle = {
+  getSnapshot(): CaptureLifecycleSnapshot;
+  start(): Promise<void>;
+  pause(): Promise<void>;
+  resume(): Promise<void>;
+  handleLastWindowClosed(): Promise<void>;
+  requestQuit(): Promise<void>;
+  stop(): Promise<void>;
+};
+
+export type CaptureLifecycleOptions = {
+  helper: HelperLifecycle;
+  startupRecovery?: CaptureStartupRecovery;
+  assetReconciliation?: CaptureAssetReconciliation;
+};
+
+export function createCaptureLifecycle(options: CaptureLifecycleOptions): CaptureLifecycle {
   return new LifecycleController(
     options.helper,
     options.startupRecovery,
@@ -28,18 +42,18 @@ export function createDesktopRuntime(options: DesktopRuntimeOptions): DesktopRun
   );
 }
 
-class LifecycleController implements DesktopRuntime {
+class LifecycleController implements CaptureLifecycle {
   private captureHelperStatus: CaptureHelperStatus | undefined;
   private menuBarActive = false;
-  private status: RuntimeStatus = 'stopped';
+  private status: CaptureLifecycleStatus = 'stopped';
 
   constructor(
     private readonly helper: HelperLifecycle,
-    private readonly startupRecovery?: StartupRecoveryLifecycle,
-    private readonly assetReconciliation?: AssetReconciliationLifecycle,
+    private readonly startupRecovery?: CaptureStartupRecovery,
+    private readonly assetReconciliation?: CaptureAssetReconciliation,
   ) {}
 
-  getSnapshot(): RuntimeSnapshot {
+  getSnapshot(): CaptureLifecycleSnapshot {
     const helperStatus = this.helper.getStatus?.() ?? this.captureHelperStatus;
 
     return {

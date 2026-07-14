@@ -120,23 +120,18 @@ export type {
   CaptureHelperEventHandlerOptions,
   CaptureHelperEventStatus,
 } from './capture/public';
-export { createCaptureRuntime } from './capture/public';
+export { createCaptureLifecycle, createCaptureRuntime } from './capture/public';
 export type {
+  CaptureAssetReconciliation,
+  CaptureLifecycle,
+  CaptureLifecycleOptions,
+  CaptureLifecycleSnapshot,
+  CaptureLifecycleStatus,
   CaptureRuntime,
   CaptureRuntimeOptions,
   CaptureStartupRecovery,
-} from './capture/public';
-export { createDesktopRuntime } from './runtime/public';
-export type {
-  DesktopRuntime,
   HelperLifecycle,
-  RuntimeSnapshot,
-  RuntimeStatus,
-} from './runtime/public';
-export type {
-  AssetReconciliationLifecycle as DesktopAssetReconciliationLifecycle,
-  StartupRecoveryLifecycle,
-} from './runtime/public';
+} from './capture/public';
 export { ServerApiError, createServerApiClient } from './server-api/public';
 export type {
   CaptureIngestInput,

@@ -1,7 +1,5 @@
 import type { HelperEnvelope, HelperToMainType } from '../helper/public';
 import type { CaptureHelperClient } from '../helper/public';
-import type { DesktopRuntime } from '../runtime/public';
-import { createDesktopRuntime } from '../runtime/public';
 import {
   type AssetAvailabilityResolver,
   type BackpressureConfig,
@@ -14,6 +12,11 @@ import {
   type CaptureHelperEventHandler,
   createCaptureHelperEventHandler,
 } from './helper-event-handler';
+import {
+  type CaptureLifecycle,
+  type CaptureStartupRecovery,
+  createCaptureLifecycle,
+} from './lifecycle';
 
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 750 * 1024 * 1024,
@@ -25,10 +28,6 @@ const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
   checkAvailability() {
     return Promise.resolve({ availabilityState: 'available' });
   },
-};
-
-export type CaptureStartupRecovery = {
-  recover(): Promise<void>;
 };
 
 export type CaptureRuntimeOptions = {
@@ -45,7 +44,7 @@ export type CaptureRuntimeOptions = {
 
 export type CaptureRuntime = {
   eventHandler: CaptureHelperEventHandler;
-  runtime: DesktopRuntime;
+  lifecycle: CaptureLifecycle;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
@@ -65,7 +64,7 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     now: options.now,
     store: options.store,
   });
-  const runtime = createDesktopRuntime({
+  const lifecycle = createCaptureLifecycle({
     assetReconciliation: {
       async reconcile() {
         await reconcileAssetRefs({
@@ -80,7 +79,7 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     startupRecovery: options.startupRecovery,
   });
 
-  return { eventHandler, runtime };
+  return { eventHandler, lifecycle };
 }
 
 function decorateEventHandler(

@@ -8,17 +8,17 @@ import {
   type IpcHandlerMap,
   createRendererSafeSuccess,
 } from '../ipc/public';
-import type { DesktopRuntime } from '../runtime/public';
 import type {
   OperationalStoreRepository,
   OutboxJob,
   SafeOperationalError,
 } from '../storage/public';
 import type { CaptureHelperEventHandler } from './helper-event-handler';
+import type { CaptureLifecycle } from './lifecycle';
 
 export type CaptureIpcHandlerOptions = {
   eventHandler: CaptureHelperEventHandler;
-  runtime: DesktopRuntime;
+  lifecycle: CaptureLifecycle;
   store: OperationalStoreRepository;
   workspaceId: string;
 };
@@ -29,18 +29,18 @@ export function createCaptureIpcHandlers(options: CaptureIpcHandlerOptions): Ipc
     'capture.getRecentEvents': async (payload) =>
       createRendererSafeSuccess(await buildRecentEventsDto(options, payload as { limit?: number })),
     'capture.pause': async () => {
-      await options.runtime.pause();
+      await options.lifecycle.pause();
       return createRendererSafeSuccess(buildCaptureStatusDto(options));
     },
     'capture.resume': async () => {
-      await options.runtime.resume();
+      await options.lifecycle.resume();
       return createRendererSafeSuccess(buildCaptureStatusDto(options));
     },
   };
 }
 
 function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatusDto {
-  const snapshot = options.runtime.getSnapshot();
+  const snapshot = options.lifecycle.getSnapshot();
   const helperStatus = snapshot.captureHelper;
   const eventStatus = options.eventHandler.getStatus();
   const permissions = eventStatus.permissions ?? {

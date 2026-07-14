@@ -136,10 +136,11 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps shared runtime lifecycle types independent from the helper controller', async () => {
-    const source = await readSource('runtime/types.ts');
+  it('keeps capture lifecycle independent from the helper controller implementation', async () => {
+    const source = await readSource('capture/lifecycle.ts');
 
-    expect(source).not.toMatch(/from ['"]\.\.\/capture\/helper-controller['"]/);
+    expect(source).not.toMatch(/from ['"]\.\/helper-controller['"]/);
+    expect(source).toMatch(/from ['"]\.\.\/helper\/public['"]/);
   });
 
   it('keeps helper adapters independent from the runtime capability', async () => {
@@ -200,6 +201,42 @@ describe('desktop architecture boundaries', () => {
     expect(source).toMatch(/\bCaptureHelperEventHandler\b/);
     expect(source).toMatch(/\bcreateCaptureHelperEventHandler\b/);
     expect(source).toMatch(/\bmapOcrScreenText\b/);
+  });
+
+  it('owns capture lifecycle in the capture capability instead of a generic desktop runtime', async () => {
+    const sourceFiles: string[] = [];
+    const productionSources: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+      if (!relativePath.endsWith('.test.ts') && !relativePath.includes('/__tests__/')) {
+        productionSources.push(await readSource(relativePath));
+      }
+    }
+
+    const retiredPaths = [
+      'runtime/lifecycle-controller.ts',
+      'runtime/runtime.test.ts',
+      'runtime/types.ts',
+    ];
+    const requiredPaths = ['capture/lifecycle.ts', 'capture/lifecycle.test.ts'];
+    const source = productionSources.join('\n');
+
+    expect(retiredPaths.filter((relativePath) => sourceFiles.includes(relativePath))).toEqual([]);
+    expect(requiredPaths.filter((relativePath) => !sourceFiles.includes(relativePath))).toEqual([]);
+    expect(source).not.toMatch(/\bDesktopRuntime\b/);
+    expect(source).not.toMatch(/\bDesktopRuntimeOptions\b/);
+    expect(source).not.toMatch(/\bRuntimeSnapshot\b/);
+    expect(source).not.toMatch(/\bRuntimeStatus\b/);
+    expect(source).not.toMatch(/\bcreateDesktopRuntime\b/);
+    expect(source).not.toContain('captureRuntime.runtime');
+    expect(source).toMatch(/\bCaptureLifecycle\b/);
+    expect(source).toMatch(/\bCaptureLifecycleOptions\b/);
+    expect(source).toMatch(/\bCaptureLifecycleSnapshot\b/);
+    expect(source).toMatch(/\bCaptureLifecycleStatus\b/);
+    expect(source).toMatch(/\bcreateCaptureLifecycle\b/);
+    expect(source).toContain('captureRuntime.lifecycle');
   });
 
   it('keeps session startup out of the Electron lifecycle coordinator', async () => {

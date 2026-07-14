@@ -1,16 +1,16 @@
+import type { CaptureLifecycle } from '../capture/public';
 import {
   type IpcHandlerMap,
   type RuntimeStatusDto,
   createRendererSafeSuccess,
 } from '../ipc/public';
-import type { DesktopRuntime } from './types';
 
 export type RuntimeStatusSource = {
   getLastObservedAt(): string | undefined;
 };
 
 export type RuntimeIpcHandlerOptions = {
-  runtime: DesktopRuntime;
+  lifecycle: CaptureLifecycle;
   statusSource: RuntimeStatusSource;
 };
 
@@ -21,7 +21,7 @@ export function createRuntimeIpcHandlers(options: RuntimeIpcHandlerOptions): Ipc
 }
 
 function buildRuntimeStatusDto(options: RuntimeIpcHandlerOptions): RuntimeStatusDto {
-  const snapshot = options.runtime.getSnapshot();
+  const snapshot = options.lifecycle.getSnapshot();
   const lastObservedAt = options.statusSource.getLastObservedAt();
 
   return {
@@ -38,7 +38,7 @@ function buildRuntimeStatusDto(options: RuntimeIpcHandlerOptions): RuntimeStatus
 
 function toHelperRuntimeStatus(
   state:
-    | NonNullable<ReturnType<DesktopRuntime['getSnapshot']>['captureHelper']>['state']
+    | NonNullable<ReturnType<CaptureLifecycle['getSnapshot']>['captureHelper']>['state']
     | undefined,
 ): RuntimeStatusDto['helper']['status'] {
   switch (state) {
