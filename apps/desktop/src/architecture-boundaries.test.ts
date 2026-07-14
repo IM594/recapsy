@@ -216,6 +216,76 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps capture outbox entry projection pure and handler side effects coordinated', async () => {
+    const [handlerSource, projectionSource, capturePublicSource] = await Promise.all([
+      readSource('capture/helper-event-handler.ts'),
+      readSource('capture/outbox-entry.ts'),
+      readSource('capture/public.ts'),
+    ]);
+    const violations: string[] = [];
+
+    if (!handlerSource.includes("from './outbox-entry'")) {
+      violations.push('capture/helper-event-handler.ts does not depend on outbox-entry.ts');
+    }
+    if (!projectionSource.includes("redactSensitiveString } from '../logging/redaction'")) {
+      violations.push('capture/outbox-entry.ts does not reuse the canonical pure redaction rule');
+    }
+
+    for (const retiredResponsibility of [
+      'createHash',
+      'selectPrimaryAsset',
+      'assetRefsFromResult',
+      'capturePayloadFromResult',
+      'safeLocalAccessKey',
+      'payloadHash',
+    ]) {
+      if (handlerSource.includes(retiredResponsibility)) {
+        violations.push(`capture/helper-event-handler.ts still owns ${retiredResponsibility}`);
+      }
+    }
+
+    for (const forbiddenDependency of [
+      '../main/',
+      '../sync/',
+      './helper-controller',
+      'createMemoryStore',
+      'createSqliteStore',
+    ]) {
+      if (projectionSource.includes(forbiddenDependency)) {
+        violations.push(`capture/outbox-entry.ts depends on ${forbiddenDependency}`);
+      }
+    }
+
+    for (const sideEffect of [
+      'CaptureHelperCommandClient',
+      'evaluateOperationalStoreBackpressure',
+      'sendCommand',
+      'capture.ack',
+      'capture.nack',
+      'getHelperState',
+      'setHelperState',
+      'console.',
+    ]) {
+      if (projectionSource.includes(sideEffect)) {
+        violations.push(`capture/outbox-entry.ts contains side effect ${sideEffect}`);
+      }
+    }
+
+    for (const duplicatedRedactionDetail of ['BEARER_TOKEN_PATTERN', 'redactUrlQuery']) {
+      if (projectionSource.includes(duplicatedRedactionDetail)) {
+        violations.push(
+          `capture/outbox-entry.ts duplicates redaction detail ${duplicatedRedactionDetail}`,
+        );
+      }
+    }
+
+    if (capturePublicSource.includes('projectCaptureOutboxEntry')) {
+      violations.push('capture/public.ts exposes an internal-only outbox entry projection');
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('retires the adapter-wide operational store repository type', async () => {
     const retiredType = ['Operational', 'Store', 'Repository'].join('');
     const violations: string[] = [];
