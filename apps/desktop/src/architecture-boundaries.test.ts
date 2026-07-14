@@ -20,6 +20,60 @@ async function readSource(relativePath: string): Promise<string> {
 }
 
 describe('desktop architecture boundaries', () => {
+  it('uses contextual names for helper results, storage DTOs, secrets, and sync recovery', async () => {
+    const sourceFiles: string[] = [];
+    const checkedSources: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+      if (relativePath !== 'architecture-boundaries.test.ts') {
+        checkedSources.push(await readSource(relativePath));
+      }
+    }
+
+    const requiredPaths = ['helper/capture-result.ts', 'storage/asset-dto.ts', 'storage/node.ts'];
+    const retiredPaths = [
+      'helper/projection.ts',
+      'storage/projections.ts',
+      'storage/composition.ts',
+    ];
+    const retiredSymbols = [
+      'CaptureProjectionInput',
+      'KeychainSecretStore',
+      'MacOsKeychainTokenStoreOptions',
+      'createMacOsKeychainTokenStore',
+      'AUTH_KEYCHAIN_SERVICE',
+      'AUTH_KEYCHAIN_ACCOUNT',
+      'ProcessCaptureHelperClient',
+      'recoverInterruptedOutboxJobs',
+      'StartupRecoveryOptions',
+      'StartupRecoverySummary',
+    ];
+    const source = checkedSources.join('\n');
+    const violations = [
+      ...requiredPaths
+        .filter((relativePath) => !sourceFiles.includes(relativePath))
+        .map((relativePath) => `${relativePath} is missing`),
+      ...retiredPaths
+        .filter((relativePath) => sourceFiles.includes(relativePath))
+        .map((relativePath) => `${relativePath} is still present`),
+      ...retiredSymbols
+        .filter((symbol) => new RegExp(`\\b${symbol}\\b`).test(source))
+        .map((symbol) => `${symbol} is still present`),
+    ];
+
+    expect(violations).toEqual([]);
+    expect(source).toMatch(/\bCaptureResultInput\b/);
+    expect(source).toMatch(/\bSecretStore\b/);
+    expect(source).toMatch(/\bSecretTokenStoreOptions\b/);
+    expect(source).toMatch(/\bcreateSecretTokenStore\b/);
+    expect(source).toMatch(/\bHelperProcessClient\b/);
+    expect(source).toMatch(/\brecoverSyncQueue\b/);
+    expect(source).toMatch(/\bSyncRecoveryOptions\b/);
+    expect(source).toMatch(/\bSyncRecoverySummary\b/);
+  });
+
   it('gives every existing capability a public module surface', async () => {
     const publicSurfaces = await Promise.all(
       CAPABILITY_DIRECTORIES.map((directory) => readSource(`${directory}/public.ts`)),
@@ -29,14 +83,14 @@ describe('desktop architecture boundaries', () => {
   });
 
   it('keeps the Node SQLite adapter out of the storage public surface', async () => {
-    const [publicSource, compositionSource] = await Promise.all([
+    const [publicSource, nodeSource] = await Promise.all([
       readSource('storage/public.ts'),
-      readSource('storage/composition.ts'),
+      readSource('storage/node.ts'),
     ]);
 
     expect(publicSource).not.toContain('node-driver');
     expect(publicSource).not.toContain('createNodeSqliteDatabase');
-    expect(compositionSource).toContain('createNodeSqliteDatabase');
+    expect(nodeSource).toContain('createNodeSqliteDatabase');
   });
 
   it('splits SQLite persistence by table ownership while keeping transactions coordinated', async () => {
@@ -145,7 +199,7 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('limits the storage composition surface to the Electron composition root', async () => {
+  it('limits the Node storage surface to the Electron composition root', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
 
@@ -162,7 +216,7 @@ describe('desktop architecture boundaries', () => {
         }
 
         const targetPath = resolveLocalImport(relativePath, specifier);
-        if (targetPath === 'storage/composition' && relativePath !== 'main/electron-entry.ts') {
+        if (targetPath === 'storage/node' && relativePath !== 'main/electron-entry.ts') {
           violations.push(`${relativePath} -> ${specifier}`);
         }
       }
@@ -835,9 +889,9 @@ describe('desktop architecture boundaries', () => {
           continue;
         }
 
-        const isCompositionRootStorageImport =
-          relativePath === 'main/electron-entry.ts' && targetPath === 'storage/composition';
-        if (targetPath !== `${targetCapability}/public` && !isCompositionRootStorageImport) {
+        const isElectronNodeStorageImport =
+          relativePath === 'main/electron-entry.ts' && targetPath === 'storage/node';
+        if (targetPath !== `${targetCapability}/public` && !isElectronNodeStorageImport) {
           violations.push(`${relativePath} -> ${specifier}`);
         }
       }
@@ -1131,7 +1185,7 @@ describe('desktop architecture boundaries', () => {
     ]);
 
     expect(runtimeSource).not.toContain('createSyncWorker');
-    expect(runtimeSource).not.toContain('recoverInterruptedOutboxJobs');
+    expect(runtimeSource).not.toContain('recoverSyncQueue');
     expect(runtimeSource).not.toContain('createSyncQueueSummary');
     expect(runtimeSource).toContain('createSyncRuntime');
     expect(runtimeSource).toContain('createSyncIpcHandlers');

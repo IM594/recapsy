@@ -17,11 +17,11 @@ export type {
   LoginWindowLike,
   LoginWindowOptions,
 } from './login-window';
-export { createInMemoryTokenStore, createMacOsKeychainTokenStore } from './tokens';
+export { createInMemoryTokenStore, createSecretTokenStore } from './tokens';
 export type {
   AuthTokenSet,
-  KeychainSecretStore,
-  MacOsKeychainTokenStoreOptions,
+  SecretStore,
+  SecretTokenStoreOptions,
   TokenStore,
 } from './tokens';
 export { createSessionStartup } from './session';

@@ -11,7 +11,7 @@ export type UnsafeCaptureContextInput = {
   cloudToken?: string;
 };
 
-export type CaptureProjectionInput = {
+export type CaptureResultInput = {
   captureId: string;
   assetRef: string;
   manifestRef: string;
@@ -22,9 +22,7 @@ export type CaptureProjectionInput = {
   unsafeContext?: UnsafeCaptureContextInput;
 };
 
-export function createSafeCaptureResultPayload(
-  input: CaptureProjectionInput,
-): CaptureResultPayload {
+export function createSafeCaptureResultPayload(input: CaptureResultInput): CaptureResultPayload {
   const manifest = {
     role: 'manifest' as const,
     ref: toOpaqueRef(input.manifestRef, 'manifest', input.captureId),
@@ -49,7 +47,7 @@ export function createSafeCaptureResultPayload(
   };
 }
 
-function createSafeContext(input: CaptureProjectionInput): SafeCaptureContextPayload {
+function createSafeContext(input: CaptureResultInput): SafeCaptureContextPayload {
   const context: SafeCaptureContextPayload = {
     observedAt: input.observedAt,
     policy: {

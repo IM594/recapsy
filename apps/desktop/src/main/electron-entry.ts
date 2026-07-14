@@ -5,7 +5,7 @@ import {
   createAuthClient,
   createInMemoryTokenStore,
   createLoginWindowPrompter,
-  createMacOsKeychainTokenStore,
+  createSecretTokenStore,
 } from '../auth/public';
 import {
   type HelperEnvelope,
@@ -13,7 +13,7 @@ import {
   createHelperProcessClient,
 } from '../helper/public';
 import { type ServerApiTransport, createServerApiClient } from '../server/public';
-import { createNodeSqliteDatabase } from '../storage/composition';
+import { createNodeSqliteDatabase } from '../storage/node';
 import { createSqliteStore } from '../storage/public';
 import type { SyncAssetReader, SyncRunResult } from '../sync/public';
 import { createLocalAssetReader } from './asset-reader';
@@ -107,14 +107,14 @@ function resolveCaptureAssetReader(): SyncAssetReader {
 }
 
 /**
- * Reverse-DNS-style Keychain "service" identifier for the encrypted token
- * file (see `safe-storage.ts`'s filename hash, which folds this in).
+ * Reverse-DNS-style secret namespace for the encrypted token file (see
+ * `safe-storage.ts`'s filename hash, which folds this in).
  * `'default'` is the account: V0 is single-profile (no multi-account
  * switching yet), so this literally names "this device's one local session"
  * — a real business concept, not a placeholder.
  */
-const AUTH_KEYCHAIN_SERVICE = 'one.recapsy.desktop.auth';
-const AUTH_KEYCHAIN_ACCOUNT = 'default';
+const AUTH_SECRET_SERVICE = 'one.recapsy.desktop.auth';
+const AUTH_SECRET_ACCOUNT = 'default';
 
 /**
  * Directory the encrypted auth-token file lives under, derived from
@@ -131,10 +131,10 @@ function resolveSecureDirectory(): string {
 
 /**
  * Real persistence for login across restarts, backed by Electron's built-in
- * `safeStorage` (see `safe-storage.ts` for the full rationale: it is
- * genuinely Keychain-backed on macOS via its per-app encryption key, without
- * shelling out to the `security` CLI — which would leak the raw secret via
- * `ps`/process listing — or adding the `keytar` native dependency).
+ * `safeStorage` (see `safe-storage.ts` for the full rationale). It uses an
+ * OS-protected per-app encryption key. Raw token data stays in the
+ * encrypted local file and is never written directly to the OS key store or
+ * passed through a CLI argument.
  *
  * `safeStorage.isEncryptionAvailable()` can be false in some environments
  * (CI, or a locked/unavailable OS keychain); when it is, this falls back to
@@ -153,13 +153,13 @@ function resolveTokenStore(): TokenStore {
   }
 
   if (safeStorage.isEncryptionAvailable()) {
-    tokenStoreInstance = createMacOsKeychainTokenStore({
-      account: AUTH_KEYCHAIN_ACCOUNT,
+    tokenStoreInstance = createSecretTokenStore({
+      account: AUTH_SECRET_ACCOUNT,
       secrets: createSafeStorageSecretStore({
         directory: resolveSecureDirectory(),
         safeStorage,
       }),
-      service: AUTH_KEYCHAIN_SERVICE,
+      service: AUTH_SECRET_SERVICE,
     });
   } else {
     console.warn(

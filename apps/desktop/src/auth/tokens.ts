@@ -23,16 +23,16 @@ export type TokenStore = {
   clearTokens(): Promise<void>;
 };
 
-export type KeychainSecretStore = {
+export type SecretStore = {
   read(service: string, account: string): Promise<string | null>;
   write(service: string, account: string, secret: string): Promise<void>;
   delete(service: string, account: string): Promise<void>;
 };
 
-export type MacOsKeychainTokenStoreOptions = {
+export type SecretTokenStoreOptions = {
   service: string;
   account: string;
-  secrets: KeychainSecretStore;
+  secrets: SecretStore;
 };
 
 export function createInMemoryTokenStore(initialTokens: AuthTokenSet | null = null): TokenStore {
@@ -51,7 +51,7 @@ export function createInMemoryTokenStore(initialTokens: AuthTokenSet | null = nu
   };
 }
 
-export function createMacOsKeychainTokenStore(options: MacOsKeychainTokenStoreOptions): TokenStore {
+export function createSecretTokenStore(options: SecretTokenStoreOptions): TokenStore {
   return {
     async clearTokens() {
       await options.secrets.delete(options.service, options.account);

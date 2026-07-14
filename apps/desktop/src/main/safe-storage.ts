@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { KeychainSecretStore } from '../auth/public';
+import type { SecretStore } from '../auth/public';
 
 /**
  * Duck-typed surface of Electron's `safeStorage` module (see
  * `electron-entry.ts`, the only file allowed to import real `electron`). On
  * macOS, `encryptString`/`decryptString` are backed by a per-app key that
- * Electron stores in the OS Keychain — the raw secret itself never touches
+ * Electron stores in the OS Keychain — raw token data itself never touches
  * the Keychain and never crosses a process boundary as a CLI argument, unlike
  * shelling out to `security add-generic-password -w <secret>` (which would
  * leak it briefly via `ps`/process listing). This is the same pattern Chrome
@@ -50,7 +50,7 @@ export type SafeStorageSecretStoreOptions = {
 };
 
 /**
- * Builds a `KeychainSecretStore` (see `auth/tokens.ts`) backed by
+ * Builds a `SecretStore` (see `auth/tokens.ts`) backed by
  * Electron `safeStorage` plus a plain file on disk. One file per
  * `(service, account)` pair, named from a hash of the pair rather than the
  * raw strings — same class of concern `asset-reader.ts` guards against for
@@ -62,15 +62,13 @@ export type SafeStorageSecretStoreOptions = {
  * the file exists but fails to decrypt (corrupted file, or the OS keychain's
  * encryption key became unavailable since the file was written). Both are
  * "no usable secret here" from the caller's point of view, and
- * `createMacOsKeychainTokenStore` already treats a `null` read as "not logged
+ * `createSecretTokenStore` already treats a `null` read as "not logged
  * in" rather than crashing. Any other error (e.g. a permissions failure
  * reading the directory) is intentionally left to propagate, so it stays
  * visible instead of being silently swallowed alongside the two expected
  * cases above.
  */
-export function createSafeStorageSecretStore(
-  options: SafeStorageSecretStoreOptions,
-): KeychainSecretStore {
+export function createSafeStorageSecretStore(options: SafeStorageSecretStoreOptions): SecretStore {
   const { safeStorage, directory } = options;
   const fs = options.fs ?? realFs;
 

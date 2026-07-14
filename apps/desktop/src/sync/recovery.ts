@@ -2,7 +2,7 @@ import type { OutboxJob, SafeOperationalError } from '../storage/public';
 import { reconcileOutboxJobFromServerCapture } from './reconciliation';
 import type { SyncClock, SyncQueueStore, SyncServerApi } from './types';
 
-export type StartupRecoveryOptions = {
+export type SyncRecoveryOptions = {
   store: SyncQueueStore;
   now: string;
   workspaceId?: string;
@@ -10,7 +10,7 @@ export type StartupRecoveryOptions = {
   clock?: SyncClock;
 };
 
-export type StartupRecoverySummary = {
+export type SyncRecoverySummary = {
   scanned: number;
   recovered: number;
   syncInterrupted: number;
@@ -40,13 +40,11 @@ const STARTUP_RECOVERY_ERRORS = {
   },
 } satisfies Record<string, SafeOperationalError>;
 
-export async function recoverInterruptedOutboxJobs(
-  options: StartupRecoveryOptions,
-): Promise<StartupRecoverySummary> {
+export async function recoverSyncQueue(options: SyncRecoveryOptions): Promise<SyncRecoverySummary> {
   const jobs = await options.store.listOutboxJobs(
     options.workspaceId ? { workspaceId: options.workspaceId } : undefined,
   );
-  const summary: StartupRecoverySummary = {
+  const summary: SyncRecoverySummary = {
     reconciledSynced: 0,
     recovered: 0,
     resultSubmitInterrupted: 0,
@@ -97,9 +95,9 @@ export async function recoverInterruptedOutboxJobs(
 }
 
 async function reconcileInterruptedCaptureJob(
-  options: StartupRecoveryOptions,
+  options: SyncRecoveryOptions,
   job: OutboxJob,
-  summary: StartupRecoverySummary,
+  summary: SyncRecoverySummary,
 ): Promise<boolean> {
   if (!options.api) {
     return false;
@@ -125,7 +123,7 @@ async function reconcileInterruptedCaptureJob(
 }
 
 async function recoverJob(
-  options: StartupRecoveryOptions,
+  options: SyncRecoveryOptions,
   job: OutboxJob,
   lastSafeError: SafeOperationalError,
 ): Promise<void> {

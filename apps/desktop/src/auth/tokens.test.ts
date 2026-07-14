@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createInMemoryTokenStore, createMacOsKeychainTokenStore } from './tokens';
+import { createInMemoryTokenStore, createSecretTokenStore } from './tokens';
 
 describe('desktop auth token store', () => {
   it('keeps auth tokens behind the token store interface and clears them on sign out', async () => {
@@ -22,9 +22,9 @@ describe('desktop auth token store', () => {
     expect(await store.getTokens()).toBeNull();
   });
 
-  it('leaves a macOS Keychain adapter boundary without changing business callers', async () => {
+  it('keeps encrypted persistence behind the secret-store boundary', async () => {
     const writes: string[] = [];
-    const adapter = createMacOsKeychainTokenStore({
+    const adapter = createSecretTokenStore({
       account: 'user_1',
       service: 'recapsy.desktop.auth',
       secrets: {

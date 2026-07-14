@@ -87,10 +87,10 @@ export type HelperProcessClientOptions = {
 export function createHelperProcessClient(
   options: HelperProcessClientOptions,
 ): CaptureHelperClient & CaptureHelperCommandClient {
-  return new ProcessCaptureHelperClient(options);
+  return new HelperProcessClient(options);
 }
 
-class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCommandClient {
+class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandClient {
   private child: HelperProcess | undefined;
   private startOptions: CaptureHelperStartOptions = {};
   private stopRequested = false;

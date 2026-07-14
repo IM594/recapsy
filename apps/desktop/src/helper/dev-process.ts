@@ -27,7 +27,7 @@
  *   - A standard POSIX facility every spawned child already supports, with
  *     no extra IPC plumbing required.
  */
-import { createSafeCaptureResultPayload } from './projection';
+import { createSafeCaptureResultPayload } from './capture-result';
 import { HelperNdjsonLineParser, encodeHelperEnvelope } from './protocol/codec';
 import {
   HELPER_PROTOCOL_VERSION,

@@ -16,8 +16,8 @@ export type {
 } from './reconciliation';
 export { createSyncWorker } from './worker';
 export type { SyncWorkerOptions, SyncWorkerStore } from './worker';
-export { recoverInterruptedOutboxJobs } from './recovery';
-export type { StartupRecoveryOptions, StartupRecoverySummary } from './recovery';
+export { recoverSyncQueue } from './recovery';
+export type { SyncRecoveryOptions, SyncRecoverySummary } from './recovery';
 export { createSyncLoop } from './loop';
 export type { SyncLoop, SyncLoopOptions } from './loop';
 export { createSyncRuntime } from './runtime';

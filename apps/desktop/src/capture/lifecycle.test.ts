@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { HelperLifecycle } from '../helper/public';
 import { createMemoryStore } from '../storage';
-import { recoverInterruptedOutboxJobs } from '../sync/recovery';
+import { recoverSyncQueue } from '../sync/recovery';
 import { createCaptureLifecycle } from './lifecycle';
 
 describe('capture lifecycle', () => {
@@ -137,7 +137,7 @@ describe('capture lifecycle', () => {
       startupRecovery: {
         async recover(): Promise<void> {
           calls.push('recover');
-          await recoverInterruptedOutboxJobs({
+          await recoverSyncQueue({
             now: '2026-07-06T00:00:02.000Z',
             store,
           });

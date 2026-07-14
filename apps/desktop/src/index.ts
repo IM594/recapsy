@@ -9,12 +9,12 @@ export type {
 export {
   createSessionStartup,
   createInMemoryTokenStore,
-  createMacOsKeychainTokenStore,
+  createSecretTokenStore,
 } from './auth/public';
 export type {
   AuthTokenSet,
-  KeychainSecretStore,
-  MacOsKeychainTokenStoreOptions,
+  SecretStore,
+  SecretTokenStoreOptions,
   SessionStartup,
   SessionStartupOptions,
   SessionWorkspaceResolution,
@@ -92,7 +92,7 @@ export type {
   SafeCaptureContextPayload,
 } from './helper/public';
 export { createSafeCaptureResultPayload } from './helper/public';
-export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './helper/public';
+export type { CaptureResultInput, UnsafeCaptureContextInput } from './helper/public';
 export { createHelperProcessClient } from './helper/public';
 export type {
   HelperProcess,
@@ -177,8 +177,8 @@ export type {
   AssetReconciliationStore,
   AssetReconciliationSummary,
 } from './storage/public';
-export { recoverInterruptedOutboxJobs } from './sync/public';
-export type { StartupRecoveryOptions, StartupRecoverySummary } from './sync/public';
+export { recoverSyncQueue } from './sync/public';
+export type { SyncRecoveryOptions, SyncRecoverySummary } from './sync/public';
 export type {
   SyncJobApi,
   SyncJobExecutor,

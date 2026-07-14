@@ -1,4 +1,4 @@
-import { type CaptureProjectionInput, createSafeCaptureResultPayload } from './projection';
+import { type CaptureResultInput, createSafeCaptureResultPayload } from './capture-result';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
@@ -35,7 +35,7 @@ export type MockHelperController = HelperLifecycle & {
   getSnapshot(): MockHelperSnapshot;
   simulateHeartbeat(): MockHelperEmitResult<HelperEnvelope<'helper.heartbeat'>>;
   simulateCapture(
-    input: CaptureProjectionInput,
+    input: CaptureResultInput,
   ): MockHelperEmitResult<HelperEnvelope<'capture.result'>>;
   ackCapture(captureId: string): MockHelperCommandResult;
   nackCapture(captureId: string, reason: string): MockHelperCommandResult;
@@ -184,7 +184,7 @@ class InMemoryMockHelperController implements MockHelperController {
   }
 
   simulateCapture(
-    input: CaptureProjectionInput,
+    input: CaptureResultInput,
   ): MockHelperEmitResult<HelperEnvelope<'capture.result'>> {
     const guard = this.ensureCanEmit();
     if (!guard.ok) {

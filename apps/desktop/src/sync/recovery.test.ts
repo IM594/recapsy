@@ -5,7 +5,7 @@ import {
   type StoredOcrResult,
   createMemoryStore,
 } from '../storage';
-import { recoverInterruptedOutboxJobs } from './recovery';
+import { recoverSyncQueue } from './recovery';
 
 const now = '2026-07-06T00:00:00.000Z';
 const recoveryNow = '2026-07-06T00:10:00.000Z';
@@ -51,7 +51,7 @@ describe('desktop startup recovery', () => {
       state: 'syncing',
     });
 
-    const summary = await recoverInterruptedOutboxJobs({
+    const summary = await recoverSyncQueue({
       now: recoveryNow,
       store,
       workspaceId: 'workspace_1',
@@ -131,7 +131,7 @@ describe('desktop startup recovery', () => {
       state: 'syncing',
     });
 
-    const summary = await recoverInterruptedOutboxJobs({
+    const summary = await recoverSyncQueue({
       now: recoveryNow,
       store,
     });
@@ -155,7 +155,7 @@ describe('desktop startup recovery', () => {
     });
     const calls: string[] = [];
 
-    const summary = await recoverInterruptedOutboxJobs({
+    const summary = await recoverSyncQueue({
       api: {
         async getCapture(workspaceId, captureId) {
           calls.push(`capture:${workspaceId}:${captureId}`);

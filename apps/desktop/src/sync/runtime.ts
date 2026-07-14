@@ -1,7 +1,7 @@
 import { createSyncJobExecutor } from './job';
 import { createSyncLoop as createRealSyncLoop } from './loop';
 import type { SyncLoop, SyncLoopOptions } from './loop';
-import { recoverInterruptedOutboxJobs } from './recovery';
+import { recoverSyncQueue } from './recovery';
 import type {
   RetryBackoffConfig,
   SyncAssetReader,
@@ -54,7 +54,7 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
 
   return {
     async recover() {
-      await recoverInterruptedOutboxJobs({
+      await recoverSyncQueue({
         api: options.createServerApi(),
         clock: { now: options.now },
         now: options.now(),

@@ -3,7 +3,7 @@ export {
   createMemoryStore,
   type MemoryStoreOptions,
 } from './memory';
-export { toRendererSafeAssetRef } from './projections';
+export { toRendererSafeAssetRef } from './asset-dto';
 export { reconcileAssetRefs } from './reconciliation';
 export type {
   AssetAvailabilityCheck,

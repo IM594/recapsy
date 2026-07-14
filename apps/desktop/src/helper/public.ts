@@ -8,8 +8,8 @@ export type {
   MockHelperSnapshot,
   MockHelperState,
 } from './mock-controller';
-export { createSafeCaptureResultPayload } from './projection';
-export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './projection';
+export { createSafeCaptureResultPayload } from './capture-result';
+export type { CaptureResultInput, UnsafeCaptureContextInput } from './capture-result';
 export {
   HELPER_PROTOCOL_MAX_LINE_LENGTH,
   HelperNdjsonLineParser,

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSyncQueueSummary } from '../../sync/public';
-import { recoverInterruptedOutboxJobs } from '../../sync/recovery';
+import { recoverSyncQueue } from '../../sync/recovery';
 import {
   type AssetCacheRef,
   type HelperRuntimeState,
@@ -434,7 +434,7 @@ describe('SQLite operational store', () => {
       state: 'cancelled',
     });
 
-    const summary = await recoverInterruptedOutboxJobs({
+    const summary = await recoverSyncQueue({
       now: '2026-07-06T00:10:00.000Z',
       store: first,
     });
