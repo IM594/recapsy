@@ -1,5 +1,10 @@
-import type { CaptureHelperStatus } from './capture-helper-controller';
-import type { DesktopRuntime, HelperLifecycle, RuntimeSnapshot, RuntimeStatus } from './types';
+import type {
+  CaptureHelperStatus,
+  DesktopRuntime,
+  HelperLifecycle,
+  RuntimeSnapshot,
+  RuntimeStatus,
+} from './types';
 
 export type StartupRecoveryLifecycle = {
   recover(): Promise<void>;

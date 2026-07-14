@@ -9,10 +9,11 @@ const workspaceId = '22222222-2222-4222-8222-222222222222';
 
 describe('desktop server API client', () => {
   it('fails closed when auth is missing and never exposes a token in the renderer response', async () => {
-    const tokenStore = createInMemoryTokenStore();
     const client = createServerApiClient({
+      accessTokenProvider: {
+        getAccessToken: async () => null,
+      },
       endpoint: 'https://api.example.test',
-      tokenStore,
       transport: async () => {
         throw new Error('transport should not be called without auth');
       },
@@ -35,6 +36,28 @@ describe('desktop server API client', () => {
       retryable: false,
       safeMessage: 'Authentication is required.',
     });
+  });
+
+  it('accepts the consumer-owned access token provider without depending on an auth token store', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createServerApiClient({
+      accessTokenProvider: {
+        getAccessToken: async () => 'access-token-secret',
+      },
+      endpoint: 'https://api.example.test',
+      transport: async (request) => {
+        calls.push(request);
+        return createJsonResponse({
+          features: {},
+          generatedAt: now,
+          providers: [],
+          workspaceId,
+        });
+      },
+    });
+
+    await expect(client.getCapabilities()).resolves.toMatchObject({ workspaceId });
+    expect(calls[0]?.headers.authorization).toBe('Bearer access-token-secret');
   });
 
   it('passes capture ingest idempotency keys through the public API boundary', async () => {
@@ -696,8 +719,10 @@ function createClient(calls: ServerApiTransportRequest[], handler: ServerApiTran
   });
 
   return createServerApiClient({
+    accessTokenProvider: {
+      getAccessToken: async () => (await tokenStore.getTokens())?.accessToken ?? null,
+    },
     endpoint: 'https://api.example.test',
-    tokenStore,
     transport: async (request) => {
       calls.push(request);
       return handler(request);

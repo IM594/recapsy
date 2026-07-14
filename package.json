@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "turbo dev",
     "build": "turbo build",
+    "architecture:check": "dependency-cruise --config .dependency-cruiser.cjs apps/server/src apps/desktop/src packages/contracts/src",
     "lint": "turbo lint",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
@@ -21,6 +22,7 @@
     "@biomejs/biome": "^1.9.0",
     "@commitlint/cli": "^19.0.0",
     "@commitlint/config-conventional": "^19.0.0",
+    "dependency-cruiser": "18.1.0",
     "lefthook": "^1.11.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0"

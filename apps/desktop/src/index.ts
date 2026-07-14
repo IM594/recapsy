@@ -9,13 +9,13 @@ export type {
 export {
   createInMemoryTokenStore,
   createMacOsKeychainTokenStore,
-} from './auth/token-store';
+} from './auth/public';
 export type {
   AuthTokenSet,
   KeychainSecretStore,
   MacOsKeychainTokenStoreOptions,
   TokenStore,
-} from './auth/token-store';
+} from './auth/public';
 export {
   IPC_CHANNEL_REGISTRY,
   IPC_ERROR_CODES,
@@ -23,7 +23,7 @@ export {
   buildPreloadAllowlist,
   createIpcErrorEnvelope,
   validateIpcRequest,
-} from './ipc/index';
+} from './ipc/public';
 export type {
   CaptureEventSummaryDto,
   CaptureStatusDto,
@@ -57,14 +57,14 @@ export type {
   TimelineQueryResponseDto,
   WorkspaceCapabilitiesDto,
   WorkspaceSummaryDto,
-} from './ipc/index';
+} from './ipc/public';
 export {
   HELPER_PROTOCOL_VERSION,
   HelperNdjsonLineParser,
   decodeHelperEnvelopeLine,
   encodeHelperEnvelope,
   parseHelperNdjsonChunk,
-} from './helper/protocol';
+} from './helper/public';
 export type {
   CaptureAssetPayload,
   CaptureAssetRole,
@@ -80,16 +80,16 @@ export type {
   MainToHelperPayloadByType,
   MainToHelperType,
   SafeCaptureContextPayload,
-} from './helper/protocol';
-export { createSafeCaptureResultPayload } from './helper/projection';
-export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './helper/projection';
-export { createSpawnCaptureHelperClient } from './helper/spawn-capture-helper-client';
+} from './helper/public';
+export { createSafeCaptureResultPayload } from './helper/public';
+export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './helper/public';
+export { createSpawnCaptureHelperClient } from './helper/public';
 export type {
   SpawnCaptureHelperClientOptions,
   SpawnedHelperProcess,
   SpawnHelperProcessFn,
-} from './helper/spawn-capture-helper-client';
-export { createMockHelperController } from './helper/mock-controller';
+} from './helper/public';
+export { createMockHelperController } from './helper/public';
 export type {
   MockHelperCommandResult,
   MockHelperController,
@@ -98,8 +98,8 @@ export type {
   MockHelperExitReason,
   MockHelperSnapshot,
   MockHelperState,
-} from './helper/mock-controller';
-export { createCaptureHelperController } from './runtime/capture-helper-controller';
+} from './helper/public';
+export { createCaptureHelperController } from './runtime/public';
 export type {
   CaptureHelperAssetRef,
   CaptureHelperClient,
@@ -108,26 +108,26 @@ export type {
   CaptureHelperStartOptions,
   CaptureHelperState,
   CaptureHelperStatus,
-} from './runtime/capture-helper-controller';
-export { createCaptureHelperEventIntake } from './runtime/capture-helper-event-intake';
+} from './runtime/public';
+export { createCaptureHelperEventIntake } from './runtime/public';
 export type {
   CaptureHelperCommandClient,
   CaptureHelperEventIntake,
   CaptureHelperEventIntakeOptions,
   CaptureHelperEventIntakeStatus,
-} from './runtime/capture-helper-event-intake';
-export { createDesktopRuntime } from './runtime/lifecycle-controller';
+} from './runtime/public';
+export { createDesktopRuntime } from './runtime/public';
 export type {
   DesktopRuntime,
   HelperLifecycle,
   RuntimeSnapshot,
   RuntimeStatus,
-} from './runtime/types';
+} from './runtime/public';
 export type {
   AssetReconciliationLifecycle as DesktopAssetReconciliationLifecycle,
   StartupRecoveryLifecycle,
-} from './runtime/lifecycle-controller';
-export { ServerApiError, createServerApiClient } from './server-api/client';
+} from './runtime/public';
+export { ServerApiError, createServerApiClient } from './server-api/public';
 export type {
   CaptureIngestInput,
   CaptureIngestResult,
@@ -146,17 +146,17 @@ export type {
   ServerApiTransportResponse,
   ServerProviderCapability,
   TimelineQueryInput,
-} from './server-api/client';
-export { createSyncQueueSummary, createSyncScheduler } from './sync/scheduler';
-export { reconcileAssetRefs } from './storage/asset-reconciliation';
+} from './server-api/public';
+export { createSyncQueueSummary, createSyncScheduler } from './sync/public';
+export { reconcileAssetRefs } from './storage/public';
 export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
   AssetReconciliationOptions,
   AssetReconciliationSummary,
-} from './storage/asset-reconciliation';
-export { recoverInterruptedOutboxJobs } from './sync/startup-recovery';
-export type { StartupRecoveryOptions, StartupRecoverySummary } from './sync/startup-recovery';
+} from './storage/public';
+export { recoverInterruptedOutboxJobs } from './sync/public';
+export type { StartupRecoveryOptions, StartupRecoverySummary } from './sync/public';
 export type {
   SyncAssetReader,
   SyncCancelResult,
@@ -166,14 +166,14 @@ export type {
   SyncSchedulerOptions,
   SyncServerApi,
   SyncWorkspaceProvider,
-} from './sync/types';
+} from './sync/public';
 export {
   createInMemoryOperationalStore,
   createSqliteOperationalStore,
   evaluateOperationalStoreBackpressure,
   runSqliteOperationalStoreMigrations,
   toRendererSafeAssetRef,
-} from './storage';
+} from './storage/public';
 export type {
   AssetCacheRef,
   AssetCacheRefRole,
@@ -219,4 +219,4 @@ export type {
   SyncCursor,
   SyncCursorKind,
   UpdateAssetRefAvailabilityInput,
-} from './storage';
+} from './storage/public';

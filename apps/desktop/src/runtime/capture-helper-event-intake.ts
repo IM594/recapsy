@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   type CaptureAssetPayload,
+  type CaptureHelperCommandClient,
   type CaptureResultPayload,
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
@@ -10,7 +11,7 @@ import {
   type MainToHelperPayloadByType,
   type MainToHelperType,
   type SafeCaptureContextPayload,
-} from '../helper/protocol';
+} from '../helper/public';
 import { redactSensitiveString } from '../logging/redaction';
 import {
   type AssetCacheRefRole,
@@ -22,11 +23,9 @@ import {
   type OperationalStoreRepository,
   type SafeOperationalError,
   evaluateOperationalStoreBackpressure,
-} from '../storage';
+} from '../storage/public';
 
-export type CaptureHelperCommandClient = {
-  sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void>;
-};
+export type { CaptureHelperCommandClient } from '../helper/public';
 
 export type CaptureHelperEventIntakeStatus = {
   lastObservedAt?: string;

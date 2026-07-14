@@ -1,55 +1,29 @@
 import {
   type CaptureAssetPayload,
+  type CaptureHelperAssetRef,
+  type CaptureHelperClient,
+  type CaptureHelperEvent,
+  type CaptureHelperStatus,
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
+  type HelperLifecycle,
   type HelperToMainType,
-} from '../helper/protocol';
+} from '../helper/public';
 import type {
-  AssetAvailabilityState,
-  AssetCacheRefRole,
   CapturePrivacyDecision,
   HelperPermissionState,
   OperationalStoreRepository,
   SafeOperationalError,
-} from '../storage';
-import type { HelperLifecycle } from './types';
+} from '../storage/public';
 
-export type CaptureHelperState =
-  | 'idle'
-  | 'starting'
-  | 'running'
-  | 'paused'
-  | 'stopping'
-  | 'stopped'
-  | 'failed'
-  | 'exited';
-
-export type CaptureHelperStatus = {
-  state: CaptureHelperState;
-  lastSafeError?: SafeOperationalError;
-  updatedAt?: string;
-};
-
-export type CaptureHelperStartOptions = {
-  /** @internal Legacy adapter surface for tests and mock clients. Capture events must be routed to eventIntake. */
-  onEvent?(event: CaptureHelperEvent): Promise<void>;
-  onEnvelope?(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
-};
-
-export type CaptureHelperClient = {
-  start(options?: CaptureHelperStartOptions): Promise<void>;
-  stop(): Promise<void>;
-  /**
-   * Tells an already-spawned helper to begin its capture loop. `start()` only
-   * spawns the process and wires its stdio; the real Swift capture engine
-   * stays idle until it receives an explicit `capture.start`, so the
-   * controller drives this once the process is running. Named `beginCapture`
-   * (not `start`) to avoid colliding with the spawn-lifecycle `start()` above.
-   */
-  beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void>;
-  pauseCapture(): Promise<void>;
-  resumeCapture(): Promise<void>;
-};
+export type {
+  CaptureHelperAssetRef,
+  CaptureHelperClient,
+  CaptureHelperEvent,
+  CaptureHelperStartOptions,
+  CaptureHelperState,
+  CaptureHelperStatus,
+} from '../helper/public';
 
 export type CaptureHelperControllerOptions = {
   client: CaptureHelperClient;
@@ -59,41 +33,6 @@ export type CaptureHelperControllerOptions = {
   };
   now(): string;
   store: OperationalStoreRepository;
-};
-
-export type CaptureHelperEvent =
-  | {
-      type: 'captureObserved';
-      workspaceId: string;
-      captureId: string;
-      capturedAt: string;
-      observedAt: string;
-      sourceAppName: string;
-      captureType: 'screen' | 'window';
-      asset: CaptureHelperAssetRef;
-      privacyDecision: CapturePrivacyDecision;
-      metadata?: Record<string, unknown>;
-      userId?: string;
-      bundleId?: string;
-      contextFingerprint?: string;
-      contextConfidence?: 'high' | 'medium' | 'low' | 'unknown';
-    }
-  | {
-      type: 'unexpectedExit';
-      reason: 'process_crashed' | 'quit_requested' | 'shutdown_requested' | 'unknown';
-      code?: number | null;
-      error?: string;
-    };
-
-export type CaptureHelperAssetRef = {
-  assetRefId: string;
-  role: Extract<AssetCacheRefRole, 'capture_original' | 'capture_thumbnail' | 'ocr_input'>;
-  hash: string;
-  mimeType: string;
-  sizeBytes: number;
-  localAccessKey: string;
-  availabilityState?: AssetAvailabilityState;
-  contentAddress?: string;
 };
 
 export type CaptureHelperController = HelperLifecycle & {

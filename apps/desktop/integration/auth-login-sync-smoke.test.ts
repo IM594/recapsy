@@ -89,8 +89,10 @@ describe('real login through to the sync loop over real HTTP', () => {
     // construction `main/electron-main-runtime.ts` performs after
     // `resolveWorkspaceId()` resolves.
     const api = createServerApiClient({
+      accessTokenProvider: {
+        getAccessToken: async () => (await tokenStore.getTokens())?.accessToken ?? null,
+      },
       endpoint: harness.endpoint,
-      tokenStore,
       transport: fetchTransport,
     });
     const store = createInMemoryOperationalStore();

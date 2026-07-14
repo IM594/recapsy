@@ -1,19 +1,21 @@
 import path from 'node:path';
 import { BrowserWindow, app, ipcMain, safeStorage } from 'electron';
-import { createAuthClient } from '../auth/auth-client';
-import { createLoginWindowPrompter } from '../auth/login-window';
 import {
   type TokenStore,
+  createAuthClient,
   createInMemoryTokenStore,
+  createLoginWindowPrompter,
   createMacOsKeychainTokenStore,
-} from '../auth/token-store';
-import type { HelperEnvelope, HelperToMainType } from '../helper/protocol';
-import { createSpawnCaptureHelperClient } from '../helper/spawn-capture-helper-client';
-import { createServerApiClient } from '../server-api/client';
-import type { ServerApiTransport } from '../server-api/types';
-import { createSqliteOperationalStore } from '../storage';
-import { createNodeSqliteDatabase } from '../storage/node-sqlite-driver';
-import type { SyncAssetReader, SyncRunResult } from '../sync/types';
+} from '../auth/public';
+import {
+  type HelperEnvelope,
+  type HelperToMainType,
+  createSpawnCaptureHelperClient,
+} from '../helper/public';
+import { type ServerApiTransport, createServerApiClient } from '../server-api/public';
+import { createNodeSqliteDatabase } from '../storage/composition';
+import { createSqliteOperationalStore } from '../storage/public';
+import type { SyncAssetReader, SyncRunResult } from '../sync/public';
 import { createLocalAssetReader } from './asset-reader';
 import { createElectronMainRuntime } from './electron-main-runtime';
 import { createElectronKeychainSecretStore } from './keychain-secret-store';
@@ -264,7 +266,13 @@ const { ready } = createElectronMainRuntime({
       env: { [CAPTURE_ASSET_ROOT_ENV]: resolveCaptureAssetRoot() },
     }),
   createServerApi: () =>
-    createServerApiClient({ endpoint: serverEndpoint, tokenStore, transport: fetchTransport }),
+    createServerApiClient({
+      accessTokenProvider: {
+        getAccessToken: async () => (await tokenStore.getTokens())?.accessToken ?? null,
+      },
+      endpoint: serverEndpoint,
+      transport: fetchTransport,
+    }),
   createStore: () => {
     const sqlitePath =
       process.env.RECAPSY_DESKTOP_SQLITE_PATH ??

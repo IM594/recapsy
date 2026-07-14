@@ -915,49 +915,6 @@ function createScheduler(input: {
 
 function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
   return {
-    async getAxAllowlist() {
-      return {
-        axTextUploadEnabled: false,
-        enabled: false,
-        reason: 'ax_text_upload_disabled',
-        status: 'disabled',
-        workspaceId: 'workspace_1',
-      };
-    },
-    async getCapabilities() {
-      return {
-        features: {},
-        generatedAt: now,
-        providers: [],
-        workspaceId: 'workspace_1',
-      };
-    },
-    async getCapturePolicies() {
-      return {
-        axAllowlist: {
-          axTextUploadEnabled: false,
-          enabled: false,
-          reason: 'ax_text_upload_disabled',
-          status: 'disabled',
-          workspaceId: 'workspace_1',
-        },
-        capturePolicy: {
-          actionCounts: {},
-          axTextUploadEnabled: false,
-          defaultAction: 'allow',
-          expiresAt: now,
-          paused: false,
-          ttlSeconds: 1800,
-          version: 'policy_1',
-        },
-        generatedAt: now,
-        storagePolicy: {
-          allowLongTermRemoteOriginal: false,
-          authoritativeOriginalLocation: 'local_device',
-        },
-        workspaceId: 'workspace_1',
-      };
-    },
     async getCapture() {
       return {
         captureId: 'capture_1',
@@ -970,18 +927,6 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
         inputAssetId: 'asset_server_1',
         nextAction: 'queue_ocr',
         timelineEventId: 'timeline_1',
-      };
-    },
-    async querySearch() {
-      return {
-        incomplete: false,
-        items: [],
-      };
-    },
-    async queryTimeline() {
-      return {
-        incomplete: false,
-        items: [],
       };
     },
     async runOcrProxy() {

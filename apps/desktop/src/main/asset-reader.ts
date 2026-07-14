@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { SyncAssetReader } from '../sync/types';
+import type { SyncAssetReader } from '../sync/public';
 
 /**
  * Real cross-process asset-byte reader for the sync loop, replacing the

@@ -8,7 +8,7 @@ import type {
   ServerApiTransport,
   ServerApiTransportRequest,
   ServerApiTransportResponse,
-} from '../server-api/types';
+} from '../server-api/public';
 import type { TokenStore } from './token-store';
 
 /**

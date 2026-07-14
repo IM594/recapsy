@@ -230,9 +230,9 @@ async function request(
     query?: Record<string, string>;
   },
 ): Promise<unknown> {
-  const tokens = await options.tokenStore.getTokens();
+  const accessToken = await options.accessTokenProvider.getAccessToken();
 
-  if (!tokens) {
+  if (!accessToken) {
     throw new ServerApiError({
       code: 'unauthenticated',
       retryable: false,
@@ -252,7 +252,7 @@ async function request(
     response = await options.transport({
       body: input.body,
       headers: {
-        authorization: `Bearer ${tokens.accessToken}`,
+        authorization: `Bearer ${accessToken}`,
         ...input.headers,
       },
       method: input.method,
@@ -775,6 +775,7 @@ export type {
   RunOcrProxyResult,
   SearchQueryInput,
   ServerApiClient,
+  ServerApiAccessTokenProvider,
   ServerApiClientOptions,
   ServerApiOcrProxyClient,
   ServerCapabilitiesResult,
@@ -788,4 +789,6 @@ export type {
   SubmitOcrResultInput,
   SubmitOcrResultResult,
   TimelineQueryInput,
+  TimelineQueryResult,
+  SearchQueryResult,
 } from './types';

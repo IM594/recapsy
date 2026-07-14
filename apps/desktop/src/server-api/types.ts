@@ -5,9 +5,10 @@ import type {
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
-import type { TokenStore } from '../auth/token-store';
-import type { SearchQueryResponseDto, TimelineQueryResponseDto } from '../ipc/dto';
-import type { AssetCacheRef, CaptureOutboxPayload } from '../storage/types';
+
+export type ServerApiAccessTokenProvider = {
+  getAccessToken(): Promise<string | null>;
+};
 
 export type ServerApiTransportRequest = {
   method: 'GET' | 'POST' | 'PUT';
@@ -29,8 +30,8 @@ export type ServerApiTransport = (
 ) => Promise<ServerApiTransportResponse>;
 
 export type ServerApiClientOptions = {
+  accessTokenProvider: ServerApiAccessTokenProvider;
   endpoint: string;
-  tokenStore: TokenStore;
   transport: ServerApiTransport;
 };
 
@@ -63,11 +64,53 @@ export type ServerApiErrorShape = {
   details?: Record<string, unknown>;
 };
 
-export type CaptureIngestInput = CaptureOutboxPayload & {
+export type CapturePrivacyDecisionInput = {
+  action: 'allow' | 'block_capture' | 'redact_context' | 'block_ocr';
+  decidedAt: string;
+  policyVersion: string;
+  reasons: string[];
+};
+
+export type CaptureIngestInput = {
+  capturedAt: string;
+  observedAt: string;
+  appName: string;
+  captureType: 'screen' | 'window';
+  privacyDecision: CapturePrivacyDecisionInput;
   workspaceId: string;
   deviceId: string;
   idempotencyKey: string;
-  asset: Pick<AssetCacheRef, 'assetRefId' | 'hash' | 'mimeType' | 'role' | 'sizeBytes'>;
+  asset: {
+    assetRefId: string;
+    hash: string;
+    mimeType: string;
+    role: 'capture_original' | 'capture_thumbnail' | 'ocr_input' | 'derived_asset';
+    sizeBytes: number;
+  };
+  localEventId?: string;
+  userId?: string;
+  bundleId?: string;
+  windowTitleCandidate?: {
+    kind: 'safe' | 'redacted' | 'omitted';
+    value?: string;
+    reason?: string;
+  };
+  urlCandidate?: {
+    kind: 'safe' | 'redacted' | 'omitted';
+    normalized?: string;
+    domain?: string;
+    hash?: string;
+    reason?: string;
+  };
+  documentPathCandidate?: {
+    kind: 'safe' | 'redacted' | 'omitted';
+    displayName?: string;
+    hash?: string;
+    reason?: string;
+  };
+  contextFingerprint?: string;
+  contextConfidence?: 'high' | 'medium' | 'low' | 'unknown';
+  metadata?: Record<string, unknown>;
 };
 
 export type CaptureIngestResult = {
@@ -126,11 +169,41 @@ export type TimelineQueryInput = {
   };
 };
 
+export type TimelineQueryItem = {
+  id: string;
+  capturedAt: string;
+  sourceApp?: string;
+  title?: string;
+  snippet?: string;
+  ocrJobId?: string;
+};
+
+export type TimelineQueryResult = {
+  items: TimelineQueryItem[];
+  nextCursor?: string;
+  incomplete: boolean;
+};
+
 export type SearchQueryInput = {
   workspaceId: string;
   query: string;
   cursor?: string;
   limit?: number;
+};
+
+export type SearchQueryItem = {
+  id: string;
+  capturedAt: string;
+  sourceApp?: string;
+  title?: string;
+  snippet: string;
+  score?: number;
+};
+
+export type SearchQueryResult = {
+  items: SearchQueryItem[];
+  nextCursor?: string;
+  incomplete: boolean;
 };
 
 export type ServerCapabilityFeature = {
@@ -192,8 +265,8 @@ export type AxAllowlistResult = {
 export type ServerApiClient = {
   ingestCapture(input: CaptureIngestInput): Promise<CaptureIngestResult>;
   getCapture(workspaceId: string, captureId: string): Promise<CaptureDetailResult>;
-  queryTimeline(input: TimelineQueryInput): Promise<TimelineQueryResponseDto>;
-  querySearch(input: SearchQueryInput): Promise<SearchQueryResponseDto>;
+  queryTimeline(input: TimelineQueryInput): Promise<TimelineQueryResult>;
+  querySearch(input: SearchQueryInput): Promise<SearchQueryResult>;
   getCapabilities(): Promise<ServerCapabilitiesResult>;
   getCapturePolicies(input: CapturePoliciesInput): Promise<CapturePoliciesResult>;
   getAxAllowlist(workspaceId: string): Promise<AxAllowlistResult>;

@@ -1,13 +1,12 @@
-import type { ServerApiClient } from '../server-api/types';
-import type { OperationalStoreRepository, OutboxJob, SafeOperationalError } from '../storage';
+import type { OutboxJob, SafeOperationalError } from '../storage/public';
 import { reconcileOutboxJobFromServerCapture } from './scheduler';
-import type { SyncClock } from './types';
+import type { SyncClock, SyncQueueStore, SyncServerApi } from './types';
 
 export type StartupRecoveryOptions = {
-  store: OperationalStoreRepository;
+  store: SyncQueueStore;
   now: string;
   workspaceId?: string;
-  api?: Pick<ServerApiClient, 'getCapture'>;
+  api?: Pick<SyncServerApi, 'getCapture'>;
   clock?: SyncClock;
 };
 

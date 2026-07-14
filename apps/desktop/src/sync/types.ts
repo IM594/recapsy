@@ -1,7 +1,84 @@
-import type { ServerApiClient, ServerApiOcrProxyClient } from '../server-api/types';
-import type { BackpressureDecision, OperationalStoreRepository } from '../storage/types';
+import type {
+  AiOcrResponse,
+  AiOcrUsage,
+  CaptureIngestNextAction,
+  OcrResultSubmitResponse,
+  OcrScreenTextResult,
+} from '@recapsy/contracts';
+import type {
+  AssetCacheRef,
+  BackpressureDecision,
+  CaptureOutboxPayload,
+  ClaimRetryableOutboxJobInput,
+  OperationalStoreResult,
+  OutboxJob,
+  OutboxJobListFilter,
+  OutboxJobStateUpdate,
+  OutboxSafeErrorInput,
+  OutboxTerminalUpdate,
+  RecoverInterruptedOutboxJobInput,
+} from '../storage/public';
 
-export type SyncServerApi = ServerApiClient & ServerApiOcrProxyClient;
+export type SyncCaptureIngestInput = CaptureOutboxPayload & {
+  workspaceId: string;
+  deviceId: string;
+  idempotencyKey: string;
+  asset: Pick<AssetCacheRef, 'assetRefId' | 'hash' | 'mimeType' | 'role' | 'sizeBytes'>;
+};
+
+export type SyncServerApi = {
+  ingestCapture(input: SyncCaptureIngestInput): Promise<{
+    captureId: string;
+    timelineEventId: string;
+    nextAction: CaptureIngestNextAction;
+    inputAssetId?: string;
+  }>;
+  getCapture(
+    workspaceId: string,
+    captureId: string,
+  ): Promise<{
+    captureId: string;
+    ocrStatus: 'not_requested' | 'queued' | 'running' | 'succeeded' | 'failed' | 'blocked';
+    ocrJobId?: string;
+  }>;
+  runOcrProxy(input: {
+    workspaceId: string;
+    mimeType: string;
+    bytes: Uint8Array;
+  }): Promise<AiOcrResponse>;
+  submitOcrResult(input: {
+    workspaceId: string;
+    captureId: string;
+    sourceAssetHash: string;
+    screenText: OcrScreenTextResult;
+    model: string;
+    providerName: string;
+    durationMs: number;
+    usage?: AiOcrUsage;
+  }): Promise<OcrResultSubmitResponse>;
+};
+
+export type SyncQueueStore = {
+  claimNextRetryableOutboxJob(input: ClaimRetryableOutboxJobInput): Promise<OutboxJob | null>;
+  getAssetCacheRef(assetRefId: string): Promise<AssetCacheRef | null>;
+  getOutboxJob(id: string): Promise<OutboxJob | null>;
+  listOutboxJobs(filter?: OutboxJobListFilter): Promise<OutboxJob[]>;
+  markOutboxJobTerminal(
+    id: string,
+    update: OutboxTerminalUpdate,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
+  recordOutboxSafeError(
+    id: string,
+    input: OutboxSafeErrorInput,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
+  recoverInterruptedOutboxJob(
+    input: RecoverInterruptedOutboxJobInput,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
+  updateOutboxJobState(
+    id: string,
+    update: OutboxJobStateUpdate,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
+};
 
 export type SyncWorkspaceProvider = {
   getActiveWorkspaceId(): Promise<string | null>;
@@ -34,7 +111,7 @@ export type RetryBackoffConfig = {
 export type RetryJitterSource = () => number;
 
 export type SyncSchedulerOptions = {
-  store: OperationalStoreRepository;
+  store: SyncQueueStore;
   api: SyncServerApi;
   workspace: SyncWorkspaceProvider;
   readAssetBytes: SyncAssetReader;
@@ -65,4 +142,38 @@ export type SyncRunResult = {
 export type SyncCancelResult = {
   cancelled: boolean;
   jobId: string;
+};
+
+export type SyncPresentationErrorCode =
+  | 'unauthenticated'
+  | 'workspace_required'
+  | 'offline'
+  | 'server_unavailable'
+  | 'policy_denied'
+  | 'quota_exceeded'
+  | 'provider_not_configured'
+  | 'provider_unavailable'
+  | 'input_too_large'
+  | 'unsupported_format'
+  | 'validation_failed'
+  | 'result_invalid'
+  | 'cancelled'
+  | 'unknown';
+
+export type SyncQueueSummary = {
+  pending: number;
+  syncing: number;
+  retrying: number;
+  blocked: number;
+  failed: number;
+  backpressure?: {
+    active: boolean;
+    reasons: string[];
+  };
+  nextRetryAt?: string;
+  lastError?: {
+    code: SyncPresentationErrorCode;
+    message: string;
+    details?: Record<string, unknown>;
+  };
 };

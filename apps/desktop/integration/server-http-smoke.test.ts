@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import type { RecapsyAiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
 import type { AppDependencies, createApp } from '../../server/src/app';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
-import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
 import type { ServerApiTransport } from '../src/server-api/types';
 import { createInMemoryOperationalStore, createSqliteOperationalStore } from '../src/storage';
@@ -350,11 +349,10 @@ const fetchTransport: ServerApiTransport = async (request) => {
 
 function createHttpClient(endpoint: string, accessToken: string) {
   return createServerApiClient({
+    accessTokenProvider: {
+      getAccessToken: async () => accessToken,
+    },
     endpoint,
-    tokenStore: createInMemoryTokenStore({
-      accessToken,
-      refreshToken: 'desktop-refresh-token',
-    }),
     transport: fetchTransport,
   });
 }

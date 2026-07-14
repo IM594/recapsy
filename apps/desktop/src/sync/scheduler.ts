@@ -1,17 +1,17 @@
-import type { IpcErrorCode, SyncQueueSummaryDto } from '../ipc';
-import { ServerApiError } from '../server-api/client';
 import type {
   BackpressureDecision,
-  OperationalStoreRepository,
   OutboxJob,
   SafeOperationalError,
   StoredOcrResult,
-} from '../storage';
+} from '../storage/public';
 import { OcrResultInvalidError, deriveScreenTextFromOcrResponse } from './ocr-screen-text-mapping';
 import type {
   RetryBackoffConfig,
   RetryJitterSource,
   SyncCancelResult,
+  SyncPresentationErrorCode,
+  SyncQueueStore,
+  SyncQueueSummary,
   SyncRunResult,
   SyncSchedulerOptions,
 } from './types';
@@ -90,12 +90,12 @@ export function createSyncScheduler(options: SyncSchedulerOptions) {
 }
 
 export async function createSyncQueueSummary(
-  store: OperationalStoreRepository,
+  store: SyncQueueStore,
   workspaceId: string,
   options: {
     backpressure?: BackpressureDecision;
   } = {},
-): Promise<SyncQueueSummaryDto> {
+): Promise<SyncQueueSummary> {
   const jobs = await store.listOutboxJobs({ workspaceId });
   const nextRetryAt = jobs
     .map((job) => job.nextRetryAt)
@@ -312,7 +312,7 @@ async function handleSyncError(
   job: OutboxJob,
   error: unknown,
 ): Promise<SyncRunResult> {
-  if (error instanceof ServerApiError) {
+  if (isSafeErrorShape(error)) {
     if (TERMINAL_BLOCKING_OCR_ERRORS.has(error.code)) {
       await markJobTerminalWithSafeError(options, job, 'blocked', {
         code: error.code,
@@ -321,19 +321,6 @@ async function handleSyncError(
       return { jobId: job.id, processed: 1, status: 'blocked' };
     }
 
-    await recordSafeError(options, job, {
-      code: error.code,
-      retryable: error.retryable,
-    });
-    return {
-      code: error.code === 'offline' ? 'offline' : undefined,
-      jobId: job.id,
-      processed: 1,
-      status: error.retryable ? 'retry_wait' : 'failed',
-    };
-  }
-
-  if (isSafeErrorShape(error)) {
     if (isLocalAssetSafeCode(error.code)) {
       await markJobTerminalWithSafeError(options, job, 'blocked', {
         code: error.code,
@@ -548,15 +535,12 @@ async function recordSafeError(
   });
 }
 
-async function isLocallyCancelled(
-  store: OperationalStoreRepository,
-  jobId: string,
-): Promise<boolean> {
+async function isLocallyCancelled(store: SyncQueueStore, jobId: string): Promise<boolean> {
   const job = await store.getOutboxJob(jobId);
   return job?.state === 'cancelled';
 }
 
-function toIpcErrorCode(code: string): IpcErrorCode {
+function toPresentationErrorCode(code: string): SyncPresentationErrorCode {
   if (code === 'provider_rate_limited' || code === 'provider_timeout') {
     return 'provider_unavailable';
   }
@@ -579,7 +563,7 @@ function toIpcErrorCode(code: string): IpcErrorCode {
       'unknown',
     ].includes(code)
   ) {
-    return code as IpcErrorCode;
+    return code as SyncPresentationErrorCode;
   }
 
   if (
@@ -596,7 +580,7 @@ function toIpcErrorCode(code: string): IpcErrorCode {
 }
 
 function toIpcError(error: SafeOperationalError) {
-  const code = toIpcErrorCode(error.code);
+  const code = toPresentationErrorCode(error.code);
   const details =
     code !== error.code && code !== 'unknown'
       ? {

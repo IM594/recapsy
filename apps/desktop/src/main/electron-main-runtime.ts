@@ -1,7 +1,5 @@
-import type { AuthClient } from '../auth/auth-client';
-import type { LoginPrompter } from '../auth/login-window';
-import type { TokenStore } from '../auth/token-store';
-import type { HelperEnvelope, HelperToMainType } from '../helper/protocol';
+import type { AuthClient, LoginPrompter, TokenStore } from '../auth/public';
+import type { HelperEnvelope, HelperToMainType } from '../helper/public';
 import {
   type CaptureEventSummaryDto,
   type CaptureStatusDto,
@@ -15,16 +13,17 @@ import {
   assertRendererSafeDto,
   createIpcErrorEnvelope,
   validateIpcRequest,
-} from '../ipc';
-import type { CaptureHelperClient, CaptureHelperState } from '../runtime/capture-helper-controller';
-import { createCaptureHelperController } from '../runtime/capture-helper-controller';
+} from '../ipc/public';
 import {
+  type CaptureHelperClient,
   type CaptureHelperCommandClient,
   type CaptureHelperEventIntake,
+  type CaptureHelperState,
+  type DesktopRuntime,
+  createCaptureHelperController,
   createCaptureHelperEventIntake,
-} from '../runtime/capture-helper-event-intake';
-import { createDesktopRuntime } from '../runtime/lifecycle-controller';
-import type { DesktopRuntime } from '../runtime/types';
+  createDesktopRuntime,
+} from '../runtime/public';
 import {
   type AssetAvailabilityCheck,
   type AssetAvailabilityResolver,
@@ -33,20 +32,19 @@ import {
   type OutboxJob,
   type SafeOperationalError,
   reconcileAssetRefs,
-} from '../storage';
-import { createSyncQueueSummary, createSyncScheduler } from '../sync/scheduler';
-import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
+} from '../storage/public';
 import {
+  type RetryBackoffConfig,
+  type SyncAssetReader,
   type SyncLoop,
   type SyncLoopOptions,
+  type SyncRunResult,
+  type SyncServerApi,
   createSyncLoop as createRealSyncLoop,
-} from '../sync/sync-loop';
-import type {
-  RetryBackoffConfig,
-  SyncAssetReader,
-  SyncRunResult,
-  SyncServerApi,
-} from '../sync/types';
+  createSyncQueueSummary,
+  createSyncScheduler,
+  recoverInterruptedOutboxJobs,
+} from '../sync/public';
 
 /**
  * Structural surface of `Electron.App` this module depends on. Kept narrow

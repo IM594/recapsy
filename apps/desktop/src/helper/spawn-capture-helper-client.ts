@@ -1,9 +1,4 @@
 import { spawn as nodeSpawn } from 'node:child_process';
-import type {
-  CaptureHelperClient,
-  CaptureHelperStartOptions,
-} from '../runtime/capture-helper-controller';
-import type { CaptureHelperCommandClient } from '../runtime/capture-helper-event-intake';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
@@ -15,6 +10,11 @@ import {
   type MainToHelperType,
   encodeHelperEnvelope,
 } from './protocol';
+import type {
+  CaptureHelperClient,
+  CaptureHelperCommandClient,
+  CaptureHelperStartOptions,
+} from './types';
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3000;
 const FORCE_KILL_GRACE_MS = 1000;
