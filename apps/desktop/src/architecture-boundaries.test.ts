@@ -153,6 +153,17 @@ describe('desktop architecture boundaries', () => {
     }
   });
 
+  it('does not retain capture compatibility modules in the runtime capability', async () => {
+    const compatibilityModules: string[] = [];
+    const glob = new Bun.Glob('runtime/capture-helper-*.ts');
+
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      compatibilityModules.push(relativePath);
+    }
+
+    expect(compatibilityModules).toEqual([]);
+  });
+
   it('keeps session startup out of the Electron lifecycle coordinator', async () => {
     const [runtimeSource, sessionStartupSource] = await Promise.all([
       readSource('main/electron-main-runtime.ts'),
