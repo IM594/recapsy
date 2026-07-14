@@ -1,5 +1,5 @@
 import type { OutboxJob, SafeOperationalError } from '../storage/public';
-import { reconcileOutboxJobFromServerCapture } from './scheduler';
+import { reconcileOutboxJobFromServerCapture } from './reconciliation';
 import type { SyncClock, SyncQueueStore, SyncServerApi } from './types';
 
 export type StartupRecoveryOptions = {

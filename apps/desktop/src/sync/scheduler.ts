@@ -5,6 +5,7 @@ import {
   isTerminalBlockingSyncErrorCode,
   syncSafeMessage,
 } from './errors';
+import { reconcileOutboxJobFromServerCapture } from './reconciliation';
 import { computeRetryBackoffDelayMs } from './retry';
 import { OcrResultInvalidError, mapOcrScreenText } from './screen-text';
 import type {
@@ -290,44 +291,6 @@ async function handleSyncError(
     processed: 1,
     status: classified.retryable ? 'retry_wait' : 'failed',
   };
-}
-
-/**
- * Best-effort reconciliation used on replay and at startup recovery: if the
- * server already reports the capture's OCR as succeeded, settle the local job
- * as `synced` without re-running the proxy (idempotent guard against a crash
- * between a successful submit and the local terminal write). Returns null when
- * there is nothing to settle.
- */
-export async function reconcileOutboxJobFromServerCapture(
-  options: {
-    api: Pick<SyncSchedulerOptions['api'], 'getCapture'>;
-    clock: SyncSchedulerOptions['clock'];
-    store: SyncSchedulerOptions['store'];
-  },
-  job: OutboxJob,
-): Promise<SyncRunResult | null> {
-  if (!job.serverCaptureId) {
-    return null;
-  }
-
-  if (['synced', 'blocked', 'failed', 'cancelled'].includes(job.state)) {
-    return null;
-  }
-
-  const capture = await options.api.getCapture(job.workspaceId, job.serverCaptureId);
-
-  if (capture.ocrStatus === 'succeeded') {
-    await options.store.markOutboxJobTerminal(job.id, {
-      now: options.clock.now(),
-      reason: 'ocr_synced',
-      serverCaptureId: job.serverCaptureId,
-      state: 'synced',
-    });
-    return { jobId: job.id, processed: 1, status: 'synced' };
-  }
-
-  return null;
 }
 
 async function markJobTerminalWithSafeError(

@@ -349,6 +349,107 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  it('separates server-capture reconciliation from storage asset reconciliation', async () => {
+    const [schedulerSource, recoverySource, publicSource] = await Promise.all([
+      readSource('sync/scheduler.ts'),
+      readSource('sync/recovery.ts'),
+      readSource('sync/public.ts'),
+    ]);
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const violations: string[] = [];
+    for (const requiredPath of [
+      'sync/reconciliation.ts',
+      'sync/reconciliation.test.ts',
+      'storage/reconciliation.ts',
+      'storage/reconciliation.test.ts',
+    ]) {
+      if (!sourceFiles.includes(requiredPath)) {
+        violations.push(`${requiredPath} is missing`);
+      }
+    }
+
+    if (sourceFiles.includes('sync/reconciliation.ts')) {
+      const reconciliationSource = await readSource('sync/reconciliation.ts');
+      for (const port of [
+        'ServerCaptureReconciliationApi',
+        'ServerCaptureReconciliationStore',
+        'ServerCaptureReconciliationClock',
+      ]) {
+        if (!new RegExp(`export\\s+(?:interface|type)\\s+${port}\\b`).test(reconciliationSource)) {
+          violations.push(`sync/reconciliation.ts does not export ${port}`);
+        }
+      }
+      for (const forbiddenDependency of [
+        'SyncQueueStore',
+        'SyncSchedulerOptions',
+        'OperationalStoreRepository',
+        'claimNextRetryableOutboxJob',
+        'getAssetCacheRef',
+        'getOutboxJob',
+        'recordOutboxSafeError',
+        'recoverInterruptedOutboxJob',
+        'updateOutboxJobState',
+        'AssetCacheRef',
+        'AssetAvailabilityResolver',
+        'reconcileAssetRefs',
+      ]) {
+        if (new RegExp(`\\b${forbiddenDependency}\\b`).test(reconciliationSource)) {
+          violations.push(`sync/reconciliation.ts still depends on ${forbiddenDependency}`);
+        }
+      }
+    }
+
+    for (const [consumerPath, source] of [
+      ['sync/scheduler.ts', schedulerSource],
+      ['sync/recovery.ts', recoverySource],
+    ] as const) {
+      if (
+        !/import\s*\{[^}]*\breconcileOutboxJobFromServerCapture\b[^}]*\}\s*from\s*['"]\.\/reconciliation['"]/s.test(
+          source,
+        )
+      ) {
+        violations.push(
+          `${consumerPath} does not import reconcileOutboxJobFromServerCapture from ./reconciliation`,
+        );
+      }
+    }
+    if (/export\s+async\s+function\s+reconcileOutboxJobFromServerCapture\b/.test(schedulerSource)) {
+      violations.push('sync/scheduler.ts still declares reconcileOutboxJobFromServerCapture');
+    }
+    if (
+      !/export\s*\{[^}]*\breconcileOutboxJobFromServerCapture\b[^}]*\}\s*from\s*['"]\.\/reconciliation['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push(
+        'sync/public.ts does not export reconcileOutboxJobFromServerCapture from ./reconciliation',
+      );
+    }
+    if (
+      !/export\s+type\s*\{[^}]*(?:\bServerCaptureReconciliationApi\b|\bServerCaptureReconciliationStore\b|\bServerCaptureReconciliationClock\b)[^}]*\}\s*from\s*['"]\.\/reconciliation['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push('sync/public.ts does not export server-capture reconciliation ports');
+    }
+    if (
+      /export\s*\{[^}]*\breconcileOutboxJobFromServerCapture\b[^}]*\}\s*from\s*['"]\.\/scheduler['"]/s.test(
+        publicSource,
+      )
+    ) {
+      violations.push(
+        'sync/public.ts still exports reconcileOutboxJobFromServerCapture from ./scheduler',
+      );
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('routes every production import into a capability through its public surface', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
