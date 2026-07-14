@@ -12,7 +12,10 @@ import type {
 } from '../../server/src/ai/public';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
 import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
-import type { createProviderCredentialResolver } from '../../server/src/provider-settings/public';
+import type {
+  InMemoryProviderSettingsRepository,
+  createProviderCredentialResolver,
+} from '../../server/src/provider-settings/public';
 import type { Logger } from '../../server/src/shared/logger';
 import { createServerApiClient } from '../src/server/client';
 import type { ServerApiTransport } from '../src/server/types';
@@ -546,6 +549,7 @@ type ServerHarnessOptions = {
 type ServerModules = {
   InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
   InMemoryCaptureOcrSearchRepository: new () => InMemoryCaptureOcrSearchRepository;
+  InMemoryProviderSettingsRepository: new () => InMemoryProviderSettingsRepository;
   createProviderCredentialResolver: typeof createProviderCredentialResolver;
   createAiRuntime: typeof createAiRuntime;
   createTestHttpApp: typeof createTestHttpApp;
@@ -558,6 +562,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
   try {
     const accountManagementRepository = new modules.InMemoryAccountManagementRepository();
     const captureOcrSearchRepository = new modules.InMemoryCaptureOcrSearchRepository();
+    const providerSettingsRepository = new modules.InMemoryProviderSettingsRepository();
     const config = {
       ADMIN_BOOTSTRAP_TOKEN: adminToken,
       CORS_ALLOWED_ORIGINS: [],
@@ -586,7 +591,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
         ? modules.createAiRuntime({
             providerCredentialResolver: modules.createProviderCredentialResolver({
               config,
-              repository: accountManagementRepository,
+              repository: providerSettingsRepository,
             }),
           })
         : undefined);
@@ -596,6 +601,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
       captureOcrSearchRepository,
       config,
       logger,
+      providerSettingsRepository,
     }).app;
     server = Bun.serve({
       fetch: app.fetch,
@@ -675,6 +681,7 @@ async function loadServerModules(): Promise<ServerModules> {
     InMemoryAccountManagementRepository:
       accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureOcrSearchRepository: captureRepositoryModule.InMemoryCaptureOcrSearchRepository,
+    InMemoryProviderSettingsRepository: providerSettingsModule.InMemoryProviderSettingsRepository,
     createProviderCredentialResolver: providerSettingsModule.createProviderCredentialResolver,
     createAiRuntime: aiRuntimeModule.createAiRuntime,
     createTestHttpApp: appHarnessModule.createTestHttpApp,
