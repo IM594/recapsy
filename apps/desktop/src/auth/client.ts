@@ -8,12 +8,12 @@ import type {
   ServerApiTransport,
   ServerApiTransportRequest,
   ServerApiTransportResponse,
-} from '../server-api/public';
-import type { TokenStore } from './token-store';
+} from '../server/public';
+import type { TokenStore } from './tokens';
 
 /**
  * Error codes this client can surface. Deliberately narrower than
- * `ServerApiErrorCode` (see `server-api/client.ts`): login only needs to
+ * `ServerApiErrorCode` (see `server/client.ts`): login only needs to
  * distinguish "credentials were wrong", "request was malformed",
  * "network/server problem" and "everything else", so renderer/main callers
  * do not have to reason about OCR- or capture-specific codes here.
@@ -71,11 +71,11 @@ export type AuthClientOptions = {
   endpoint: string;
   tokenStore: TokenStore;
   /**
-   * Reuses `ServerApiTransport`'s shape (see `server-api/types.ts`) so the
+   * Reuses `ServerApiTransport`'s shape (see `server/types.ts`) so the
    * real Electron entry point can share one `fetch`-backed transport
    * implementation across this client and `createServerApiClient`, and so
    * tests can share the same fake-transport pattern already used in
-   * `server-api/server-api.test.ts` / `integration/server-http-smoke.test.ts`.
+   * `server/client.test.ts` / `integration/server-http-smoke.test.ts`.
    */
   transport: ServerApiTransport;
 };

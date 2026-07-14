@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { ServerApiError } from '../server-api/client';
-import { createInMemoryOperationalStore } from '../storage';
+import { ServerApiError } from '../server/client';
+import { createMemoryStore } from '../storage';
 import type {
   AssetCacheRef,
   BackpressureDecision,
@@ -14,7 +14,7 @@ const now = '2026-07-06T00:00:00.000Z';
 
 describe('desktop server sync scheduler', () => {
   it('skips work when the active workspace is missing', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi(),
@@ -33,7 +33,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('guards against workspace switches during a sync run', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     let activeWorkspace: string | null = 'workspace_1';
     const scheduler = createScheduler({
@@ -69,7 +69,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('runs ingest, the OCR proxy, and result submission to reach synced', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
     const scheduler = createScheduler({
@@ -112,7 +112,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('resubmits a crash-recovered result_pending job without re-running the proxy', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     // Simulate a job that reached result_pending, was recovered to pending by
     // startup recovery, and still carries its locally stored transcript.
@@ -171,7 +171,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('drains existing pending work even when backpressure is pausing new capture', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
     const scheduler = createScheduler({
@@ -208,7 +208,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('blocks jobs with a safe local asset reason when the asset ref row is missing', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const created = await store.createOutboxJob(createJob());
     expect(created.ok).toBe(true);
     const scheduler = createScheduler({
@@ -239,7 +239,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('blocks local asset byte read failures without running the OCR proxy', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
     const scheduler = createScheduler({
@@ -280,7 +280,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('maps a provider_not_configured proxy failure to a fail-closed blocked state', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi({
@@ -305,7 +305,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('keeps provider_unavailable proxy failures and offline ingest failures retryable', async () => {
-    const providerStore = createInMemoryOperationalStore();
+    const providerStore = createMemoryStore();
     await seedPendingCapture(providerStore);
     const providerScheduler = createScheduler({
       api: createApi({
@@ -320,7 +320,7 @@ describe('desktop server sync scheduler', () => {
       store: providerStore,
     });
 
-    const offlineStore = createInMemoryOperationalStore();
+    const offlineStore = createMemoryStore();
     await seedPendingCapture(offlineStore);
     const offlineScheduler = createScheduler({
       api: createApi({
@@ -355,7 +355,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('fails a job when the proxy rejects the input as too large', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi({
@@ -384,7 +384,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('retries a job as result_invalid when the proxy response maps to no usable text', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi({
@@ -418,7 +418,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('retries only the submission and keeps the transcript when result submission fails', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     let proxyCalls = 0;
     const scheduler = createScheduler({
@@ -468,7 +468,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('does not revive a locally cancelled job after the proxy returns', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const scheduler = createScheduler({
       api: createApi({
@@ -501,7 +501,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('cancels a syncing job as a purely local terminal state', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     await store.updateOutboxJobState('job_1', {
       now,
@@ -529,7 +529,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('treats block_ocr captures as metadata-only and never reads or proxies local bytes', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(
       store,
       createJob({
@@ -582,7 +582,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('treats block_capture outbox jobs as metadata-only', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(
       store,
       createJob({
@@ -635,7 +635,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('redacts untrusted proxy error messages before storing errors or queue summaries', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const leakedText = 'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
     const scheduler = createScheduler({
@@ -672,7 +672,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('does not persist arbitrary server error messages in sync errors or summaries', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     const leakedText = 'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
     const scheduler = createScheduler({
@@ -709,7 +709,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('returns safe queue summaries under backpressure after a local cancel', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     await store.updateOutboxJobState('job_1', {
       now,
@@ -748,7 +748,7 @@ describe('desktop server sync scheduler', () => {
   });
 
   it('reconciles capture-only jobs to synced when server OCR already succeeded', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store);
     await store.updateOutboxJobState('job_1', {
       now: '2026-07-06T00:00:01.000Z',
@@ -815,7 +815,7 @@ describe('desktop server sync scheduler', () => {
     ] as const;
 
     for (const [safeCode, expectedIpcCode, expectedDetailsCode] of cases) {
-      const store = createInMemoryOperationalStore();
+      const store = createMemoryStore();
       await seedPendingCapture(store);
       await store.recordOutboxSafeError('job_1', {
         code: safeCode,
@@ -880,7 +880,7 @@ function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): Stored
 }
 
 async function seedPendingCapture(
-  store: ReturnType<typeof createInMemoryOperationalStore>,
+  store: ReturnType<typeof createMemoryStore>,
   job: OutboxJobCreateInput = createJob(),
 ) {
   await store.upsertAssetCacheRef(createAsset());
@@ -893,7 +893,7 @@ function createScheduler(input: {
   backpressure?: BackpressureDecision;
   getWorkspaceId?: () => Promise<string | null>;
   readAssetBytes?: (localAccessKey: string) => Promise<Uint8Array>;
-  store: ReturnType<typeof createInMemoryOperationalStore>;
+  store: ReturnType<typeof createMemoryStore>;
   workspaceId?: string | null;
 }) {
   return createSyncScheduler({

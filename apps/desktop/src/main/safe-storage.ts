@@ -41,7 +41,7 @@ const realFs: SecretStoreFs = {
   rm: (filePath, options) => rm(filePath, options),
 };
 
-export type ElectronKeychainSecretStoreOptions = {
+export type SafeStorageSecretStoreOptions = {
   safeStorage: SafeStorageLike;
   /** Directory the encrypted secret files live under (e.g. `<userData>/secure`). */
   directory: string;
@@ -50,7 +50,7 @@ export type ElectronKeychainSecretStoreOptions = {
 };
 
 /**
- * Builds a `KeychainSecretStore` (see `auth/token-store.ts`) backed by
+ * Builds a `KeychainSecretStore` (see `auth/tokens.ts`) backed by
  * Electron `safeStorage` plus a plain file on disk. One file per
  * `(service, account)` pair, named from a hash of the pair rather than the
  * raw strings — same class of concern `asset-reader.ts` guards against for
@@ -68,8 +68,8 @@ export type ElectronKeychainSecretStoreOptions = {
  * visible instead of being silently swallowed alongside the two expected
  * cases above.
  */
-export function createElectronKeychainSecretStore(
-  options: ElectronKeychainSecretStoreOptions,
+export function createSafeStorageSecretStore(
+  options: SafeStorageSecretStoreOptions,
 ): KeychainSecretStore {
   const { safeStorage, directory } = options;
   const fs = options.fs ?? realFs;

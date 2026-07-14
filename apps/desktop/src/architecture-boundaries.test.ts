@@ -8,8 +8,8 @@ const CAPABILITY_DIRECTORIES = [
   'capture',
   'helper',
   'ipc',
-  'runtime',
-  'server-api',
+  'server',
+  'status',
   'storage',
   'sync',
 ] as const;
@@ -34,7 +34,7 @@ describe('desktop architecture boundaries', () => {
       readSource('storage/composition.ts'),
     ]);
 
-    expect(publicSource).not.toContain('node-sqlite-driver');
+    expect(publicSource).not.toContain('node-driver');
     expect(publicSource).not.toContain('createNodeSqliteDatabase');
     expect(compositionSource).toContain('createNodeSqliteDatabase');
   });
@@ -65,8 +65,8 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps server-api transport types independent from auth, IPC, and storage internals', async () => {
-    const source = await readSource('server-api/types.ts');
+  it('keeps server transport types independent from auth, IPC, and storage internals', async () => {
+    const source = await readSource('server/types.ts');
 
     expect(source).not.toMatch(/from ['"]\.\.\/auth\//);
     expect(source).not.toMatch(/from ['"]\.\.\/ipc\//);
@@ -76,7 +76,7 @@ describe('desktop architecture boundaries', () => {
   it('lets sync own its server and queue ports', async () => {
     const source = await readSource('sync/types.ts');
 
-    expect(source).not.toMatch(/from ['"]\.\.\/server-api\//);
+    expect(source).not.toMatch(/from ['"]\.\.\/server\//);
     expect(source).not.toContain('OperationalStoreRepository');
     expect(source).toContain('export type SyncServerApi =');
     expect(source).toContain('export type SyncQueueStore =');
@@ -85,8 +85,8 @@ describe('desktop architecture boundaries', () => {
 
   it('requires an explicit access token provider at the server API boundary', async () => {
     const [typesSource, clientSource] = await Promise.all([
-      readSource('server-api/types.ts'),
-      readSource('server-api/client.ts'),
+      readSource('server/types.ts'),
+      readSource('server/client.ts'),
     ]);
 
     expect(typesSource).not.toContain('ServerApiTokenSource');
@@ -98,7 +98,7 @@ describe('desktop architecture boundaries', () => {
     const source = await readSource('sync/scheduler.ts');
 
     expect(source).not.toMatch(/from ['"]\.\.\/ipc/);
-    expect(source).not.toMatch(/from ['"]\.\.\/server-api/);
+    expect(source).not.toMatch(/from ['"]\.\.\/server/);
     expect(source).not.toContain('ServerApiError');
   });
 
@@ -143,26 +143,15 @@ describe('desktop architecture boundaries', () => {
     expect(source).toMatch(/from ['"]\.\.\/helper\/public['"]/);
   });
 
-  it('keeps helper adapters independent from the runtime capability', async () => {
+  it('keeps helper adapters independent from the status capability', async () => {
     const sources = await Promise.all([
       readSource('helper/mock-controller.ts'),
-      readSource('helper/spawn-capture-helper-client.ts'),
+      readSource('helper/process-client.ts'),
     ]);
 
     for (const source of sources) {
-      expect(source).not.toMatch(/from ['"]\.\.\/runtime\//);
+      expect(source).not.toMatch(/from ['"]\.\.\/status\//);
     }
-  });
-
-  it('does not retain capture compatibility modules in the runtime capability', async () => {
-    const compatibilityModules: string[] = [];
-    const glob = new Bun.Glob('runtime/capture-helper-*.ts');
-
-    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      compatibilityModules.push(relativePath);
-    }
-
-    expect(compatibilityModules).toEqual([]);
   });
 
   it('uses capability context instead of repeating it in filenames and public symbols', async () => {
@@ -201,6 +190,78 @@ describe('desktop architecture boundaries', () => {
     expect(source).toMatch(/\bCaptureHelperEventHandler\b/);
     expect(source).toMatch(/\bcreateCaptureHelperEventHandler\b/);
     expect(source).toMatch(/\bmapOcrScreenText\b/);
+  });
+
+  it('uses concise capability and adapter paths', async () => {
+    const sourceFiles: string[] = [];
+    const productionSources: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+      if (!relativePath.endsWith('.test.ts') && !relativePath.includes('/__tests__/')) {
+        productionSources.push(await readSource(relativePath));
+      }
+    }
+
+    const retiredPaths = [
+      'server-api/client.ts',
+      'runtime/ipc-handlers.ts',
+      'auth/auth-client.ts',
+      'auth/session-startup.ts',
+      'auth/token-store.ts',
+      'auth/login-window-preload.ts',
+      'helper/spawn-capture-helper-client.ts',
+      'helper/dev-helper-process.ts',
+      'storage/sqlite-operational-store.ts',
+      'storage/memory-operational-store.ts',
+      'storage/node-sqlite-driver.ts',
+      'storage/bun-sqlite-driver.ts',
+      'storage/asset-reconciliation.ts',
+      'sync/startup-recovery.ts',
+      'sync/sync-loop.ts',
+      'sync/sync-runtime.ts',
+      'sync/ipc-handlers.ts',
+      'capture/ipc-handlers.ts',
+      'ipc/handler-registry.ts',
+      'main/keychain-secret-store.ts',
+    ];
+    const requiredPaths = [
+      'server/client.ts',
+      'status/handlers.ts',
+      'auth/client.ts',
+      'auth/session.ts',
+      'auth/tokens.ts',
+      'auth/login-preload.ts',
+      'helper/process-client.ts',
+      'helper/dev-process.ts',
+      'storage/sqlite-store.ts',
+      'storage/memory-store.ts',
+      'storage/node-driver.ts',
+      'storage/bun-driver.ts',
+      'storage/reconciliation.ts',
+      'sync/recovery.ts',
+      'sync/loop.ts',
+      'sync/runtime.ts',
+      'sync/handlers.ts',
+      'capture/handlers.ts',
+      'ipc/handlers.ts',
+      'main/safe-storage.ts',
+    ];
+    const source = productionSources.join('\n');
+
+    expect(retiredPaths.filter((relativePath) => sourceFiles.includes(relativePath))).toEqual([]);
+    expect(requiredPaths.filter((relativePath) => !sourceFiles.includes(relativePath))).toEqual([]);
+    expect(source).not.toMatch(/\bcreateElectronKeychainSecretStore\b/);
+    expect(source).not.toMatch(/\bcreateSpawnCaptureHelperClient\b/);
+    expect(source).not.toMatch(/\bcreateSqliteOperationalStore\b/);
+    expect(source).not.toMatch(/\bcreateInMemoryOperationalStore\b/);
+    expect(source).not.toMatch(/\bcreateRuntimeIpcHandlers\b/);
+    expect(source).toMatch(/\bcreateSafeStorageSecretStore\b/);
+    expect(source).toMatch(/\bcreateHelperProcessClient\b/);
+    expect(source).toMatch(/\bcreateSqliteStore\b/);
+    expect(source).toMatch(/\bcreateMemoryStore\b/);
+    expect(source).toMatch(/\bcreateStatusHandlers\b/);
   });
 
   it('owns capture lifecycle in the capture capability instead of a generic desktop runtime', async () => {
@@ -242,7 +303,7 @@ describe('desktop architecture boundaries', () => {
   it('keeps session startup out of the Electron lifecycle coordinator', async () => {
     const [runtimeSource, sessionStartupSource] = await Promise.all([
       readSource('main/runtime.ts'),
-      readSource('auth/session-startup.ts'),
+      readSource('auth/session.ts'),
     ]);
 
     expect(runtimeSource).not.toContain('async function resolveWorkspaceId');
@@ -255,7 +316,7 @@ describe('desktop architecture boundaries', () => {
     const [runtimeSource, captureRuntimeSource, captureHandlersSource] = await Promise.all([
       readSource('main/runtime.ts'),
       readSource('capture/runtime.ts'),
-      readSource('capture/ipc-handlers.ts'),
+      readSource('capture/handlers.ts'),
     ]);
 
     expect(runtimeSource).not.toContain('createCaptureHelperController');
@@ -271,8 +332,8 @@ describe('desktop architecture boundaries', () => {
   it('gives sync ownership of recovery, scheduler, loop startup, and queue IPC', async () => {
     const [runtimeSource, syncRuntimeSource, syncHandlersSource] = await Promise.all([
       readSource('main/runtime.ts'),
-      readSource('sync/sync-runtime.ts'),
-      readSource('sync/ipc-handlers.ts'),
+      readSource('sync/runtime.ts'),
+      readSource('sync/handlers.ts'),
     ]);
 
     expect(runtimeSource).not.toContain('createSyncScheduler');
@@ -287,7 +348,7 @@ describe('desktop architecture boundaries', () => {
   it('keeps IPC contract registration in the IPC capability', async () => {
     const [runtimeSource, registrySource] = await Promise.all([
       readSource('main/runtime.ts'),
-      readSource('ipc/handler-registry.ts'),
+      readSource('ipc/handlers.ts'),
     ]);
 
     expect(runtimeSource).not.toContain('IPC_CHANNEL_REGISTRY');

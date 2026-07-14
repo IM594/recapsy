@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import type { AuthActiveSession, AuthClient } from '../auth/auth-client';
+import type { AuthActiveSession, AuthClient } from '../auth/client';
 import type { LoginPromptResult, LoginPrompter } from '../auth/login-window';
-import { createInMemoryTokenStore } from '../auth/token-store';
+import { createInMemoryTokenStore } from '../auth/tokens';
 import type {
   CaptureHelperClient,
   CaptureHelperCommandClient,
   CaptureHelperStartOptions,
 } from '../capture/public';
 import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/protocol';
-import { type OperationalStoreRepository, createInMemoryOperationalStore } from '../storage';
-import type { SyncLoop, SyncLoopOptions } from '../sync/sync-loop';
+import { type OperationalStoreRepository, createMemoryStore } from '../storage';
+import type { SyncLoop, SyncLoopOptions } from '../sync/loop';
 import type { SyncRunResult, SyncServerApi } from '../sync/types';
 import {
   type ElectronAppLike,
@@ -591,7 +591,7 @@ class FakeSyncLoop implements SyncLoop {
 }
 
 function testStore(): OperationalStoreLifecycle & { initializeCalls: number; closeCalls: number } {
-  const store = createInMemoryOperationalStore() as OperationalStoreRepository & {
+  const store = createMemoryStore() as OperationalStoreRepository & {
     initializeCalls: number;
     closeCalls: number;
     initialize(): Promise<void>;
@@ -711,7 +711,7 @@ class FakeIpcMain implements ElectronIpcMainLike {
 }
 
 /**
- * Stands in for `createSpawnCaptureHelperClient(...)` in these tests: same
+ * Stands in for `createHelperProcessClient(...)` in these tests: same
  * `CaptureHelperClient & CaptureHelperCommandClient` shape, but with no real
  * subprocess. Real cross-process spawning is covered by
  * `integration/capture-helper-process.test.ts` and the manual smoke test.

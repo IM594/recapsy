@@ -2,10 +2,9 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { recoverInterruptedOutboxJobs } from '../sync/recovery';
 import { createSyncQueueSummary } from '../sync/scheduler';
-import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
-import { reconcileAssetRefs } from './asset-reconciliation';
-import { createBunSqliteDatabase } from './bun-sqlite-driver';
+import { createBunSqliteDatabase } from './bun-driver';
 import {
   type AssetCacheRef,
   type HelperRuntimeState,
@@ -14,11 +13,9 @@ import {
   evaluateOperationalStoreBackpressure,
   toRendererSafeAssetRef,
 } from './index';
+import { reconcileAssetRefs } from './reconciliation';
 import type { SqliteDatabase } from './sqlite-driver';
-import {
-  createSqliteOperationalStore,
-  runSqliteOperationalStoreMigrations,
-} from './sqlite-operational-store';
+import { createSqliteStore, migrateSqliteStore } from './sqlite-store';
 
 const now = '2026-07-06T00:00:00.000Z';
 const tempDirs: string[] = [];
@@ -33,7 +30,7 @@ describe('SQLite operational store', () => {
   it('records schema version when migrations run repeatedly without clearing data', async () => {
     const database = createBunSqliteDatabase(tempDatabasePath());
 
-    runSqliteOperationalStoreMigrations(database);
+    migrateSqliteStore(database);
     database.run(
       `INSERT INTO settings_cache (
         workspace_id,
@@ -61,7 +58,7 @@ describe('SQLite operational store', () => {
         $workspaceId: 'workspace_1',
       },
     );
-    runSqliteOperationalStoreMigrations(database);
+    migrateSqliteStore(database);
 
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM schema_migrations').get()
@@ -123,8 +120,8 @@ describe('SQLite operational store', () => {
       { $createdAt: now },
     );
 
-    runSqliteOperationalStoreMigrations(database);
-    const store = createSqliteOperationalStore({ database });
+    migrateSqliteStore(database);
+    const store = createSqliteStore({ database });
 
     expect(await store.getAssetCacheRef('asset_early')).toMatchObject({
       assetRefId: 'asset_early',
@@ -230,7 +227,7 @@ describe('SQLite operational store', () => {
     });
     insertV1Row({ id: 'job_synced', idempotencyKey: 'idem_synced', state: 'synced' });
 
-    runSqliteOperationalStoreMigrations(database);
+    migrateSqliteStore(database);
 
     const columns = new Set(
       database
@@ -280,7 +277,7 @@ describe('SQLite operational store', () => {
   it('initializes schema idempotently and restores operational state after close and reopen', async () => {
     const path = tempDatabasePath();
     const firstDatabase = createBunSqliteDatabase(path);
-    const first = createSqliteOperationalStore({ database: firstDatabase });
+    const first = createSqliteStore({ database: firstDatabase });
 
     await first.initialize();
     await first.initialize();
@@ -316,7 +313,7 @@ describe('SQLite operational store', () => {
     first.close();
 
     const reopenedDatabase = createBunSqliteDatabase(path);
-    const reopened = createSqliteOperationalStore({ database: reopenedDatabase });
+    const reopened = createSqliteStore({ database: reopenedDatabase });
     await reopened.initialize();
 
     expect(await reopened.getOutboxJob('job_1')).toMatchObject({
@@ -355,7 +352,7 @@ describe('SQLite operational store', () => {
   it('persists explicit startup recovery after SQLite close and reopen', async () => {
     const path = tempDatabasePath();
     const firstDatabase = createBunSqliteDatabase(path);
-    const first = createSqliteOperationalStore({ database: firstDatabase });
+    const first = createSqliteStore({ database: firstDatabase });
 
     await first.initialize();
     await first.upsertAssetCacheRef(createAsset());
@@ -397,7 +394,7 @@ describe('SQLite operational store', () => {
     first.close();
 
     const reopenedDatabase = createBunSqliteDatabase(path);
-    const reopened = createSqliteOperationalStore({ database: reopenedDatabase });
+    const reopened = createSqliteStore({ database: reopenedDatabase });
     await reopened.initialize();
 
     expect(summary).toEqual({
@@ -483,7 +480,7 @@ describe('SQLite operational store', () => {
 
   it('creates capture outbox entries in a transaction and rolls back asset refs on capacity failure', async () => {
     const database = createBunSqliteDatabase(tempDatabasePath());
-    const store = createSqliteOperationalStore({ database, maxActiveOutboxJobs: 0 });
+    const store = createSqliteStore({ database, maxActiveOutboxJobs: 0 });
     await store.initialize();
 
     const result = await store.createCaptureOutboxEntry({
@@ -684,7 +681,7 @@ describe('SQLite operational store', () => {
   it('normalizes CapturePrivacyDecision.decidedAt and persists the normalized payload', async () => {
     const path = tempDatabasePath();
     const database = createBunSqliteDatabase(path);
-    const first = createSqliteOperationalStore({ database });
+    const first = createSqliteStore({ database });
     await first.initialize();
     await first.createOutboxJob(
       createJob({
@@ -702,7 +699,7 @@ describe('SQLite operational store', () => {
     first.close();
 
     const reopenedDatabase = createBunSqliteDatabase(path);
-    const reopened = createSqliteOperationalStore({ database: reopenedDatabase });
+    const reopened = createSqliteStore({ database: reopenedDatabase });
     await reopened.initialize();
 
     expect(await reopened.getOutboxJob('job_1')).toMatchObject({
@@ -723,7 +720,7 @@ describe('SQLite operational store', () => {
 
   it('rejects invalid JSON text through SQLite CHECK constraints', async () => {
     const database = createBunSqliteDatabase(tempDatabasePath());
-    runSqliteOperationalStoreMigrations(database);
+    migrateSqliteStore(database);
 
     expect(() =>
       database.run(
@@ -796,7 +793,7 @@ describe('SQLite operational store', () => {
   it('persists asset ref reconciliation state and blocked jobs after close and reopen', async () => {
     const path = tempDatabasePath();
     const firstDatabase = createBunSqliteDatabase(path);
-    const first = createSqliteOperationalStore({ database: firstDatabase });
+    const first = createSqliteStore({ database: firstDatabase });
 
     await first.initialize();
     await first.upsertAssetCacheRef(
@@ -820,7 +817,7 @@ describe('SQLite operational store', () => {
     first.close();
 
     const reopenedDatabase = createBunSqliteDatabase(path);
-    const reopened = createSqliteOperationalStore({ database: reopenedDatabase });
+    const reopened = createSqliteStore({ database: reopenedDatabase });
     await reopened.initialize();
 
     const asset = await reopened.getAssetCacheRef('asset_1');
@@ -1031,17 +1028,17 @@ describe('SQLite operational store', () => {
   });
 });
 
-async function createTempStore(): Promise<ReturnType<typeof createSqliteOperationalStore>> {
+async function createTempStore(): Promise<ReturnType<typeof createSqliteStore>> {
   const { store } = await createTempStoreWithDatabase();
   return store;
 }
 
 async function createTempStoreWithDatabase(): Promise<{
   database: SqliteDatabase;
-  store: ReturnType<typeof createSqliteOperationalStore>;
+  store: ReturnType<typeof createSqliteStore>;
 }> {
   const database = createBunSqliteDatabase(tempDatabasePath());
-  const store = createSqliteOperationalStore({ database });
+  const store = createSqliteStore({ database });
   await store.initialize();
   return { database, store };
 }

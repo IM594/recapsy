@@ -2,12 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { CaptureHelperEvent } from '../src/capture/public';
+import { createHelperProcessClient } from '../src/helper/process-client';
 import type { HelperEnvelope, HelperToMainType } from '../src/helper/protocol';
-import { createSpawnCaptureHelperClient } from '../src/helper/spawn-capture-helper-client';
 
-const devHelperPath = fileURLToPath(
-  new URL('../src/helper/dev-helper-process.ts', import.meta.url),
-);
+const devHelperPath = fileURLToPath(new URL('../src/helper/dev-process.ts', import.meta.url));
 
 const activeChildren: ChildProcess[] = [];
 
@@ -102,11 +100,11 @@ describe('capture helper subprocess (real cross-process transport)', () => {
 
 function startRealHelperClient(onEvent?: (event: CaptureHelperEvent) => Promise<void>): {
   child: ChildProcess;
-  client: ReturnType<typeof createSpawnCaptureHelperClient>;
+  client: ReturnType<typeof createHelperProcessClient>;
   envelopes: HelperEnvelope<HelperToMainType>[];
 } {
   let capturedChild: ChildProcess | undefined;
-  const client = createSpawnCaptureHelperClient({
+  const client = createHelperProcessClient({
     args: [devHelperPath],
     command: 'bun',
     shutdownTimeoutMs: 3000,
@@ -130,7 +128,7 @@ function startRealHelperClient(onEvent?: (event: CaptureHelperEvent) => Promise<
     onEvent,
   });
 
-  // `createSpawnCaptureHelperClient().start()` spawns synchronously and has
+  // `createHelperProcessClient().start()` spawns synchronously and has
   // no `await` before returning, so by the time this function returns,
   // `capturedChild` is already set even though we don't await the promise
   // here. Still surface any unexpected start() rejection instead of

@@ -15,7 +15,7 @@
 
       Security boundary: this page never calls `fetch` and never sees a
       token. It only calls `window.recapsyAuth.login(email, password)`,
-      which the preload script (`login-window-preload.ts`) wires to the
+      which the preload script (`login-preload.ts`) wires to the
       `auth.login` IPC channel. The real HTTP request and token storage
       happen entirely in the Electron main process.
     -->

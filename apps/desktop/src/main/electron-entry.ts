@@ -10,15 +10,15 @@ import {
 import {
   type HelperEnvelope,
   type HelperToMainType,
-  createSpawnCaptureHelperClient,
+  createHelperProcessClient,
 } from '../helper/public';
-import { type ServerApiTransport, createServerApiClient } from '../server-api/public';
+import { type ServerApiTransport, createServerApiClient } from '../server/public';
 import { createNodeSqliteDatabase } from '../storage/composition';
-import { createSqliteOperationalStore } from '../storage/public';
+import { createSqliteStore } from '../storage/public';
 import type { SyncAssetReader, SyncRunResult } from '../sync/public';
 import { createLocalAssetReader } from './asset-reader';
-import { createElectronKeychainSecretStore } from './keychain-secret-store';
 import { createElectronMainRuntime } from './runtime';
+import { createSafeStorageSecretStore } from './safe-storage';
 
 /**
  * Thin, genuinely-`electron`-importing entry point. Everything with actual
@@ -43,7 +43,7 @@ import { createElectronMainRuntime } from './runtime';
  * `apps/desktop` here. The same reasoning applies to the login window's
  * preload script and HTML file below.
  */
-const defaultHelperEntry = path.join(process.cwd(), 'src', 'helper', 'dev-helper-process.ts');
+const defaultHelperEntry = path.join(process.cwd(), 'src', 'helper', 'dev-process.ts');
 
 const helperCommand = process.env.RECAPSY_DESKTOP_HELPER_COMMAND ?? 'bun';
 const helperArgs = process.env.RECAPSY_DESKTOP_HELPER_ARGS
@@ -108,7 +108,7 @@ function resolveCaptureAssetReader(): SyncAssetReader {
 
 /**
  * Reverse-DNS-style Keychain "service" identifier for the encrypted token
- * file (see `keychain-secret-store.ts`'s filename hash, which folds this in).
+ * file (see `safe-storage.ts`'s filename hash, which folds this in).
  * `'default'` is the account: V0 is single-profile (no multi-account
  * switching yet), so this literally names "this device's one local session"
  * — a real business concept, not a placeholder.
@@ -131,7 +131,7 @@ function resolveSecureDirectory(): string {
 
 /**
  * Real persistence for login across restarts, backed by Electron's built-in
- * `safeStorage` (see `keychain-secret-store.ts` for the full rationale: it is
+ * `safeStorage` (see `safe-storage.ts` for the full rationale: it is
  * genuinely Keychain-backed on macOS via its per-app encryption key, without
  * shelling out to the `security` CLI — which would leak the raw secret via
  * `ps`/process listing — or adding the `keytar` native dependency).
@@ -155,7 +155,7 @@ function resolveTokenStore(): TokenStore {
   if (safeStorage.isEncryptionAvailable()) {
     tokenStoreInstance = createMacOsKeychainTokenStore({
       account: AUTH_KEYCHAIN_ACCOUNT,
-      secrets: createElectronKeychainSecretStore({
+      secrets: createSafeStorageSecretStore({
         directory: resolveSecureDirectory(),
         safeStorage,
       }),
@@ -221,7 +221,7 @@ const loginWindowHtmlPath = path.join(process.cwd(), 'src', 'auth', 'login-windo
 // loader with no TypeScript support. So, unlike `login-window.html` above,
 // the preload script does need a compiled JS output — see the `build`
 // script in `package.json`, which now also bundles
-// `auth/login-window-preload.ts` into `dist/auth/login-window-preload.js`.
+// `auth/login-preload.ts` into `dist/auth/login-preload.js`.
 // That bundle is specifically built with `--format cjs`: Electron's preload
 // loader only supports CommonJS (`require`), not ESM `import` — unlike this
 // file's own bundle, which Electron's main process loads through Node's
@@ -229,7 +229,7 @@ const loginWindowHtmlPath = path.join(process.cwd(), 'src', 'auth', 'login-windo
 // applies there). An ESM preload bundle loads silently as if it never ran:
 // `contextBridge.exposeInMainWorld` never executes and the renderer sees no
 // `window.recapsyAuth`, with no thrown error surfaced to this process.
-const loginWindowPreloadPath = path.join(process.cwd(), 'dist', 'auth', 'login-window-preload.js');
+const loginWindowPreloadPath = path.join(process.cwd(), 'dist', 'auth', 'login-preload.js');
 
 const loginPrompter = createLoginWindowPrompter({
   authClient,
@@ -258,7 +258,7 @@ const { ready } = createElectronMainRuntime({
   app,
   authClient,
   createHelperClient: () =>
-    createSpawnCaptureHelperClient({
+    createHelperProcessClient({
       args: helperArgs,
       command: helperCommand,
       // Hand the shared asset root to the capture process via env (see the
@@ -278,7 +278,7 @@ const { ready } = createElectronMainRuntime({
       process.env.RECAPSY_DESKTOP_SQLITE_PATH ??
       path.join(app.getPath('userData'), 'recapsy-desktop-dev.sqlite3');
 
-    return createSqliteOperationalStore({ database: createNodeSqliteDatabase(sqlitePath) });
+    return createSqliteStore({ database: createNodeSqliteDatabase(sqlitePath) });
   },
   deviceId,
   hideDockIcon: devVisibilityEnabled ? false : undefined,

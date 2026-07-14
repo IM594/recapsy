@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import type { ServerApiTransport, ServerApiTransportRequest } from '../server-api/types';
-import { AuthClientError, createAuthClient } from './auth-client';
-import { createInMemoryTokenStore } from './token-store';
+import type { ServerApiTransport, ServerApiTransportRequest } from '../server/types';
+import { AuthClientError, createAuthClient } from './client';
+import { createInMemoryTokenStore } from './tokens';
 
 const endpoint = 'https://api.example.test';
 const generatedAt = '2026-07-08T00:00:00.000Z';

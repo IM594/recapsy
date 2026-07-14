@@ -26,7 +26,7 @@ const FORCE_KILL_GRACE_MS = 1000;
  * spawning a real OS process; a real `node:child_process` `ChildProcess`
  * satisfies this type as-is.
  */
-export type SpawnedHelperProcess = {
+export type HelperProcess = {
   readonly stdin: { write(chunk: string): boolean } | null;
   readonly stdout: NodeEventSource | null;
   readonly stderr: NodeEventSource | null;
@@ -42,13 +42,13 @@ type NodeEventSource = {
   on(event: 'data', listener: (chunk: Buffer | string) => void): unknown;
 };
 
-export type SpawnHelperProcessFn = (
+export type SpawnHelperProcess = (
   command: string,
   args: string[],
   options: { env: NodeJS.ProcessEnv },
-) => SpawnedHelperProcess;
+) => HelperProcess;
 
-export type SpawnCaptureHelperClientOptions = {
+export type HelperProcessClientOptions = {
   /** Path or command name of the helper executable. Injected, never hard-coded here. */
   command: string;
   args?: string[];
@@ -57,7 +57,7 @@ export type SpawnCaptureHelperClientOptions = {
   shutdownTimeoutMs?: number;
   now?: () => string;
   /** Dependency injection point for the underlying process spawn, defaults to `node:child_process`. */
-  spawnHelperProcess?: SpawnHelperProcessFn;
+  spawnHelperProcess?: SpawnHelperProcess;
   /**
    * Optional diagnostics hook for envelopes this process could not parse.
    * Never receives raw stdout bytes beyond what `protocol.ts` already
@@ -84,19 +84,19 @@ export type SpawnCaptureHelperClientOptions = {
  * resume) are unaffected; this only adds capability, it does not change any
  * existing method's behavior.
  */
-export function createSpawnCaptureHelperClient(
-  options: SpawnCaptureHelperClientOptions,
+export function createHelperProcessClient(
+  options: HelperProcessClientOptions,
 ): CaptureHelperClient & CaptureHelperCommandClient {
   return new ProcessCaptureHelperClient(options);
 }
 
 class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCommandClient {
-  private child: SpawnedHelperProcess | undefined;
+  private child: HelperProcess | undefined;
   private startOptions: CaptureHelperStartOptions = {};
   private stopRequested = false;
   private pendingStopResolvers: Array<() => void> = [];
 
-  constructor(private readonly options: SpawnCaptureHelperClientOptions) {}
+  constructor(private readonly options: HelperProcessClientOptions) {}
 
   async start(startOptions: CaptureHelperStartOptions = {}): Promise<void> {
     if (this.child) {
@@ -227,7 +227,7 @@ class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCo
     }
   }
 
-  private waitForExit(child: SpawnedHelperProcess, timeoutMs: number): Promise<boolean> {
+  private waitForExit(child: HelperProcess, timeoutMs: number): Promise<boolean> {
     if (this.child !== child) {
       return Promise.resolve(true);
     }
@@ -252,7 +252,7 @@ class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCo
   }
 
   private writeCommand<TType extends MainToHelperType>(
-    child: SpawnedHelperProcess,
+    child: HelperProcess,
     type: TType,
     payload: MainToHelperPayloadByType[TType],
   ): void {
@@ -288,7 +288,7 @@ function defaultSpawnHelperProcess(
   command: string,
   args: string[],
   options: { env: NodeJS.ProcessEnv },
-): SpawnedHelperProcess {
+): HelperProcess {
   return nodeSpawn(command, args, { env: options.env, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 

@@ -1,6 +1,6 @@
-import type { AuthClient } from './auth-client';
+import type { AuthClient } from './client';
 import type { LoginPrompter } from './login-window';
-import type { TokenStore } from './token-store';
+import type { TokenStore } from './tokens';
 
 export type SessionWorkspaceResolution = {
   workspaceId: string;

@@ -25,7 +25,7 @@ import type {
   UpdateAssetRefAvailabilityInput,
 } from './types';
 
-export type InMemoryOperationalStoreOptions = {
+export type MemoryStoreOptions = {
   maxActiveOutboxJobs?: number;
 };
 
@@ -36,9 +36,7 @@ const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'cancelled',
 ]);
 
-export function createInMemoryOperationalStore(
-  options: InMemoryOperationalStoreOptions = {},
-): OperationalStoreRepository {
+export function createMemoryStore(options: MemoryStoreOptions = {}): OperationalStoreRepository {
   return new InMemoryOperationalStore(options);
 }
 
@@ -50,7 +48,7 @@ class InMemoryOperationalStore implements OperationalStoreRepository {
   private readonly settingsCache = new Map<string, SettingsCache>();
   private helperState: HelperRuntimeState | null = null;
 
-  constructor(private readonly options: InMemoryOperationalStoreOptions) {}
+  constructor(private readonly options: MemoryStoreOptions) {}
 
   async createOutboxJob(job: OutboxJobCreateInput): Promise<OperationalStoreResult<OutboxJob>> {
     const activeJobCount = [...this.outboxJobs.values()].filter(

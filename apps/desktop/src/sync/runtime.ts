@@ -1,8 +1,8 @@
 import type { OperationalStoreRepository } from '../storage/public';
+import { createSyncLoop as createRealSyncLoop } from './loop';
+import type { SyncLoop, SyncLoopOptions } from './loop';
+import { recoverInterruptedOutboxJobs } from './recovery';
 import { createSyncScheduler } from './scheduler';
-import { recoverInterruptedOutboxJobs } from './startup-recovery';
-import { createSyncLoop as createRealSyncLoop } from './sync-loop';
-import type { SyncLoop, SyncLoopOptions } from './sync-loop';
 import type { RetryBackoffConfig, SyncAssetReader, SyncRunResult, SyncServerApi } from './types';
 
 const DEFAULT_SYNC_MAX_ATTEMPTS = 15;

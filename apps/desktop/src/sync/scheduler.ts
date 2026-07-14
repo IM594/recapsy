@@ -18,7 +18,7 @@ import type {
 
 // Proxy/submit failures the sync flow routes to a terminal `blocked` state
 // (policy/authorization denials and unconfigured providers) rather than a
-// retryable failure or a generic `failed`. The server-api client already
+// retryable failure or a generic `failed`. The server client already
 // computes `retryable`; this set only redirects the non-retryable *policy*
 // denials, which are a block rather than a hard failure. See
 // `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.

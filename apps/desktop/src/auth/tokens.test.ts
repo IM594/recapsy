@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createInMemoryTokenStore, createMacOsKeychainTokenStore } from './token-store';
+import { createInMemoryTokenStore, createMacOsKeychainTokenStore } from './tokens';
 
 describe('desktop auth token store', () => {
   it('keeps auth tokens behind the token store interface and clears them on sign out', async () => {

@@ -87,11 +87,11 @@ export type {
 } from './helper/public';
 export { createSafeCaptureResultPayload } from './helper/public';
 export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './helper/public';
-export { createSpawnCaptureHelperClient } from './helper/public';
+export { createHelperProcessClient } from './helper/public';
 export type {
-  SpawnCaptureHelperClientOptions,
-  SpawnedHelperProcess,
-  SpawnHelperProcessFn,
+  HelperProcess,
+  HelperProcessClientOptions,
+  SpawnHelperProcess,
 } from './helper/public';
 export { createMockHelperController } from './helper/public';
 export type {
@@ -132,7 +132,7 @@ export type {
   CaptureStartupRecovery,
   HelperLifecycle,
 } from './capture/public';
-export { ServerApiError, createServerApiClient } from './server-api/public';
+export { ServerApiError, createServerApiClient } from './server/public';
 export type {
   CaptureIngestInput,
   CaptureIngestResult,
@@ -151,7 +151,7 @@ export type {
   ServerApiTransportResponse,
   ServerProviderCapability,
   TimelineQueryInput,
-} from './server-api/public';
+} from './server/public';
 export { createSyncQueueSummary, createSyncScheduler } from './sync/public';
 export { createSyncRuntime } from './sync/public';
 export type { SyncRuntime, SyncRuntimeOptions } from './sync/public';
@@ -175,10 +175,10 @@ export type {
   SyncWorkspaceProvider,
 } from './sync/public';
 export {
-  createInMemoryOperationalStore,
-  createSqliteOperationalStore,
+  createMemoryStore,
+  createSqliteStore,
   evaluateOperationalStoreBackpressure,
-  runSqliteOperationalStoreMigrations,
+  migrateSqliteStore,
   toRendererSafeAssetRef,
 } from './storage/public';
 export type {
@@ -217,7 +217,7 @@ export type {
   SafeOperationalError,
   SettingsCache,
   SqliteDatabase,
-  SqliteOperationalStoreOptions,
+  SqliteStoreOptions,
   SqliteParameters,
   SqliteRow,
   SqliteRunResult,

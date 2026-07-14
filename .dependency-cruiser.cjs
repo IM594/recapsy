@@ -18,8 +18,8 @@ const DESKTOP_CAPABILITIES = [
   'capture',
   'helper',
   'ipc',
-  'runtime',
-  'server-api',
+  'server',
+  'status',
   'storage',
   'sync',
 ];
@@ -117,18 +117,6 @@ module.exports = {
     ...publicSurfaceRules('desktop', DESKTOP_SOURCE_ROOT, DESKTOP_CAPABILITIES, {
       storage: ['composition'],
     }),
-    {
-      name: 'desktop-no-runtime-capture-compatibility-imports',
-      severity: 'error',
-      comment:
-        'Capture orchestration belongs to the capture capability and must be consumed through capture/public.ts.',
-      from: {
-        path: `^${DESKTOP_SOURCE_ROOT}/`,
-      },
-      to: {
-        path: `^${DESKTOP_SOURCE_ROOT}/runtime/capture-helper-(?:controller|event-intake)[.]ts$`,
-      },
-    },
     {
       name: 'desktop-storage-composition-only-from-electron-root',
       severity: 'error',

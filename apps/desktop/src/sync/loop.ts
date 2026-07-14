@@ -46,7 +46,7 @@ export type SyncLoop = {
   /**
    * Stops scheduling further runs and waits for any in-flight `runOnce()` to
    * settle before resolving, mirroring the "wait for the current step before
-   * deciding the next one" shape `helper/spawn-capture-helper-client.ts`
+   * deciding the next one" shape `helper/process-client.ts`
    * uses for its own shutdown (`waitForExit`) — applied here to avoid two
    * overlapping `runOnce()` calls racing the same outbox claim.
    */

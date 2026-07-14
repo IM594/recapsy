@@ -4,16 +4,16 @@ import {
   type OperationalStoreRepository,
   type OutboxJobCreateInput,
   type StoredOcrResult,
-  createInMemoryOperationalStore,
+  createMemoryStore,
 } from '../storage';
-import { recoverInterruptedOutboxJobs } from './startup-recovery';
+import { recoverInterruptedOutboxJobs } from './recovery';
 
 const now = '2026-07-06T00:00:00.000Z';
 const recoveryNow = '2026-07-06T00:10:00.000Z';
 
 describe('desktop startup recovery', () => {
   it('recovers interrupted outbox jobs while preserving terminal and retryable jobs', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedJob(store, createJob({ id: 'job_syncing', idempotencyKey: 'idem_syncing' }));
     await store.updateOutboxJobState('job_syncing', {
       now: '2026-07-06T00:01:00.000Z',
@@ -105,7 +105,7 @@ describe('desktop startup recovery', () => {
   });
 
   it('can recover interrupted jobs across all workspaces explicitly', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedJob(
       store,
       createJob({
@@ -147,7 +147,7 @@ describe('desktop startup recovery', () => {
   });
 
   it('reconciles capture-only interrupted jobs to synced when server OCR already succeeded', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedJob(store, createJob({ id: 'job_reconcile', idempotencyKey: 'idem_reconcile' }));
     await store.updateOutboxJobState('job_reconcile', {
       now: '2026-07-06T00:03:00.000Z',

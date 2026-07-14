@@ -1,15 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { createTestHttpApp } from '../../server/src/__tests__/http-app-harness';
+import type { createTestHttpApp } from '../../server/src/__tests__/app-harness';
 import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
 import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
 import type { Logger } from '../../server/src/shared/logger';
-import { createAuthClient } from '../src/auth/auth-client';
-import { createInMemoryTokenStore } from '../src/auth/token-store';
-import { createServerApiClient } from '../src/server-api/client';
-import type { ServerApiTransport } from '../src/server-api/types';
-import { createInMemoryOperationalStore } from '../src/storage';
+import { createAuthClient } from '../src/auth/client';
+import { createInMemoryTokenStore } from '../src/auth/tokens';
+import { createServerApiClient } from '../src/server/client';
+import type { ServerApiTransport } from '../src/server/types';
+import { createMemoryStore } from '../src/storage';
 import type { AssetCacheRef, OperationalStoreRepository } from '../src/storage';
 import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncAssetReader } from '../src/sync/types';
@@ -96,7 +96,7 @@ describe('real login through to the sync loop over real HTTP', () => {
       endpoint: harness.endpoint,
       transport: fetchTransport,
     });
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const bytes = new Uint8Array([1, 2, 3, 4]);
     await seedPendingCapture(store, registered.workspaceId, bytes);
 
@@ -429,7 +429,7 @@ type ServerModules = {
 
 async function loadServerModules(): Promise<ServerModules> {
   const appHarnessModule = await import(
-    new URL('../../server/src/__tests__/http-app-harness.ts', import.meta.url).href
+    new URL('../../server/src/__tests__/app-harness.ts', import.meta.url).href
   );
   const accountRepositoryModule = await import(
     new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href

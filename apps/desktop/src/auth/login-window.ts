@@ -1,4 +1,4 @@
-import type { AuthClient, AuthClientErrorCode } from './auth-client';
+import type { AuthClient, AuthClientErrorCode } from './client';
 
 /**
  * Structural surface of the single Electron `ipcMain` this module needs.
@@ -87,7 +87,7 @@ export type LoginIpcResponse = LoginIpcSuccessResponse | LoginIpcErrorResponse;
 
 /**
  * Wires the login `BrowserWindow` lifecycle to a single, temporary
- * `auth.login` IPC handler. The renderer side (`login-window-preload.ts` +
+ * `auth.login` IPC handler. The renderer side (`login-preload.ts` +
  * `login-window.html`) never sees tokens or the workspace id directly — it
  * only learns whether the submitted credentials were accepted. The resolved
  * `workspaceId` is returned to the *main*-process caller of `promptLogin()`,

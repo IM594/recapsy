@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createDevHelperRuntime } from './dev-helper-process';
+import { createDevHelperRuntime } from './dev-process';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,

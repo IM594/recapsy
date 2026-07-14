@@ -3,23 +3,26 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { createTestHttpApp } from '../../server/src/__tests__/http-app-harness';
+import type { createTestHttpApp } from '../../server/src/__tests__/app-harness';
 import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
-import type { AiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
-import type { createAiRuntime } from '../../server/src/ai-runtime/public';
+import type {
+  AiRuntime,
+  RunVisionTextFailureReason,
+  createAiRuntime,
+} from '../../server/src/ai/public';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
 import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
 import type { createProviderCredentialResolver } from '../../server/src/provider-settings/public';
 import type { Logger } from '../../server/src/shared/logger';
-import { createServerApiClient } from '../src/server-api/client';
-import type { ServerApiTransport } from '../src/server-api/types';
-import { createInMemoryOperationalStore, createSqliteOperationalStore } from '../src/storage';
+import { createServerApiClient } from '../src/server/client';
+import type { ServerApiTransport } from '../src/server/types';
+import { createMemoryStore, createSqliteStore } from '../src/storage';
 import type {
   AssetCacheRef,
   OperationalStoreRepository,
   OutboxJobCreateInput,
 } from '../src/storage';
-import { createBunSqliteDatabase } from '../src/storage/bun-sqlite-driver';
+import { createBunSqliteDatabase } from '../src/storage/bun-driver';
 import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncServerApi } from '../src/sync/types';
 
@@ -64,7 +67,7 @@ describe('desktop server sync over real HTTP', () => {
       aiRuntime: visionRuntimeReturning('Visible retention graph and roadmap notes'),
     });
     const user = await harness.bootstrapUser('desktop-positive@example.test');
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
     const scheduler = createScheduler(store, client, user.workspaceId, bytes);
@@ -113,7 +116,7 @@ describe('desktop server sync over real HTTP', () => {
       aiRuntime: visionRuntimeReturning('SQLite backed OCR searchable invoice'),
     });
     const user = await harness.bootstrapUser('desktop-sqlite-positive@example.test');
-    const store = await createSqliteStore();
+    const store = await createSqliteTestStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
     const scheduler = createScheduler(store, client, user.workspaceId, bytes);
@@ -203,7 +206,7 @@ describe('desktop server sync over real HTTP', () => {
     const bytes = new Uint8Array([5, 6, 7, 8]);
     const harness = await startServerHttpHarness({ useAppDefaultOcrRunner: true });
     const user = await harness.bootstrapUser('desktop-provider-missing@example.test');
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
     const scheduler = createScheduler(store, client, user.workspaceId, bytes);
@@ -234,7 +237,7 @@ describe('desktop server sync over real HTTP', () => {
       aiRuntime: visionRuntimeFailing('provider_timeout', true, leakedProviderMessage),
     });
     const user = await harness.bootstrapUser('desktop-provider-timeout@example.test');
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
     const scheduler = createScheduler(store, client, user.workspaceId, bytes);
@@ -275,7 +278,7 @@ describe('desktop server sync over real HTTP', () => {
       aiRuntime: visionRuntimeReturning('This OCR must not be submitted'),
     });
     const user = await harness.bootstrapUser('desktop-cancel@example.test');
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     // Simulate a job that has been claimed and ingested (in-flight) when the
     // user cancels it: the thin-proxy model has no server-side OCR job to
@@ -305,7 +308,7 @@ describe('desktop server sync over real HTTP', () => {
       aiRuntime: visionRuntimeReturning('This OCR must not run'),
     });
     const user = await harness.bootstrapUser('desktop-block-ocr@example.test');
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes, {
       capture: {
         privacyDecision: {
@@ -436,10 +439,10 @@ async function seedPendingCapture(
   expect(created.ok).toBe(true);
 }
 
-async function createSqliteStore(): Promise<OperationalStoreRepository> {
+async function createSqliteTestStore(): Promise<OperationalStoreRepository> {
   const dir = mkdtempSync(join(tmpdir(), 'recapsy-desktop-http-sqlite-'));
   activeTempDirs.push(dir);
-  const store = createSqliteOperationalStore({
+  const store = createSqliteStore({
     database: createBunSqliteDatabase(join(dir, 'operational.sqlite')),
   });
   await store.initialize();
@@ -653,10 +656,10 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
 
 async function loadServerModules(): Promise<ServerModules> {
   const appHarnessModule = await import(
-    new URL('../../server/src/__tests__/http-app-harness.ts', import.meta.url).href
+    new URL('../../server/src/__tests__/app-harness.ts', import.meta.url).href
   );
   const aiRuntimeModule = await import(
-    new URL('../../server/src/ai-runtime/public.ts', import.meta.url).href
+    new URL('../../server/src/ai/public.ts', import.meta.url).href
   );
   const accountRepositoryModule = await import(
     new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href

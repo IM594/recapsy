@@ -8,7 +8,7 @@ import { HELPER_PROTOCOL_VERSION, decodeHelperEnvelopeLine } from '../helper/pro
 import {
   type BackpressureConfig,
   type OperationalStoreRepository,
-  createInMemoryOperationalStore,
+  createMemoryStore,
 } from '../storage';
 import {
   type CaptureHelperCommandClient,
@@ -26,7 +26,7 @@ const backpressure: BackpressureConfig = {
 
 describe('capture helper event handler', () => {
   it('acks capture.result only after asset refs and outbox jobs are durably recorded', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,
@@ -84,7 +84,7 @@ describe('capture helper event handler', () => {
   });
 
   it('nacks before writing asset refs or outbox jobs when backpressure is active', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure: {
@@ -115,7 +115,7 @@ describe('capture helper event handler', () => {
 
   it('nacks storage failures with a safe typed error and without leaking sensitive details', async () => {
     const store = createThrowingStore(
-      createInMemoryOperationalStore(),
+      createMemoryStore(),
       new Error(
         'sqlite failed for /Users/alice/Pictures/private.png with token secret and OCR raw text from stderr',
       ),
@@ -149,7 +149,7 @@ describe('capture helper event handler', () => {
   });
 
   it('does not leave asset refs behind when outbox entry creation fails', async () => {
-    const store = createInMemoryOperationalStore({ maxActiveOutboxJobs: 0 });
+    const store = createMemoryStore({ maxActiveOutboxJobs: 0 });
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,
@@ -175,7 +175,7 @@ describe('capture helper event handler', () => {
   });
 
   it('acks repeated identical capture.result without rewriting the existing entry', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,
@@ -198,7 +198,7 @@ describe('capture helper event handler', () => {
   });
 
   it('nacks divergent idempotency conflicts without overwriting existing asset refs', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,
@@ -241,7 +241,7 @@ describe('capture helper event handler', () => {
   });
 
   it('sends typed nacks for protocol errors without leaking raw payload content', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,
@@ -324,7 +324,7 @@ describe('capture helper event handler', () => {
   });
 
   it('stores fixed safe messages for helper capture errors instead of helper-provided text', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,
@@ -368,7 +368,7 @@ describe('capture helper event handler', () => {
   });
 
   it('keeps helper unexpected exit observable without deleting or resetting outbox jobs', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob({
       assetRefId: 'asset_existing',
       createdAt: observedAt,
@@ -405,7 +405,7 @@ describe('capture helper event handler', () => {
   });
 
   it('persists real permission.status into helper_state and preserves it across a later capture error', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
       backpressure,

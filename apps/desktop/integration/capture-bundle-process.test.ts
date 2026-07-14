@@ -5,9 +5,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CaptureHelperEvent } from '../src/capture/public';
+import { createHelperProcessClient } from '../src/helper/process-client';
 import { HELPER_PROTOCOL_VERSION } from '../src/helper/protocol';
 import type { HelperEnvelope, HelperToMainType } from '../src/helper/protocol';
-import { createSpawnCaptureHelperClient } from '../src/helper/spawn-capture-helper-client';
 
 /**
  * Real cross-process test of the *signed Swift capture bundle*, spawned exactly
@@ -162,14 +162,14 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
 
 function startBundleClient(onEvent?: (event: CaptureHelperEvent) => Promise<void>): {
   child: ChildProcess;
-  client: ReturnType<typeof createSpawnCaptureHelperClient>;
+  client: ReturnType<typeof createHelperProcessClient>;
   envelopes: HelperEnvelope<HelperToMainType>[];
 } {
   const assetRoot = mkdtempSync(path.join(tmpdir(), 'recapsy-capture-assets-'));
   tempRoots.push(assetRoot);
 
   let capturedChild: ChildProcess | undefined;
-  const client = createSpawnCaptureHelperClient({
+  const client = createHelperProcessClient({
     args: [captureBinaryPath],
     command: launcherPath,
     env: { RECAPSY_CAPTURE_ASSET_ROOT: assetRoot },

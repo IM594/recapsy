@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { HelperLifecycle } from '../helper/public';
-import { createInMemoryOperationalStore } from '../storage';
-import { recoverInterruptedOutboxJobs } from '../sync/startup-recovery';
+import { createMemoryStore } from '../storage';
+import { recoverInterruptedOutboxJobs } from '../sync/recovery';
 import { createCaptureLifecycle } from './lifecycle';
 
 describe('capture lifecycle', () => {
@@ -117,7 +117,7 @@ describe('capture lifecycle', () => {
   });
 
   it('can wire interrupted outbox recovery into lifecycle startup through dependency injection', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const calls: string[] = [];
     await store.createOutboxJob({
       assetRefId: 'asset_1',

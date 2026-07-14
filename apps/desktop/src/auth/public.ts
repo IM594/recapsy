@@ -1,4 +1,4 @@
-export { AuthClientError, createAuthClient } from './auth-client';
+export { AuthClientError, createAuthClient } from './client';
 export type {
   AuthActiveSession,
   AuthClient,
@@ -7,7 +7,7 @@ export type {
   AuthClientOptions,
   AuthLoginInput,
   AuthLoginResult,
-} from './auth-client';
+} from './client';
 export { createLoginWindowPrompter } from './login-window';
 export type {
   CreateLoginWindowFn,
@@ -17,17 +17,17 @@ export type {
   LoginWindowLike,
   LoginWindowOptions,
 } from './login-window';
-export { createInMemoryTokenStore, createMacOsKeychainTokenStore } from './token-store';
+export { createInMemoryTokenStore, createMacOsKeychainTokenStore } from './tokens';
 export type {
   AuthTokenSet,
   KeychainSecretStore,
   MacOsKeychainTokenStoreOptions,
   TokenStore,
-} from './token-store';
-export { createSessionStartup } from './session-startup';
+} from './tokens';
+export { createSessionStartup } from './session';
 export type {
   SessionStartup,
   SessionStartupLogger,
   SessionStartupOptions,
   SessionWorkspaceResolution,
-} from './session-startup';
+} from './session';

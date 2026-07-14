@@ -27,7 +27,7 @@ import type {
   UpdateAssetRefAvailabilityInput,
 } from './types';
 
-export type SqliteOperationalStoreOptions = {
+export type SqliteStoreOptions = {
   database: SqliteDatabase;
   maxActiveOutboxJobs?: number;
 };
@@ -41,16 +41,14 @@ const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'cancelled',
 ]);
 
-export function createSqliteOperationalStore(
-  options: SqliteOperationalStoreOptions,
-): OperationalStoreRepository & {
+export function createSqliteStore(options: SqliteStoreOptions): OperationalStoreRepository & {
   close(): void;
   initialize(): Promise<void>;
 } {
   return new SqliteOperationalStore(options);
 }
 
-export function runSqliteOperationalStoreMigrations(database: SqliteDatabase): void {
+export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
   database.run('PRAGMA journal_mode = WAL');
   database.run('PRAGMA busy_timeout = 5000');
@@ -193,10 +191,10 @@ function migrateOutboxJobsToV2(database: SqliteDatabase): void {
 }
 
 class SqliteOperationalStore implements OperationalStoreRepository {
-  constructor(private readonly options: SqliteOperationalStoreOptions) {}
+  constructor(private readonly options: SqliteStoreOptions) {}
 
   async initialize(): Promise<void> {
-    runSqliteOperationalStoreMigrations(this.options.database);
+    migrateSqliteStore(this.options.database);
   }
 
   close(): void {

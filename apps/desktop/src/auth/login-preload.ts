@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 /**
- * Thin, genuinely-`electron`-importing preload for the V0 login window (see
+ * Thin, genuinely-`electron`-importing preload for the login window (see
  * `main/electron-entry.ts`'s doc comment for why this project keeps such
  * files thin and manually smoke-tested rather than unit-tested under
  * `bun test`).

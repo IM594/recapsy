@@ -8,9 +8,9 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
-    "./storage/bun-sqlite-driver": {
-      "types": "./src/storage/bun-sqlite-driver.ts",
-      "import": "./src/storage/bun-sqlite-driver.ts"
+    "./storage/bun-driver": {
+      "types": "./src/storage/bun-driver.ts",
+      "import": "./src/storage/bun-driver.ts"
     }
   },
   "dependencies": {
@@ -26,7 +26,7 @@
     "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",
     "lint": "biome check src/ integration/",
     "check": "biome check src/ integration/",
-    "build": "bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron && bun build src/auth/login-window-preload.ts --outdir dist/auth --target node --format cjs --external electron",
+    "build": "bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron && bun build src/auth/login-preload.ts --outdir dist/auth --target node --format cjs --external electron",
     "start": "electron dist/main/electron-entry.js",
     "dev": "pnpm run build && pnpm run start"
   },

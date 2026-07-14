@@ -7,7 +7,7 @@ import {
 import {
   type BackpressureConfig,
   type OperationalStoreRepository,
-  createInMemoryOperationalStore,
+  createMemoryStore,
 } from '../storage';
 import {
   type CaptureHelperClient,
@@ -27,7 +27,7 @@ const backpressure: BackpressureConfig = {
 describe('capture helper controller', () => {
   it('starts the helper through explicit dependency injection and records running state', async () => {
     const client = new RecordingCaptureHelperClient();
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const controller = createCaptureHelperController({
       client,
       deviceId: 'device_1',
@@ -50,7 +50,7 @@ describe('capture helper controller', () => {
   });
 
   it('fails closed on helper start failure without entering running state', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const client = new RecordingCaptureHelperClient({
       startError: new Error(
         'spawn failed for /Users/alice/Library/Recapsy/helper with token secret and OCR raw text',
@@ -81,7 +81,7 @@ describe('capture helper controller', () => {
   });
 
   it('observes unexpected helper exit without deleting or resetting outbox jobs', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob({
       assetRefId: 'asset_existing',
       createdAt: now,
@@ -124,7 +124,7 @@ describe('capture helper controller', () => {
   });
 
   it('routes internal capture events through the envelope handler without a second outbox path', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const commandClient = new RecordingCommandClient();
     const client = new RecordingCaptureHelperClient();
     const controller = createCaptureHelperController({
@@ -195,9 +195,7 @@ describe('capture helper controller', () => {
   });
 
   it('does not double-write helper_state when routing an unexpected exit through the event handler', async () => {
-    const { store, setHelperStateCallCount } = createCountingHelperStateStore(
-      createInMemoryOperationalStore(),
-    );
+    const { store, setHelperStateCallCount } = createCountingHelperStateStore(createMemoryStore());
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
@@ -229,7 +227,7 @@ describe('capture helper controller', () => {
   });
 
   it('preserves event-handler-owned permissions when the controller persists its own status', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const eventHandler = createCaptureHelperEventHandler({
       backpressure,
       client: new RecordingCommandClient(),
@@ -263,7 +261,7 @@ describe('capture helper controller', () => {
   });
 
   it('fails closed instead of mislabeling a legacy ocr_input asset as a screenshot', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
@@ -286,7 +284,7 @@ describe('capture helper controller', () => {
   });
 
   it('does not let internal capture events write outbox jobs when the handler is absent', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const controller = createCaptureHelperController({
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
@@ -320,7 +318,7 @@ describe('capture helper controller', () => {
         },
       },
       now: () => now,
-      store: createInMemoryOperationalStore(),
+      store: createMemoryStore(),
     });
 
     await controller.start();
@@ -335,7 +333,7 @@ describe('capture helper controller', () => {
       client,
       deviceId: 'device_1',
       now: () => now,
-      store: createInMemoryOperationalStore(),
+      store: createMemoryStore(),
     });
     await controller.start();
 

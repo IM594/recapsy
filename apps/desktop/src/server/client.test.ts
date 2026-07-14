@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createInMemoryTokenStore } from '../auth/token-store';
+import { createInMemoryTokenStore } from '../auth/tokens';
 import { assertRendererSafeDto } from '../ipc/dto';
 import { ServerApiError, createServerApiClient } from './client';
 import type { ServerApiTransport, ServerApiTransportRequest } from './types';

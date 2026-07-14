@@ -6,7 +6,7 @@
  * filesystem, or any OS permission. Its only job is to exist as a real,
  * separate OS process that speaks the exact same stdio NDJSON protocol
  * (`../helper/protocol.ts`) the real Swift helper will speak, so that
- * `SpawnCaptureHelperClient` (see `./spawn-capture-helper-client.ts`) and the
+ * `createHelperProcessClient` (see `./process-client.ts`) and the
  * Electron main runtime around it can be exercised across a genuine process
  * boundary before the Swift binary exists.
  *
@@ -37,7 +37,7 @@ import {
   encodeHelperEnvelope,
 } from './protocol';
 
-const HELPER_VERSION = 'dev-helper-process/0.1.0';
+const HELPER_VERSION = 'dev-process/0.1.0';
 
 export type DevHelperCaptureState = 'starting' | 'ready' | 'paused';
 

@@ -5,22 +5,22 @@ import {
   createRendererSafeSuccess,
 } from '../ipc/public';
 
-export type RuntimeStatusSource = {
+export type StatusSource = {
   getLastObservedAt(): string | undefined;
 };
 
-export type RuntimeIpcHandlerOptions = {
+export type StatusHandlerOptions = {
   lifecycle: CaptureLifecycle;
-  statusSource: RuntimeStatusSource;
+  statusSource: StatusSource;
 };
 
-export function createRuntimeIpcHandlers(options: RuntimeIpcHandlerOptions): IpcHandlerMap {
+export function createStatusHandlers(options: StatusHandlerOptions): IpcHandlerMap {
   return {
     'settings.getRuntime': async () => createRendererSafeSuccess(buildRuntimeStatusDto(options)),
   };
 }
 
-function buildRuntimeStatusDto(options: RuntimeIpcHandlerOptions): RuntimeStatusDto {
+function buildRuntimeStatusDto(options: StatusHandlerOptions): RuntimeStatusDto {
   const snapshot = options.lifecycle.getSnapshot();
   const lastObservedAt = options.statusSource.getLastObservedAt();
 

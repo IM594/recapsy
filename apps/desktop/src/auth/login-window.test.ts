@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AuthClientError } from './auth-client';
+import { AuthClientError } from './client';
 import {
   type LoginIpcMainLike,
   type LoginIpcResponse,

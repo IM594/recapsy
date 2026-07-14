@@ -14,7 +14,7 @@ import {
 } from '../capture/public';
 import type { HelperEnvelope, HelperToMainType } from '../helper/public';
 import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/public';
-import { createRuntimeIpcHandlers } from '../runtime/public';
+import { createStatusHandlers } from '../status/public';
 import type { BackpressureConfig, OperationalStoreRepository } from '../storage/public';
 import {
   type RetryBackoffConfig,
@@ -151,7 +151,7 @@ export function createElectronMainRuntime(
           store,
           workspaceId,
         }),
-        ...createRuntimeIpcHandlers({
+        ...createStatusHandlers({
           lifecycle: captureRuntime.lifecycle,
           statusSource: {
             getLastObservedAt: () => captureRuntime.eventHandler.getStatus().lastObservedAt,

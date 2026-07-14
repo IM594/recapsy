@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import {
   type SafeStorageLike,
   type SecretStoreFs,
-  createElectronKeychainSecretStore,
-} from './keychain-secret-store';
+  createSafeStorageSecretStore,
+} from './safe-storage';
 
 /** In-memory fake filesystem so tests never touch the real disk. */
 function makeFakeFs(): SecretStoreFs {
@@ -61,9 +61,9 @@ function makeFakeSafeStorage(options?: {
 
 const DIRECTORY = '/fake/userData/secure';
 
-describe('createElectronKeychainSecretStore', () => {
+describe('createSafeStorageSecretStore', () => {
   it('round-trips the exact string written', async () => {
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: makeFakeFs(),
       safeStorage: makeFakeSafeStorage(),
@@ -76,7 +76,7 @@ describe('createElectronKeychainSecretStore', () => {
   });
 
   it('returns null when reading before any write', async () => {
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: makeFakeFs(),
       safeStorage: makeFakeSafeStorage(),
@@ -88,7 +88,7 @@ describe('createElectronKeychainSecretStore', () => {
   });
 
   it('delete removes the secret so a subsequent read returns null', async () => {
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: makeFakeFs(),
       safeStorage: makeFakeSafeStorage(),
@@ -102,7 +102,7 @@ describe('createElectronKeychainSecretStore', () => {
   });
 
   it('delete on a never-written pair is a no-op success (ENOENT treated as already gone)', async () => {
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: makeFakeFs(),
       safeStorage: makeFakeSafeStorage(),
@@ -113,7 +113,7 @@ describe('createElectronKeychainSecretStore', () => {
 
   it('tolerates a corrupted/undecryptable file by returning null instead of throwing', async () => {
     const fakeFs = makeFakeFs();
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: fakeFs,
       safeStorage: makeFakeSafeStorage({ corruptOn: () => true }),
@@ -137,7 +137,7 @@ describe('createElectronKeychainSecretStore', () => {
         throw error;
       },
     };
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: failingFs,
       safeStorage: makeFakeSafeStorage(),
@@ -149,7 +149,7 @@ describe('createElectronKeychainSecretStore', () => {
   });
 
   it('does not let two different (service, account) pairs collide', async () => {
-    const store = createElectronKeychainSecretStore({
+    const store = createSafeStorageSecretStore({
       directory: DIRECTORY,
       fs: makeFakeFs(),
       safeStorage: makeFakeSafeStorage(),

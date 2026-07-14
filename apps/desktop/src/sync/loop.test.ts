@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createSyncLoop } from './sync-loop';
+import { createSyncLoop } from './loop';
 import type { SyncRunResult } from './types';
 
 describe('sync loop', () => {

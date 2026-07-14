@@ -31,5 +31,5 @@ export type {
   CaptureRuntime,
   CaptureRuntimeOptions,
 } from './runtime';
-export { createCaptureIpcHandlers } from './ipc-handlers';
-export type { CaptureIpcHandlerOptions } from './ipc-handlers';
+export { createCaptureIpcHandlers } from './handlers';
+export type { CaptureIpcHandlerOptions } from './handlers';

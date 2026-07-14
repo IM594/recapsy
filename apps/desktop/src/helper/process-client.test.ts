@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { CaptureHelperEvent } from '../capture/public';
+import { type HelperProcess, createHelperProcessClient } from './process-client';
 import { type HelperEnvelope, decodeHelperEnvelopeLine, encodeHelperEnvelope } from './protocol';
-import {
-  type SpawnedHelperProcess,
-  createSpawnCaptureHelperClient,
-} from './spawn-capture-helper-client';
 
 /**
  * Minimal fake standing in for a real `ChildProcess` so these tests can
@@ -14,7 +11,7 @@ import {
  * covered separately by `integration/capture-helper-process.test.ts`, which
  * spawns the real dev helper script.
  */
-class FakeChildProcess extends EventEmitter implements SpawnedHelperProcess {
+class FakeChildProcess extends EventEmitter implements HelperProcess {
   readonly stdin = new FakeWritable();
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
@@ -53,11 +50,11 @@ function helloLine(): string {
   return encodeHelperEnvelope(envelope);
 }
 
-describe('spawn capture helper client', () => {
+describe('helper process client', () => {
   it('forwards well-formed envelopes from stdout to onEnvelope', async () => {
     const child = new FakeChildProcess();
     const received: HelperEnvelope[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -73,7 +70,7 @@ describe('spawn capture helper client', () => {
   it('splits multiple NDJSON lines arriving in one chunk', async () => {
     const child = new FakeChildProcess();
     const received: HelperEnvelope[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -89,7 +86,7 @@ describe('spawn capture helper client', () => {
     const child = new FakeChildProcess();
     const protocolErrors: unknown[] = [];
     const received: HelperEnvelope[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       onProtocolError: (error) => protocolErrors.push(error),
@@ -106,7 +103,7 @@ describe('spawn capture helper client', () => {
 
   it('writes a valid capture.start envelope to stdin on beginCapture', async () => {
     const child = new FakeChildProcess();
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -125,7 +122,7 @@ describe('spawn capture helper client', () => {
 
   it('drops beginCapture writes silently when no child is running', async () => {
     const child = new FakeChildProcess();
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -137,7 +134,7 @@ describe('spawn capture helper client', () => {
 
   it('writes an encoded capture.pause / capture.resume command to stdin', async () => {
     const child = new FakeChildProcess();
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -156,7 +153,7 @@ describe('spawn capture helper client', () => {
 
   it('writes a caller-built envelope to stdin verbatim via sendCommand', async () => {
     const child = new FakeChildProcess();
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -187,7 +184,7 @@ describe('spawn capture helper client', () => {
 
   it('drops sendCommand writes silently when no child is running', async () => {
     const child = new FakeChildProcess();
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -209,7 +206,7 @@ describe('spawn capture helper client', () => {
   it('reports unexpectedExit when the child exits without stop() being called', async () => {
     const child = new FakeChildProcess();
     const events: CaptureHelperEvent[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -224,7 +221,7 @@ describe('spawn capture helper client', () => {
   it('classifies a signal-terminated exit as process_crashed', async () => {
     const child = new FakeChildProcess();
     const events: CaptureHelperEvent[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -239,7 +236,7 @@ describe('spawn capture helper client', () => {
   it('does not report unexpectedExit for an exit caused by stop()', async () => {
     const child = new FakeChildProcess();
     const events: CaptureHelperEvent[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
@@ -258,7 +255,7 @@ describe('spawn capture helper client', () => {
 
   it('force-kills the child if it does not exit before the shutdown timeout', async () => {
     const child = new FakeChildProcess();
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       shutdownTimeoutMs: 20,
@@ -278,7 +275,7 @@ describe('spawn capture helper client', () => {
   it('reports unexpectedExit with no leaked message when spawning fails', async () => {
     const child = new FakeChildProcess();
     const events: CaptureHelperEvent[] = [];
-    const client = createSpawnCaptureHelperClient({
+    const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,

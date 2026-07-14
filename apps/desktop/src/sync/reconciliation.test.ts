@@ -5,19 +5,16 @@ import {
   type OperationalStoreRepository,
   type OutboxJobCreateInput,
   type StoredOcrResult,
-  createInMemoryOperationalStore,
+  createMemoryStore,
 } from '../storage';
-import {
-  type AssetAvailabilityResolver,
-  reconcileAssetRefs,
-} from '../storage/asset-reconciliation';
+import { type AssetAvailabilityResolver, reconcileAssetRefs } from '../storage/reconciliation';
 
 const now = '2026-07-06T00:00:00.000Z';
 const reconcileNow = '2026-07-06T00:05:00.000Z';
 
 describe('asset ref reconciliation', () => {
   it('leaves available refs and associated retryable jobs unchanged in memory', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
 
     const summary = await reconcileAssetRefs({
@@ -47,7 +44,7 @@ describe('asset ref reconciliation', () => {
   });
 
   it('records missing and unreadable refs and blocks eligible pending and syncing jobs', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await createAssetBackedJob(
       store,
       createAsset({ assetRefId: 'asset_missing' }),
@@ -116,7 +113,7 @@ describe('asset ref reconciliation', () => {
   });
 
   it('does not revive terminal jobs and leaves result_pending jobs untouched when local assets are gone', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
     await createAssetBackedJob(
       store,
@@ -167,7 +164,7 @@ describe('asset ref reconciliation', () => {
   });
 
   it('can reconcile all workspaces without returning sensitive asset fields in the summary', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
     await createAssetBackedJob(
       store,
@@ -202,7 +199,7 @@ describe('asset ref reconciliation', () => {
   });
 
   it('maps resolver exceptions to a fixed unreadable state without storing raw exception text', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
 
     const summary = await reconcileAssetRefs({

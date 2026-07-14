@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   type AssetCacheRef,
   type OutboxJobCreateInput,
-  createInMemoryOperationalStore,
+  createMemoryStore,
   evaluateOperationalStoreBackpressure,
   toRendererSafeAssetRef,
 } from './index';
@@ -40,7 +40,7 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
 
 describe('in-memory operational store', () => {
   it('creates, lists, reads, and updates outbox jobs', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
 
     const created = await store.createOutboxJob(createJob());
     const updated = await store.updateOutboxJobState('job_1', {
@@ -61,7 +61,7 @@ describe('in-memory operational store', () => {
   });
 
   it('normalizes capture privacy decisions with a required decidedAt timestamp', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
 
     const defaulted = await store.createOutboxJob(createJob());
     const explicit = await store.createOutboxJob(
@@ -106,7 +106,7 @@ describe('in-memory operational store', () => {
   });
 
   it('enforces unique idempotency keys per workspace', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
 
     const first = await store.createOutboxJob(createJob());
     const duplicate = await store.createOutboxJob(
@@ -127,7 +127,7 @@ describe('in-memory operational store', () => {
   });
 
   it('creates capture outbox entries atomically and rolls back asset refs on capacity failure', async () => {
-    const store = createInMemoryOperationalStore({ maxActiveOutboxJobs: 0 });
+    const store = createMemoryStore({ maxActiveOutboxJobs: 0 });
 
     const result = await store.createCaptureOutboxEntry({
       ...createJob(),
@@ -146,7 +146,7 @@ describe('in-memory operational store', () => {
   });
 
   it('treats identical capture outbox idempotency conflicts as success and divergent ones as conflicts', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     const entry = {
       ...createJob(),
       assetRefs: [createAsset()],
@@ -185,7 +185,7 @@ describe('in-memory operational store', () => {
   });
 
   it('claims the next retryable job by retry time and marks it as syncing', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob(
       createJob({
         id: 'job_later',
@@ -215,7 +215,7 @@ describe('in-memory operational store', () => {
   });
 
   it('records retryable safe errors with backoff and terminal failures at max attempts', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob(createJob());
 
     const retryable = await store.recordOutboxSafeError('job_1', {
@@ -255,7 +255,7 @@ describe('in-memory operational store', () => {
   });
 
   it('treats cancelled as terminal and never revives it through retry or state update', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob(createJob());
     await store.markOutboxJobTerminal('job_1', {
       now: '2026-07-06T00:00:10.000Z',
@@ -303,7 +303,7 @@ describe('in-memory operational store', () => {
   });
 
   it('rejects terminal-to-terminal overwrites so late success cannot revive cancellation', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob(createJob());
     await store.markOutboxJobTerminal('job_1', {
       now: '2026-07-06T00:00:10.000Z',
@@ -334,7 +334,7 @@ describe('in-memory operational store', () => {
   });
 
   it('rejects direct terminal updates even when the target state is unchanged', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob(createJob());
     await store.markOutboxJobTerminal('job_1', {
       now: '2026-07-06T00:00:10.000Z',
@@ -362,7 +362,7 @@ describe('in-memory operational store', () => {
   });
 
   it('stores asset refs and returns a renderer-safe projection without local absolute paths', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.upsertAssetCacheRef(
       createAsset({
         localAccessKey: '/Users/alice/Pictures/recapsy/private.png',
@@ -399,7 +399,7 @@ describe('in-memory operational store', () => {
   });
 
   it('expires policy cache entries by TTL', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.setPolicyCache({
       actions: ['block_capture'],
       fetchedAt: '2026-07-06T00:00:00.000Z',
@@ -427,7 +427,7 @@ describe('in-memory operational store', () => {
   });
 
   it('sets sync cursors, settings cache, and clears workspace or sign-out scoped cache', async () => {
-    const store = createInMemoryOperationalStore();
+    const store = createMemoryStore();
     await store.createOutboxJob(createJob());
     await store.upsertAssetCacheRef(createAsset());
     await store.setSyncCursor({

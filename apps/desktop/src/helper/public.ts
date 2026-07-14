@@ -33,12 +33,12 @@ export type {
   MainToHelperType,
   SafeCaptureContextPayload,
 } from './protocol';
-export { createSpawnCaptureHelperClient } from './spawn-capture-helper-client';
+export { createHelperProcessClient } from './process-client';
 export type {
-  SpawnCaptureHelperClientOptions,
-  SpawnedHelperProcess,
-  SpawnHelperProcessFn,
-} from './spawn-capture-helper-client';
+  HelperProcess,
+  HelperProcessClientOptions,
+  SpawnHelperProcess,
+} from './process-client';
 export type {
   CaptureHelperAssetRef,
   CaptureHelperClient,

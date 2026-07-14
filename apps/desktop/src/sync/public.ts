@@ -4,14 +4,14 @@ export {
   createSyncScheduler,
   reconcileOutboxJobFromServerCapture,
 } from './scheduler';
-export { recoverInterruptedOutboxJobs } from './startup-recovery';
-export type { StartupRecoveryOptions, StartupRecoverySummary } from './startup-recovery';
-export { createSyncLoop } from './sync-loop';
-export type { SyncLoop, SyncLoopOptions } from './sync-loop';
-export { createSyncRuntime } from './sync-runtime';
-export type { SyncRuntime, SyncRuntimeOptions } from './sync-runtime';
-export { createSyncIpcHandlers } from './ipc-handlers';
-export type { SyncIpcHandlerOptions } from './ipc-handlers';
+export { recoverInterruptedOutboxJobs } from './recovery';
+export type { StartupRecoveryOptions, StartupRecoverySummary } from './recovery';
+export { createSyncLoop } from './loop';
+export type { SyncLoop, SyncLoopOptions } from './loop';
+export { createSyncRuntime } from './runtime';
+export type { SyncRuntime, SyncRuntimeOptions } from './runtime';
+export { createSyncIpcHandlers } from './handlers';
+export type { SyncIpcHandlerOptions } from './handlers';
 export type {
   RetryBackoffConfig,
   RetryJitterSource,

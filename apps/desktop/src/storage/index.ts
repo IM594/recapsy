@@ -1,16 +1,16 @@
 export { evaluateOperationalStoreBackpressure } from './backpressure';
 export {
-  createInMemoryOperationalStore,
-  type InMemoryOperationalStoreOptions,
-} from './memory-operational-store';
+  createMemoryStore,
+  type MemoryStoreOptions,
+} from './memory-store';
 export { toRendererSafeAssetRef } from './projections';
-export { reconcileAssetRefs } from './asset-reconciliation';
+export { reconcileAssetRefs } from './reconciliation';
 export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
   AssetReconciliationOptions,
   AssetReconciliationSummary,
-} from './asset-reconciliation';
+} from './reconciliation';
 export type {
   SqliteDatabase,
   SqliteParameters,
@@ -20,10 +20,10 @@ export type {
   SqliteValue,
 } from './sqlite-driver';
 export {
-  createSqliteOperationalStore,
-  runSqliteOperationalStoreMigrations,
-  type SqliteOperationalStoreOptions,
-} from './sqlite-operational-store';
+  createSqliteStore,
+  migrateSqliteStore,
+  type SqliteStoreOptions,
+} from './sqlite-store';
 export type {
   AssetCacheRef,
   AssetCacheRefRole,
