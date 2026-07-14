@@ -24,3 +24,10 @@ export type {
   MacOsKeychainTokenStoreOptions,
   TokenStore,
 } from './token-store';
+export { createSessionStartup } from './session-startup';
+export type {
+  SessionStartup,
+  SessionStartupLogger,
+  SessionStartupOptions,
+  SessionWorkspaceResolution,
+} from './session-startup';

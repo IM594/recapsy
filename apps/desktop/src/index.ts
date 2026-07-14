@@ -7,6 +7,7 @@ export type {
   DesktopConfigResult,
 } from './config/config';
 export {
+  createSessionStartup,
   createInMemoryTokenStore,
   createMacOsKeychainTokenStore,
 } from './auth/public';
@@ -14,6 +15,9 @@ export type {
   AuthTokenSet,
   KeychainSecretStore,
   MacOsKeychainTokenStoreOptions,
+  SessionStartup,
+  SessionStartupOptions,
+  SessionWorkspaceResolution,
   TokenStore,
 } from './auth/public';
 export {
@@ -99,7 +103,7 @@ export type {
   MockHelperSnapshot,
   MockHelperState,
 } from './helper/public';
-export { createCaptureHelperController } from './runtime/public';
+export { createCaptureHelperController } from './capture/public';
 export type {
   CaptureHelperAssetRef,
   CaptureHelperClient,
@@ -108,14 +112,20 @@ export type {
   CaptureHelperStartOptions,
   CaptureHelperState,
   CaptureHelperStatus,
-} from './runtime/public';
-export { createCaptureHelperEventIntake } from './runtime/public';
+} from './capture/public';
+export { createCaptureHelperEventIntake } from './capture/public';
 export type {
   CaptureHelperCommandClient,
   CaptureHelperEventIntake,
   CaptureHelperEventIntakeOptions,
   CaptureHelperEventIntakeStatus,
-} from './runtime/public';
+} from './capture/public';
+export { createCaptureRuntime } from './capture/public';
+export type {
+  CaptureRuntime,
+  CaptureRuntimeOptions,
+  CaptureStartupRecovery,
+} from './capture/public';
 export { createDesktopRuntime } from './runtime/public';
 export type {
   DesktopRuntime,
@@ -148,6 +158,8 @@ export type {
   TimelineQueryInput,
 } from './server-api/public';
 export { createSyncQueueSummary, createSyncScheduler } from './sync/public';
+export { createSyncRuntime } from './sync/public';
+export type { SyncRuntime, SyncRuntimeOptions } from './sync/public';
 export { reconcileAssetRefs } from './storage/public';
 export type {
   AssetAvailabilityCheck,

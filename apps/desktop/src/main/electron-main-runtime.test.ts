@@ -2,12 +2,12 @@ import { describe, expect, it } from 'bun:test';
 import type { AuthActiveSession, AuthClient } from '../auth/auth-client';
 import type { LoginPromptResult, LoginPrompter } from '../auth/login-window';
 import { createInMemoryTokenStore } from '../auth/token-store';
-import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/protocol';
 import type {
   CaptureHelperClient,
+  CaptureHelperCommandClient,
   CaptureHelperStartOptions,
-} from '../runtime/capture-helper-controller';
-import type { CaptureHelperCommandClient } from '../runtime/capture-helper-event-intake';
+} from '../capture/public';
+import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/protocol';
 import { type OperationalStoreRepository, createInMemoryOperationalStore } from '../storage';
 import type { SyncLoop, SyncLoopOptions } from '../sync/sync-loop';
 import type { SyncRunResult, SyncServerApi } from '../sync/types';

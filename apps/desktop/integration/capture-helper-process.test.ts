@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import type { CaptureHelperEvent } from '../src/capture/public';
 import type { HelperEnvelope, HelperToMainType } from '../src/helper/protocol';
 import { createSpawnCaptureHelperClient } from '../src/helper/spawn-capture-helper-client';
-import type { CaptureHelperEvent } from '../src/runtime/capture-helper-controller';
 
 const devHelperPath = fileURLToPath(
   new URL('../src/helper/dev-helper-process.ts', import.meta.url),

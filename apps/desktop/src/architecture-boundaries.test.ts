@@ -5,6 +5,7 @@ import path from 'node:path';
 const DESKTOP_SOURCE_ROOT = path.resolve(import.meta.dir);
 const CAPABILITY_DIRECTORIES = [
   'auth',
+  'capture',
   'helper',
   'ipc',
   'runtime',
@@ -150,6 +151,64 @@ describe('desktop architecture boundaries', () => {
     for (const source of sources) {
       expect(source).not.toMatch(/from ['"]\.\.\/runtime\//);
     }
+  });
+
+  it('keeps session startup out of the Electron lifecycle coordinator', async () => {
+    const [runtimeSource, sessionStartupSource] = await Promise.all([
+      readSource('main/electron-main-runtime.ts'),
+      readSource('auth/session-startup.ts'),
+    ]);
+
+    expect(runtimeSource).not.toContain('async function resolveWorkspaceId');
+    expect(runtimeSource).not.toContain('console.warn(');
+    expect(runtimeSource).toContain('createSessionStartup');
+    expect(sessionStartupSource).toContain('export function createSessionStartup');
+  });
+
+  it('gives capture ownership of helper orchestration and renderer projections', async () => {
+    const [runtimeSource, captureRuntimeSource, captureHandlersSource] = await Promise.all([
+      readSource('main/electron-main-runtime.ts'),
+      readSource('capture/capture-runtime.ts'),
+      readSource('capture/ipc-handlers.ts'),
+    ]);
+
+    expect(runtimeSource).not.toContain('createCaptureHelperController');
+    expect(runtimeSource).not.toContain('createCaptureHelperEventIntake');
+    expect(runtimeSource).not.toContain('buildCaptureStatusDto');
+    expect(runtimeSource).not.toContain('buildRecentEventsDto');
+    expect(runtimeSource).toContain('createCaptureRuntime');
+    expect(runtimeSource).toContain('createCaptureIpcHandlers');
+    expect(captureRuntimeSource).toContain('export function createCaptureRuntime');
+    expect(captureHandlersSource).toContain('export function createCaptureIpcHandlers');
+  });
+
+  it('gives sync ownership of recovery, scheduler, loop startup, and queue IPC', async () => {
+    const [runtimeSource, syncRuntimeSource, syncHandlersSource] = await Promise.all([
+      readSource('main/electron-main-runtime.ts'),
+      readSource('sync/sync-runtime.ts'),
+      readSource('sync/ipc-handlers.ts'),
+    ]);
+
+    expect(runtimeSource).not.toContain('createSyncScheduler');
+    expect(runtimeSource).not.toContain('recoverInterruptedOutboxJobs');
+    expect(runtimeSource).not.toContain('createSyncQueueSummary');
+    expect(runtimeSource).toContain('createSyncRuntime');
+    expect(runtimeSource).toContain('createSyncIpcHandlers');
+    expect(syncRuntimeSource).toContain('export function createSyncRuntime');
+    expect(syncHandlersSource).toContain('export function createSyncIpcHandlers');
+  });
+
+  it('keeps IPC contract registration in the IPC capability', async () => {
+    const [runtimeSource, registrySource] = await Promise.all([
+      readSource('main/electron-main-runtime.ts'),
+      readSource('ipc/handler-registry.ts'),
+    ]);
+
+    expect(runtimeSource).not.toContain('IPC_CHANNEL_REGISTRY');
+    expect(runtimeSource).not.toContain('REAL_IPC_HANDLERS');
+    expect(runtimeSource).not.toContain('validateIpcRequest');
+    expect(runtimeSource).toContain('registerIpcHandlers');
+    expect(registrySource).toContain('export function registerIpcHandlers');
   });
 });
 

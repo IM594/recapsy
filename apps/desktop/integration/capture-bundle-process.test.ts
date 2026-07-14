@@ -4,10 +4,10 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { CaptureHelperEvent } from '../src/capture/public';
 import { HELPER_PROTOCOL_VERSION } from '../src/helper/protocol';
 import type { HelperEnvelope, HelperToMainType } from '../src/helper/protocol';
 import { createSpawnCaptureHelperClient } from '../src/helper/spawn-capture-helper-client';
-import type { CaptureHelperEvent } from '../src/runtime/capture-helper-controller';
 
 /**
  * Real cross-process test of the *signed Swift capture bundle*, spawned exactly

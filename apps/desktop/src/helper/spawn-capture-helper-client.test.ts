@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import type { CaptureHelperEvent } from '../runtime/capture-helper-controller';
+import type { CaptureHelperEvent } from '../capture/public';
 import { type HelperEnvelope, decodeHelperEnvelopeLine, encodeHelperEnvelope } from './protocol';
 import {
   type SpawnedHelperProcess,

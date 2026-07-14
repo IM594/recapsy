@@ -8,8 +8,8 @@ export type AuthTokenSet = {
    * `auth/auth-client.ts`). Stored alongside the tokens — not derived
    * separately — because its lifecycle is the same as the tokens': it is
    * only ever set together with them, and must be cleared together with
-   * them on sign-out. Consumers (see `resolveWorkspaceId` in
-   * `main/electron-main-runtime.ts`) use this as a degraded fallback when
+   * them on sign-out. Consumers (see `createSessionStartup` in
+   * `auth/session-startup.ts`) use this as a degraded fallback when
    * the session cannot be re-verified because the network/server is
    * unavailable — never as a substitute for a confirmed 401/expired
    * session, which always forces a fresh login.

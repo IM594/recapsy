@@ -3,9 +3,14 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { createTestHttpApp } from '../../server/src/__tests__/http-app-harness';
+import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
 import type { RecapsyAiRuntime, RunVisionTextFailureReason } from '../../server/src/ai-runtime';
-import type { AppDependencies, createApp } from '../../server/src/app';
+import type { createRecapsyAiRuntime } from '../../server/src/ai-runtime/public';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
+import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
+import type { createProviderCredentialResolver } from '../../server/src/provider-settings/public';
+import type { Logger } from '../../server/src/shared/logger';
 import { createServerApiClient } from '../src/server-api/client';
 import type { ServerApiTransport } from '../src/server-api/types';
 import { createInMemoryOperationalStore, createSqliteOperationalStore } from '../src/storage';
@@ -535,64 +540,60 @@ type ServerHarnessOptions = {
   useAppDefaultOcrRunner?: boolean;
 };
 
-type CaptureRepositoryHarness = {
-  snapshot(): CaptureOcrSearchRepositorySnapshot;
-};
-
-type ServerAppDependencies = Pick<AppDependencies, 'aiRuntime' | 'config'> & {
-  accountManagementRepository: object;
-  captureOcrSearchRepository: CaptureRepositoryHarness;
-  db: object;
-  logger: {
-    debug(): void;
-    error(): void;
-    info(): void;
-    warn(): void;
-  };
-};
-
 type ServerModules = {
-  InMemoryAccountManagementRepository: new () => object;
-  InMemoryCaptureOcrSearchRepository: new () => CaptureRepositoryHarness;
-  createApp(deps: ServerAppDependencies): ReturnType<typeof createApp>;
+  InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
+  InMemoryCaptureOcrSearchRepository: new () => InMemoryCaptureOcrSearchRepository;
+  createProviderCredentialResolver: typeof createProviderCredentialResolver;
+  createRecapsyAiRuntime: typeof createRecapsyAiRuntime;
+  createTestHttpApp: typeof createTestHttpApp;
 };
 
 async function startServerHttpHarness(options: ServerHarnessOptions): Promise<ServerHttpHarness> {
   const modules = await loadServerModules();
-  const serverTempAssetDir = mkdtempSync(join(tmpdir(), 'recapsy-desktop-http-assets-'));
   let server: ReturnType<typeof Bun.serve> | undefined;
 
   try {
     const accountManagementRepository = new modules.InMemoryAccountManagementRepository();
     const captureOcrSearchRepository = new modules.InMemoryCaptureOcrSearchRepository();
-    const app = modules.createApp({
+    const config = {
+      ADMIN_BOOTSTRAP_TOKEN: adminToken,
+      CORS_ALLOWED_ORIGINS: [],
+      DATABASE_URL: 'postgresql://test',
+      EMBEDDING_INDEXER_BATCH_SIZE: 16,
+      EMBEDDING_INDEXER_INTERVAL_MS: 15_000,
+      EMBEDDING_INDEXER_MAX_ATTEMPTS: 5,
+      EMBEDDING_INDEXER_TIMEOUT_MS: 30_000,
+      LOG_LEVEL: 'error' as const,
+      NODE_ENV: options.useAppDefaultOcrRunner ? ('production' as const) : ('test' as const),
+      OCR_MAX_INPUT_BYTES: 1024 * 1024,
+      OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
+      PORT: 0,
+      PROVIDER_ENCRYPTION_SECRET: providerSecret,
+      SESSION_SECRET: sessionSecret,
+    };
+    const logger = {
+      debug() {},
+      error() {},
+      info() {},
+      warn() {},
+    } as unknown as Logger;
+    const aiRuntime =
+      options.aiRuntime ??
+      (options.useAppDefaultOcrRunner
+        ? modules.createRecapsyAiRuntime({
+            providerCredentialResolver: modules.createProviderCredentialResolver({
+              config,
+              repository: accountManagementRepository,
+            }),
+          })
+        : undefined);
+    const app = modules.createTestHttpApp({
       accountManagementRepository,
+      ...(aiRuntime ? { aiRuntime } : {}),
       captureOcrSearchRepository,
-      config: {
-        ADMIN_BOOTSTRAP_TOKEN: adminToken,
-        CORS_ALLOWED_ORIGINS: [],
-        DATABASE_URL: 'postgresql://test',
-        EMBEDDING_INDEXER_BATCH_SIZE: 16,
-        EMBEDDING_INDEXER_INTERVAL_MS: 15_000,
-        EMBEDDING_INDEXER_MAX_ATTEMPTS: 5,
-        EMBEDDING_INDEXER_TIMEOUT_MS: 30_000,
-        LOG_LEVEL: 'error',
-        NODE_ENV: options.useAppDefaultOcrRunner ? 'production' : 'test',
-        OCR_MAX_INPUT_BYTES: 1024 * 1024,
-        OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
-        PORT: 0,
-        PROVIDER_ENCRYPTION_SECRET: providerSecret,
-        SESSION_SECRET: sessionSecret,
-      },
-      db: {},
-      logger: {
-        debug() {},
-        error() {},
-        info() {},
-        warn() {},
-      },
-      ...(options.aiRuntime ? { aiRuntime: options.aiRuntime } : {}),
-    });
+      config,
+      logger,
+    }).app;
     server = Bun.serve({
       fetch: app.fetch,
       port: 0,
@@ -640,32 +641,40 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
       stop() {
         server?.stop(true);
         server = undefined;
-        rmSync(serverTempAssetDir, { force: true, recursive: true });
       },
     };
     activeHarnesses.push(harness);
     return harness;
   } catch (error) {
     server?.stop(true);
-    rmSync(serverTempAssetDir, { force: true, recursive: true });
     throw error;
   }
 }
 
 async function loadServerModules(): Promise<ServerModules> {
-  const appModule = await import(new URL('../../server/src/app.ts', import.meta.url).href);
+  const appHarnessModule = await import(
+    new URL('../../server/src/__tests__/http-app-harness.ts', import.meta.url).href
+  );
+  const aiRuntimeModule = await import(
+    new URL('../../server/src/ai-runtime/public.ts', import.meta.url).href
+  );
   const accountRepositoryModule = await import(
     new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href
   );
   const captureRepositoryModule = await import(
     new URL('../../server/src/capture-ocr-search/repositories/memory.ts', import.meta.url).href
   );
+  const providerSettingsModule = await import(
+    new URL('../../server/src/provider-settings/public.ts', import.meta.url).href
+  );
 
   return {
     InMemoryAccountManagementRepository:
       accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureOcrSearchRepository: captureRepositoryModule.InMemoryCaptureOcrSearchRepository,
-    createApp: appModule.createApp,
+    createProviderCredentialResolver: providerSettingsModule.createProviderCredentialResolver,
+    createRecapsyAiRuntime: aiRuntimeModule.createRecapsyAiRuntime,
+    createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }
 

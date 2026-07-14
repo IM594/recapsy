@@ -8,6 +8,10 @@ export { recoverInterruptedOutboxJobs } from './startup-recovery';
 export type { StartupRecoveryOptions, StartupRecoverySummary } from './startup-recovery';
 export { createSyncLoop } from './sync-loop';
 export type { SyncLoop, SyncLoopOptions } from './sync-loop';
+export { createSyncRuntime } from './sync-runtime';
+export type { SyncRuntime, SyncRuntimeOptions } from './sync-runtime';
+export { createSyncIpcHandlers } from './ipc-handlers';
+export type { SyncIpcHandlerOptions } from './ipc-handlers';
 export type {
   RetryBackoffConfig,
   RetryJitterSource,

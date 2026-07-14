@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import type { createTestHttpApp } from '../../server/src/__tests__/http-app-harness';
+import type { InMemoryAccountManagementRepository } from '../../server/src/account-management/repositories/memory';
 import type { CaptureOcrSearchRepositorySnapshot } from '../../server/src/capture-ocr-search/models';
+import type { InMemoryCaptureOcrSearchRepository } from '../../server/src/capture-ocr-search/repositories/memory';
+import type { Logger } from '../../server/src/shared/logger';
 import { createAuthClient } from '../src/auth/auth-client';
 import { createInMemoryTokenStore } from '../src/auth/token-store';
 import { createServerApiClient } from '../src/server-api/client';
@@ -342,34 +343,37 @@ type ServerHttpHarness = {
 
 async function startServerHttpHarness(): Promise<ServerHttpHarness> {
   const modules = await loadServerModules();
-  const serverTempAssetDir = mkdtempSync(join(tmpdir(), 'recapsy-desktop-auth-smoke-'));
   let server: ReturnType<typeof Bun.serve> | undefined;
 
   try {
     const accountManagementRepository = new modules.InMemoryAccountManagementRepository();
     const captureOcrSearchRepository = new modules.InMemoryCaptureOcrSearchRepository();
-    const app = modules.createApp({
+    const app = modules.createTestHttpApp({
       accountManagementRepository,
       captureOcrSearchRepository,
       config: {
         ADMIN_BOOTSTRAP_TOKEN: adminToken,
+        CORS_ALLOWED_ORIGINS: [],
         DATABASE_URL: 'postgresql://test',
-        EMBEDDING_PROVIDER: 'stub',
+        EMBEDDING_INDEXER_BATCH_SIZE: 16,
+        EMBEDDING_INDEXER_INTERVAL_MS: 15_000,
+        EMBEDDING_INDEXER_MAX_ATTEMPTS: 5,
+        EMBEDDING_INDEXER_TIMEOUT_MS: 30_000,
         LOG_LEVEL: 'error',
         NODE_ENV: 'test',
         OCR_MAX_INPUT_BYTES: 1024 * 1024,
+        OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
         PORT: 0,
         PROVIDER_ENCRYPTION_SECRET: providerSecret,
         SESSION_SECRET: sessionSecret,
       },
-      db: {},
       logger: {
         debug() {},
         error() {},
         info() {},
         warn() {},
-      },
-    });
+      } as unknown as Logger,
+    }).app;
     server = Bun.serve({ fetch: app.fetch, port: 0 });
     const endpoint = server.url.toString().replace(/\/$/, '');
     const harness: ServerHttpHarness = {
@@ -407,20 +411,26 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
       stop() {
         server?.stop(true);
         server = undefined;
-        rmSync(serverTempAssetDir, { force: true, recursive: true });
       },
     };
     activeHarnesses.push(harness);
     return harness;
   } catch (error) {
     server?.stop(true);
-    rmSync(serverTempAssetDir, { force: true, recursive: true });
     throw error;
   }
 }
 
-async function loadServerModules() {
-  const appModule = await import(new URL('../../server/src/app.ts', import.meta.url).href);
+type ServerModules = {
+  InMemoryAccountManagementRepository: new () => InMemoryAccountManagementRepository;
+  InMemoryCaptureOcrSearchRepository: new () => InMemoryCaptureOcrSearchRepository;
+  createTestHttpApp: typeof createTestHttpApp;
+};
+
+async function loadServerModules(): Promise<ServerModules> {
+  const appHarnessModule = await import(
+    new URL('../../server/src/__tests__/http-app-harness.ts', import.meta.url).href
+  );
   const accountRepositoryModule = await import(
     new URL('../../server/src/account-management/repositories/memory.ts', import.meta.url).href
   );
@@ -432,6 +442,6 @@ async function loadServerModules() {
     InMemoryAccountManagementRepository:
       accountRepositoryModule.InMemoryAccountManagementRepository,
     InMemoryCaptureOcrSearchRepository: captureRepositoryModule.InMemoryCaptureOcrSearchRepository,
-    createApp: appModule.createApp,
+    createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }

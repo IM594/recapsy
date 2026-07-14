@@ -13,7 +13,16 @@ const SERVER_CAPABILITIES = [
 ];
 
 const DESKTOP_SOURCE_ROOT = 'apps/desktop/src';
-const DESKTOP_CAPABILITIES = ['auth', 'helper', 'ipc', 'runtime', 'server-api', 'storage', 'sync'];
+const DESKTOP_CAPABILITIES = [
+  'auth',
+  'capture',
+  'helper',
+  'ipc',
+  'runtime',
+  'server-api',
+  'storage',
+  'sync',
+];
 
 function publicSurfaceRules(rulePrefix, sourceRoot, capabilities, exceptions = {}) {
   return capabilities.map((targetCapability) => {
@@ -55,13 +64,13 @@ module.exports = {
       'account-management': ['composition'],
     }),
     {
-      name: 'server-account-management-composition-only-from-roots',
+      name: 'server-account-management-composition-only-from-root',
       severity: 'error',
       comment:
-        'Only the server composition roots may instantiate the account-management persistence adapter.',
+        'Only the server composition root may instantiate the account-management persistence adapter.',
       from: {
         path: `^${SERVER_SOURCE_ROOT}/`,
-        pathNot: `(?:${TEST_SOURCE_PATH}|^${SERVER_SOURCE_ROOT}/(?:app|index)[.]ts$)`,
+        pathNot: `(?:${TEST_SOURCE_PATH}|^${SERVER_SOURCE_ROOT}/index[.]ts$)`,
       },
       to: {
         path: `^${SERVER_SOURCE_ROOT}/account-management/composition[.]ts$`,
@@ -77,6 +86,32 @@ module.exports = {
       },
       to: {
         path: `^${SERVER_SOURCE_ROOT}/shared/db(?:/|[.])`,
+      },
+    },
+    {
+      name: 'server-ai-runtime-not-to-account-management',
+      severity: 'error',
+      comment:
+        'AI runtime consumes provider credentials through the provider-settings resolver port.',
+      from: {
+        path: `^${SERVER_SOURCE_ROOT}/ai-runtime/`,
+        pathNot: TEST_SOURCE_PATH,
+      },
+      to: {
+        path: `^${SERVER_SOURCE_ROOT}/account-management/`,
+      },
+    },
+    {
+      name: 'server-provider-settings-not-to-account-management',
+      severity: 'error',
+      comment:
+        'Provider settings owns provider records, scope resolution, and secret materialization.',
+      from: {
+        path: `^${SERVER_SOURCE_ROOT}/provider-settings/`,
+        pathNot: TEST_SOURCE_PATH,
+      },
+      to: {
+        path: `^${SERVER_SOURCE_ROOT}/account-management/`,
       },
     },
     ...publicSurfaceRules('desktop', DESKTOP_SOURCE_ROOT, DESKTOP_CAPABILITIES, {
