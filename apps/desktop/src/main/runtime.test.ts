@@ -7,7 +7,7 @@ import type {
   CaptureHelperCommandClient,
   CaptureHelperStartOptions,
 } from '../capture/public';
-import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/protocol';
+import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/public';
 import { createMemoryStore } from '../storage';
 import type { SyncLoop, SyncLoopOptions } from '../sync/loop';
 import type { SyncRunResult, SyncServerApi } from '../sync/types';

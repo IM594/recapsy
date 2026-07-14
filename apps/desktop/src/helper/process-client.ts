@@ -1,15 +1,15 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { HelperNdjsonLineParser, encodeHelperEnvelope } from './protocol/codec';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
-  HelperNdjsonLineParser,
   type HelperProtocolError,
   type HelperProtocolResult,
-  type HelperToMainType,
+  type HelperToMainEnvelope,
   type MainToHelperPayloadByType,
   type MainToHelperType,
-  encodeHelperEnvelope,
-} from './protocol';
+} from './protocol/types';
+import { validateHelperToMainEnvelope } from './protocol/validation';
 import type {
   CaptureHelperClient,
   CaptureHelperCommandClient,
@@ -60,7 +60,7 @@ export type HelperProcessClientOptions = {
   spawnHelperProcess?: SpawnHelperProcess;
   /**
    * Optional diagnostics hook for envelopes this process could not parse.
-   * Never receives raw stdout bytes beyond what `protocol.ts` already
+   * Never receives raw stdout bytes beyond what the protocol codec already
    * decided was safe to surface in a `HelperProtocolError`.
    */
   onProtocolError?: (error: HelperProtocolError) => void;
@@ -112,7 +112,7 @@ class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCo
     });
     this.child = child;
 
-    const lineParser = new HelperNdjsonLineParser();
+    const lineParser = new HelperNdjsonLineParser(validateHelperToMainEnvelope);
     child.stdout?.on('data', (chunk) => {
       const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
       for (const result of lineParser.feed(text)) {
@@ -176,9 +176,9 @@ class ProcessCaptureHelperClient implements CaptureHelperClient, CaptureHelperCo
     }
   }
 
-  private handleParsedLine(result: HelperProtocolResult<HelperEnvelope>): void {
+  private handleParsedLine(result: HelperProtocolResult<HelperToMainEnvelope>): void {
     if (result.ok) {
-      void this.startOptions.onEnvelope?.(result.envelope as HelperEnvelope<HelperToMainType>);
+      void this.startOptions.onEnvelope?.(result.envelope);
       return;
     }
 

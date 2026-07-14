@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type {
-  HelperEnvelope,
-  HelperToMainPayloadByType,
-  MainToHelperType,
-} from '../helper/protocol';
-import { HELPER_PROTOCOL_VERSION, decodeHelperEnvelopeLine } from '../helper/protocol';
+import type { HelperEnvelope, HelperToMainPayloadByType, MainToHelperType } from '../helper/public';
+import {
+  HELPER_PROTOCOL_VERSION,
+  decodeHelperEnvelopeLine,
+  validateHelperToMainEnvelope,
+} from '../helper/public';
 import { type BackpressureConfig, createMemoryStore } from '../storage';
 import {
   type CaptureHelperCommandClient,
@@ -251,6 +251,7 @@ describe('capture helper event handler', () => {
     await handler.handleProtocolResult(
       decodeHelperEnvelopeLine(
         '{"protocolVersion":"recapsy.capture-helper","messageId":"msg_bad","type":"capture.result","payload":{"providerToken":"secret-token","path":"/Users/alice/private.png","ocr":"OCR raw text"',
+        validateHelperToMainEnvelope,
       ),
     );
     await handler.handleProtocolResult(
@@ -268,6 +269,7 @@ describe('capture helper event handler', () => {
           sentAt: observedAt,
           type: 'capture.result',
         }),
+        validateHelperToMainEnvelope,
       ),
     );
     await handler.handleProtocolResult(
@@ -284,6 +286,7 @@ describe('capture helper event handler', () => {
           sentAt: observedAt,
           type: 'capture.raw_debug',
         }),
+        validateHelperToMainEnvelope,
       ),
     );
 

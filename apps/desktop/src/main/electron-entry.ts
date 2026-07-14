@@ -309,7 +309,7 @@ ready.catch((error: unknown) => {
 
 /**
  * `HelperEnvelope<TType>`'s `payload` type is a conditional type keyed off
- * its own generic parameter (see `helper/protocol.ts`), so a plain
+ * its own generic parameter (see `helper/protocol/types.ts`), so a plain
  * `switch (envelope.type)` does not narrow `envelope.payload` per case — the
  * same limitation `capture/helper-event-handler.ts`'s own
  * `narrowHelperEnvelope` works around. This is a type-level cast only: the

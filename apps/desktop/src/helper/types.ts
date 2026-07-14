@@ -4,7 +4,7 @@ import type {
   CapturePrivacyDecision,
   SafeOperationalError,
 } from '../storage/public';
-import type { HelperEnvelope, HelperToMainType, MainToHelperType } from './protocol';
+import type { HelperEnvelope, HelperToMainType, MainToHelperType } from './protocol/types';
 
 export type CaptureHelperState =
   | 'idle'

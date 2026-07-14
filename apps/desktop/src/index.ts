@@ -63,25 +63,31 @@ export type {
   WorkspaceSummaryDto,
 } from './ipc/public';
 export {
+  HELPER_PROTOCOL_MAX_LINE_LENGTH,
   HELPER_PROTOCOL_VERSION,
   HelperNdjsonLineParser,
   decodeHelperEnvelopeLine,
   encodeHelperEnvelope,
   parseHelperNdjsonChunk,
+  validateHelperToMainEnvelope,
+  validateMainToHelperEnvelope,
 } from './helper/public';
 export type {
   CaptureAssetPayload,
   CaptureAssetRole,
   CaptureResultPayload,
   HelperEnvelope,
+  HelperEnvelopeValidator,
   HelperMessageType,
   HelperProtocolError,
   HelperProtocolErrorCode,
   HelperProtocolResult,
   HelperProtocolVersion,
+  HelperToMainEnvelope,
   HelperToMainPayloadByType,
   HelperToMainType,
   MainToHelperPayloadByType,
+  MainToHelperEnvelope,
   MainToHelperType,
   SafeCaptureContextPayload,
 } from './helper/public';

@@ -3,7 +3,7 @@ import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
   type MainToHelperType,
-} from '../helper/protocol';
+} from '../helper/public';
 import { type BackpressureConfig, createMemoryStore } from '../storage';
 import {
   type CaptureHelperClient,

@@ -1,5 +1,9 @@
 import { type CaptureProjectionInput, createSafeCaptureResultPayload } from './projection';
-import { HELPER_PROTOCOL_VERSION, type HelperEnvelope, type HelperToMainType } from './protocol';
+import {
+  HELPER_PROTOCOL_VERSION,
+  type HelperEnvelope,
+  type HelperToMainType,
+} from './protocol/types';
 import type { HelperLifecycle } from './types';
 
 export type MockHelperState =

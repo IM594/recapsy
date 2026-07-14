@@ -1,6 +1,6 @@
 import Foundation
 
-/// Wire contract shared with `apps/desktop/src/helper/protocol.ts`. Every field
+/// Wire contract shared with `apps/desktop/src/helper/protocol/types.ts`. Every field
 /// name, enum value and optionality here is mirrored 1:1 against that file's
 /// runtime validators (`hasOnlyKeys`, `isOneOf`, the per-type payload guards).
 /// The guiding rule the TS side enforces and this file must respect:

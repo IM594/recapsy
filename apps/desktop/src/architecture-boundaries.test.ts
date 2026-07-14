@@ -794,6 +794,90 @@ describe('desktop architecture boundaries', () => {
     }
   });
 
+  it('splits helper protocol responsibilities and binds process directions explicitly', async () => {
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const requiredPaths = [
+      'helper/protocol/types.ts',
+      'helper/protocol/validation.ts',
+      'helper/protocol/validation.test.ts',
+      'helper/protocol/codec.ts',
+      'helper/protocol/codec.test.ts',
+    ];
+    const retiredPaths = ['helper/protocol.ts', 'helper/protocol.test.ts'];
+    const violations = [
+      ...requiredPaths
+        .filter((relativePath) => !sourceFiles.includes(relativePath))
+        .map((relativePath) => `${relativePath} is missing`),
+      ...retiredPaths
+        .filter((relativePath) => sourceFiles.includes(relativePath))
+        .map((relativePath) => `${relativePath} is still present`),
+    ];
+
+    const [typesSource, validationSource, codecSource, processSource, devProcessSource] =
+      await Promise.all([
+        readSource('helper/protocol/types.ts'),
+        readSource('helper/protocol/validation.ts'),
+        readSource('helper/protocol/codec.ts'),
+        readSource('helper/process-client.ts'),
+        readSource('helper/dev-process.ts'),
+      ]);
+
+    if (/\bfrom\s+['"]/.test(typesSource)) {
+      violations.push('helper/protocol/types.ts must not import runtime dependencies');
+    }
+    if (!validationSource.includes("from './types'")) {
+      violations.push('helper/protocol/validation.ts must depend on types.ts');
+    }
+    if (validationSource.includes("from './codec'")) {
+      violations.push('helper/protocol/validation.ts must not depend on codec.ts');
+    }
+    for (const dependency of ["from './types'", "from './validation'"]) {
+      if (!codecSource.includes(dependency)) {
+        violations.push(`helper/protocol/codec.ts does not depend on ${dependency}`);
+      }
+    }
+    if (
+      !processSource.includes('new HelperNdjsonLineParser(validateHelperToMainEnvelope)') ||
+      processSource.includes('validateMainToHelperEnvelope')
+    ) {
+      violations.push('helper/process-client.ts does not bind the Helper-to-Main validator');
+    }
+    if (
+      !devProcessSource.includes('new HelperNdjsonLineParser(validateMainToHelperEnvelope)') ||
+      devProcessSource.includes('validateHelperToMainEnvelope')
+    ) {
+      violations.push('helper/dev-process.ts does not bind the Main-to-Helper validator');
+    }
+
+    for (const relativePath of sourceFiles) {
+      if (
+        relativePath.startsWith('helper/') ||
+        relativePath === 'architecture-boundaries.test.ts'
+      ) {
+        continue;
+      }
+      const source = await readSource(relativePath);
+      if (/from\s+['"][^'"]*helper\/protocol(?:\/|['"])/.test(source)) {
+        violations.push(`${relativePath} bypasses helper/public.ts for protocol access`);
+      }
+    }
+
+    const integrationRoot = path.resolve(DESKTOP_SOURCE_ROOT, '../integration');
+    for await (const relativePath of glob.scan({ cwd: integrationRoot })) {
+      const source = await readFile(path.resolve(integrationRoot, relativePath), 'utf8');
+      if (/from\s+['"][^'"]*helper\/protocol(?:\/|['"])/.test(source)) {
+        violations.push(`integration/${relativePath} bypasses helper/public.ts`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('uses capability context instead of repeating it in filenames and public symbols', async () => {
     const sourceFiles: string[] = [];
     const productionSources: string[] = [];

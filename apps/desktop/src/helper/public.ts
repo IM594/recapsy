@@ -11,12 +11,13 @@ export type {
 export { createSafeCaptureResultPayload } from './projection';
 export type { CaptureProjectionInput, UnsafeCaptureContextInput } from './projection';
 export {
-  HELPER_PROTOCOL_VERSION,
+  HELPER_PROTOCOL_MAX_LINE_LENGTH,
   HelperNdjsonLineParser,
   decodeHelperEnvelopeLine,
   encodeHelperEnvelope,
   parseHelperNdjsonChunk,
-} from './protocol';
+} from './protocol/codec';
+export { HELPER_PROTOCOL_VERSION } from './protocol/types';
 export type {
   CaptureAssetPayload,
   CaptureAssetRole,
@@ -27,12 +28,19 @@ export type {
   HelperProtocolErrorCode,
   HelperProtocolResult,
   HelperProtocolVersion,
+  HelperToMainEnvelope,
   HelperToMainPayloadByType,
   HelperToMainType,
+  MainToHelperEnvelope,
   MainToHelperPayloadByType,
   MainToHelperType,
   SafeCaptureContextPayload,
-} from './protocol';
+} from './protocol/types';
+export {
+  validateHelperToMainEnvelope,
+  validateMainToHelperEnvelope,
+} from './protocol/validation';
+export type { HelperEnvelopeValidator } from './protocol/validation';
 export { createHelperProcessClient } from './process-client';
 export type {
   HelperProcess,

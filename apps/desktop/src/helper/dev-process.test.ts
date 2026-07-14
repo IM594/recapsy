@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { createDevHelperRuntime } from './dev-process';
+import { decodeHelperEnvelopeLine, encodeHelperEnvelope } from './protocol/codec';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
   type MainToHelperPayloadByType,
   type MainToHelperType,
-  decodeHelperEnvelopeLine,
-  encodeHelperEnvelope,
-} from './protocol';
+} from './protocol/types';
+import { validateHelperToMainEnvelope, validateMainToHelperEnvelope } from './protocol/validation';
 
 const now = '2026-07-08T00:00:00.000Z';
 
@@ -33,7 +33,7 @@ describe('dev helper runtime', () => {
     runtime.start();
 
     expect(lines).toHaveLength(1);
-    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '');
+    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '', validateHelperToMainEnvelope);
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
     expect(decoded.envelope.type).toBe('helper.hello');
@@ -52,7 +52,7 @@ describe('dev helper runtime', () => {
     });
 
     expect(runtime.getState()).toBe('ready');
-    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '');
+    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '', validateHelperToMainEnvelope);
     expect(decoded).toMatchObject({
       envelope: { payload: { status: 'ready' }, type: 'helper.status' },
       ok: true,
@@ -75,8 +75,8 @@ describe('dev helper runtime', () => {
     });
     expect(runtime.getState()).toBe('ready');
 
-    const decodedPause = decodeHelperEnvelopeLine(lines[0] ?? '');
-    const decodedResume = decodeHelperEnvelopeLine(lines[1] ?? '');
+    const decodedPause = decodeHelperEnvelopeLine(lines[0] ?? '', validateHelperToMainEnvelope);
+    const decodedResume = decodeHelperEnvelopeLine(lines[1] ?? '', validateHelperToMainEnvelope);
     expect(decodedPause).toMatchObject({ envelope: { payload: { status: 'paused' } }, ok: true });
     expect(decodedResume).toMatchObject({ envelope: { payload: { status: 'ready' } }, ok: true });
   });
@@ -95,6 +95,29 @@ describe('dev helper runtime', () => {
     expect(runtime.getState()).toBe('starting');
   });
 
+  it('rejects Helper-to-Main events received on helper stdin without changing state', () => {
+    const lines: string[] = [];
+    const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
+    const result = decodeHelperEnvelopeLine(
+      encodeHelperEnvelope({
+        correlationId: '/Users/alice/private.txt',
+        messageId: 'provider-secret-token',
+        payload: { sequence: 1, status: 'ready' },
+        protocolVersion: HELPER_PROTOCOL_VERSION,
+        sentAt: now,
+        type: 'helper.heartbeat',
+      }),
+      validateMainToHelperEnvelope,
+    );
+
+    expect(result).toMatchObject({ error: { code: 'schema_mismatch' }, ok: false });
+    expect(JSON.stringify(result)).not.toContain('/Users/alice');
+    expect(JSON.stringify(result)).not.toContain('provider-secret-token');
+    runtime.handleEnvelope(result);
+    expect(runtime.getState()).toBe('starting');
+    expect(lines).toEqual([]);
+  });
+
   it('synthesizes a well-formed capture.result reflecting the configured policy version', () => {
     const lines: string[] = [];
     const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
@@ -108,7 +131,10 @@ describe('dev helper runtime', () => {
 
     expect(envelope.type).toBe('capture.result');
     expect(envelope.payload.context.policy.version).toBe('policy_v7');
-    const roundTripped = decodeHelperEnvelopeLine(encodeHelperEnvelope(envelope));
+    const roundTripped = decodeHelperEnvelopeLine(
+      encodeHelperEnvelope(envelope),
+      validateHelperToMainEnvelope,
+    );
     expect(roundTripped.ok).toBe(true);
   });
 
@@ -124,7 +150,7 @@ describe('dev helper runtime', () => {
     });
 
     expect(runtime.isShutdown()).toBe(true);
-    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '');
+    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '', validateHelperToMainEnvelope);
     expect(decoded).toMatchObject({
       envelope: { payload: { reason: 'shutdown_requested' }, type: 'helper.exiting' },
       ok: true,

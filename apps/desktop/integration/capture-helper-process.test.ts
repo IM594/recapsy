@@ -3,7 +3,7 @@ import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { CaptureHelperEvent } from '../src/capture/public';
 import { createHelperProcessClient } from '../src/helper/process-client';
-import type { HelperEnvelope, HelperToMainType } from '../src/helper/protocol';
+import type { HelperEnvelope, HelperToMainType } from '../src/helper/public';
 
 const devHelperPath = fileURLToPath(new URL('../src/helper/dev-process.ts', import.meta.url));
 

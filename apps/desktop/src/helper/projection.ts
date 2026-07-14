@@ -1,4 +1,4 @@
-import type { CaptureResultPayload, SafeCaptureContextPayload } from './protocol';
+import type { CaptureResultPayload, SafeCaptureContextPayload } from './protocol/types';
 
 export type UnsafeCaptureContextInput = {
   appName?: string;

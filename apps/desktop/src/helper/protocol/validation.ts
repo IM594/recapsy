@@ -1,228 +1,58 @@
-export const HELPER_PROTOCOL_VERSION = 'recapsy.capture-helper' as const;
+import {
+  HELPER_PROTOCOL_VERSION,
+  type HelperEnvelope,
+  type HelperMessageType,
+  type HelperProtocolErrorCode,
+  type HelperProtocolResult,
+  type HelperToMainEnvelope,
+  type HelperToMainType,
+  type MainToHelperEnvelope,
+  type MainToHelperType,
+} from './types';
 
-export type HelperProtocolVersion = typeof HELPER_PROTOCOL_VERSION;
+export type HelperEnvelopeValidator<TEnvelope extends HelperEnvelope> = (
+  value: unknown,
+) => HelperProtocolResult<TEnvelope>;
 
-export type HelperProtocolErrorCode =
-  | 'invalid_json'
-  | 'schema_mismatch'
-  | 'unsupported_protocol_version'
-  | 'unknown_message_type';
+const HELPER_TO_MAIN_TYPES: readonly HelperToMainType[] = [
+  'helper.hello',
+  'helper.status',
+  'permission.status',
+  'capture.result',
+  'capture.skipped',
+  'capture.error',
+  'helper.heartbeat',
+  'helper.exiting',
+];
 
-export type HelperProtocolError = {
-  code: HelperProtocolErrorCode;
-  message: string;
-  captureId?: string;
-  correlationId?: string | null;
-  messageId?: string;
-  messageType?: string;
-};
+const MAIN_TO_HELPER_TYPES: readonly MainToHelperType[] = [
+  'helper.configure',
+  'capture.start',
+  'capture.pause',
+  'capture.resume',
+  'capture.flush',
+  'capture.ack',
+  'capture.nack',
+  'helper.shutdown',
+];
 
-export type HelperProtocolResult<T> =
-  | {
-      ok: true;
-      envelope: T;
-    }
-  | {
-      ok: false;
-      error: HelperProtocolError;
-    };
+export const validateHelperToMainEnvelope: HelperEnvelopeValidator<HelperToMainEnvelope> = (
+  value,
+) => validateDirectionalEnvelope(value, isHelperToMainType);
 
-export type CaptureAssetRole = 'screenshot' | 'thumbnail' | 'manifest';
+export const validateMainToHelperEnvelope: HelperEnvelopeValidator<MainToHelperEnvelope> = (
+  value,
+) => validateDirectionalEnvelope(value, isMainToHelperType);
 
-export type CaptureAssetPayload = {
-  role: CaptureAssetRole;
-  ref: string;
-  hash: string;
-  mimeType: string;
-  sizeBytes: number;
-};
-
-export type SafeCaptureContextPayload = {
-  observedAt: string;
-  app?: {
-    name: string;
-    bundleId: string;
-  };
-  window?: {
-    title: string;
-  };
-  website?: {
-    origin: string;
-    host: string;
-  };
-  document?: {
-    name: string;
-  };
-  policy: {
-    version: string;
-    decision: 'allow' | 'redact_context' | 'block_ocr';
-  };
-};
-
-export type CaptureResultPayload = {
-  captureId: string;
-  observedAt: string;
-  manifest: CaptureAssetPayload;
-  assets: CaptureAssetPayload[];
-  context: SafeCaptureContextPayload;
-};
-
-export type HelperToMainPayloadByType = {
-  'helper.hello': {
-    helperVersion: string;
-    pid: number | null;
-    capabilities: {
-      capture: boolean;
-      permissions: boolean;
-      mock: boolean;
-    };
-  };
-  'helper.status': {
-    status: 'starting' | 'ready' | 'paused' | 'stopping' | 'stopped' | 'error';
-    reason?: string;
-  };
-  'permission.status': {
-    screenCapture: 'granted' | 'denied' | 'not_determined' | 'unknown';
-    accessibility: 'granted' | 'denied' | 'not_determined' | 'unknown';
-    observedAt: string;
-  };
-  'capture.result': CaptureResultPayload;
-  'capture.skipped': {
-    captureId: string;
-    reason: 'paused' | 'policy_denied' | 'duplicate' | 'blank' | 'secure_input' | 'private_context';
-    observedAt: string;
-  };
-  'capture.error': {
-    captureId?: string;
-    code:
-      | 'capture_failed'
-      | 'permission_missing'
-      | 'permission_revoked'
-      | 'asset_write_failed'
-      | 'helper_unavailable'
-      | 'unknown';
-    message: string;
-  };
-  'helper.heartbeat': {
-    sequence: number;
-    status: 'starting' | 'ready' | 'paused' | 'stopping';
-  };
-  'helper.exiting': {
-    reason: 'shutdown_requested' | 'quit_requested' | 'process_crashed' | 'unknown';
-    code: number | null;
-  };
-};
-
-export type MainToHelperPayloadByType = {
-  'helper.configure': {
-    captureIntervalMs?: number;
-    policyVersion: string;
-  };
-  'capture.start': {
-    reason: 'runtime_started' | 'user_resumed';
-  };
-  'capture.pause': {
-    reason: 'user_paused' | 'backpressure' | 'permission_missing' | 'runtime_stopping';
-  };
-  'capture.resume': {
-    reason: 'user_resumed' | 'backpressure_relieved';
-  };
-  'capture.flush': {
-    reason: 'shutdown' | 'manual';
-  };
-  'capture.ack': {
-    captureId: string;
-  };
-  'capture.nack': {
-    captureId?: string;
-    code:
-      | 'schema_mismatch'
-      | 'asset_unavailable'
-      | 'policy_denied'
-      | 'backpressure'
-      | 'storage_unavailable'
-      | 'conflict'
-      | 'unknown';
-    message: string;
-  };
-  'helper.shutdown': {
-    reason: 'quit' | 'restart' | 'runtime_stop';
-  };
-};
-
-export type HelperToMainType = keyof HelperToMainPayloadByType;
-export type MainToHelperType = keyof MainToHelperPayloadByType;
-export type HelperMessageType = HelperToMainType | MainToHelperType;
-
-export type HelperEnvelope<TType extends HelperMessageType = HelperMessageType> = {
-  protocolVersion: HelperProtocolVersion;
-  messageId: string;
-  correlationId: string | null;
-  sentAt: string;
-  type: TType;
-  payload: TType extends HelperToMainType
-    ? HelperToMainPayloadByType[TType]
-    : TType extends MainToHelperType
-      ? MainToHelperPayloadByType[TType]
-      : never;
-};
-
-export function encodeHelperEnvelope(envelope: HelperEnvelope): string {
-  return `${JSON.stringify(envelope)}\n`;
-}
-
-export function decodeHelperEnvelopeLine(line: string): HelperProtocolResult<HelperEnvelope> {
-  let decoded: unknown;
-
-  try {
-    decoded = JSON.parse(line);
-  } catch {
-    return protocolError('invalid_json', 'Helper protocol line is not valid JSON.');
-  }
-
-  return validateHelperEnvelope(decoded);
-}
-
-export function parseHelperNdjsonChunk(chunk: string): HelperProtocolResult<HelperEnvelope>[] {
-  const parser = new HelperNdjsonLineParser();
-
-  return parser.feed(chunk);
-}
-
-export class HelperNdjsonLineParser {
-  private buffer = '';
-
-  feed(chunk: string): HelperProtocolResult<HelperEnvelope>[] {
-    this.buffer += chunk;
-
-    const lines = this.buffer.split(/\r?\n/);
-    this.buffer = lines.pop() ?? '';
-
-    return lines
-      .filter((line) => line.trim().length > 0)
-      .map((line) => decodeHelperEnvelopeLine(line));
-  }
-
-  flush(): HelperProtocolResult<HelperEnvelope>[] {
-    if (this.buffer.trim().length === 0) {
-      this.buffer = '';
-      return [];
-    }
-
-    const line = this.buffer;
-    this.buffer = '';
-
-    return [decodeHelperEnvelopeLine(line)];
-  }
-}
-
-function validateHelperEnvelope(value: unknown): HelperProtocolResult<HelperEnvelope> {
+function validateDirectionalEnvelope<TEnvelope extends HelperEnvelope>(
+  value: unknown,
+  isAllowedType: (type: string) => type is TEnvelope['type'],
+): HelperProtocolResult<TEnvelope> {
   if (!isRecord(value)) {
     return protocolError('schema_mismatch', 'Helper envelope must be an object.');
   }
 
   const type = value.type;
-
   if (value.protocolVersion !== HELPER_PROTOCOL_VERSION) {
     return protocolError(
       'unsupported_protocol_version',
@@ -263,6 +93,14 @@ function validateHelperEnvelope(value: unknown): HelperProtocolResult<HelperEnve
     );
   }
 
+  if (!isAllowedType(type)) {
+    return protocolError(
+      'schema_mismatch',
+      'Helper envelope type is not valid for this protocol direction.',
+      protocolErrorMetadata(value, type),
+    );
+  }
+
   if (!isPayloadForType(type, value.payload)) {
     return protocolError(
       'schema_mismatch',
@@ -271,10 +109,7 @@ function validateHelperEnvelope(value: unknown): HelperProtocolResult<HelperEnve
     );
   }
 
-  return {
-    ok: true,
-    envelope: value as HelperEnvelope,
-  };
+  return { envelope: value as TEnvelope, ok: true };
 }
 
 function isPayloadForType(type: HelperMessageType, payload: unknown): boolean {
@@ -526,51 +361,23 @@ function isOpaqueRef(value: unknown): boolean {
 
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
   const allowed = new Set(allowedKeys);
-
   return Object.keys(value).every((key) => allowed.has(key));
 }
 
+function isHelperToMainType(type: string): type is HelperToMainType {
+  return HELPER_TO_MAIN_TYPES.includes(type as HelperToMainType);
+}
+
+function isMainToHelperType(type: string): type is MainToHelperType {
+  return MAIN_TO_HELPER_TYPES.includes(type as MainToHelperType);
+}
+
 function isKnownMessageType(type: string): type is HelperMessageType {
-  return [
-    'helper.hello',
-    'helper.status',
-    'permission.status',
-    'capture.result',
-    'capture.skipped',
-    'capture.error',
-    'helper.heartbeat',
-    'helper.exiting',
-    'helper.configure',
-    'capture.start',
-    'capture.pause',
-    'capture.resume',
-    'capture.flush',
-    'capture.ack',
-    'capture.nack',
-    'helper.shutdown',
-  ].includes(type);
+  return isHelperToMainType(type) || isMainToHelperType(type);
 }
 
 function safeKnownMessageType(type: unknown): HelperMessageType | undefined {
   return isString(type) && isKnownMessageType(type) ? type : undefined;
-}
-
-function protocolError(
-  code: HelperProtocolErrorCode,
-  message: string,
-  metadata: ProtocolErrorMetadata = {},
-): HelperProtocolResult<HelperEnvelope> {
-  return {
-    ok: false,
-    error: {
-      code,
-      message,
-      ...(metadata.captureId ? { captureId: metadata.captureId } : {}),
-      ...(metadata.correlationId !== undefined ? { correlationId: metadata.correlationId } : {}),
-      ...(metadata.messageId ? { messageId: metadata.messageId } : {}),
-      ...(metadata.messageType ? { messageType: metadata.messageType } : {}),
-    },
-  };
 }
 
 type ProtocolErrorMetadata = {
@@ -580,18 +387,31 @@ type ProtocolErrorMetadata = {
   messageType?: HelperMessageType;
 };
 
+function protocolError<TEnvelope extends HelperEnvelope>(
+  code: HelperProtocolErrorCode,
+  message: string,
+  metadata: ProtocolErrorMetadata = {},
+): HelperProtocolResult<TEnvelope> {
+  return {
+    error: {
+      code,
+      message,
+      ...(metadata.captureId ? { captureId: metadata.captureId } : {}),
+      ...(metadata.correlationId !== undefined ? { correlationId: metadata.correlationId } : {}),
+      ...(metadata.messageId ? { messageId: metadata.messageId } : {}),
+      ...(metadata.messageType ? { messageType: metadata.messageType } : {}),
+    },
+    ok: false,
+  };
+}
+
 function protocolErrorMetadata(
   value: Record<string, unknown>,
   messageType?: HelperMessageType,
 ): ProtocolErrorMetadata {
-  const metadata: ProtocolErrorMetadata = {
-    ...(messageType ? { messageType } : {}),
-  };
+  const metadata: ProtocolErrorMetadata = { ...(messageType ? { messageType } : {}) };
 
-  if (isSafeProtocolIdentifier(value.messageId)) {
-    metadata.messageId = value.messageId;
-  }
-
+  if (isSafeProtocolIdentifier(value.messageId)) metadata.messageId = value.messageId;
   if (value.correlationId === null) {
     metadata.correlationId = null;
   } else if (isSafeProtocolIdentifier(value.correlationId)) {
@@ -600,10 +420,7 @@ function protocolErrorMetadata(
 
   if (messageType?.startsWith('capture.') && isRecord(value.payload)) {
     const captureId = value.payload.captureId;
-
-    if (isSafeProtocolIdentifier(captureId)) {
-      metadata.captureId = captureId;
-    }
+    if (isSafeProtocolIdentifier(captureId)) metadata.captureId = captureId;
   }
 
   return metadata;
@@ -662,13 +479,10 @@ function isSafeDocumentName(value: unknown): value is string {
 }
 
 function isSafeWebsiteOrigin(origin: unknown, host: unknown): boolean {
-  if (!isString(origin) || !isString(host)) {
-    return false;
-  }
+  if (!isString(origin) || !isString(host)) return false;
 
   try {
     const url = new URL(origin);
-
     return (
       (url.protocol === 'https:' || url.protocol === 'http:') &&
       url.origin === origin &&
@@ -683,33 +497,26 @@ function isSafeWebsiteOrigin(origin: unknown, host: unknown): boolean {
 }
 
 function isUnsafeVisibleString(value: string): boolean {
-  if (
+  return (
     isLocalAbsolutePath(value) ||
     FILE_URL_PATTERN.test(value) ||
     SECRET_WORD_PATTERN.test(value) ||
-    API_KEY_VALUE_PATTERN.test(value)
-  ) {
-    return true;
-  }
-
-  return hasUrlQuerySecret(value);
+    API_KEY_VALUE_PATTERN.test(value) ||
+    hasUrlQuerySecret(value)
+  );
 }
 
 function hasUrlQuerySecret(value: string): boolean {
   try {
     const url = new URL(value);
-
     for (const key of url.searchParams.keys()) {
-      if (SECRET_QUERY_KEY_PATTERN.test(key)) {
-        return true;
-      }
+      if (SECRET_QUERY_KEY_PATTERN.test(key)) return true;
     }
   } catch {
     return /https?:\/\/\S+[?&](token|auth|access_token|refresh_token|secret|password|credential|api[_-]?key)=/i.test(
       value,
     );
   }
-
   return false;
 }
 

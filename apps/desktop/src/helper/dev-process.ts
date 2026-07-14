@@ -5,14 +5,14 @@
  * This is NOT a real capture helper. It never touches the screen, the
  * filesystem, or any OS permission. Its only job is to exist as a real,
  * separate OS process that speaks the exact same stdio NDJSON protocol
- * (`../helper/protocol.ts`) the real Swift helper will speak, so that
+ * (`../helper/protocol/codec.ts`) the real Swift helper will speak, so that
  * `createHelperProcessClient` (see `./process-client.ts`) and the
  * Electron main runtime around it can be exercised across a genuine process
  * boundary before the Swift binary exists.
  *
  * Protocol handling in this file always goes through
- * `encodeHelperEnvelope` / `decodeHelperEnvelopeLine` /
- * `HelperNdjsonLineParser` from `./protocol.ts` — this module does not
+ * `encodeHelperEnvelope` and `HelperNdjsonLineParser` from
+ * `./protocol/codec.ts` — this module does not
  * invent its own serialization.
  *
  * Synthesizing a `capture.result` for tests: `MainToHelperPayloadByType`
@@ -28,14 +28,15 @@
  *     no extra IPC plumbing required.
  */
 import { createSafeCaptureResultPayload } from './projection';
+import { HelperNdjsonLineParser, encodeHelperEnvelope } from './protocol/codec';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
-  HelperNdjsonLineParser,
   type HelperProtocolResult,
   type HelperToMainType,
-  encodeHelperEnvelope,
-} from './protocol';
+  type MainToHelperEnvelope,
+} from './protocol/types';
+import { validateMainToHelperEnvelope } from './protocol/validation';
 
 const HELPER_VERSION = 'dev-process/0.1.0';
 
@@ -52,7 +53,7 @@ export type DevHelperRuntime = {
   start(): void;
   heartbeat(): void;
   synthesizeCapture(): HelperEnvelope<'capture.result'>;
-  handleEnvelope(result: HelperProtocolResult<HelperEnvelope>): void;
+  handleEnvelope(result: HelperProtocolResult<MainToHelperEnvelope>): void;
 };
 
 /**
@@ -206,7 +207,7 @@ function runDevHelperProcess(): void {
   const heartbeatIntervalMs = parsePositiveInt(process.env.DEV_HELPER_HEARTBEAT_INTERVAL_MS, 250);
   const heartbeatTimer = setInterval(() => runtime.heartbeat(), heartbeatIntervalMs);
 
-  const stdinParser = new HelperNdjsonLineParser();
+  const stdinParser = new HelperNdjsonLineParser(validateMainToHelperEnvelope);
 
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk: string) => {

@@ -6,8 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CaptureHelperEvent } from '../src/capture/public';
 import { createHelperProcessClient } from '../src/helper/process-client';
-import { HELPER_PROTOCOL_VERSION } from '../src/helper/protocol';
-import type { HelperEnvelope, HelperToMainType } from '../src/helper/protocol';
+import {
+  HELPER_PROTOCOL_VERSION,
+  type HelperEnvelope,
+  type HelperToMainType,
+} from '../src/helper/public';
 
 /**
  * Real cross-process test of the *signed Swift capture bundle*, spawned exactly

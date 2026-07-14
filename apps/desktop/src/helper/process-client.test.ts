@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { CaptureHelperEvent } from '../capture/public';
 import { type HelperProcess, createHelperProcessClient } from './process-client';
-import { type HelperEnvelope, decodeHelperEnvelopeLine, encodeHelperEnvelope } from './protocol';
+import { decodeHelperEnvelopeLine, encodeHelperEnvelope } from './protocol/codec';
+import type { HelperEnvelope } from './protocol/types';
+import { validateMainToHelperEnvelope } from './protocol/validation';
 
 /**
  * Minimal fake standing in for a real `ChildProcess` so these tests can
@@ -101,6 +103,42 @@ describe('helper process client', () => {
     expect(protocolErrors[0]).toMatchObject({ code: 'invalid_json' });
   });
 
+  it('rejects Main-to-Helper commands received on helper stdout without leaking metadata', async () => {
+    const child = new FakeChildProcess();
+    const protocolErrors: unknown[] = [];
+    const received: HelperEnvelope[] = [];
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      onProtocolError: (error) => protocolErrors.push(error),
+      spawnHelperProcess: () => child,
+    });
+
+    await client.start({ onEnvelope: async (envelope) => void received.push(envelope) });
+    child.stdout.emit(
+      'data',
+      encodeHelperEnvelope({
+        correlationId: '/Users/alice/private.txt',
+        messageId: 'provider-secret-token',
+        payload: { reason: 'runtime_started' },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-08T00:00:00.000Z',
+        type: 'capture.start',
+      }),
+    );
+
+    expect(received).toHaveLength(0);
+    expect(protocolErrors).toEqual([
+      {
+        code: 'schema_mismatch',
+        message: 'Helper envelope type is not valid for this protocol direction.',
+        messageType: 'capture.start',
+      },
+    ]);
+    expect(JSON.stringify(protocolErrors)).not.toContain('/Users/alice');
+    expect(JSON.stringify(protocolErrors)).not.toContain('provider-secret-token');
+  });
+
   it('writes a valid capture.start envelope to stdin on beginCapture', async () => {
     const child = new FakeChildProcess();
     const client = createHelperProcessClient({
@@ -113,7 +151,10 @@ describe('helper process client', () => {
     await client.beginCapture('runtime_started');
 
     expect(child.stdin.written).toHaveLength(1);
-    const decoded = decodeHelperEnvelopeLine(child.stdin.written[0] ?? '');
+    const decoded = decodeHelperEnvelopeLine(
+      child.stdin.written[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
     expect(decoded).toMatchObject({
       envelope: { type: 'capture.start', payload: { reason: 'runtime_started' } },
       ok: true,
@@ -145,8 +186,14 @@ describe('helper process client', () => {
     await client.resumeCapture();
 
     expect(child.stdin.written).toHaveLength(2);
-    const pauseDecoded = decodeHelperEnvelopeLine(child.stdin.written[0] ?? '');
-    const resumeDecoded = decodeHelperEnvelopeLine(child.stdin.written[1] ?? '');
+    const pauseDecoded = decodeHelperEnvelopeLine(
+      child.stdin.written[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
+    const resumeDecoded = decodeHelperEnvelopeLine(
+      child.stdin.written[1] ?? '',
+      validateMainToHelperEnvelope,
+    );
     expect(pauseDecoded).toMatchObject({ envelope: { type: 'capture.pause' }, ok: true });
     expect(resumeDecoded).toMatchObject({ envelope: { type: 'capture.resume' }, ok: true });
   });
@@ -170,7 +217,10 @@ describe('helper process client', () => {
     });
 
     expect(child.stdin.written).toHaveLength(1);
-    const decoded = decodeHelperEnvelopeLine(child.stdin.written[0] ?? '');
+    const decoded = decodeHelperEnvelopeLine(
+      child.stdin.written[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
     expect(decoded).toMatchObject({
       envelope: {
         correlationId: 'incoming_1',
@@ -249,7 +299,10 @@ describe('helper process client', () => {
     await stopPromise;
 
     expect(events).toHaveLength(0);
-    const shutdownDecoded = decodeHelperEnvelopeLine(child.stdin.written[0] ?? '');
+    const shutdownDecoded = decodeHelperEnvelopeLine(
+      child.stdin.written[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
     expect(shutdownDecoded).toMatchObject({ envelope: { type: 'helper.shutdown' }, ok: true });
   });
 
