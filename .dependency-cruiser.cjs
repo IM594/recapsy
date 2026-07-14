@@ -10,6 +10,8 @@ const SERVER_CAPABILITIES = [
   'capture-ocr-search',
   'ocr-proxy',
   'provider-settings',
+  'search',
+  'timeline',
 ];
 
 const DESKTOP_SOURCE_ROOT = 'apps/desktop/src';
