@@ -41,7 +41,6 @@ export type {
   HelperRuntimeState,
   OperationalStoreError,
   OperationalStoreErrorCode,
-  OperationalStoreRepository,
   OperationalStoreResult,
   OperationalStoreSnapshot,
   OutboxJob,

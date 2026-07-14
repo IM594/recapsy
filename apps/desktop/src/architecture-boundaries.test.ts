@@ -110,6 +110,41 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  it('retires the adapter-wide operational store repository type', async () => {
+    const retiredType = ['Operational', 'Store', 'Repository'].join('');
+    const violations: string[] = [];
+    const roots = [DESKTOP_SOURCE_ROOT, path.resolve(DESKTOP_SOURCE_ROOT, '..', 'integration')];
+    const glob = new Bun.Glob('**/*.ts');
+
+    for (const root of roots) {
+      for await (const relativePath of glob.scan({ cwd: root })) {
+        if (root === DESKTOP_SOURCE_ROOT && relativePath === 'architecture-boundaries.test.ts') {
+          continue;
+        }
+
+        const source = await readFile(path.resolve(root, relativePath), 'utf8');
+        if (source.includes(retiredType)) {
+          const scope = root === DESKTOP_SOURCE_ROOT ? 'src' : 'integration';
+          violations.push(`${scope}/${relativePath} still references the retired repository type`);
+        }
+      }
+    }
+
+    for (const relativePath of [
+      'storage/types.ts',
+      'storage/index.ts',
+      'storage/public.ts',
+      'index.ts',
+    ]) {
+      const source = await readSource(relativePath);
+      if (source.includes(retiredType)) {
+        violations.push(`${relativePath} still exports the retired repository type`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('publishes capture and storage operational ports from capability surfaces', async () => {
     const [capturePublicSource, storagePublicSource] = await Promise.all([
       readSource('capture/public.ts'),

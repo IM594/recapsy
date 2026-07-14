@@ -4,11 +4,7 @@ import {
   type HelperEnvelope,
   type MainToHelperType,
 } from '../helper/protocol';
-import {
-  type BackpressureConfig,
-  type OperationalStoreRepository,
-  createMemoryStore,
-} from '../storage';
+import { type BackpressureConfig, createMemoryStore } from '../storage';
 import {
   type CaptureHelperClient,
   type CaptureHelperEvent,
@@ -16,6 +12,7 @@ import {
   createCaptureHelperController,
 } from './helper-controller';
 import { createCaptureHelperEventHandler } from './helper-event-handler';
+import type { HelperStateStore } from './store';
 
 const now = '2026-07-07T08:00:00.000Z';
 const backpressure: BackpressureConfig = {
@@ -442,12 +439,14 @@ type CaptureObservedEvent = Extract<CaptureHelperEvent, { type: 'captureObserved
 
 type CaptureHelperEventAsset = Extract<CaptureHelperEvent, { type: 'captureObserved' }>['asset'];
 
-function createCountingHelperStateStore(store: OperationalStoreRepository): {
-  store: OperationalStoreRepository;
+function createCountingHelperStateStore<TStore extends HelperStateStore>(
+  store: TStore,
+): {
+  store: TStore;
   setHelperStateCallCount: () => number;
 } {
   let count = 0;
-  const wrapped = Object.create(store) as OperationalStoreRepository;
+  const wrapped = Object.create(store) as TStore;
   wrapped.setHelperState = async (state) => {
     count += 1;
     return store.setHelperState(state);

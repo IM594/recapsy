@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
   type AssetCacheRef,
-  type OperationalStoreRepository,
   type OutboxJobCreateInput,
   type StoredOcrResult,
   createMemoryStore,
@@ -186,7 +185,7 @@ describe('desktop startup recovery', () => {
   });
 });
 
-async function seedTerminalJobs(store: OperationalStoreRepository): Promise<void> {
+async function seedTerminalJobs(store: ReturnType<typeof createMemoryStore>): Promise<void> {
   const states = [
     ['job_synced', 'idem_synced', 'synced', 'ocr_synced'],
     ['job_blocked', 'idem_blocked', 'blocked', 'provider_not_configured'],
@@ -205,7 +204,7 @@ async function seedTerminalJobs(store: OperationalStoreRepository): Promise<void
 }
 
 async function seedJob(
-  store: OperationalStoreRepository,
+  store: ReturnType<typeof createMemoryStore>,
   job: OutboxJobCreateInput,
   asset: AssetCacheRef = createAsset({
     assetRefId: `asset_${job.id}`,

@@ -20,15 +20,11 @@ import type { Logger } from '../../server/src/shared/logger';
 import { createServerApiClient } from '../src/server/client';
 import type { ServerApiTransport } from '../src/server/types';
 import { createMemoryStore, createSqliteStore } from '../src/storage';
-import type {
-  AssetCacheRef,
-  OperationalStoreRepository,
-  OutboxJobCreateInput,
-} from '../src/storage';
+import type { AssetCacheRef, OutboxJobCreateInput } from '../src/storage';
 import { createBunSqliteDatabase } from '../src/storage/bun-driver';
 import { createSyncJobExecutor } from '../src/sync/job';
 import { createSyncScheduler } from '../src/sync/scheduler';
-import type { SyncServerApi } from '../src/sync/types';
+import type { SyncQueueStore, SyncServerApi } from '../src/sync/types';
 
 const now = '2026-07-06T00:00:00.000Z';
 const adminToken = 'test-admin-bootstrap-token';
@@ -370,7 +366,7 @@ function createHttpClient(endpoint: string, accessToken: string) {
 }
 
 function createScheduler(
-  store: OperationalStoreRepository,
+  store: SyncQueueStore,
   api: SyncServerApi,
   workspaceId: string,
   bytes: Uint8Array,
@@ -402,7 +398,7 @@ function createScheduler(
 }
 
 async function seedPendingCapture(
-  store: OperationalStoreRepository,
+  store: SyncFixtureStore,
   workspaceId: string,
   bytes: Uint8Array,
   overrides: Partial<OutboxJobCreateInput> = {},
@@ -452,7 +448,7 @@ async function seedPendingCapture(
   expect(created.ok).toBe(true);
 }
 
-async function createSqliteTestStore(): Promise<OperationalStoreRepository> {
+async function createSqliteTestStore(): Promise<ReturnType<typeof createSqliteStore>> {
   const dir = mkdtempSync(join(tmpdir(), 'recapsy-desktop-http-sqlite-'));
   activeTempDirs.push(dir);
   const store = createSqliteStore({
@@ -461,6 +457,9 @@ async function createSqliteTestStore(): Promise<OperationalStoreRepository> {
   await store.initialize();
   return store;
 }
+
+type SyncFixtureStore = SyncQueueStore &
+  Pick<ReturnType<typeof createMemoryStore>, 'createOutboxJob' | 'upsertAssetCacheRef'>;
 
 function createAsset(workspaceId: string, bytes: Uint8Array): AssetCacheRef {
   return {

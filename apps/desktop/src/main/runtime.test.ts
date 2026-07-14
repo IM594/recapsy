@@ -8,7 +8,7 @@ import type {
   CaptureHelperStartOptions,
 } from '../capture/public';
 import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../helper/protocol';
-import { type OperationalStoreRepository, createMemoryStore } from '../storage';
+import { createMemoryStore } from '../storage';
 import type { SyncLoop, SyncLoopOptions } from '../sync/loop';
 import type { SyncRunResult, SyncServerApi } from '../sync/types';
 import {
@@ -591,21 +591,16 @@ class FakeSyncLoop implements SyncLoop {
 }
 
 function testStore(): DesktopStore & { initializeCalls: number; closeCalls: number } {
-  const store = createMemoryStore() as OperationalStoreRepository & {
-    initializeCalls: number;
-    closeCalls: number;
-    initialize(): Promise<void>;
-    close(): void;
-  };
-
-  store.initializeCalls = 0;
-  store.closeCalls = 0;
-  store.initialize = async () => {
-    store.initializeCalls += 1;
-  };
-  store.close = () => {
-    store.closeCalls += 1;
-  };
+  const store = Object.assign(createMemoryStore(), {
+    closeCalls: 0,
+    initializeCalls: 0,
+    close() {
+      this.closeCalls += 1;
+    },
+    async initialize() {
+      this.initializeCalls += 1;
+    },
+  });
 
   return store;
 }

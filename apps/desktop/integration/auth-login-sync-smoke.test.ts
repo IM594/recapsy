@@ -10,7 +10,7 @@ import { createInMemoryTokenStore } from '../src/auth/tokens';
 import { createServerApiClient } from '../src/server/client';
 import type { ServerApiTransport } from '../src/server/types';
 import { createMemoryStore } from '../src/storage';
-import type { AssetCacheRef, OperationalStoreRepository } from '../src/storage';
+import type { AssetCacheRef } from '../src/storage';
 import { createSyncJobExecutor } from '../src/sync/job';
 import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncAssetReader } from '../src/sync/types';
@@ -245,7 +245,7 @@ const failClosedReadAssetBytes: SyncAssetReader = async () => {
 };
 
 async function seedPendingCapture(
-  store: OperationalStoreRepository,
+  store: ReturnType<typeof createMemoryStore>,
   workspaceId: string,
   bytes: Uint8Array,
 ) {

@@ -5,11 +5,7 @@ import type {
   MainToHelperType,
 } from '../helper/protocol';
 import { HELPER_PROTOCOL_VERSION, decodeHelperEnvelopeLine } from '../helper/protocol';
-import {
-  type BackpressureConfig,
-  type OperationalStoreRepository,
-  createMemoryStore,
-} from '../storage';
+import { type BackpressureConfig, createMemoryStore } from '../storage';
 import {
   type CaptureHelperCommandClient,
   createCaptureHelperEventHandler,
@@ -468,7 +464,10 @@ class RecordingCaptureHelperCommandClient implements CaptureHelperCommandClient 
     | undefined;
 
   constructor(
-    private readonly store: OperationalStoreRepository,
+    private readonly store: Pick<
+      ReturnType<typeof createMemoryStore>,
+      'getAssetCacheRef' | 'getOutboxJob'
+    >,
     private readonly captureId: string,
   ) {}
 
@@ -564,10 +563,10 @@ function helperEnvelope<TType extends keyof HelperToMainPayloadByType>(
 }
 
 function createThrowingStore(
-  store: OperationalStoreRepository,
+  store: ReturnType<typeof createMemoryStore>,
   error: Error,
-): OperationalStoreRepository {
-  const failingStore = Object.create(store) as OperationalStoreRepository;
+): ReturnType<typeof createMemoryStore> {
+  const failingStore = Object.create(store) as ReturnType<typeof createMemoryStore>;
   failingStore.upsertAssetCacheRef = async () => {
     throw error;
   };

@@ -4,7 +4,6 @@ import type {
   ClaimRetryableOutboxJobInput,
   HelperRuntimeState,
   OperationalStoreError,
-  OperationalStoreRepository,
   OperationalStoreResult,
   OperationalStoreSnapshot,
   OutboxJob,
@@ -36,11 +35,11 @@ const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'cancelled',
 ]);
 
-export function createMemoryStore(options: MemoryStoreOptions = {}): OperationalStoreRepository {
+export function createMemoryStore(options: MemoryStoreOptions = {}) {
   return new InMemoryOperationalStore(options);
 }
 
-class InMemoryOperationalStore implements OperationalStoreRepository {
+class InMemoryOperationalStore {
   private readonly outboxJobs = new Map<string, OutboxJob>();
   private readonly assetRefs = new Map<string, AssetCacheRef>();
   private readonly policyCache = new Map<string, PolicyCacheEntry>();

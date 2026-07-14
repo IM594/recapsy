@@ -5,7 +5,6 @@ import type {
   ClaimRetryableOutboxJobInput,
   HelperRuntimeState,
   OperationalStoreError,
-  OperationalStoreRepository,
   OperationalStoreResult,
   OperationalStoreSnapshot,
   OutboxJob,
@@ -41,10 +40,7 @@ const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'cancelled',
 ]);
 
-export function createSqliteStore(options: SqliteStoreOptions): OperationalStoreRepository & {
-  close(): void;
-  initialize(): Promise<void>;
-} {
+export function createSqliteStore(options: SqliteStoreOptions) {
   return new SqliteOperationalStore(options);
 }
 
@@ -190,7 +186,7 @@ function migrateOutboxJobsToV2(database: SqliteDatabase): void {
   }
 }
 
-class SqliteOperationalStore implements OperationalStoreRepository {
+class SqliteOperationalStore {
   constructor(private readonly options: SqliteStoreOptions) {}
 
   async initialize(): Promise<void> {

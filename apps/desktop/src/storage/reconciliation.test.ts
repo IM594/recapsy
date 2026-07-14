@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test';
 import {
   type AssetAvailabilityState,
   type AssetCacheRef,
-  type OperationalStoreRepository,
   type OutboxJobCreateInput,
   type StoredOcrResult,
   createMemoryStore,
@@ -258,7 +257,7 @@ function resolverFromMap(map: Record<string, AssetAvailabilityState>): AssetAvai
 }
 
 async function createAssetBackedJob(
-  store: OperationalStoreRepository,
+  store: ReturnType<typeof createMemoryStore>,
   asset: AssetCacheRef,
   job: OutboxJobCreateInput,
 ): Promise<void> {
