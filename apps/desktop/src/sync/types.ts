@@ -7,7 +7,6 @@ import type {
 } from '@recapsy/contracts';
 import type {
   AssetCacheRef,
-  BackpressureDecision,
   CaptureOutboxPayload,
   ClaimRetryableOutboxJobInput,
   OperationalStoreResult,
@@ -109,19 +108,6 @@ export type RetryBackoffConfig = {
 
 /** [0, 1) random source for backoff jitter; injectable so tests stay deterministic. */
 export type RetryJitterSource = () => number;
-
-export type SyncSchedulerOptions = {
-  store: SyncQueueStore;
-  api: SyncServerApi;
-  workspace: SyncWorkspaceProvider;
-  readAssetBytes: SyncAssetReader;
-  clock: SyncClock;
-  maxAttempts: number;
-  retryBackoff: RetryBackoffConfig;
-  /** Overrides the jitter random source; defaults to `Math.random` in the scheduler. */
-  jitterRandom?: RetryJitterSource;
-  backpressure?: BackpressureDecision;
-};
 
 export type SyncRunStatus =
   | 'idle'

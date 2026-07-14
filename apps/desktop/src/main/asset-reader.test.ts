@@ -22,7 +22,7 @@ function makeAssetRoot(): string {
   return root;
 }
 
-/** Mirrors the sync scheduler's `isSafeErrorShape` / `isLocalAssetSafeCode`. */
+/** Mirrors the local-asset error shape classified by `sync/errors.ts`. */
 function expectUnreadable(error: unknown): void {
   expect(error).toBeInstanceOf(Error);
   const shaped = error as { code?: unknown; retryable?: unknown; safeMessage?: unknown };

@@ -26,6 +26,7 @@ import type {
   OutboxJobCreateInput,
 } from '../src/storage';
 import { createBunSqliteDatabase } from '../src/storage/bun-driver';
+import { createSyncJobExecutor } from '../src/sync/job';
 import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncServerApi } from '../src/sync/types';
 
@@ -376,18 +377,27 @@ function createScheduler(
   readAssetBytes: () => Promise<Uint8Array> = async () => bytes,
 ) {
   let tick = 0;
-  return createSyncScheduler({
+  const clock = {
+    now: () => `2026-07-06T00:00:0${tick++}.000Z`,
+  };
+  const workspace = {
+    getActiveWorkspaceId: async () => workspaceId,
+  };
+  const executeJob = createSyncJobExecutor({
     api,
-    clock: {
-      now: () => `2026-07-06T00:00:0${tick++}.000Z`,
-    },
+    clock,
     maxAttempts: 3,
     readAssetBytes,
     retryBackoff: { baseMs: 60_000, factor: 2, jitterRatio: 0, maxMs: 300_000 },
     store,
-    workspace: {
-      getActiveWorkspaceId: async () => workspaceId,
-    },
+    workspace,
+  });
+  return createSyncScheduler({
+    clock,
+    executeJob,
+    maxAttempts: 3,
+    store,
+    workspace,
   });
 }
 

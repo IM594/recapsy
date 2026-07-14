@@ -163,9 +163,116 @@ describe('desktop architecture boundaries', () => {
     expect(source).not.toContain('ServerApiError');
   });
 
-  it('gives retry policy its own sync module and test ownership', async () => {
-    const [schedulerSource, publicSource] = await Promise.all([
+  it('gives the single-job sync state machine its own executor', async () => {
+    const [schedulerSource, runtimeSource] = await Promise.all([
       readSource('sync/scheduler.ts'),
+      readSource('sync/runtime.ts'),
+    ]);
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const violations: string[] = [];
+    for (const requiredPath of ['sync/job.ts', 'sync/job.test.ts']) {
+      if (!sourceFiles.includes(requiredPath)) {
+        violations.push(`${requiredPath} is missing`);
+      }
+    }
+
+    if (sourceFiles.includes('sync/job.ts')) {
+      const jobSource = await readSource('sync/job.ts');
+      for (const requiredPort of ['SyncJobApi', 'SyncJobStore', 'SyncJobExecutor']) {
+        if (!new RegExp(`export\\s+(?:interface|type)\\s+${requiredPort}\\b`).test(jobSource)) {
+          violations.push(`sync/job.ts does not export ${requiredPort}`);
+        }
+      }
+      if (!/export\s+function\s+createSyncJobExecutor\b/.test(jobSource)) {
+        violations.push('sync/job.ts does not export createSyncJobExecutor');
+      }
+      for (const policyModule of ['errors', 'reconciliation', 'retry', 'screen-text']) {
+        if (!new RegExp(`from\\s+['"]\\./${policyModule}['"]`).test(jobSource)) {
+          violations.push(`sync/job.ts does not reuse ./${policyModule}`);
+        }
+      }
+      for (const forbiddenWorkerResponsibility of [
+        'SyncQueueStore',
+        'OperationalStoreRepository',
+        'claimNextRetryableOutboxJob',
+        'recoverInterruptedOutboxJob',
+        'listOutboxJobs',
+        'backpressure',
+      ]) {
+        if (new RegExp(`\\b${forbiddenWorkerResponsibility}\\b`).test(jobSource)) {
+          violations.push(
+            `sync/job.ts owns worker responsibility ${forbiddenWorkerResponsibility}`,
+          );
+        }
+      }
+    }
+
+    if (!/from\s+['"]\.\/job['"]/.test(schedulerSource)) {
+      violations.push('sync/scheduler.ts does not depend on the job executor');
+    }
+    if (!/export\s+type\s+SyncSchedulerStore\b/.test(schedulerSource)) {
+      violations.push('sync/scheduler.ts does not own SyncSchedulerStore');
+    }
+    for (const workerStoreMethod of [
+      'claimNextRetryableOutboxJob',
+      'getOutboxJob',
+      'markOutboxJobTerminal',
+    ]) {
+      if (!new RegExp(`\\b${workerStoreMethod}\\s*\\(`).test(schedulerSource)) {
+        violations.push(`SyncSchedulerStore does not declare ${workerStoreMethod}`);
+      }
+    }
+    if (!/\bexecuteJob\s*\(\s*job\s*\)/.test(schedulerSource)) {
+      violations.push('sync/scheduler.ts does not delegate a claimed job to executeJob');
+    }
+    for (const retiredJobImplementation of [
+      'syncJob',
+      'submitStoredOcrResult',
+      'handleSyncError',
+      'markJobTerminalWithSafeError',
+      'ensureWorkspaceStillActive',
+      'recordSafeError',
+      'isLocallyCancelled',
+      'ingestCapture',
+      'runOcrProxy',
+      'submitOcrResult',
+      'getAssetCacheRef',
+      'recordOutboxSafeError',
+      'computeRetryBackoffDelayMs',
+      'classifySyncError',
+      'mapOcrScreenText',
+      'reconcileOutboxJobFromServerCapture',
+      'SyncQueueStore',
+      'OperationalStoreRepository',
+      'SyncServerApi',
+      'SyncAssetReader',
+      'readAssetBytes',
+      'retryBackoff',
+    ]) {
+      if (new RegExp(`\\b${retiredJobImplementation}\\b`).test(schedulerSource)) {
+        violations.push(`sync/scheduler.ts still owns ${retiredJobImplementation}`);
+      }
+    }
+
+    if (
+      !/import\s*\{[^}]*\bcreateSyncJobExecutor\b[^}]*\}\s*from\s*['"]\.\/job['"]/s.test(
+        runtimeSource,
+      )
+    ) {
+      violations.push('sync/runtime.ts does not compose createSyncJobExecutor');
+    }
+
+    expect(violations).toEqual([]);
+  });
+
+  it('gives retry policy its own sync module and test ownership', async () => {
+    const [jobSource, publicSource] = await Promise.all([
+      readSource('sync/job.ts'),
       readSource('sync/public.ts'),
     ]);
     const sourceFiles: string[] = [];
@@ -184,15 +291,15 @@ describe('desktop architecture boundaries', () => {
     if (sourceFiles.includes('sync/retry-backoff.test.ts')) {
       violations.push('sync/retry-backoff.test.ts is still present');
     }
-    if (/export function computeRetryBackoffDelayMs\s*\(/.test(schedulerSource)) {
-      violations.push('sync/scheduler.ts still declares computeRetryBackoffDelayMs');
+    if (/export function computeRetryBackoffDelayMs\s*\(/.test(jobSource)) {
+      violations.push('sync/job.ts still declares computeRetryBackoffDelayMs');
     }
     if (
       !/import\s*\{[^}]*\bcomputeRetryBackoffDelayMs\b[^}]*\}\s*from\s*['"]\.\/retry['"]/s.test(
-        schedulerSource,
+        jobSource,
       )
     ) {
-      violations.push('sync/scheduler.ts does not import computeRetryBackoffDelayMs from ./retry');
+      violations.push('sync/job.ts does not import computeRetryBackoffDelayMs from ./retry');
     }
     if (
       !/export\s*\{[^}]*\bcomputeRetryBackoffDelayMs\b[^}]*\}\s*from\s*['"]\.\/retry['"]/s.test(
@@ -213,7 +320,7 @@ describe('desktop architecture boundaries', () => {
   });
 
   it('owns sync error classification and safe presentation in one module', async () => {
-    const schedulerSource = await readSource('sync/scheduler.ts');
+    const jobSource = await readSource('sync/job.ts');
     const sourceFiles: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
     for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
@@ -232,12 +339,10 @@ describe('desktop architecture boundaries', () => {
       'isTerminalBlockingSyncErrorCode',
       'syncSafeMessage',
     ];
-    const errorsImport = schedulerSource.match(
-      /import\s*\{([^}]*)\}\s*from\s*['"]\.\/errors['"]/s,
-    )?.[1];
+    const errorsImport = jobSource.match(/import\s*\{([^}]*)\}\s*from\s*['"]\.\/errors['"]/s)?.[1];
     for (const expectedImport of expectedImports) {
       if (!errorsImport || !new RegExp(`\\b${expectedImport}\\b`).test(errorsImport)) {
-        violations.push(`sync/scheduler.ts does not import ${expectedImport} from ./errors`);
+        violations.push(`sync/job.ts does not import ${expectedImport} from ./errors`);
       }
     }
 
@@ -252,8 +357,8 @@ describe('desktop architecture boundaries', () => {
       'syncSafeMessage',
       'isLocalAssetSafeCode',
     ]) {
-      if (new RegExp(`(?:const|function)\\s+${retiredDeclaration}\\b`).test(schedulerSource)) {
-        violations.push(`sync/scheduler.ts still declares ${retiredDeclaration}`);
+      if (new RegExp(`(?:const|function)\\s+${retiredDeclaration}\\b`).test(jobSource)) {
+        violations.push(`sync/job.ts still declares ${retiredDeclaration}`);
       }
     }
 
@@ -350,8 +455,8 @@ describe('desktop architecture boundaries', () => {
   });
 
   it('separates server-capture reconciliation from storage asset reconciliation', async () => {
-    const [schedulerSource, recoverySource, publicSource] = await Promise.all([
-      readSource('sync/scheduler.ts'),
+    const [jobSource, recoverySource, publicSource] = await Promise.all([
+      readSource('sync/job.ts'),
       readSource('sync/recovery.ts'),
       readSource('sync/public.ts'),
     ]);
@@ -405,7 +510,7 @@ describe('desktop architecture boundaries', () => {
     }
 
     for (const [consumerPath, source] of [
-      ['sync/scheduler.ts', schedulerSource],
+      ['sync/job.ts', jobSource],
       ['sync/recovery.ts', recoverySource],
     ] as const) {
       if (
@@ -418,8 +523,8 @@ describe('desktop architecture boundaries', () => {
         );
       }
     }
-    if (/export\s+async\s+function\s+reconcileOutboxJobFromServerCapture\b/.test(schedulerSource)) {
-      violations.push('sync/scheduler.ts still declares reconcileOutboxJobFromServerCapture');
+    if (/export\s+async\s+function\s+reconcileOutboxJobFromServerCapture\b/.test(jobSource)) {
+      violations.push('sync/job.ts still declares reconcileOutboxJobFromServerCapture');
     }
     if (
       !/export\s*\{[^}]*\breconcileOutboxJobFromServerCapture\b[^}]*\}\s*from\s*['"]\.\/reconciliation['"]/s.test(

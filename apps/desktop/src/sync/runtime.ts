@@ -1,3 +1,4 @@
+import { createSyncJobExecutor } from './job';
 import { createSyncLoop as createRealSyncLoop } from './loop';
 import type { SyncLoop, SyncLoopOptions } from './loop';
 import { recoverInterruptedOutboxJobs } from './recovery';
@@ -67,14 +68,24 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
         return;
       }
 
-      const scheduler = createSyncScheduler({
+      const clock = { now: options.now };
+      const workspace = { getActiveWorkspaceId: async () => options.workspaceId };
+      const maxAttempts = options.maxAttempts ?? DEFAULT_SYNC_MAX_ATTEMPTS;
+      const executeJob = createSyncJobExecutor({
         api: options.createServerApi(),
-        clock: { now: options.now },
-        maxAttempts: options.maxAttempts ?? DEFAULT_SYNC_MAX_ATTEMPTS,
+        clock,
+        maxAttempts,
         readAssetBytes: options.readAssetBytes ?? failClosedReadAssetBytes,
         retryBackoff: options.retryBackoff ?? DEFAULT_SYNC_RETRY_BACKOFF,
         store: options.store,
-        workspace: { getActiveWorkspaceId: async () => options.workspaceId },
+        workspace,
+      });
+      const scheduler = createSyncScheduler({
+        clock,
+        executeJob,
+        maxAttempts,
+        store: options.store,
+        workspace,
       });
       const createLoop = options.createLoop ?? createRealSyncLoop;
       loop = createLoop({

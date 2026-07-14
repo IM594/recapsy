@@ -156,7 +156,11 @@ export type {
   ServerProviderCapability,
   TimelineQueryInput,
 } from './server/public';
-export { createSyncQueueSummary, createSyncScheduler } from './sync/public';
+export {
+  createSyncJobExecutor,
+  createSyncQueueSummary,
+  createSyncScheduler,
+} from './sync/public';
 export { createSyncRuntime } from './sync/public';
 export type { SyncRuntime, SyncRuntimeOptions } from './sync/public';
 export { reconcileAssetRefs } from './storage/public';
@@ -170,6 +174,10 @@ export type {
 export { recoverInterruptedOutboxJobs } from './sync/public';
 export type { StartupRecoveryOptions, StartupRecoverySummary } from './sync/public';
 export type {
+  SyncJobApi,
+  SyncJobExecutor,
+  SyncJobExecutorOptions,
+  SyncJobStore,
   SyncAssetReader,
   SyncCancelResult,
   SyncClock,

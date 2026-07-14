@@ -3,7 +3,7 @@ import type { SyncRunResult, SyncRunStatus } from './types';
 /**
  * Narrow surface this loop depends on: just `runOnce()` from
  * `createSyncScheduler(...)` (see `sync/scheduler.ts`). Duck-typed so tests
- * can supply a fake scheduler instead of a full `SyncSchedulerOptions` setup.
+ * can supply a fake scheduler without composing the worker's dependencies.
  */
 export type SyncLoopRunner = {
   runOnce(): Promise<SyncRunResult>;
@@ -54,7 +54,7 @@ export type SyncLoop = {
 };
 
 /**
- * Turns `SyncSchedulerOptions.runOnce()` (see `sync/scheduler.ts`), which
+ * Turns `createSyncScheduler(...).runOnce()` (see `sync/scheduler.ts`), which
  * only processes a single outbox job per call, into a continuously
  * self-rescheduling loop. Deliberately not a bare `setInterval`: `runOnce()`
  * is an async network-bound call, and a fixed-interval timer would let two
@@ -99,8 +99,8 @@ export function createSyncLoop(options: SyncLoopOptions): SyncLoop {
       options.onResult?.(result);
       scheduleNext(IDLE_STATUSES.has(result.status) ? idleDelayMs : activeDelayMs);
     } catch (error) {
-      // `runOnce()` already classifies job-level failures into terminal
-      // outbox states instead of throwing (see `sync/scheduler.ts`), so
+      // The job executor already classifies job-level failures into terminal
+      // outbox states instead of throwing (see `sync/job.ts`), so
       // reaching here means something unexpected happened outside a single
       // job (e.g. the store itself is unavailable). The loop must not die
       // silently — fall back to the idle delay and keep trying.

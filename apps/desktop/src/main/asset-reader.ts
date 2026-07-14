@@ -16,7 +16,7 @@ import type { SyncAssetReader } from '../sync/public';
  * make the sync loop read a file outside the asset root. Any illegal key or
  * read failure (including a not-yet-written / missing file, which is exactly
  * what the V0 dev helper produces) fails closed with the
- * `local_asset_unreadable` safe-error shape `sync/scheduler.ts` already maps to
+ * `local_asset_unreadable` safe-error shape `sync/job.ts` already maps to
  * a terminal `blocked` outbox state. The thrown error never contains an
  * absolute path.
  *
@@ -41,7 +41,7 @@ type LocalAssetUnreadableError = Error & {
 };
 
 /**
- * Fail-closed error matching the shape `sync/scheduler.ts`'s `isSafeErrorShape`
+ * Fail-closed error matching the shape classified by `sync/errors.ts`
  * / `isLocalAssetSafeCode` detect (`code` + `safeMessage` + `retryable`). The
  * `message` is deliberately generic and path-free: neither it nor `safeMessage`
  * may leak the absolute path being read, per the same privacy contract as

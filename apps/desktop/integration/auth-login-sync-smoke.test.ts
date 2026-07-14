@@ -11,6 +11,7 @@ import { createServerApiClient } from '../src/server/client';
 import type { ServerApiTransport } from '../src/server/types';
 import { createMemoryStore } from '../src/storage';
 import type { AssetCacheRef, OperationalStoreRepository } from '../src/storage';
+import { createSyncJobExecutor } from '../src/sync/job';
 import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncAssetReader } from '../src/sync/types';
 
@@ -100,14 +101,23 @@ describe('real login through to the sync loop over real HTTP', () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
     await seedPendingCapture(store, registered.workspaceId, bytes);
 
-    const scheduler = createSyncScheduler({
+    const clock = { now: () => now };
+    const workspace = { getActiveWorkspaceId: async () => registered.workspaceId };
+    const executeJob = createSyncJobExecutor({
       api,
-      clock: { now: () => now },
+      clock,
       maxAttempts: 3,
       readAssetBytes: failClosedReadAssetBytes,
       retryBackoff: { baseMs: 60_000, factor: 2, jitterRatio: 0, maxMs: 300_000 },
       store,
-      workspace: { getActiveWorkspaceId: async () => registered.workspaceId },
+      workspace,
+    });
+    const scheduler = createSyncScheduler({
+      clock,
+      executeJob,
+      maxAttempts: 3,
+      store,
+      workspace,
     });
 
     // 5. First run: real ingestCapture over HTTP succeeds, but there are no
@@ -220,7 +230,7 @@ const fetchTransport: ServerApiTransport = async (request) => {
 
 /**
  * Mirrors `main/runtime.ts`'s `failClosedReadAssetBytes`
- * exactly (same safe-error shape `sync/scheduler.ts` already has dedicated
+ * exactly (same safe-error shape `sync/job.ts` already has dedicated
  * handling for), rather than importing it: that constant is not exported
  * (deliberately private to the runtime wiring module), and duplicating a
  * five-line fail-closed stub here keeps this integration test independent

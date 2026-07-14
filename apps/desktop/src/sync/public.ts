@@ -1,4 +1,11 @@
 export { computeRetryBackoffDelayMs } from './retry';
+export { createSyncJobExecutor } from './job';
+export type {
+  SyncJobApi,
+  SyncJobExecutor,
+  SyncJobExecutorOptions,
+  SyncJobStore,
+} from './job';
 export { createSyncQueueSummary } from './summary';
 export type { SyncSummaryStore } from './summary';
 export { reconcileOutboxJobFromServerCapture } from './reconciliation';
@@ -8,6 +15,7 @@ export type {
   ServerCaptureReconciliationStore,
 } from './reconciliation';
 export { createSyncScheduler } from './scheduler';
+export type { SyncSchedulerOptions, SyncSchedulerStore } from './scheduler';
 export { recoverInterruptedOutboxJobs } from './recovery';
 export type { StartupRecoveryOptions, StartupRecoverySummary } from './recovery';
 export { createSyncLoop } from './loop';
@@ -27,7 +35,6 @@ export type {
   SyncQueueSummary,
   SyncRunResult,
   SyncRunStatus,
-  SyncSchedulerOptions,
   SyncServerApi,
   SyncWorkspaceProvider,
 } from './types';

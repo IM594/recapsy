@@ -69,7 +69,7 @@ export async function recoverInterruptedOutboxJobs(
 
     // A recovered `result_pending` job already holds its transcript locally, so
     // it replays as a submit-only retry (no billed proxy re-run) — the
-    // scheduler's fast path handles the resubmission. See
+    // job executor's fast path handles the resubmission. See
     // `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
     if (job.state === 'result_pending') {
       await recoverJob(options, job, STARTUP_RECOVERY_ERRORS.interrupted_before_result_submit);

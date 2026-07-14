@@ -10,7 +10,7 @@ import {
  * Raised when an `AiOcrResponse` cannot be mapped to a valid screen-text
  * result — either no non-empty block survives, or the assembled shape fails
  * `OcrScreenTextResultSchema`. The proxy transcript is deterministic input, so
- * re-mapping the same bytes would fail identically; the sync scheduler treats
+ * re-mapping the same bytes would fail identically; the sync job executor treats
  * this as `result_invalid` and retries by re-running the proxy for a fresh
  * provider response, not by re-mapping. See
  * `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
