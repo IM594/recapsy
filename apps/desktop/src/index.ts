@@ -159,7 +159,7 @@ export type {
 export {
   createSyncJobExecutor,
   createSyncQueueSummary,
-  createSyncScheduler,
+  createSyncWorker,
 } from './sync/public';
 export { createSyncRuntime } from './sync/public';
 export type { SyncRuntime, SyncRuntimeOptions } from './sync/public';
@@ -183,7 +183,7 @@ export type {
   SyncClock,
   SyncRunResult,
   SyncRunStatus,
-  SyncSchedulerOptions,
+  SyncWorkerOptions,
   SyncServerApi,
   SyncWorkspaceProvider,
 } from './sync/public';

@@ -276,7 +276,7 @@ export type ServerApiClient = {
 // from `ServerApiClient` during this additive increment so existing consumers
 // of the base interface (notably the sync job executor, whose `SyncServerApi`
 // aliases `ServerApiClient`) are not forced to implement methods they do not
-// yet call. The scheduler is rewired onto these in a later increment, at which
+// yet call. The worker is rewired onto these in a later increment, at which
 // point they fold into the base contract.
 export type ServerApiOcrProxyClient = {
   runOcrProxy(input: RunOcrProxyInput): Promise<RunOcrProxyResult>;

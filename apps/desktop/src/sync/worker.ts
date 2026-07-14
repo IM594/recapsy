@@ -7,7 +7,7 @@ import type {
 import type { SyncJobExecutor } from './job';
 import type { SyncCancelResult, SyncClock, SyncRunResult, SyncWorkspaceProvider } from './types';
 
-export type SyncSchedulerStore = {
+export type SyncWorkerStore = {
   claimNextRetryableOutboxJob(input: ClaimRetryableOutboxJobInput): Promise<OutboxJob | null>;
   getOutboxJob(id: string): Promise<OutboxJob | null>;
   markOutboxJobTerminal(
@@ -16,15 +16,15 @@ export type SyncSchedulerStore = {
   ): Promise<OperationalStoreResult<OutboxJob>>;
 };
 
-export type SyncSchedulerOptions = {
+export type SyncWorkerOptions = {
   clock: SyncClock;
   executeJob: SyncJobExecutor;
   maxAttempts: number;
-  store: SyncSchedulerStore;
+  store: SyncWorkerStore;
   workspace: SyncWorkspaceProvider;
 };
 
-export function createSyncScheduler(options: SyncSchedulerOptions) {
+export function createSyncWorker(options: SyncWorkerOptions) {
   return {
     async cancel(jobId: string, reason: string): Promise<SyncCancelResult> {
       const job = await options.store.getOutboxJob(jobId);

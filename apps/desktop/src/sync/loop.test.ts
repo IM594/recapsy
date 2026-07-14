@@ -6,7 +6,7 @@ describe('sync loop', () => {
   it('reschedules with the idle delay after an idle result', async () => {
     const timers = new FakeTimers();
     const results: SyncRunResult[] = [{ processed: 0, status: 'idle' }];
-    const scheduler = { runOnce: async () => results.shift() ?? { processed: 0, status: 'idle' } };
+    const worker = { runOnce: async () => results.shift() ?? { processed: 0, status: 'idle' } };
     const observed: SyncRunResult[] = [];
 
     const loop = createSyncLoop({
@@ -14,7 +14,7 @@ describe('sync loop', () => {
       clearTimeoutFn: timers.clear,
       idleDelayMs: 2000,
       onResult: (result) => observed.push(result),
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
 
@@ -29,7 +29,7 @@ describe('sync loop', () => {
 
   it('reschedules almost immediately (activeDelayMs) after a job was actually processed', async () => {
     const timers = new FakeTimers();
-    const scheduler = {
+    const worker = {
       runOnce: async (): Promise<SyncRunResult> => ({
         jobId: 'job_1',
         processed: 1,
@@ -43,7 +43,7 @@ describe('sync loop', () => {
       clearTimeoutFn: timers.clear,
       idleDelayMs: 2000,
       onResult: (result) => observed.push(result),
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
 
@@ -58,7 +58,7 @@ describe('sync loop', () => {
 
   it('defaults the active delay to 150ms as a hot-spin guard when not overridden', async () => {
     const timers = new FakeTimers();
-    const scheduler = {
+    const worker = {
       runOnce: async (): Promise<SyncRunResult> => ({
         jobId: 'job_1',
         processed: 1,
@@ -69,7 +69,7 @@ describe('sync loop', () => {
     const loop = createSyncLoop({
       clearTimeoutFn: timers.clear,
       idleDelayMs: 2000,
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
 
@@ -87,7 +87,7 @@ describe('sync loop', () => {
     let maxConcurrentCalls = 0;
     let callCount = 0;
 
-    const scheduler = {
+    const worker = {
       async runOnce(): Promise<SyncRunResult> {
         callCount += 1;
         concurrentCalls += 1;
@@ -102,7 +102,7 @@ describe('sync loop', () => {
     const loop = createSyncLoop({
       clearTimeoutFn: timers.clear,
       idleDelayMs: 5,
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
 
@@ -122,7 +122,7 @@ describe('sync loop', () => {
   it('start() is idempotent while already running', async () => {
     const timers = new FakeTimers();
     let calls = 0;
-    const scheduler = {
+    const worker = {
       runOnce: async (): Promise<SyncRunResult> => {
         calls += 1;
         return { processed: 0, status: 'idle' };
@@ -131,7 +131,7 @@ describe('sync loop', () => {
 
     const loop = createSyncLoop({
       clearTimeoutFn: timers.clear,
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
 
@@ -147,7 +147,7 @@ describe('sync loop', () => {
   it('stop() cancels the pending timer and waits for an in-flight run to settle', async () => {
     const timers = new FakeTimers();
     let resolveRun: (() => void) | undefined;
-    const scheduler = {
+    const worker = {
       runOnce: () =>
         new Promise<SyncRunResult>((resolve) => {
           resolveRun = () => resolve({ processed: 0, status: 'idle' });
@@ -156,7 +156,7 @@ describe('sync loop', () => {
 
     const loop = createSyncLoop({
       clearTimeoutFn: timers.clear,
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
     loop.start();
@@ -183,7 +183,7 @@ describe('sync loop', () => {
     const timers = new FakeTimers();
     let calls = 0;
     const errors: unknown[] = [];
-    const scheduler = {
+    const worker = {
       runOnce: async (): Promise<SyncRunResult> => {
         calls += 1;
         if (calls === 1) {
@@ -197,7 +197,7 @@ describe('sync loop', () => {
       idleDelayMs: 7,
       onError: (error) => errors.push(error),
       clearTimeoutFn: timers.clear,
-      scheduler,
+      worker,
       setTimeoutFn: timers.set,
     });
 

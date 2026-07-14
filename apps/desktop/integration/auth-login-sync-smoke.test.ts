@@ -12,15 +12,15 @@ import type { ServerApiTransport } from '../src/server/types';
 import { createMemoryStore } from '../src/storage';
 import type { AssetCacheRef } from '../src/storage';
 import { createSyncJobExecutor } from '../src/sync/job';
-import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncAssetReader } from '../src/sync/types';
+import { createSyncWorker } from '../src/sync/worker';
 
 /**
  * End-to-end smoke test for the real login -> sync loop path this task adds:
  * bootstrap a real user against a real (in-process) server HTTP app, log in
  * through the real `createAuthClient()` (hitting the real `/v1/auth/login`
  * and `/v1/auth/session` routes, not a mock), then feed the resulting real
- * token + workspace id into `createServerApiClient` + `createSyncScheduler`
+ * token + workspace id into `createServerApiClient` + `createSyncWorker`
  * exactly as `main/runtime.ts` does. This intentionally
  * reuses the harness pattern from `server-http-smoke.test.ts`
  * (`Bun.serve()` + in-memory repositories, no real Postgres) rather than a
@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 describe('real login through to the sync loop over real HTTP', () => {
-  it('logs in through /v1/auth/login, validates the session through /v1/auth/session, and runs the sync scheduler against real workspace/token values', async () => {
+  it('logs in through /v1/auth/login, validates the session through /v1/auth/session, and runs the sync worker against real workspace/token values', async () => {
     const harness = await startServerHttpHarness();
     const email = 'desktop-auth-smoke@example.test';
     const registered = await harness.registerUser(email);
@@ -86,7 +86,7 @@ describe('real login through to the sync loop over real HTTP', () => {
     // Re-login for the sync portion below (the 401 probe above cleared tokenStore).
     await authClient.login({ email, password });
 
-    // 4. Real server API client + real sync scheduler, using the workspace
+    // 4. Real server API client + real sync worker, using the workspace
     // id and token that came out of the real login above — the same
     // construction `main/runtime.ts` performs after
     // `resolveWorkspaceId()` resolves.
@@ -112,7 +112,7 @@ describe('real login through to the sync loop over real HTTP', () => {
       store,
       workspace,
     });
-    const scheduler = createSyncScheduler({
+    const worker = createSyncWorker({
       clock,
       executeJob,
       maxAttempts: 3,
@@ -123,7 +123,7 @@ describe('real login through to the sync loop over real HTTP', () => {
     // 5. First run: real ingestCapture over HTTP succeeds, but there are no
     // real asset bytes yet (no Swift helper in this repo), so this must
     // fail closed to `blocked` — never a fabricated `synced`.
-    const firstRun = await scheduler.runOnce();
+    const firstRun = await worker.runOnce();
     expect(firstRun).toEqual({ jobId: 'job_1', processed: 1, status: 'blocked' });
 
     const job = await store.getOutboxJob('job_1');
@@ -138,8 +138,8 @@ describe('real login through to the sync loop over real HTTP', () => {
     });
 
     // 6. Second run: the job is now terminal, so there is nothing left to
-    // claim — the scheduler must report `idle`, not re-process it.
-    const secondRun = await scheduler.runOnce();
+    // claim — the worker must report `idle`, not re-process it.
+    const secondRun = await worker.runOnce();
     expect(secondRun).toEqual({ processed: 0, status: 'idle' });
 
     // Capture ingest completed, but the unreadable local asset stopped the

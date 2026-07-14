@@ -13,7 +13,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     let activeWorkspace: string | null = 'workspace_1';
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           activeWorkspace = 'workspace_2';
@@ -29,7 +29,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
     const job = await store.getOutboxJob('job_1');
 
     expect(result).toMatchObject({
@@ -49,7 +49,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture(input) {
           calls.push(`ingest:${input.idempotencyKey}`);
@@ -72,7 +72,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -110,7 +110,7 @@ describe('desktop sync job executor', () => {
       now,
     });
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           calls.push('ingest');
@@ -132,7 +132,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -151,7 +151,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture(input) {
           calls.push(`ingest:${input.idempotencyKey}`);
@@ -165,7 +165,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -183,7 +183,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     const created = await store.createOutboxJob(createJob());
     expect(created.ok).toBe(true);
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           throw new Error('ingestCapture must not run when the asset ref row is missing');
@@ -192,7 +192,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -214,7 +214,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           calls.push('proxy');
@@ -232,7 +232,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -254,7 +254,7 @@ describe('desktop sync job executor', () => {
   it('maps a provider_not_configured proxy failure to a fail-closed blocked state', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           throw new ServerApiError({
@@ -267,7 +267,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toMatchObject({ status: 'blocked' });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
@@ -279,7 +279,7 @@ describe('desktop sync job executor', () => {
   it('keeps provider_unavailable proxy failures and offline ingest failures retryable', async () => {
     const providerStore = createMemoryStore();
     await seedPendingCapture(providerStore);
-    const providerScheduler = createJobRunner({
+    const providerWorker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           throw new ServerApiError({
@@ -294,7 +294,7 @@ describe('desktop sync job executor', () => {
 
     const offlineStore = createMemoryStore();
     await seedPendingCapture(offlineStore);
-    const offlineScheduler = createJobRunner({
+    const offlineWorker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           throw Object.assign(new Error('offline'), {
@@ -307,8 +307,8 @@ describe('desktop sync job executor', () => {
       store: offlineStore,
     });
 
-    await providerScheduler.runOnce();
-    await offlineScheduler.runOnce();
+    await providerWorker.runOnce();
+    await offlineWorker.runOnce();
 
     expect(await providerStore.getOutboxJob('job_1')).toMatchObject({
       lastSafeError: {
@@ -329,7 +329,7 @@ describe('desktop sync job executor', () => {
   it('fails a job when the proxy rejects the input as too large', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           throw new ServerApiError({
@@ -342,7 +342,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toMatchObject({ status: 'failed' });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
@@ -358,7 +358,7 @@ describe('desktop sync job executor', () => {
   it('retries a job as result_invalid when the proxy response maps to no usable text', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           return {
@@ -376,7 +376,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toMatchObject({ status: 'retry_wait' });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
@@ -393,7 +393,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     let proxyCalls = 0;
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           return {
@@ -419,7 +419,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
     const job = await store.getOutboxJob('job_1');
 
     expect(result).toMatchObject({ status: 'retry_wait' });
@@ -442,7 +442,7 @@ describe('desktop sync job executor', () => {
   it('does not revive a locally cancelled job after the proxy returns', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           await store.markOutboxJobTerminal('job_1', {
@@ -459,7 +459,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -488,7 +488,7 @@ describe('desktop sync job executor', () => {
       }),
     );
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           calls.push('ingest');
@@ -511,7 +511,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -541,7 +541,7 @@ describe('desktop sync job executor', () => {
       }),
     );
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           calls.push('ingest');
@@ -564,7 +564,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -582,7 +582,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     const leakedText = 'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
           throw new ServerApiError({
@@ -595,7 +595,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    await scheduler.runOnce();
+    await worker.runOnce();
     const job = await store.getOutboxJob('job_1');
     const summary = await createSyncQueueSummary(store, 'workspace_1');
     const serialized = JSON.stringify({ job, summary });
@@ -619,7 +619,7 @@ describe('desktop sync job executor', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     const leakedText = 'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async ingestCapture() {
           throw new ServerApiError({
@@ -633,7 +633,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    await scheduler.runOnce();
+    await worker.runOnce();
     const job = await store.getOutboxJob('job_1');
     const summary = await createSyncQueueSummary(store, 'workspace_1');
     const serialized = JSON.stringify({ job, summary });
@@ -672,7 +672,7 @@ describe('desktop sync job executor', () => {
       now,
     });
     const calls: string[] = [];
-    const scheduler = createJobRunner({
+    const worker = createJobRunner({
       api: createApi({
         async getCapture(workspaceId, captureId) {
           calls.push(`capture:${workspaceId}:${captureId}`);
@@ -694,7 +694,7 @@ describe('desktop sync job executor', () => {
       store,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',

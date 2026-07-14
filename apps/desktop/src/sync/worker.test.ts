@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import { createMemoryStore } from '../storage';
 import type { OutboxJob, OutboxJobCreateInput } from '../storage';
-import { createSyncScheduler } from './scheduler';
 import { createSyncQueueSummary } from './summary';
+import { createSyncWorker } from './worker';
 
 const now = '2026-07-06T00:00:00.000Z';
 
-describe('desktop sync scheduler', () => {
+describe('desktop sync worker', () => {
   it('skips claiming work when the active workspace is missing', async () => {
     const store = createMemoryStore();
     await seedJob(store);
     let executeCalls = 0;
-    const scheduler = createScheduler(store, {
+    const worker = createWorker(store, {
       executeJob: async () => {
         executeCalls += 1;
         return { processed: 1, status: 'synced' };
@@ -19,7 +19,7 @@ describe('desktop sync scheduler', () => {
       workspaceId: null,
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       code: 'workspace_required',
@@ -32,9 +32,9 @@ describe('desktop sync scheduler', () => {
 
   it('returns idle when no retryable job can be claimed', async () => {
     const store = createMemoryStore();
-    const scheduler = createScheduler(store);
+    const worker = createWorker(store);
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({ processed: 0, status: 'idle' });
   });
@@ -43,14 +43,14 @@ describe('desktop sync scheduler', () => {
     const store = createMemoryStore();
     await seedJob(store);
     const executedJobs: OutboxJob[] = [];
-    const scheduler = createScheduler(store, {
+    const worker = createWorker(store, {
       executeJob: async (job) => {
         executedJobs.push(job);
         return { jobId: job.id, processed: 1, status: 'retry_wait' };
       },
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({ jobId: 'job_1', processed: 1, status: 'retry_wait' });
     expect(executedJobs).toHaveLength(1);
@@ -70,9 +70,9 @@ describe('desktop sync scheduler', () => {
       serverCaptureId: 'capture_1',
       state: 'syncing',
     });
-    const scheduler = createScheduler(store);
+    const worker = createWorker(store);
 
-    const result = await scheduler.cancel('job_1', 'user_cancelled');
+    const result = await worker.cancel('job_1', 'user_cancelled');
     const claimed = await store.claimNextRetryableOutboxJob({
       maxAttempts: 3,
       now: '2026-07-06T00:02:00.000Z',
@@ -95,9 +95,9 @@ describe('desktop sync scheduler', () => {
       serverCaptureId: 'capture_1',
       state: 'syncing',
     });
-    const scheduler = createScheduler(store);
+    const worker = createWorker(store);
 
-    const result = await scheduler.cancel('job_1', 'user_cancelled');
+    const result = await worker.cancel('job_1', 'user_cancelled');
     const summary = await createSyncQueueSummary(store, 'workspace_1', {
       backpressure: {
         action: 'pause',
@@ -120,7 +120,7 @@ describe('desktop sync scheduler', () => {
   });
 });
 
-function createScheduler(
+function createWorker(
   store: ReturnType<typeof createMemoryStore>,
   overrides: {
     executeJob?: (job: OutboxJob) => Promise<{
@@ -131,7 +131,7 @@ function createScheduler(
     workspaceId?: string | null;
   } = {},
 ) {
-  return createSyncScheduler({
+  return createSyncWorker({
     clock: { now: () => now },
     executeJob:
       overrides.executeJob ??

@@ -2,7 +2,6 @@ import { createSyncJobExecutor } from './job';
 import { createSyncLoop as createRealSyncLoop } from './loop';
 import type { SyncLoop, SyncLoopOptions } from './loop';
 import { recoverInterruptedOutboxJobs } from './recovery';
-import { createSyncScheduler } from './scheduler';
 import type {
   RetryBackoffConfig,
   SyncAssetReader,
@@ -10,6 +9,7 @@ import type {
   SyncRunResult,
   SyncServerApi,
 } from './types';
+import { createSyncWorker } from './worker';
 
 const DEFAULT_SYNC_MAX_ATTEMPTS = 15;
 const DEFAULT_SYNC_RETRY_BACKOFF: RetryBackoffConfig = {
@@ -80,7 +80,7 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
         store: options.store,
         workspace,
       });
-      const scheduler = createSyncScheduler({
+      const worker = createSyncWorker({
         clock,
         executeJob,
         maxAttempts,
@@ -93,7 +93,7 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
         idleDelayMs: options.idleDelayMs,
         onError: options.onError,
         onResult: options.onResult,
-        scheduler,
+        worker,
       });
       loop.start();
     },

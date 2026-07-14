@@ -14,8 +14,8 @@ export type {
   ServerCaptureReconciliationClock,
   ServerCaptureReconciliationStore,
 } from './reconciliation';
-export { createSyncScheduler } from './scheduler';
-export type { SyncSchedulerOptions, SyncSchedulerStore } from './scheduler';
+export { createSyncWorker } from './worker';
+export type { SyncWorkerOptions, SyncWorkerStore } from './worker';
 export { recoverInterruptedOutboxJobs } from './recovery';
 export type { StartupRecoveryOptions, StartupRecoverySummary } from './recovery';
 export { createSyncLoop } from './loop';

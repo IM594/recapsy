@@ -23,8 +23,8 @@ import { createMemoryStore, createSqliteStore } from '../src/storage';
 import type { AssetCacheRef, OutboxJobCreateInput } from '../src/storage';
 import { createBunSqliteDatabase } from '../src/storage/bun-driver';
 import { createSyncJobExecutor } from '../src/sync/job';
-import { createSyncScheduler } from '../src/sync/scheduler';
 import type { SyncQueueStore, SyncServerApi } from '../src/sync/types';
+import { createSyncWorker } from '../src/sync/worker';
 
 const now = '2026-07-06T00:00:00.000Z';
 const adminToken = 'test-admin-bootstrap-token';
@@ -70,9 +70,9 @@ describe('desktop server sync over real HTTP', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
-    const scheduler = createScheduler(store, client, user.workspaceId, bytes);
+    const worker = createWorker(store, client, user.workspaceId, bytes);
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
     const timeline = await client.queryTimeline({ workspaceId: user.workspaceId, limit: 10 });
     const search = await client.querySearch({
       workspaceId: user.workspaceId,
@@ -119,9 +119,9 @@ describe('desktop server sync over real HTTP', () => {
     const store = await createSqliteTestStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
-    const scheduler = createScheduler(store, client, user.workspaceId, bytes);
+    const worker = createWorker(store, client, user.workspaceId, bytes);
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
     const search = await client.querySearch({
       workspaceId: user.workspaceId,
       query: 'invoice',
@@ -209,9 +209,9 @@ describe('desktop server sync over real HTTP', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
-    const scheduler = createScheduler(store, client, user.workspaceId, bytes);
+    const worker = createWorker(store, client, user.workspaceId, bytes);
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
     const search = await client.querySearch({
       workspaceId: user.workspaceId,
       query: 'anything',
@@ -240,9 +240,9 @@ describe('desktop server sync over real HTTP', () => {
     const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
     const client = createHttpClient(harness.endpoint, user.accessToken);
-    const scheduler = createScheduler(store, client, user.workspaceId, bytes);
+    const worker = createWorker(store, client, user.workspaceId, bytes);
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
     const job = await store.getOutboxJob('job_1');
     const search = await client.querySearch({
       workspaceId: user.workspaceId,
@@ -289,9 +289,9 @@ describe('desktop server sync over real HTTP', () => {
       state: 'syncing',
     });
     const client = createHttpClient(harness.endpoint, user.accessToken);
-    const scheduler = createScheduler(store, client, user.workspaceId, bytes);
+    const worker = createWorker(store, client, user.workspaceId, bytes);
 
-    const cancel = await scheduler.cancel('job_1', 'user_cancelled');
+    const cancel = await worker.cancel('job_1', 'user_cancelled');
 
     expect(cancel).toEqual({ cancelled: true, jobId: 'job_1' });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
@@ -320,11 +320,11 @@ describe('desktop server sync over real HTTP', () => {
       },
     });
     const client = createHttpClient(harness.endpoint, user.accessToken);
-    const scheduler = createScheduler(store, client, user.workspaceId, bytes, async () => {
+    const worker = createWorker(store, client, user.workspaceId, bytes, async () => {
       throw new Error('block_ocr must not read local bytes');
     });
 
-    const result = await scheduler.runOnce();
+    const result = await worker.runOnce();
 
     expect(result).toEqual({
       jobId: 'job_1',
@@ -365,7 +365,7 @@ function createHttpClient(endpoint: string, accessToken: string) {
   });
 }
 
-function createScheduler(
+function createWorker(
   store: SyncQueueStore,
   api: SyncServerApi,
   workspaceId: string,
@@ -388,7 +388,7 @@ function createScheduler(
     store,
     workspace,
   });
-  return createSyncScheduler({
+  return createSyncWorker({
     clock,
     executeJob,
     maxAttempts: 3,

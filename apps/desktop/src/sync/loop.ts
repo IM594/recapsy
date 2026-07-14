@@ -2,8 +2,8 @@ import type { SyncRunResult, SyncRunStatus } from './types';
 
 /**
  * Narrow surface this loop depends on: just `runOnce()` from
- * `createSyncScheduler(...)` (see `sync/scheduler.ts`). Duck-typed so tests
- * can supply a fake scheduler without composing the worker's dependencies.
+ * `createSyncWorker(...)` (see `sync/worker.ts`). Duck-typed so tests
+ * can supply a fake worker without composing the worker's dependencies.
  */
 export type SyncLoopRunner = {
   runOnce(): Promise<SyncRunResult>;
@@ -12,7 +12,7 @@ export type SyncLoopRunner = {
 const IDLE_STATUSES: ReadonlySet<SyncRunStatus> = new Set(['idle', 'skipped']);
 
 export type SyncLoopOptions = {
-  scheduler: SyncLoopRunner;
+  worker: SyncLoopRunner;
   /**
    * Delay before the next `runOnce()` when the last call found nothing to do
    * (`idle`/`skipped`, e.g. no workspace or an empty outbox). Default 2000ms
@@ -54,7 +54,7 @@ export type SyncLoop = {
 };
 
 /**
- * Turns `createSyncScheduler(...).runOnce()` (see `sync/scheduler.ts`), which
+ * Turns `createSyncWorker(...).runOnce()` (see `sync/worker.ts`), which
  * only processes a single outbox job per call, into a continuously
  * self-rescheduling loop. Deliberately not a bare `setInterval`: `runOnce()`
  * is an async network-bound call, and a fixed-interval timer would let two
@@ -95,7 +95,7 @@ export function createSyncLoop(options: SyncLoopOptions): SyncLoop {
     }
 
     try {
-      const result = await options.scheduler.runOnce();
+      const result = await options.worker.runOnce();
       options.onResult?.(result);
       scheduleNext(IDLE_STATUSES.has(result.status) ? idleDelayMs : activeDelayMs);
     } catch (error) {
