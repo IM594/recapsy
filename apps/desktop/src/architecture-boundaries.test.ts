@@ -212,6 +212,55 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  it('owns sync error classification and safe presentation in one module', async () => {
+    const schedulerSource = await readSource('sync/scheduler.ts');
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const violations: string[] = [];
+    for (const requiredPath of ['sync/errors.ts', 'sync/errors.test.ts']) {
+      if (!sourceFiles.includes(requiredPath)) {
+        violations.push(`${requiredPath} is missing`);
+      }
+    }
+    const expectedImports = [
+      'classifySyncError',
+      'isLocalAssetSyncErrorCode',
+      'isTerminalBlockingSyncErrorCode',
+      'syncSafeMessage',
+      'toSyncPresentationError',
+    ];
+    const errorsImport = schedulerSource.match(
+      /import\s*\{([^}]*)\}\s*from\s*['"]\.\/errors['"]/s,
+    )?.[1];
+    for (const expectedImport of expectedImports) {
+      if (!errorsImport || !new RegExp(`\\b${expectedImport}\\b`).test(errorsImport)) {
+        violations.push(`sync/scheduler.ts does not import ${expectedImport} from ./errors`);
+      }
+    }
+
+    for (const retiredDeclaration of [
+      'TERMINAL_BLOCKING_OCR_ERRORS',
+      'classifyUnhandledSyncError',
+      'isSafeErrorShape',
+      'isClassifiableSyncErrorCode',
+      'isRetryableClassifiableSyncCode',
+      'toPresentationErrorCode',
+      'toIpcError',
+      'syncSafeMessage',
+      'isLocalAssetSafeCode',
+    ]) {
+      if (new RegExp(`(?:const|function)\\s+${retiredDeclaration}\\b`).test(schedulerSource)) {
+        violations.push(`sync/scheduler.ts still declares ${retiredDeclaration}`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('routes every production import into a capability through its public surface', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('**/*.ts');

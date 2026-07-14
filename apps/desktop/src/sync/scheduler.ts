@@ -1,31 +1,20 @@
-import type {
-  BackpressureDecision,
-  OutboxJob,
-  SafeOperationalError,
-  StoredOcrResult,
-} from '../storage/public';
+import type { BackpressureDecision, OutboxJob, StoredOcrResult } from '../storage/public';
+import {
+  classifySyncError,
+  isLocalAssetSyncErrorCode,
+  isTerminalBlockingSyncErrorCode,
+  syncSafeMessage,
+  toSyncPresentationError,
+} from './errors';
 import { computeRetryBackoffDelayMs } from './retry';
 import { OcrResultInvalidError, mapOcrScreenText } from './screen-text';
 import type {
   SyncCancelResult,
-  SyncPresentationErrorCode,
   SyncQueueStore,
   SyncQueueSummary,
   SyncRunResult,
   SyncSchedulerOptions,
 } from './types';
-
-// Proxy/submit failures the sync flow routes to a terminal `blocked` state
-// (policy/authorization denials and unconfigured providers) rather than a
-// retryable failure or a generic `failed`. The server client already
-// computes `retryable`; this set only redirects the non-retryable *policy*
-// denials, which are a block rather than a hard failure. See
-// `docs/design/OCR_OUTBOX_STATE_MACHINE.md` §3.2.
-const TERMINAL_BLOCKING_OCR_ERRORS = new Set([
-  'policy_denied',
-  'provider_not_configured',
-  'quota_exceeded',
-]);
 
 export function createSyncScheduler(options: SyncSchedulerOptions) {
   return {
@@ -118,7 +107,7 @@ export async function createSyncQueueSummary(
       : {}),
     ...(lastSafeError
       ? {
-          lastError: toIpcError(lastSafeError),
+          lastError: toSyncPresentationError(lastSafeError),
         }
       : {}),
     ...(nextRetryAt ? { nextRetryAt } : {}),
@@ -311,43 +300,31 @@ async function handleSyncError(
   job: OutboxJob,
   error: unknown,
 ): Promise<SyncRunResult> {
-  if (isSafeErrorShape(error)) {
-    if (TERMINAL_BLOCKING_OCR_ERRORS.has(error.code)) {
-      await markJobTerminalWithSafeError(options, job, 'blocked', {
-        code: error.code,
-        retryable: false,
-      });
-      return { jobId: job.id, processed: 1, status: 'blocked' };
-    }
+  const classified = classifySyncError(error);
+  if (isTerminalBlockingSyncErrorCode(classified.code)) {
+    await markJobTerminalWithSafeError(options, job, 'blocked', {
+      code: classified.code,
+      retryable: false,
+    });
+    return { jobId: job.id, processed: 1, status: 'blocked' };
+  }
 
-    if (isLocalAssetSafeCode(error.code)) {
-      await markJobTerminalWithSafeError(options, job, 'blocked', {
-        code: error.code,
-        retryable: false,
-      });
-      return {
-        code: undefined,
-        jobId: job.id,
-        processed: 1,
-        status: 'blocked',
-      };
-    }
-
-    await recordSafeError(options, job, {
-      code: error.code,
-      retryable: error.retryable,
+  if (isLocalAssetSyncErrorCode(classified.code)) {
+    await markJobTerminalWithSafeError(options, job, 'blocked', {
+      code: classified.code,
+      retryable: false,
     });
     return {
-      code: error.code === 'offline' ? 'offline' : undefined,
+      code: undefined,
       jobId: job.id,
       processed: 1,
-      status: error.retryable ? 'retry_wait' : 'failed',
+      status: 'blocked',
     };
   }
 
-  const classified = classifyUnhandledSyncError(error);
   await recordSafeError(options, job, classified);
   return {
+    code: classified.code === 'offline' ? 'offline' : undefined,
     jobId: job.id,
     processed: 1,
     status: classified.retryable ? 'retry_wait' : 'failed',
@@ -392,52 +369,6 @@ export async function reconcileOutboxJobFromServerCapture(
   return null;
 }
 
-function classifyUnhandledSyncError(error: unknown): { code: string; retryable: boolean } {
-  if (error instanceof SyntaxError || error instanceof TypeError) {
-    return { code: 'validation_failed', retryable: false };
-  }
-
-  if (error instanceof Error) {
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === 'string' && code.length > 0) {
-      if (isLocalAssetSafeCode(code)) {
-        return { code, retryable: false };
-      }
-
-      if (isClassifiableSyncErrorCode(code)) {
-        return {
-          code,
-          retryable: isRetryableClassifiableSyncCode(code),
-        };
-      }
-    }
-
-    const message = error.message.toLowerCase();
-    if (message.includes('sqlite') || message.includes('database')) {
-      return { code: 'server_unavailable', retryable: true };
-    }
-  }
-
-  return { code: 'validation_failed', retryable: false };
-}
-
-function isClassifiableSyncErrorCode(code: string): boolean {
-  return [
-    'offline',
-    'server_unavailable',
-    'validation_failed',
-    'workspace_required',
-    'unknown',
-    'result_invalid',
-    'temporary_location_missing',
-    'cleanup_failed',
-  ].includes(code);
-}
-
-function isRetryableClassifiableSyncCode(code: string): boolean {
-  return code === 'offline' || code === 'server_unavailable' || code === 'unknown';
-}
-
 async function markJobTerminalWithSafeError(
   options: SyncSchedulerOptions,
   job: OutboxJob,
@@ -459,21 +390,6 @@ async function markJobTerminalWithSafeError(
     serverCaptureId: input.serverCaptureId ?? job.serverCaptureId,
     state,
   });
-}
-
-function isSafeErrorShape(
-  error: unknown,
-): error is { code: string; safeMessage: string; retryable: boolean } {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    'safeMessage' in error &&
-    'retryable' in error &&
-    typeof error.code === 'string' &&
-    typeof error.safeMessage === 'string' &&
-    typeof error.retryable === 'boolean'
-  );
 }
 
 async function ensureWorkspaceStillActive(
@@ -517,151 +433,4 @@ async function recordSafeError(
 async function isLocallyCancelled(store: SyncQueueStore, jobId: string): Promise<boolean> {
   const job = await store.getOutboxJob(jobId);
   return job?.state === 'cancelled';
-}
-
-function toPresentationErrorCode(code: string): SyncPresentationErrorCode {
-  if (code === 'provider_rate_limited' || code === 'provider_timeout') {
-    return 'provider_unavailable';
-  }
-
-  if (
-    [
-      'unauthenticated',
-      'workspace_required',
-      'offline',
-      'server_unavailable',
-      'policy_denied',
-      'quota_exceeded',
-      'provider_not_configured',
-      'provider_unavailable',
-      'input_too_large',
-      'unsupported_format',
-      'validation_failed',
-      'result_invalid',
-      'cancelled',
-      'unknown',
-    ].includes(code)
-  ) {
-    return code as SyncPresentationErrorCode;
-  }
-
-  if (
-    code === 'local_asset_missing' ||
-    code === 'local_asset_unreadable' ||
-    code === 'asset_ref_missing' ||
-    code === 'upload_input_missing' ||
-    code === 'result_invalid'
-  ) {
-    return 'validation_failed';
-  }
-
-  return 'unknown';
-}
-
-function toIpcError(error: SafeOperationalError) {
-  const code = toPresentationErrorCode(error.code);
-  const details =
-    code !== error.code && code !== 'unknown'
-      ? {
-          safeCode: error.code,
-        }
-      : undefined;
-
-  return {
-    code,
-    message: syncSafeMessage(error.code),
-    ...(details ? { details } : {}),
-  };
-}
-
-function syncSafeMessage(code: string): string {
-  if (code === 'unauthenticated') {
-    return 'Authentication is required.';
-  }
-
-  if (code === 'workspace_required') {
-    return 'Workspace is required.';
-  }
-
-  if (code === 'offline') {
-    return 'Network is offline or unavailable.';
-  }
-
-  if (code === 'server_unavailable') {
-    return 'Server is unavailable.';
-  }
-
-  if (code === 'policy_denied') {
-    return 'Capture policy denied this request.';
-  }
-
-  if (code === 'quota_exceeded') {
-    return 'Quota has been exceeded.';
-  }
-
-  if (code === 'provider_not_configured') {
-    return 'Provider is not configured.';
-  }
-
-  if (code === 'provider_unavailable') {
-    return 'Provider is unavailable.';
-  }
-
-  if (code === 'provider_auth_failed') {
-    return 'Provider authentication failed.';
-  }
-
-  if (code === 'provider_rate_limited') {
-    return 'Provider is rate limited.';
-  }
-
-  if (code === 'provider_timeout') {
-    return 'OCR provider timed out.';
-  }
-
-  if (code === 'input_too_large') {
-    return 'Input is too large.';
-  }
-
-  if (code === 'unsupported_format') {
-    return 'Input format is unsupported.';
-  }
-
-  if (code === 'validation_failed') {
-    return 'Request validation failed.';
-  }
-
-  if (code === 'result_invalid') {
-    return 'OCR result is invalid.';
-  }
-
-  if (code === 'unknown') {
-    return 'Sync failed due to an unexpected error.';
-  }
-
-  if (code === 'local_asset_missing') {
-    return 'Local asset is missing.';
-  }
-
-  if (code === 'local_asset_unreadable') {
-    return 'Local asset is unreadable.';
-  }
-
-  if (code === 'asset_ref_missing') {
-    return 'Local asset reference is missing.';
-  }
-
-  if (code === 'upload_input_missing') {
-    return 'Upload input asset is missing.';
-  }
-
-  if (code === 'cancelled') {
-    return 'Request was cancelled.';
-  }
-
-  return 'Sync failed.';
-}
-
-function isLocalAssetSafeCode(code: string): boolean {
-  return code === 'local_asset_missing' || code === 'local_asset_unreadable';
 }
