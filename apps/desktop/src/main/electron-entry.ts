@@ -150,7 +150,7 @@ const tokenStore = createAuthStorage({
 
 /**
  * `fetch`-backed transport shared by the auth client and the server API
- * client, matching the same shape `integration/server-http-smoke.test.ts`
+ * client, matching the same shape `tests/integration/server-http.test.ts`
  * already exercises against a real HTTP server.
  */
 const fetchTransport = createHttpTransport();

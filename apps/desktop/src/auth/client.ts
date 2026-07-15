@@ -75,7 +75,7 @@ export type AuthClientOptions = {
    * real Electron entry point can share one `fetch`-backed transport
    * implementation across this client and `createServerApiClient`, and so
    * tests can share the same fake-transport pattern already used in
-   * `server/client.test.ts` / `integration/server-http-smoke.test.ts`.
+   * `server/tests/client.test.ts` / `tests/integration/server-http.test.ts`.
    */
   transport: ServerApiTransport;
 };
