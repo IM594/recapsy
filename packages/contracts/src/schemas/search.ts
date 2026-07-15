@@ -59,7 +59,7 @@ export const SearchDocumentSchema = z
   })
   .strict();
 
-export const SearchQueryRequestSchema = z
+export const SearchRequestSchema = z
   .object({
     workspaceId: IdSchema,
     q: z.string().min(1).max(1024),
@@ -141,7 +141,7 @@ export type SearchFallbackReason = z.infer<typeof SearchFallbackReasonSchema>;
 export type SearchResultOcrStatus = z.infer<typeof SearchResultOcrStatusSchema>;
 export type SearchResultSyncStatus = z.infer<typeof SearchResultSyncStatusSchema>;
 export type SearchDocument = z.infer<typeof SearchDocumentSchema>;
-export type SearchQueryRequest = z.infer<typeof SearchQueryRequestSchema>;
+export type SearchRequest = z.infer<typeof SearchRequestSchema>;
 export type SearchGetQuery = z.infer<typeof SearchGetQuerySchema>;
 export type SearchSnippet = z.infer<typeof SearchSnippetSchema>;
 export type SearchResult = z.infer<typeof SearchResultSchema>;

@@ -109,7 +109,7 @@ export const EffectiveProviderSettingSchema = z
   })
   .strict();
 
-export const EffectiveProviderSettingsResponseSchema = z
+export const ResolvedProviderSettingsSchema = z
   .object({
     workspaceId: IdSchema,
     userId: IdSchema.optional(),
@@ -139,6 +139,4 @@ export type AdminProviderSettingListResponse = z.infer<
 export type AdminProviderSettingResponse = z.infer<typeof AdminProviderSettingResponseSchema>;
 export type AdminProviderModelsResponse = z.infer<typeof AdminProviderModelsResponseSchema>;
 export type EffectiveProviderSetting = z.infer<typeof EffectiveProviderSettingSchema>;
-export type EffectiveProviderSettingsResponse = z.infer<
-  typeof EffectiveProviderSettingsResponseSchema
->;
+export type ResolvedProviderSettings = z.infer<typeof ResolvedProviderSettingsSchema>;

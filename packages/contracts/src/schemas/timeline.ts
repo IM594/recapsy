@@ -84,7 +84,7 @@ export const TimelineEventSchema = z
   })
   .strict();
 
-export const TimelineQueryRequestSchema = z
+export const TimelineQuerySchema = z
   .object({
     workspaceId: IdSchema,
     from: IsoDateTimeSchema.optional(),
@@ -124,6 +124,6 @@ export type TimelineDocumentPathSummary = z.infer<typeof TimelineDocumentPathSum
 export type TimelineContextSummary = z.infer<typeof TimelineContextSummarySchema>;
 export type TimelineEventStatuses = z.infer<typeof TimelineEventStatusesSchema>;
 export type TimelineEvent = z.infer<typeof TimelineEventSchema>;
-export type TimelineQueryRequest = z.infer<typeof TimelineQueryRequestSchema>;
+export type TimelineQuery = z.infer<typeof TimelineQuerySchema>;
 export type TimelineListResponse = z.infer<typeof TimelineListResponseSchema>;
 export type TimelineEventResponse = z.infer<typeof TimelineEventResponseSchema>;

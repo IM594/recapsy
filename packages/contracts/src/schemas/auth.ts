@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { CapabilitiesResponseSchema } from './capabilities.js';
 import { IdSchema, IsoDateTimeSchema } from './common.js';
-import { EffectiveProviderSettingsResponseSchema } from './provider-settings.js';
-import { SubscriptionEntitlementSnapshotSchema } from './subscription.js';
+import { ResolvedProviderSettingsSchema } from './provider-settings.js';
+import { EntitlementSnapshotSchema } from './subscription.js';
 import { WorkspaceMembershipSchema, WorkspaceSummarySchema } from './workspace.js';
 
 export const AuthUserRoleSchema = z.enum(['user', 'admin']);
@@ -72,9 +72,9 @@ export const AuthSessionSnapshotSchema = z
     user: AuthSafeUserSchema,
     currentWorkspace: WorkspaceSummarySchema,
     membership: WorkspaceMembershipSchema,
-    subscription: SubscriptionEntitlementSnapshotSchema,
+    subscription: EntitlementSnapshotSchema,
     capabilities: CapabilitiesResponseSchema,
-    providerSettings: EffectiveProviderSettingsResponseSchema,
+    providerSettings: ResolvedProviderSettingsSchema,
   })
   .strict();
 

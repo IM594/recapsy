@@ -70,7 +70,7 @@ export const SubscriptionSchema = z
   })
   .strict();
 
-export const SubscriptionEntitlementSnapshotSchema = z
+export const EntitlementSnapshotSchema = z
   .object({
     workspaceId: IdSchema,
     subscriptionId: IdSchema.nullable().optional(),
@@ -180,7 +180,7 @@ export const AdminSubscriptionListResponseSchema = z
 export const AdminSubscriptionResponseSchema = z
   .object({
     subscription: SubscriptionSchema,
-    entitlement: SubscriptionEntitlementSnapshotSchema,
+    entitlement: EntitlementSnapshotSchema,
   })
   .strict();
 
@@ -198,7 +198,7 @@ export type PlanSummary = z.infer<typeof PlanSummarySchema>;
 export type Plan = z.infer<typeof PlanSchema>;
 export type UsageCounter = z.infer<typeof UsageCounterSchema>;
 export type Subscription = z.infer<typeof SubscriptionSchema>;
-export type SubscriptionEntitlementSnapshot = z.infer<typeof SubscriptionEntitlementSnapshotSchema>;
+export type EntitlementSnapshot = z.infer<typeof EntitlementSnapshotSchema>;
 export type AdminPlanCreateRequest = z.infer<typeof AdminPlanCreateRequestSchema>;
 export type AdminPlanUpdateRequest = z.infer<typeof AdminPlanUpdateRequestSchema>;
 export type AdminPlanListResponse = z.infer<typeof AdminPlanListResponseSchema>;

@@ -18,7 +18,7 @@ export const CapturePolicyRuleKindSchema = z.enum([
 export const CapturePolicyRuleScopeSchema = z.enum(['local_user', 'workspace_default']);
 export const StorageDeleteBehaviorSchema = z.enum(['delete_reference', 'delete_source_when_owned']);
 export const StorageQuotaScopeSchema = z.enum(['workspace']);
-export const AXAllowlistStatusSchema = z.enum(['disabled']);
+export const AxAllowlistStatusSchema = z.enum(['disabled']);
 
 export const CapturePolicyRuleSchema = z
   .object({
@@ -58,7 +58,7 @@ export const CapturePolicySnapshotSchema = z
     version: z.string().min(1).max(128),
     deviceId: z.string().min(1).max(256).nullable().optional(),
     policy: CaptureDefaultPolicySchema,
-    axAllowlistStatus: AXAllowlistStatusSchema.default('disabled'),
+    axAllowlistStatus: AxAllowlistStatusSchema.default('disabled'),
     ttlSeconds: z.number().int().positive(),
     generatedAt: IsoDateTimeSchema,
     expiresAt: IsoDateTimeSchema,
@@ -93,7 +93,7 @@ export const CapturePoliciesResponseSchema = z
       .object({
         enabled: z.literal(false),
         axTextUploadEnabled: z.literal(false),
-        status: AXAllowlistStatusSchema,
+        status: AxAllowlistStatusSchema,
         reason: z.literal('ax_text_upload_disabled'),
       })
       .strict(),
@@ -109,12 +109,12 @@ export const StoragePoliciesResponseSchema = z
   })
   .strict();
 
-export const AXAllowlistDisabledResponseSchema = z
+export const AxAllowlistResponseSchema = z
   .object({
     workspaceId: IdSchema,
     enabled: z.literal(false),
     axTextUploadEnabled: z.literal(false),
-    status: AXAllowlistStatusSchema,
+    status: AxAllowlistStatusSchema,
     reason: z.literal('ax_text_upload_disabled'),
     policyVersion: z.string().min(1).max(128).nullable().optional(),
     generatedAt: IsoDateTimeSchema,
@@ -126,7 +126,7 @@ export type CapturePolicyRuleKind = z.infer<typeof CapturePolicyRuleKindSchema>;
 export type CapturePolicyRuleScope = z.infer<typeof CapturePolicyRuleScopeSchema>;
 export type StorageDeleteBehavior = z.infer<typeof StorageDeleteBehaviorSchema>;
 export type StorageQuotaScope = z.infer<typeof StorageQuotaScopeSchema>;
-export type AXAllowlistStatus = z.infer<typeof AXAllowlistStatusSchema>;
+export type AxAllowlistStatus = z.infer<typeof AxAllowlistStatusSchema>;
 export type CapturePolicyRule = z.infer<typeof CapturePolicyRuleSchema>;
 export type CapturePrivacyDecision = z.infer<typeof CapturePrivacyDecisionSchema>;
 export type CaptureDefaultPolicy = z.infer<typeof CaptureDefaultPolicySchema>;
@@ -134,4 +134,4 @@ export type CapturePolicySnapshot = z.infer<typeof CapturePolicySnapshotSchema>;
 export type StoragePolicy = z.infer<typeof StoragePolicySchema>;
 export type CapturePoliciesResponse = z.infer<typeof CapturePoliciesResponseSchema>;
 export type StoragePoliciesResponse = z.infer<typeof StoragePoliciesResponseSchema>;
-export type AXAllowlistDisabledResponse = z.infer<typeof AXAllowlistDisabledResponseSchema>;
+export type AxAllowlistResponse = z.infer<typeof AxAllowlistResponseSchema>;
