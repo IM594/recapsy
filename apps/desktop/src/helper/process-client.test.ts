@@ -14,6 +14,7 @@ import { validateMainToHelperEnvelope } from './protocol/validation';
  * spawns the real dev helper script.
  */
 class FakeChildProcess extends EventEmitter implements HelperProcess {
+  readonly pid = 4321;
   readonly stdin = new FakeWritable();
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
@@ -53,6 +54,23 @@ function helloLine(): string {
 }
 
 describe('helper process client', () => {
+  it('spawns the helper in a dedicated process group on POSIX', async () => {
+    const child = new FakeChildProcess();
+    let detached: boolean | undefined;
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: (_command, _args, options) => {
+        detached = options.detached;
+        return child;
+      },
+    });
+
+    await client.start();
+
+    expect(detached).toBe(process.platform !== 'win32');
+  });
+
   it('forwards well-formed envelopes from stdout to onEnvelope', async () => {
     const child = new FakeChildProcess();
     const received: HelperEnvelope[] = [];
@@ -306,11 +324,16 @@ describe('helper process client', () => {
     expect(shutdownDecoded).toMatchObject({ envelope: { type: 'helper.shutdown' }, ok: true });
   });
 
-  it('force-kills the child if it does not exit before the shutdown timeout', async () => {
+  it('force-kills the dedicated process group if shutdown times out', async () => {
     const child = new FakeChildProcess();
+    const killedProcessGroups: Array<{ processGroupId: number; signal: NodeJS.Signals }> = [];
     const client = createHelperProcessClient({
       args: [],
       command: 'fake',
+      forceKillProcessGroup: (processGroupId, signal) => {
+        killedProcessGroups.push({ processGroupId, signal });
+        return true;
+      },
       shutdownTimeoutMs: 20,
       spawnHelperProcess: () => child,
     });
@@ -321,8 +344,8 @@ describe('helper process client', () => {
     setTimeout(() => child.emit('exit', null, 'SIGKILL'), 40);
     await stopPromise;
 
-    expect(child.killed).toBe(true);
-    expect(child.lastKillSignal).toBe('SIGKILL');
+    expect(killedProcessGroups).toEqual([{ processGroupId: 4321, signal: 'SIGKILL' }]);
+    expect(child.killed).toBe(false);
   });
 
   it('reports unexpectedExit with no leaked message when spawning fails', async () => {

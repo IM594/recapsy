@@ -11,7 +11,7 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 | `CaptureCore` | Swift library | 纯逻辑:相对键生成、资产落盘路径拼接、活跃窗口选择规则、NDJSON envelope 编码、SHA-256 内容哈希、capture id 生成。全部有单测,且完全不依赖 libwebp / ScreenCaptureKit。 |
 | `CWebP` | system library shim | 把 libwebp 的 C 编码 API(`webp/encode.h`)以 `CWebP` 模块暴露给 Swift。头/库路径**不写死**,由 `build-capture-bundle.sh` 经 `brew --prefix webp` 动态传入。 |
 | `RecapsyCapture` | Swift executable | 采集体:取前台 app → `SCShareableContent` 选主窗口 → `SCContentFilter(desktopIndependentWindow:)` 只截该活跃窗口 → CGImage 转 RGBA → libwebp `WebPEncodeRGBA` 有损编码(压后约 100–800KB)→ 写资产根 → NDJSON stdio 主循环。组装进 bundle 时**重命名为 `Recapsy`**(隐私面板显示名,ADR 约束③)。 |
-| `CaptureLauncher` | C executable | 极小 disclaim 启动器:`posix_spawn` + `responsibility_spawnattrs_setdisclaim`,`waitpid` 到采集体退出并镜像其退出码。 |
+| `CaptureLauncher` | C executable | 极小 disclaim supervisor：`posix_spawn` + `responsibility_spawnattrs_setdisclaim`，转发 `SIGTERM` / `SIGINT`，严格 `waitpid` 并镜像采集体退出码；Electron 超时强退时终止 launcher 与采集体共享的专用进程组。 |
 
 前台 app 无可截窗口时(如 Finder 桌面、无窗口应用),采集体**静默跳过本次 tick**:不发 `capture.result`、不发 `capture.error`(仅 stderr 记一行),下个 interval 再试。
 

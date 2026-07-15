@@ -27,6 +27,7 @@ const FORCE_KILL_GRACE_MS = 1000;
  * satisfies this type as-is.
  */
 export type HelperProcess = {
+  readonly pid?: number;
   readonly stdin: { write(chunk: string): boolean } | null;
   readonly stdout: NodeEventSource | null;
   readonly stderr: NodeEventSource | null;
@@ -45,7 +46,7 @@ type NodeEventSource = {
 export type SpawnHelperProcess = (
   command: string,
   args: string[],
-  options: { env: NodeJS.ProcessEnv },
+  options: { detached: boolean; env: NodeJS.ProcessEnv },
 ) => HelperProcess;
 
 export type HelperProcessClientOptions = {
@@ -58,6 +59,8 @@ export type HelperProcessClientOptions = {
   now?: () => string;
   /** Dependency injection point for the underlying process spawn, defaults to `node:child_process`. */
   spawnHelperProcess?: SpawnHelperProcess;
+  /** Test seam for POSIX process-group termination; production uses `process.kill(-pgid, signal)`. */
+  forceKillProcessGroup?: (processGroupId: number, signal: NodeJS.Signals) => boolean;
   /**
    * Optional diagnostics hook for envelopes this process could not parse.
    * Never receives raw stdout bytes beyond what the protocol codec already
@@ -108,6 +111,7 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
 
     const spawnFn = this.options.spawnHelperProcess ?? defaultSpawnHelperProcess;
     const child = spawnFn(this.options.command, this.options.args ?? [], {
+      detached: process.platform !== 'win32',
       env: { ...processEnvSafeCopy(), ...this.options.env },
     });
     this.child = child;
@@ -140,7 +144,7 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     );
 
     if (!exitedGracefully && this.child === child) {
-      child.kill('SIGKILL');
+      this.forceKill(child);
       await this.waitForExit(child, FORCE_KILL_GRACE_MS);
     }
   }
@@ -267,6 +271,23 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
 
     child.stdin?.write(encodeHelperEnvelope(envelope));
   }
+
+  private forceKill(child: HelperProcess): void {
+    const processId = child.pid;
+    if (process.platform !== 'win32' && processId && processId > 0) {
+      const killProcessGroup = this.options.forceKillProcessGroup ?? defaultForceKillProcessGroup;
+      try {
+        if (killProcessGroup(processId, 'SIGKILL')) {
+          return;
+        }
+      } catch {
+        // The process may have exited between the timeout and the signal. Fall
+        // back to the direct handle so stop() remains idempotent and bounded.
+      }
+    }
+
+    child.kill('SIGKILL');
+  }
 }
 
 function classifyUnexpectedExitReason(
@@ -287,9 +308,17 @@ function classifyUnexpectedExitReason(
 function defaultSpawnHelperProcess(
   command: string,
   args: string[],
-  options: { env: NodeJS.ProcessEnv },
+  options: { detached: boolean; env: NodeJS.ProcessEnv },
 ): HelperProcess {
-  return nodeSpawn(command, args, { env: options.env, stdio: ['pipe', 'pipe', 'pipe'] });
+  return nodeSpawn(command, args, {
+    detached: options.detached,
+    env: options.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+}
+
+function defaultForceKillProcessGroup(processGroupId: number, signal: NodeJS.Signals): boolean {
+  return process.kill(-processGroupId, signal);
 }
 
 function processEnvSafeCopy(): NodeJS.ProcessEnv {

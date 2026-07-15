@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { type ChildProcess, execFileSync, spawn as nodeSpawn } from 'node:child_process';
+import {
+  constants,
+  closeSync,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,6 +46,9 @@ const launcherPath = fileURLToPath(
 const captureBinaryPath = fileURLToPath(
   new URL('../macos/build/Recapsy.app/Contents/MacOS/Recapsy', import.meta.url),
 );
+const launcherSourcePath = fileURLToPath(
+  new URL('../macos/Sources/CaptureLauncher/main.c', import.meta.url),
+);
 
 const bundleBuilt = existsSync(launcherPath) && existsSync(captureBinaryPath);
 // When the bundle has not been built yet (`pnpm run build:capture`), skip rather
@@ -51,6 +62,8 @@ if (!bundleBuilt) {
 }
 
 const activeChildren: ChildProcess[] = [];
+const activeCaptureProcessIds = new Set<number>();
+const activeFileDescriptors: number[] = [];
 const tempRoots: string[] = [];
 
 afterEach(async () => {
@@ -58,6 +71,15 @@ afterEach(async () => {
     if (isProcessAlive(child.pid)) {
       child.kill('SIGKILL');
     }
+  }
+  for (const processId of activeCaptureProcessIds) {
+    if (isProcessAlive(processId)) {
+      process.kill(processId, 'SIGKILL');
+    }
+  }
+  activeCaptureProcessIds.clear();
+  for (const fileDescriptor of activeFileDescriptors.splice(0)) {
+    closeSync(fileDescriptor);
   }
   for (const root of tempRoots.splice(0)) {
     rmSync(root, { force: true, recursive: true });
@@ -161,9 +183,80 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
     expect(isProcessAlive(child.pid)).toBe(false);
     expect(events).toHaveLength(0);
   });
+
+  bundleIt(
+    'forwards SIGTERM to the supervised capture process',
+    async () => {
+      const { child, envelopes } = startBundleClient(undefined, { keepStdinOpen: true });
+      const hello = await waitForEnvelope(envelopes, 'helper.hello');
+      const captureProcessId = requireCaptureProcessId(hello.payload.pid);
+      activeCaptureProcessIds.add(captureProcessId);
+
+      expect(child.kill('SIGTERM')).toBe(true);
+      await waitForCondition(() => !isProcessAlive(child.pid), 4000);
+      await waitForCondition(() => !isProcessAlive(captureProcessId), 4000);
+
+      expect(isProcessAlive(captureProcessId)).toBe(false);
+    },
+    10000,
+  );
+
+  bundleIt(
+    'forwards SIGINT to the supervised capture process',
+    async () => {
+      const { child, envelopes } = startBundleClient(undefined, { keepStdinOpen: true });
+      const hello = await waitForEnvelope(envelopes, 'helper.hello');
+      const captureProcessId = requireCaptureProcessId(hello.payload.pid);
+      activeCaptureProcessIds.add(captureProcessId);
+
+      expect(child.kill('SIGINT')).toBe(true);
+      await waitForCondition(() => !isProcessAlive(child.pid), 4000);
+      await waitForCondition(() => !isProcessAlive(captureProcessId), 4000);
+
+      expect(isProcessAlive(captureProcessId)).toBe(false);
+    },
+    10000,
+  );
+
+  bundleIt(
+    'force-stop kills the dedicated launcher process group with no capture orphan',
+    async () => {
+      const { child, client, envelopes } = startBundleClient(undefined, {
+        keepStdinOpen: true,
+        shutdownTimeoutMs: 20,
+      });
+      const hello = await waitForEnvelope(envelopes, 'helper.hello');
+      const captureProcessId = requireCaptureProcessId(hello.payload.pid);
+      activeCaptureProcessIds.add(captureProcessId);
+
+      await client.stop();
+      await waitForCondition(() => !isProcessAlive(child.pid), 4000);
+      await waitForCondition(() => !isProcessAlive(captureProcessId), 4000);
+
+      expect(isProcessAlive(captureProcessId)).toBe(false);
+    },
+    10000,
+  );
 });
 
-function startBundleClient(onEvent?: (event: CaptureHelperEvent) => Promise<void>): {
+describe('capture launcher supervision invariants', () => {
+  const source = readFileSync(launcherSourcePath, 'utf8');
+
+  it('installs SIGTERM and SIGINT handlers that signal the supervised child', () => {
+    expect(source).toContain('install_signal_handler(SIGTERM)');
+    expect(source).toContain('install_signal_handler(SIGINT)');
+    expect(source).toMatch(/kill\([^,]+, signal_number\)/);
+  });
+
+  it('retries waitpid only when it is interrupted', () => {
+    expect(source).toMatch(/wait_result < 0 && errno == EINTR/);
+  });
+});
+
+function startBundleClient(
+  onEvent?: (event: CaptureHelperEvent) => Promise<void>,
+  options: { keepStdinOpen?: boolean; shutdownTimeoutMs?: number } = {},
+): {
   child: ChildProcess;
   client: ReturnType<typeof createHelperProcessClient>;
   envelopes: HelperEnvelope<HelperToMainType>[];
@@ -176,9 +269,20 @@ function startBundleClient(onEvent?: (event: CaptureHelperEvent) => Promise<void
     args: [captureBinaryPath],
     command: launcherPath,
     env: { RECAPSY_CAPTURE_ASSET_ROOT: assetRoot },
-    shutdownTimeoutMs: 3000,
-    spawnHelperProcess: (command, args, options) => {
-      const child = nodeSpawn(command, args, { env: options.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    shutdownTimeoutMs: options.shutdownTimeoutMs ?? 3000,
+    spawnHelperProcess: (command, args, spawnOptions) => {
+      let stdin: number | 'pipe' = 'pipe';
+      if (options.keepStdinOpen) {
+        const fifoPath = path.join(assetRoot, 'capture-stdin.fifo');
+        execFileSync('/usr/bin/mkfifo', [fifoPath]);
+        stdin = openSync(fifoPath, constants.O_RDWR);
+        activeFileDescriptors.push(stdin);
+      }
+      const child = nodeSpawn(command, args, {
+        detached: spawnOptions.detached,
+        env: spawnOptions.env,
+        stdio: [stdin, 'pipe', 'pipe'],
+      });
       capturedChild = child;
       activeChildren.push(child);
       return child;
@@ -289,6 +393,13 @@ function isProcessAlive(pid: number | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+function requireCaptureProcessId(processId: number | null): number {
+  if (!processId) {
+    throw new Error('real capture process did not report its pid');
+  }
+  return processId;
 }
 
 function delay(ms: number): Promise<void> {
