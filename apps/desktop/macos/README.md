@@ -46,6 +46,35 @@ codesign -dv --verbose=4 macos/build/Recapsy.app
 # 应看到 Identifier=one.recapsy.desktop.capture、Authority=Recapsy Developer
 ```
 
+## Electron `.app` 装配
+
+在 `apps/desktop` 下运行：
+
+```bash
+pnpm run package:macos
+```
+
+命令先构建真实 capture bundle 与 Electron main / preload，再由
+`@electron/packager` 生成宿主机架构的
+`dist/release/Recapsy-darwin-<arch>/Recapsy.app`。应用代码来自最小 staging，
+`app.asar` 只包含 `dist/main/electron-entry.js`、login preload / HTML 和最小
+manifest；源码、tests、SwiftPM `.build` 与 package `node_modules` 不会进入产物。
+采集 bundle 位于标准 nested-code 路径
+`Recapsy.app/Contents/Frameworks/RecapsyCapture.app`，`Contents/Resources` 不保留
+重复副本。
+
+签名渠道分为三种。未设置 `RECAPSY_CAPTURE_SIGN_IDENTITY` 时是本机开发渠道：
+Electron 外壳和 helpers 使用 ad-hoc 签名，capture bundle 恢复为稳定的
+`Recapsy Developer` 身份，outer app 最后重新 seal 并执行完整验证；本机必须已有
+可用的该证书。显式设置为 `-` 时，outer 与 nested 全部使用 ad-hoc 签名，仅用于
+CI 的布局、进程和 seal 门禁，不提供跨 rebuild 的 TCC 身份稳定性。显式设置为
+Developer ID 时，Packager 使用同一发行身份 inside-out 签完整应用；Developer ID
+凭据、notarization 和正式分发仍由后续独立发行任务完成。
+
+当前命令只生成 host-native 架构，不生成 universal 或另一架构产物；也不包含 DMG、
+notarization、auto-update、Tray / Main Window 或权限引导。自动化不得把 ad-hoc
+GREEN 宣称为 Developer ID、Gatekeeper 或正式发行完成。
+
 ## 自动化测试(不依赖屏幕录制授权)
 
 ```bash
@@ -77,14 +106,17 @@ pnpm run test:capture-bundle-process
    cd apps/desktop && pnpm run build:capture
    ```
 
-2. **指向启动器与采集体**(Electron 的接线契约,见 `src/main/electron-entry.ts`):
+2. **启动 Electron**。开发环境默认解析并校验上一步构建出的真实 bundle，
+   不需要手工设置启动命令。只有明确调试自定义进程时才设置以下覆盖项：
 
    ```bash
    export RECAPSY_DESKTOP_HELPER_COMMAND="$PWD/macos/build/Recapsy.app/Contents/MacOS/CaptureLauncher"
    export RECAPSY_DESKTOP_HELPER_ARGS="$PWD/macos/build/Recapsy.app/Contents/MacOS/Recapsy"
    ```
 
-   `RECAPSY_DESKTOP_HELPER_ARGS` 按空格分隔成 argv,因此采集体路径不能含空格;资产根经 `RECAPSY_CAPTURE_ASSET_ROOT` env 传递(Electron 从 `userData/captures` 派生),不走 argv,以容忍 `Application Support` 里的空格。
+   `RECAPSY_DESKTOP_HELPER_ARGS` 是单个 argv 值，因此路径可以包含空格。该覆盖只在
+   未打包开发环境生效，正式 `.app` 会拒绝覆盖。资产根经
+   `RECAPSY_CAPTURE_ASSET_ROOT` env 传递（Electron 从 `userData/captures` 派生）。
 
 3. **启动桌面 app 并登录**(触发 sync loop)。
 

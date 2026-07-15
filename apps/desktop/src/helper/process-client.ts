@@ -17,7 +17,37 @@ import type {
 } from './types';
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3000;
+const DEFAULT_STARTUP_TIMEOUT_MS = 5000;
 const FORCE_KILL_GRACE_MS = 1000;
+
+type HelperProcessStartupErrorCode =
+  | 'handshake_timeout'
+  | 'protocol_invalid'
+  | 'process_exit'
+  | 'spawn_failed';
+
+const STARTUP_ERROR_MESSAGES: Record<HelperProcessStartupErrorCode, string> = {
+  handshake_timeout: 'Capture helper startup handshake timed out.',
+  process_exit: 'Capture helper exited during startup.',
+  protocol_invalid: 'Capture helper startup handshake failed.',
+  spawn_failed: 'Capture helper failed to start.',
+};
+
+class HelperProcessStartupError extends Error {
+  readonly name = 'HelperProcessStartupError';
+
+  constructor(readonly code: HelperProcessStartupErrorCode) {
+    super(STARTUP_ERROR_MESSAGES[code]);
+  }
+}
+
+type PendingStartup = {
+  child: HelperProcess;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: HelperProcessStartupError) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
 
 /**
  * Minimal structural surface of a child process this client depends on.
@@ -56,6 +86,8 @@ export type HelperProcessClientOptions = {
   env?: NodeJS.ProcessEnv;
   /** How long to wait for a clean exit after `helper.shutdown` before SIGKILL. */
   shutdownTimeoutMs?: number;
+  /** How long to wait for the first valid `helper.hello` before rejecting startup. */
+  startupTimeoutMs?: number;
   now?: () => string;
   /** Dependency injection point for the underlying process spawn, defaults to `node:child_process`. */
   spawnHelperProcess?: SpawnHelperProcess;
@@ -98,11 +130,16 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
   private startOptions: CaptureHelperStartOptions = {};
   private stopRequested = false;
   private pendingStopResolvers: Array<() => void> = [];
+  private pendingStartup: PendingStartup | undefined;
+  private readonly expectedExitChildren = new WeakSet<HelperProcess>();
 
   constructor(private readonly options: HelperProcessClientOptions) {}
 
   async start(startOptions: CaptureHelperStartOptions = {}): Promise<void> {
     if (this.child) {
+      if (this.pendingStartup?.child === this.child) {
+        return this.pendingStartup.promise;
+      }
       return;
     }
 
@@ -110,22 +147,47 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     this.stopRequested = false;
 
     const spawnFn = this.options.spawnHelperProcess ?? defaultSpawnHelperProcess;
-    const child = spawnFn(this.options.command, this.options.args ?? [], {
-      detached: process.platform !== 'win32',
-      env: { ...processEnvSafeCopy(), ...this.options.env },
-    });
+    let child: HelperProcess;
+    try {
+      child = spawnFn(this.options.command, this.options.args ?? [], {
+        detached: process.platform !== 'win32',
+        env: { ...processEnvSafeCopy(), ...this.options.env },
+      });
+    } catch {
+      throw new HelperProcessStartupError('spawn_failed');
+    }
     this.child = child;
+
+    let resolveStartup: (() => void) | undefined;
+    let rejectStartup: ((error: HelperProcessStartupError) => void) | undefined;
+    const startupPromise = new Promise<void>((resolve, reject) => {
+      resolveStartup = resolve;
+      rejectStartup = reject;
+    });
+    const timeout = setTimeout(
+      () => this.rejectStartup(child, 'handshake_timeout'),
+      this.options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS,
+    );
+    this.pendingStartup = {
+      child,
+      promise: startupPromise,
+      reject: rejectStartup as (error: HelperProcessStartupError) => void,
+      resolve: resolveStartup as () => void,
+      timeout,
+    };
 
     const lineParser = new HelperNdjsonLineParser(validateHelperToMainEnvelope);
     child.stdout?.on('data', (chunk) => {
       const text = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
       for (const result of lineParser.feed(text)) {
-        this.handleParsedLine(result);
+        this.handleParsedLine(child, result);
       }
     });
 
-    child.on('exit', (code, signal) => this.handleExit(code, signal));
-    child.on('error', () => this.handleSpawnError());
+    child.on('exit', (code, signal) => this.handleExit(child, code, signal));
+    child.on('error', () => this.handleSpawnError(child));
+
+    return startupPromise;
   }
 
   async stop(): Promise<void> {
@@ -180,16 +242,47 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     }
   }
 
-  private handleParsedLine(result: HelperProtocolResult<HelperToMainEnvelope>): void {
+  private handleParsedLine(
+    child: HelperProcess,
+    result: HelperProtocolResult<HelperToMainEnvelope>,
+  ): void {
+    if (this.child !== child) {
+      return;
+    }
+
     if (result.ok) {
+      if (this.pendingStartup?.child === child) {
+        if (result.envelope.type !== 'helper.hello') {
+          this.rejectStartup(child, 'protocol_invalid');
+          return;
+        }
+        this.resolveStartup(child);
+      }
+
       void this.startOptions.onEnvelope?.(result.envelope);
       return;
     }
 
+    if (this.pendingStartup?.child === child) {
+      this.rejectStartup(child, 'protocol_invalid');
+    }
     this.options.onProtocolError?.(result.error);
   }
 
-  private handleExit(code: number | null, signal: NodeJS.Signals | null): void {
+  private handleExit(
+    child: HelperProcess,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ): void {
+    if (this.pendingStartup?.child === child) {
+      this.rejectStartup(child, 'process_exit', false);
+      return;
+    }
+
+    if (this.expectedExitChildren.delete(child) || this.child !== child) {
+      return;
+    }
+
     const wasStopRequested = this.stopRequested;
     this.child = undefined;
     this.settlePendingStopWaiters();
@@ -205,7 +298,16 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     });
   }
 
-  private handleSpawnError(): void {
+  private handleSpawnError(child: HelperProcess): void {
+    if (this.pendingStartup?.child === child) {
+      this.rejectStartup(child, 'spawn_failed');
+      return;
+    }
+
+    if (this.child !== child) {
+      return;
+    }
+
     const wasStopRequested = this.stopRequested;
     this.child = undefined;
     this.settlePendingStopWaiters();
@@ -222,6 +324,42 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
       reason: 'unknown',
       type: 'unexpectedExit',
     });
+  }
+
+  private resolveStartup(child: HelperProcess): void {
+    const startup = this.pendingStartup;
+    if (!startup || startup.child !== child) {
+      return;
+    }
+
+    clearTimeout(startup.timeout);
+    this.pendingStartup = undefined;
+    startup.resolve();
+  }
+
+  private rejectStartup(
+    child: HelperProcess,
+    code: HelperProcessStartupErrorCode,
+    terminateChild = true,
+  ): void {
+    const startup = this.pendingStartup;
+    if (!startup || startup.child !== child) {
+      return;
+    }
+
+    clearTimeout(startup.timeout);
+    this.pendingStartup = undefined;
+    if (this.child === child) {
+      this.child = undefined;
+    }
+    this.settlePendingStopWaiters();
+
+    if (terminateChild) {
+      this.expectedExitChildren.add(child);
+      this.forceKill(child);
+    }
+
+    startup.reject(new HelperProcessStartupError(code));
   }
 
   private settlePendingStopWaiters(): void {

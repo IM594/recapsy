@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
+  "main": "dist/main/electron-entry.js",
   "dependencies": {
     "@recapsy/contracts": "workspace:*"
   },
@@ -14,17 +15,21 @@
     "test:auth-login-sync": "bun test tests/integration/auth-login-sync.test.ts",
     "test:capture-process": "bun test tests/integration/capture-process.test.ts",
     "test:capture-bundle-process": "bun test tests/integration/capture-bundle-process.test.ts",
-    "test:macos": "swift build --package-path macos --target CaptureCoreTests && swift test --package-path macos --skip-build && pnpm run build:capture && pnpm run test:capture-bundle-process",
+    "test:packaged-layout": "bun test tests/integration/packaged-layout.test.ts",
+    "test:macos": "swift build --package-path macos --target CaptureCoreTests && swift test --package-path macos --skip-build && pnpm run package:macos && pnpm run test:capture-bundle-process && pnpm run test:packaged-layout",
     "build:capture": "bash macos/build-capture-bundle.sh",
+    "package:macos": "pnpm run build:capture && pnpm run build && bun scripts/package-macos.ts",
     "typecheck": "tsc --noEmit && pnpm run typecheck:tests",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
-    "lint": "biome check src/ tests/",
-    "check": "biome check src/ tests/",
-    "build": "bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron && bun build src/auth/login-preload.ts --outdir dist/auth --target node --format cjs --external electron",
+    "lint": "biome check scripts/ src/ tests/",
+    "check": "biome check scripts/ src/ tests/",
+    "build": "bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron && bun build src/auth/login-preload.ts --outdir dist/auth --target node --format cjs --external electron && cp src/auth/login-window.html dist/auth/login-window.html",
     "start": "electron dist/main/electron-entry.js",
     "dev": "pnpm run build && pnpm run start"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "@electron/packager": "18.4.4",
     "@types/bun": "^1.2.0",
     "@types/node": "^24.9.0",
     "electron": "^43.1.0"

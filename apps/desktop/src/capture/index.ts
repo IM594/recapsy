@@ -33,5 +33,19 @@ export type {
   CaptureRuntimeStore,
 } from './runtime';
 export { createCaptureIpcHandlers } from './handlers';
+export {
+  CAPTURE_BUNDLE_IDENTIFIER,
+  CaptureBundleError,
+  createCaptureBundleClient,
+  resolveCaptureBundlePaths,
+} from './bundle-client';
+export type {
+  CaptureBundleClientOptions,
+  CaptureBundleErrorCode,
+  CaptureBundlePaths,
+  CaptureBundleValidationAdapter,
+  CaptureProcessLaunch,
+} from './bundle-client';
+export { createNodeCaptureBundleValidationAdapter } from './bundle-validation-node';
 export type { CaptureIpcHandlerOptions } from './handlers';
 export type { CaptureHistoryReader, CaptureIntakeStore, HelperStateStore } from './store';

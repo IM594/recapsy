@@ -62,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test macOS capture
+      - name: Test macOS capture and packaged layout
         env:
           RECAPSY_CAPTURE_SIGN_IDENTITY: "-"
         run: pnpm --filter @recapsy/desktop run test:macos
