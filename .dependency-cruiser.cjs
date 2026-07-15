@@ -5,12 +5,15 @@ const TEST_SOURCE_PATH =
 
 const SERVER_SOURCE_ROOT = 'apps/server/src';
 const SERVER_CAPABILITIES = [
-  'account-management',
   'ai',
+  'audit',
   'capture',
+  'identity',
   'ocr-proxy',
   'provider-settings',
+  'registration',
   'search',
+  'subscriptions',
   'timeline',
 ];
 
@@ -62,22 +65,7 @@ module.exports = {
         circular: true,
       },
     },
-    ...publicSurfaceRules('server', SERVER_SOURCE_ROOT, SERVER_CAPABILITIES, {
-      'account-management': ['composition'],
-    }),
-    {
-      name: 'server-account-management-composition-only-from-root',
-      severity: 'error',
-      comment:
-        'Only the server composition root may instantiate the account-management persistence adapter.',
-      from: {
-        path: `^${SERVER_SOURCE_ROOT}/`,
-        pathNot: `(?:${TEST_SOURCE_PATH}|^${SERVER_SOURCE_ROOT}/index[.]ts$)`,
-      },
-      to: {
-        path: `^${SERVER_SOURCE_ROOT}/account-management/composition[.]ts$`,
-      },
-    },
+    ...publicSurfaceRules('server', SERVER_SOURCE_ROOT, SERVER_CAPABILITIES),
     {
       name: 'server-ai-not-to-database',
       severity: 'error',
@@ -91,7 +79,7 @@ module.exports = {
       },
     },
     {
-      name: 'server-ai-not-to-account-management',
+      name: 'server-ai-not-to-account-capabilities',
       severity: 'error',
       comment:
         'AI runtime consumes provider credentials through the provider-settings resolver port.',
@@ -100,11 +88,11 @@ module.exports = {
         pathNot: TEST_SOURCE_PATH,
       },
       to: {
-        path: `^${SERVER_SOURCE_ROOT}/account-management/`,
+        path: `^${SERVER_SOURCE_ROOT}/(?:audit|identity|registration|subscriptions)/`,
       },
     },
     {
-      name: 'server-provider-settings-not-to-account-management',
+      name: 'server-provider-settings-not-to-account-capabilities',
       severity: 'error',
       comment:
         'Provider settings owns provider records, scope resolution, and secret materialization.',
@@ -113,14 +101,14 @@ module.exports = {
         pathNot: TEST_SOURCE_PATH,
       },
       to: {
-        path: `^${SERVER_SOURCE_ROOT}/account-management/`,
+        path: `^${SERVER_SOURCE_ROOT}/(?:audit|identity|registration|subscriptions)/`,
       },
     },
     ...publicSurfaceRules('desktop', DESKTOP_SOURCE_ROOT, DESKTOP_CAPABILITIES, {
-      storage: ['composition'],
+      storage: ['node'],
     }),
     {
-      name: 'desktop-storage-composition-only-from-electron-root',
+      name: 'desktop-storage-node-only-from-electron-root',
       severity: 'error',
       comment:
         'Only the Electron composition root may instantiate the Node SQLite persistence adapter.',
@@ -129,7 +117,7 @@ module.exports = {
         pathNot: `(?:${TEST_SOURCE_PATH}|^${DESKTOP_SOURCE_ROOT}/main/electron-entry[.]ts$)`,
       },
       to: {
-        path: `^${DESKTOP_SOURCE_ROOT}/storage/composition[.]ts$`,
+        path: `^${DESKTOP_SOURCE_ROOT}/storage/node[.]ts$`,
       },
     },
   ],

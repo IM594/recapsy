@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { createTestHttpApp } from '../../server/src/__tests__/app-harness';
-import type { createMemoryAccountPersistence } from '../../server/src/account-management/composition';
 import type { CaptureRepositorySnapshot } from '../../server/src/capture/models';
 import type { InMemoryCaptureRepository } from '../../server/src/capture/repositories/memory';
 import type { Logger } from '../../server/src/shared/logger';
@@ -61,7 +60,7 @@ describe('real login through to the sync loop over real HTTP', () => {
     });
 
     // 1. Real login: hits the real `/v1/auth/login` route (the same route
-    // `service.login` in `apps/server/src/account-management/service.ts`
+    // `AuthService.login` in `apps/server/src/identity/auth.ts`
     // implements), not a stand-in.
     const loginResult = await authClient.login({ email, password });
 
@@ -356,10 +355,8 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
   let server: ReturnType<typeof Bun.serve> | undefined;
 
   try {
-    const accountPersistence = modules.createMemoryAccountPersistence();
     const captureRepository = new modules.InMemoryCaptureRepository();
     const app = modules.createTestHttpApp({
-      accountPersistence,
       captureRepository,
       config: {
         ADMIN_BOOTSTRAP_TOKEN: adminToken,
@@ -433,7 +430,6 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
 
 type ServerModules = {
   InMemoryCaptureRepository: new () => InMemoryCaptureRepository;
-  createMemoryAccountPersistence: typeof createMemoryAccountPersistence;
   createTestHttpApp: typeof createTestHttpApp;
 };
 
@@ -441,16 +437,12 @@ async function loadServerModules(): Promise<ServerModules> {
   const appHarnessModule = await import(
     new URL('../../server/src/__tests__/app-harness.ts', import.meta.url).href
   );
-  const accountCompositionModule = await import(
-    new URL('../../server/src/account-management/composition.ts', import.meta.url).href
-  );
   const captureRepositoryModule = await import(
     new URL('../../server/src/capture/repositories/memory.ts', import.meta.url).href
   );
 
   return {
     InMemoryCaptureRepository: captureRepositoryModule.InMemoryCaptureRepository,
-    createMemoryAccountPersistence: accountCompositionModule.createMemoryAccountPersistence,
     createTestHttpApp: appHarnessModule.createTestHttpApp,
   };
 }
