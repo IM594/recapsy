@@ -220,6 +220,34 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
+  it('keeps the private Electron app free of package exports and a root source index', async () => {
+    const [packageSource, sourceFiles] = await Promise.all([
+      readFile(path.resolve(DESKTOP_SOURCE_ROOT, '../package.json'), 'utf8'),
+      (async () => {
+        const paths: string[] = [];
+        const glob = new Bun.Glob('**/*.ts');
+        for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+          paths.push(relativePath);
+        }
+        return paths;
+      })(),
+    ]);
+    const packageJson = JSON.parse(packageSource) as Record<string, unknown>;
+    const violations: string[] = [];
+
+    if (packageJson.private !== true) {
+      violations.push('desktop package must remain private');
+    }
+    if (Object.hasOwn(packageJson, 'exports')) {
+      violations.push('private desktop package must not define exports');
+    }
+    if (sourceFiles.includes('index.ts')) {
+      violations.push('private desktop app must not have src/index.ts');
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('keeps the Node SQLite adapter out of the storage index entrypoint', async () => {
     const [indexSource, nodeSource] = await Promise.all([
       readSource('storage/index.ts'),
@@ -321,17 +349,6 @@ describe('desktop architecture boundaries', () => {
           violations.push(`${leafPath} depends on ${forbiddenDependency}`);
         }
       }
-    }
-
-    const packageSource = await readFile(
-      path.resolve(DESKTOP_SOURCE_ROOT, '../package.json'),
-      'utf8',
-    );
-    if (!packageSource.includes('"./storage/sqlite/bun"')) {
-      violations.push('package export ./storage/sqlite/bun is missing');
-    }
-    if (packageSource.includes('"./storage/bun-driver"')) {
-      violations.push('package export ./storage/bun-driver is still present');
     }
 
     expect(violations).toEqual([]);
@@ -498,7 +515,7 @@ describe('desktop architecture boundaries', () => {
       }
     }
 
-    for (const relativePath of ['storage/types.ts', 'storage/index.ts', 'index.ts']) {
+    for (const relativePath of ['storage/types.ts', 'storage/index.ts']) {
       const source = await readSource(relativePath);
       if (source.includes(retiredType)) {
         violations.push(`${relativePath} still exports the retired repository type`);
