@@ -15,7 +15,7 @@ describe('desktop sync job executor', () => {
     let activeWorkspace: string | null = 'workspace_1';
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
+        async createCapture() {
           activeWorkspace = 'workspace_2';
           return {
             captureId: 'capture_1',
@@ -45,14 +45,14 @@ describe('desktop sync job executor', () => {
     });
   });
 
-  it('runs ingest, the OCR proxy, and result submission to reach synced', async () => {
+  it('runs capture creation, the OCR proxy, and result submission to reach synced', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
     const calls: string[] = [];
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture(input) {
-          calls.push(`ingest:${input.idempotencyKey}`);
+        async createCapture(input) {
+          calls.push(`create:${input.idempotencyKey}`);
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
@@ -79,7 +79,7 @@ describe('desktop sync job executor', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual(['ingest:idem_1', 'proxy:4:image/png', `submit:capture_1:${assetHash}`]);
+    expect(calls).toEqual(['create:idem_1', 'proxy:4:image/png', `submit:capture_1:${assetHash}`]);
     const job = await store.getOutboxJob('job_1');
     expect(job).toMatchObject({
       serverCaptureId: 'capture_1',
@@ -112,9 +112,9 @@ describe('desktop sync job executor', () => {
     const calls: string[] = [];
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
-          calls.push('ingest');
-          throw new Error('ingestCapture must not run for a recovered result_pending job');
+        async createCapture() {
+          calls.push('create');
+          throw new Error('createCapture must not run for a recovered result_pending job');
         },
         async runOcrProxy() {
           calls.push('proxy');
@@ -153,8 +153,8 @@ describe('desktop sync job executor', () => {
     const calls: string[] = [];
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture(input) {
-          calls.push(`ingest:${input.idempotencyKey}`);
+        async createCapture(input) {
+          calls.push(`create:${input.idempotencyKey}`);
           return {
             captureId: 'capture_1',
             nextAction: 'none',
@@ -172,7 +172,7 @@ describe('desktop sync job executor', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual(['ingest:idem_1']);
+    expect(calls).toEqual(['create:idem_1']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'synced',
       terminalReason: 'metadata_synced',
@@ -185,8 +185,8 @@ describe('desktop sync job executor', () => {
     expect(created.ok).toBe(true);
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
-          throw new Error('ingestCapture must not run when the asset ref row is missing');
+        async createCapture() {
+          throw new Error('createCapture must not run when the asset ref row is missing');
         },
       }),
       store,
@@ -276,7 +276,7 @@ describe('desktop sync job executor', () => {
     });
   });
 
-  it('keeps provider_unavailable proxy failures and offline ingest failures retryable', async () => {
+  it('keeps provider_unavailable proxy failures and offline capture creation failures retryable', async () => {
     const providerStore = createMemoryStore();
     await seedPendingCapture(providerStore);
     const providerWorker = createJobRunner({
@@ -296,7 +296,7 @@ describe('desktop sync job executor', () => {
     await seedPendingCapture(offlineStore);
     const offlineWorker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
+        async createCapture() {
           throw Object.assign(new Error('offline'), {
             code: 'offline',
             retryable: true,
@@ -395,7 +395,7 @@ describe('desktop sync job executor', () => {
     let proxyCalls = 0;
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
+        async createCapture() {
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
@@ -490,8 +490,8 @@ describe('desktop sync job executor', () => {
     const calls: string[] = [];
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
-          calls.push('ingest');
+        async createCapture() {
+          calls.push('create');
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
@@ -518,7 +518,7 @@ describe('desktop sync job executor', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual(['ingest']);
+    expect(calls).toEqual(['create']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'synced',
       terminalReason: 'ocr_blocked_by_local_policy',
@@ -543,8 +543,8 @@ describe('desktop sync job executor', () => {
     const calls: string[] = [];
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
-          calls.push('ingest');
+        async createCapture() {
+          calls.push('create');
           return {
             captureId: 'capture_1',
             inputAssetId: 'asset_server_1',
@@ -571,7 +571,7 @@ describe('desktop sync job executor', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual(['ingest']);
+    expect(calls).toEqual(['create']);
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'synced',
       terminalReason: 'capture_blocked_by_local_policy',
@@ -621,7 +621,7 @@ describe('desktop sync job executor', () => {
     const leakedText = 'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
     const worker = createJobRunner({
       api: createApi({
-        async ingestCapture() {
+        async createCapture() {
           throw new ServerApiError({
             code: 'provider_unavailable',
             retryable: true,
@@ -682,9 +682,9 @@ describe('desktop sync job executor', () => {
             ocrStatus: 'succeeded',
           };
         },
-        async ingestCapture() {
-          calls.push('ingest');
-          throw new Error('ingestCapture must not run during capture reconcile');
+        async createCapture() {
+          calls.push('create');
+          throw new Error('createCapture must not run during capture reconcile');
         },
         async runOcrProxy() {
           calls.push('proxy');
@@ -837,7 +837,7 @@ function createApi(overrides: Partial<SyncServerApi> = {}): SyncServerApi {
         ocrStatus: 'not_requested',
       };
     },
-    async ingestCapture() {
+    async createCapture() {
       return {
         captureId: 'capture_1',
         inputAssetId: 'asset_server_1',

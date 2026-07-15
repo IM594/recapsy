@@ -144,8 +144,8 @@ export type {
 } from './capture/public';
 export { ServerApiError, createServerApiClient } from './server/public';
 export type {
-  CaptureIngestInput,
-  CaptureIngestResult,
+  CaptureCreateInput,
+  CaptureCreateResult,
   CapturePoliciesInput,
   CapturePoliciesResult,
   AxAllowlistResult,

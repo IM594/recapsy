@@ -84,7 +84,7 @@ export const CaptureSyncStateSchema = z.enum([
   'failed',
   'blocked',
 ]);
-export const CaptureIngestNextActionSchema = z.enum(['queue_ocr', 'none']);
+export const CaptureNextActionSchema = z.enum(['queue_ocr', 'none']);
 export const CaptureDuplicateHintStatusSchema = z.enum(['unique', 'candidate', 'duplicate']);
 
 export const CaptureSafeMetadataSchema = MetadataSchema.superRefine((value, context) => {
@@ -186,7 +186,7 @@ export const CaptureDuplicateHintSchema = z
   })
   .strict();
 
-export const CaptureSecureOrPrivateHintSchema = z
+export const CapturePrivacyHintSchema = z
   .object({
     detected: z.boolean(),
     reason: z.string().min(1).max(256).nullable().optional(),
@@ -223,7 +223,7 @@ export const CaptureSchema = z
   })
   .strict();
 
-export const CaptureIngestRequestSchema = z
+export const CaptureCreateRequestSchema = z
   .object({
     workspaceId: IdSchema,
     userId: IdSchema.nullable().optional(),
@@ -246,7 +246,7 @@ export const CaptureIngestRequestSchema = z
     perceptualHash: PerceptualHashSchema.nullable().optional(),
     blankScore: z.number().min(0).max(1).nullable().optional(),
     duplicateHint: CaptureDuplicateHintSchema.nullable().optional(),
-    secureOrPrivateHint: CaptureSecureOrPrivateHintSchema.nullable().optional(),
+    secureOrPrivateHint: CapturePrivacyHintSchema.nullable().optional(),
     metadata: CaptureSafeMetadataSchema.default({}),
   })
   .strict();
@@ -275,7 +275,7 @@ export const CaptureTimelineStatusSummarySchema = z
   })
   .strict();
 
-export const CaptureIngestResponseSchema = z
+export const CaptureCreateResponseSchema = z
   .object({
     capture: CaptureSchema,
     assets: z.array(AssetSchema),
@@ -283,7 +283,7 @@ export const CaptureIngestResponseSchema = z
     assetLocations: z.array(AssetLocationSchema),
     timelineEvent: TimelineEventSchema,
     policyResult: CapturePrivacyDecisionSchema,
-    nextAction: CaptureIngestNextActionSchema,
+    nextAction: CaptureNextActionSchema,
     syncState: CaptureSyncStateSchema,
   })
   .strict();
@@ -314,7 +314,7 @@ export type CaptureOcrStatus = z.infer<typeof CaptureOcrStatusSchema>;
 export type CaptureIndexStatus = z.infer<typeof CaptureIndexStatusSchema>;
 export type CaptureTimelineStatus = z.infer<typeof CaptureTimelineStatusSchema>;
 export type CaptureSyncState = z.infer<typeof CaptureSyncStateSchema>;
-export type CaptureIngestNextAction = z.infer<typeof CaptureIngestNextActionSchema>;
+export type CaptureNextAction = z.infer<typeof CaptureNextActionSchema>;
 export type CaptureDuplicateHintStatus = z.infer<typeof CaptureDuplicateHintStatusSchema>;
 export type CaptureSafeMetadata = z.infer<typeof CaptureSafeMetadataSchema>;
 export type CaptureWindowTitleCandidate = z.infer<typeof CaptureWindowTitleCandidateSchema>;
@@ -322,12 +322,12 @@ export type CaptureUrlCandidate = z.infer<typeof CaptureUrlCandidateSchema>;
 export type CaptureDocumentPathCandidate = z.infer<typeof CaptureDocumentPathCandidateSchema>;
 export type CaptureLocalAssetRef = z.infer<typeof CaptureLocalAssetRefSchema>;
 export type CaptureDuplicateHint = z.infer<typeof CaptureDuplicateHintSchema>;
-export type CaptureSecureOrPrivateHint = z.infer<typeof CaptureSecureOrPrivateHintSchema>;
+export type CapturePrivacyHint = z.infer<typeof CapturePrivacyHintSchema>;
 export type Capture = z.infer<typeof CaptureSchema>;
-export type CaptureIngestRequest = z.infer<typeof CaptureIngestRequestSchema>;
+export type CaptureCreateRequest = z.infer<typeof CaptureCreateRequestSchema>;
 export type CaptureOcrStatusSummary = z.infer<typeof CaptureOcrStatusSummarySchema>;
 export type CaptureSearchStatusSummary = z.infer<typeof CaptureSearchStatusSummarySchema>;
 export type CaptureTimelineStatusSummary = z.infer<typeof CaptureTimelineStatusSummarySchema>;
-export type CaptureIngestResponse = z.infer<typeof CaptureIngestResponseSchema>;
+export type CaptureCreateResponse = z.infer<typeof CaptureCreateResponseSchema>;
 export type CaptureDetailResponse = z.infer<typeof CaptureDetailResponseSchema>;
 export type CaptureListResponse = z.infer<typeof CaptureListResponseSchema>;

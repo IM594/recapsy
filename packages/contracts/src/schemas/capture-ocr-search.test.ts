@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   AXAllowlistDisabledResponseSchema,
   AssetLocationSchema,
-  CaptureIngestRequestSchema,
+  CaptureCreateRequestSchema,
   OcrResultSchema,
   SearchDocumentSchema,
   SearchResponseSchema,
@@ -20,7 +20,7 @@ const ids = {
   ocrResult: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
 };
 
-const captureIngestRequest = {
+const captureCreateRequest = {
   workspaceId: ids.workspace,
   deviceId: 'macbook-pro-01',
   localEventId: 'local-event-01',
@@ -50,7 +50,7 @@ const captureIngestRequest = {
     policyVersion: 'capture-policy-v1',
     reasons: ['default_allow'],
   },
-  idempotencyKey: 'capture-ingest-key-01',
+  idempotencyKey: 'capture-create-key-01',
   localAssets: [
     {
       role: 'screenshot_original',
@@ -88,40 +88,40 @@ const captureIngestRequest = {
   },
 } as const;
 
-describe('Capture ingest contracts', () => {
-  it('parses valid capture ingest requests using workspaceId, not tenantId', () => {
-    const parsed = CaptureIngestRequestSchema.parse(captureIngestRequest);
+describe('Capture creation contracts', () => {
+  it('parses valid capture creation requests using workspaceId, not tenantId', () => {
+    const parsed = CaptureCreateRequestSchema.parse(captureCreateRequest);
 
     expect(parsed.workspaceId).toBe(ids.workspace);
     expect('tenantId' in parsed).toBe(false);
   });
 
-  it('strictly rejects AX and page text-like ingest fields', () => {
+  it('strictly rejects AX and page text-like create fields', () => {
     expect(
-      CaptureIngestRequestSchema.safeParse({
-        ...captureIngestRequest,
+      CaptureCreateRequestSchema.safeParse({
+        ...captureCreateRequest,
         tenantId: ids.workspace,
       }).success,
     ).toBe(false);
 
     expect(
-      CaptureIngestRequestSchema.safeParse({
-        ...captureIngestRequest,
+      CaptureCreateRequestSchema.safeParse({
+        ...captureCreateRequest,
         selectedText: 'Do not upload selected text.',
       }).success,
     ).toBe(false);
 
     expect(
-      CaptureIngestRequestSchema.safeParse({
-        ...captureIngestRequest,
+      CaptureCreateRequestSchema.safeParse({
+        ...captureCreateRequest,
         pageBody: 'Do not upload page bodies.',
       }).success,
     ).toBe(false);
 
     expect(
-      CaptureIngestRequestSchema.safeParse({
-        ...captureIngestRequest,
-        ocrText: 'OCR text is produced by the server, not capture ingest.',
+      CaptureCreateRequestSchema.safeParse({
+        ...captureCreateRequest,
+        ocrText: 'OCR text is produced by the server, not capture creation.',
       }).success,
     ).toBe(false);
   });

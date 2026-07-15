@@ -1,7 +1,7 @@
 import type {
   AiOcrResponse,
   AiOcrUsage,
-  CaptureIngestNextAction,
+  CaptureNextAction,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -18,7 +18,7 @@ import type {
   RecoverInterruptedOutboxJobInput,
 } from '../storage/public';
 
-export type SyncCaptureIngestInput = CaptureOutboxPayload & {
+export type SyncCaptureCreateInput = CaptureOutboxPayload & {
   workspaceId: string;
   deviceId: string;
   idempotencyKey: string;
@@ -26,10 +26,10 @@ export type SyncCaptureIngestInput = CaptureOutboxPayload & {
 };
 
 export type SyncServerApi = {
-  ingestCapture(input: SyncCaptureIngestInput): Promise<{
+  createCapture(input: SyncCaptureCreateInput): Promise<{
     captureId: string;
     timelineEventId: string;
-    nextAction: CaptureIngestNextAction;
+    nextAction: CaptureNextAction;
     inputAssetId?: string;
   }>;
   getCapture(

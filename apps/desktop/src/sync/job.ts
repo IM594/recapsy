@@ -28,7 +28,7 @@ import type {
 
 export type SyncJobApi = Pick<
   SyncServerApi,
-  'getCapture' | 'ingestCapture' | 'runOcrProxy' | 'submitOcrResult'
+  'getCapture' | 'createCapture' | 'runOcrProxy' | 'submitOcrResult'
 >;
 
 export type SyncJobStore = {
@@ -80,7 +80,7 @@ async function executeSyncJob(
       return submitted;
     }
 
-    // Replay of an already-ingested capture: if the server already holds a
+    // Replay of an already-created capture: if the server already holds a
     // succeeded OCR result, settle locally instead of re-running the proxy.
     if (activeJob.serverCaptureId) {
       const reconciled = await reconcileOutboxJobFromServerCapture(options, activeJob);
@@ -108,7 +108,7 @@ async function executeSyncJob(
       return { jobId: activeJob.id, processed: 1, status: 'retry_wait' };
     }
 
-    const capture = await options.api.ingestCapture({
+    const capture = await options.api.createCapture({
       ...activeJob.capture,
       asset,
       deviceId: activeJob.deviceId,

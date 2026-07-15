@@ -97,7 +97,7 @@ describe('capture helper controller', () => {
     });
     await controller.start();
 
-    await controller.ingestEvent({
+    await controller.handleEvent({
       code: 1,
       error: 'stderr /private/tmp/helper.log token secret OCR raw text',
       reason: 'process_crashed',
@@ -140,7 +140,7 @@ describe('capture helper controller', () => {
     });
     await controller.start();
 
-    await controller.ingestEvent(
+    await controller.handleEvent(
       createCaptureEvent({
         metadata: {
           note: 'safe metadata',
@@ -210,7 +210,7 @@ describe('capture helper controller', () => {
     await controller.start();
     const callsBeforeExit = setHelperStateCallCount();
 
-    await controller.ingestEvent({
+    await controller.handleEvent({
       code: 1,
       reason: 'process_crashed',
       type: 'unexpectedExit',
@@ -276,7 +276,7 @@ describe('capture helper controller', () => {
     await controller.start();
 
     await expect(
-      controller.ingestEvent(createCaptureEvent({ asset: { role: 'ocr_input' } })),
+      controller.handleEvent(createCaptureEvent({ asset: { role: 'ocr_input' } })),
     ).rejects.toThrow('capture_helper_legacy_adapter_ocr_input_unsupported');
   });
 
@@ -290,7 +290,7 @@ describe('capture helper controller', () => {
     });
     await controller.start();
 
-    await controller.ingestEvent(createCaptureEvent());
+    await controller.handleEvent(createCaptureEvent());
 
     expect(await store.getAssetCacheRef('asset_capture_1')).toBeNull();
     expect(await store.getOutboxJob('capture_1')).toBeNull();

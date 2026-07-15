@@ -119,7 +119,7 @@ describe('real login through to the sync loop over real HTTP', () => {
       workspace,
     });
 
-    // 5. First run: real ingestCapture over HTTP succeeds, but there are no
+    // 5. First run: real createCapture over HTTP succeeds, but there are no
     // real asset bytes yet (no Swift helper in this repo), so this must
     // fail closed to `blocked` — never a fabricated `synced`.
     const firstRun = await worker.runOnce();
@@ -141,7 +141,7 @@ describe('real login through to the sync loop over real HTTP', () => {
     const secondRun = await worker.runOnce();
     expect(secondRun).toEqual({ processed: 0, status: 'idle' });
 
-    // Capture ingest completed, but the unreadable local asset stopped the
+    // Capture creation completed, but the unreadable local asset stopped the
     // thin-proxy flow before OCR and result submission created any records.
     const captureSnapshot = harness.captureSnapshot();
     expect(captureSnapshot.captures).toHaveLength(1);

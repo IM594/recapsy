@@ -155,7 +155,7 @@ describe('desktop server sync over real HTTP', () => {
     const client = createHttpClient(harness.endpoint, user.accessToken);
 
     await expect(
-      client.ingestCapture({
+      client.createCapture({
         appName: 'Code',
         asset: createAsset(user.workspaceId, bytes),
         captureType: 'screen',
@@ -175,7 +175,7 @@ describe('desktop server sync over real HTTP', () => {
       retryable: false,
     });
 
-    const serverResponse = await fetch(`${harness.endpoint}/v1/captures/ingest`, {
+    const serverResponse = await fetch(`${harness.endpoint}/v1/captures`, {
       method: 'POST',
       headers: {
         authorization: `Bearer ${user.accessToken}`,
@@ -279,7 +279,7 @@ describe('desktop server sync over real HTTP', () => {
     const user = await harness.bootstrapUser('desktop-cancel@example.test');
     const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
-    // Simulate a job that has been claimed and ingested (in-flight) when the
+    // Simulate a job that has been claimed and created (in-flight) when the
     // user cancels it: the thin-proxy model has no server-side OCR job to
     // cancel, so cancellation is purely local.
     await store.updateOutboxJobState('job_1', {

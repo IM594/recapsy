@@ -20,7 +20,7 @@ describe('desktop server API client', () => {
     });
 
     await expect(
-      client.ingestCapture({
+      client.createCapture({
         appName: 'Code',
         asset: createLocalAsset(),
         captureType: 'screen',
@@ -60,7 +60,7 @@ describe('desktop server API client', () => {
     expect(calls[0]?.headers.authorization).toBe('Bearer access-token-secret');
   });
 
-  it('passes capture ingest idempotency keys through the public API boundary', async () => {
+  it('passes capture creation idempotency keys through the public API boundary', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const client = createClient(calls, async (request) => {
       expect(request.body).toMatchObject({
@@ -78,7 +78,7 @@ describe('desktop server API client', () => {
       });
     });
 
-    const response = await client.ingestCapture({
+    const response = await client.createCapture({
       appName: 'Code',
       asset: createLocalAsset(),
       captureType: 'screen',
@@ -90,7 +90,7 @@ describe('desktop server API client', () => {
       workspaceId,
     });
 
-    expect(calls[0]?.path).toBe('/v1/captures/ingest');
+    expect(calls[0]?.path).toBe('/v1/captures');
     expect(calls[0]?.headers.authorization).toBe('Bearer access-token-secret');
     expect(response).toMatchObject({
       captureId: 'capture_1',
@@ -101,7 +101,7 @@ describe('desktop server API client', () => {
     expect(JSON.stringify(calls)).not.toContain('provider-token');
   });
 
-  it('rejects retired temporary-upload commands in capture ingest responses', async () => {
+  it('rejects retired temporary-upload commands in capture creation responses', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const retiredNextAction = ['create', 'temporary', 'upload'].join('_');
     const client = createClient(calls, async () =>
@@ -117,7 +117,7 @@ describe('desktop server API client', () => {
     );
 
     await expect(
-      client.ingestCapture({
+      client.createCapture({
         appName: 'Code',
         asset: createLocalAsset(),
         captureType: 'screen',
@@ -134,7 +134,7 @@ describe('desktop server API client', () => {
     });
   });
 
-  it('validates capture ingest against contracts and rejects missing privacyDecision.decidedAt', async () => {
+  it('validates capture creation against contracts and rejects missing privacyDecision.decidedAt', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const client = createClient(calls, async () => {
       throw new Error('transport should not be called for an invalid contract payload');
@@ -146,7 +146,7 @@ describe('desktop server API client', () => {
     };
 
     await expect(
-      client.ingestCapture({
+      client.createCapture({
         appName: 'Code',
         asset: createLocalAsset(),
         captureType: 'screen',

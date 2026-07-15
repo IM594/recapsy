@@ -37,7 +37,7 @@ export type CaptureHelperControllerOptions = {
 
 export type CaptureHelperController = HelperLifecycle & {
   getStatus(): CaptureHelperStatus;
-  ingestEvent(event: CaptureHelperEvent): Promise<void>;
+  handleEvent(event: CaptureHelperEvent): Promise<void>;
 };
 
 export function createCaptureHelperController(
@@ -75,7 +75,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
         onEnvelope: this.options.eventHandler
           ? (envelope) => this.options.eventHandler?.handleEnvelope(envelope) ?? Promise.resolve()
           : undefined,
-        onEvent: (event) => this.ingestEvent(event),
+        onEvent: (event) => this.handleEvent(event),
       });
     } catch (error) {
       const safeError = safeOperationalError(
@@ -153,7 +153,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     await this.persistHelperState();
   }
 
-  async ingestEvent(event: CaptureHelperEvent): Promise<void> {
+  async handleEvent(event: CaptureHelperEvent): Promise<void> {
     if (this.options.eventHandler) {
       // The event handler is the sole writer of `helper_state` for
       // envelope-derived facts (see `helper-event-handler.ts`). Only

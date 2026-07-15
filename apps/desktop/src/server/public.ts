@@ -2,8 +2,8 @@ export { ServerApiError, createServerApiClient } from './client';
 export type {
   AxAllowlistResult,
   CaptureDetailResult,
-  CaptureIngestInput,
-  CaptureIngestResult,
+  CaptureCreateInput,
+  CaptureCreateResult,
   CapturePoliciesInput,
   CapturePoliciesResult,
   RunOcrProxyInput,

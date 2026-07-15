@@ -76,9 +76,9 @@ export async function recoverSyncQueue(options: SyncRecoveryOptions): Promise<Sy
       continue;
     }
 
-    // `syncing`: ingest/proxy/submit was in flight when the process stopped. If
-    // the server already finished OCR for an already-ingested capture, settle
-    // it; otherwise recover for a full replay (ingest is idempotent).
+    // `syncing`: create/proxy/submit was in flight when the process stopped. If
+    // the server already finished OCR for an already-created capture, settle
+    // it; otherwise recover for a full replay (create is idempotent).
     if (options.api && job.serverCaptureId) {
       const reconciled = await reconcileInterruptedCaptureJob(options, job, summary);
       if (reconciled) {

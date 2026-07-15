@@ -1,7 +1,7 @@
 import type {
   AiOcrResponse,
   AiOcrUsage,
-  CaptureIngestNextAction,
+  CaptureNextAction,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -71,7 +71,7 @@ export type CapturePrivacyDecisionInput = {
   reasons: string[];
 };
 
-export type CaptureIngestInput = {
+export type CaptureCreateInput = {
   capturedAt: string;
   observedAt: string;
   appName: string;
@@ -113,10 +113,10 @@ export type CaptureIngestInput = {
   metadata?: Record<string, unknown>;
 };
 
-export type CaptureIngestResult = {
+export type CaptureCreateResult = {
   captureId: string;
   timelineEventId: string;
-  nextAction: CaptureIngestNextAction;
+  nextAction: CaptureNextAction;
   inputAssetId?: string;
 };
 
@@ -263,7 +263,7 @@ export type AxAllowlistResult = {
 };
 
 export type ServerApiClient = {
-  ingestCapture(input: CaptureIngestInput): Promise<CaptureIngestResult>;
+  createCapture(input: CaptureCreateInput): Promise<CaptureCreateResult>;
   getCapture(workspaceId: string, captureId: string): Promise<CaptureDetailResult>;
   queryTimeline(input: TimelineQueryInput): Promise<TimelineQueryResult>;
   querySearch(input: SearchQueryInput): Promise<SearchQueryResult>;

@@ -1,15 +1,15 @@
 import {
   AiOcrResponseSchema,
-  CaptureIngestNextActionSchema,
-  CaptureIngestRequestSchema,
+  CaptureCreateRequestSchema,
+  CaptureNextActionSchema,
   OcrResultSubmitRequestSchema,
   OcrResultSubmitResponseSchema,
 } from '@recapsy/contracts';
 import { redactLogPayload } from '../logging/redaction';
 import type {
+  CaptureCreateInput,
+  CaptureCreateResult,
   CaptureDetailResult,
-  CaptureIngestInput,
-  CaptureIngestResult,
   CapturePoliciesResult,
   RunOcrProxyResult,
   ServerApiClient,
@@ -95,13 +95,13 @@ export function createServerApiClient(
       });
       return toCaptureDetailResult(body);
     },
-    async ingestCapture(input) {
+    async createCapture(input) {
       const body = await request(options, endpoint, {
-        body: toCaptureIngestBody(input),
+        body: toCaptureCreateBody(input),
         method: 'POST',
-        path: '/v1/captures/ingest',
+        path: '/v1/captures',
       });
-      return toCaptureIngestResult(body);
+      return toCaptureCreateResult(body);
     },
     async runOcrProxy(input): Promise<RunOcrProxyResult> {
       const body = await request(options, endpoint, {
@@ -364,7 +364,7 @@ function toAxAllowlistResult(
   };
 }
 
-function toCaptureIngestBody(input: CaptureIngestInput): Record<string, unknown> {
+function toCaptureCreateBody(input: CaptureCreateInput): Record<string, unknown> {
   const canExposeOcrAsset =
     input.privacyDecision.action !== 'block_ocr' &&
     input.privacyDecision.action !== 'block_capture';
@@ -399,14 +399,14 @@ function toCaptureIngestBody(input: CaptureIngestInput): Record<string, unknown>
     ...(input.userId ? { userId: input.userId } : {}),
     ...(input.windowTitleCandidate ? { windowTitleCandidate: input.windowTitleCandidate } : {}),
   };
-  const parsed = CaptureIngestRequestSchema.safeParse(body);
+  const parsed = CaptureCreateRequestSchema.safeParse(body);
 
   if (!parsed.success) {
     throw new ServerApiError({
       code: 'validation_failed',
       details: redactLogPayload(parsed.error.flatten()),
       retryable: false,
-      safeMessage: 'Capture ingest payload does not match the public contract.',
+      safeMessage: 'Capture creation payload does not match the public contract.',
     });
   }
 
@@ -437,10 +437,10 @@ function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unkn
   return parsed.data;
 }
 
-function toCaptureIngestResult(body: unknown): CaptureIngestResult {
+function toCaptureCreateResult(body: unknown): CaptureCreateResult {
   const capture = readObject(readObject(body, 'capture'), undefined);
   const timelineEvent = readObject(readObject(body, 'timelineEvent'), undefined);
-  const nextAction = CaptureIngestNextActionSchema.safeParse(readString(body, 'nextAction'));
+  const nextAction = CaptureNextActionSchema.safeParse(readString(body, 'nextAction'));
   const inputAsset = readArray(body, 'assets')
     .map((entry) => readObject(entry, undefined))
     .find((entry) => readOptionalString(entry, 'role') === 'ocr_input_image');
@@ -766,8 +766,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 export type {
   CaptureDetailResult,
-  CaptureIngestInput,
-  CaptureIngestResult,
+  CaptureCreateInput,
+  CaptureCreateResult,
   CapturePoliciesInput,
   CapturePoliciesResult,
   AxAllowlistResult,

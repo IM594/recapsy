@@ -20,6 +20,54 @@ async function readSource(relativePath: string): Promise<string> {
 }
 
 describe('desktop architecture boundaries', () => {
+  it('uses capture creation terminology across server client, sync, exports, and integration', async () => {
+    const sources: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      if (relativePath === 'architecture-boundaries.test.ts') continue;
+      sources.push(await readSource(relativePath));
+    }
+    for (const relativePath of [
+      '../integration/auth-login-sync-smoke.test.ts',
+      '../integration/server-http-smoke.test.ts',
+    ]) {
+      sources.push(await readFile(path.resolve(DESKTOP_SOURCE_ROOT, relativePath), 'utf8'));
+    }
+    const source = sources.join('\n');
+    const retiredSymbols = [
+      'CaptureIngestInput',
+      'CaptureIngestResult',
+      'SyncCaptureIngestInput',
+      'ingestCapture',
+      'toCaptureIngestBody',
+      'toCaptureIngestResult',
+      'ingestEvent',
+    ];
+    const violations = retiredSymbols
+      .filter((symbol) => new RegExp(`\\b${symbol}\\b`).test(source))
+      .map((symbol) => `retired desktop capture ingest symbol remains: ${symbol}`);
+    if (source.includes('/v1/captures/ingest')) {
+      violations.push('retired desktop capture ingest path remains');
+    }
+    if (/\bingest\b/i.test(source)) {
+      violations.push('standalone capture ingest terminology remains in desktop code or tests');
+    }
+    for (const symbol of [
+      'CaptureCreateInput',
+      'CaptureCreateResult',
+      'SyncCaptureCreateInput',
+      'createCapture',
+      'toCaptureCreateBody',
+      'toCaptureCreateResult',
+      'handleEvent',
+    ]) {
+      if (!new RegExp(`\\b${symbol}\\b`).test(source)) {
+        violations.push(`required desktop capture creation symbol is missing: ${symbol}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
   it('uses contextual names for helper results, storage DTOs, secrets, and sync recovery', async () => {
     const sourceFiles: string[] = [];
     const checkedSources: string[] = [];

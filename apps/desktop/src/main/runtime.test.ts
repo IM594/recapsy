@@ -559,7 +559,7 @@ function notImplementedServerApi(): SyncServerApi {
     getCapabilities: notImplemented,
     getCapturePolicies: notImplemented,
     getCapture: notImplemented,
-    ingestCapture: notImplemented,
+    createCapture: notImplemented,
     querySearch: notImplemented,
     queryTimeline: notImplemented,
     runOcrProxy: notImplemented,
