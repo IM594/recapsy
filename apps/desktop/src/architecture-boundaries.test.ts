@@ -74,6 +74,80 @@ describe('desktop architecture boundaries', () => {
     expect(source).toMatch(/\bSyncRecoverySummary\b/);
   });
 
+  it('keeps Electron entry focused on platform wiring through narrow main adapters', async () => {
+    const sourceFiles: string[] = [];
+    const glob = new Bun.Glob('**/*.ts');
+    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+      sourceFiles.push(relativePath);
+    }
+
+    const requiredPaths = [
+      'main/http-transport.ts',
+      'main/http-transport.test.ts',
+      'main/dev-visibility.ts',
+      'main/dev-visibility.test.ts',
+      'main/auth-storage.ts',
+      'main/auth-storage.test.ts',
+    ];
+    const entrySource = await readSource('main/electron-entry.ts');
+    const adapterSources = await Promise.all(
+      ['main/http-transport.ts', 'main/dev-visibility.ts', 'main/auth-storage.ts']
+        .filter((relativePath) => sourceFiles.includes(relativePath))
+        .map((relativePath) => readSource(relativePath)),
+    );
+    const violations = requiredPaths
+      .filter((relativePath) => !sourceFiles.includes(relativePath))
+      .map((relativePath) => `${relativePath} is missing`);
+
+    for (const moduleName of ['./http-transport', './dev-visibility', './auth-storage']) {
+      if (!entrySource.includes(`from '${moduleName}'`)) {
+        violations.push(`main/electron-entry.ts does not depend on ${moduleName}`);
+      }
+    }
+    for (const retiredResponsibility of [
+      'encodeTransportBody',
+      'decodeTransportBody',
+      'logHelperEnvelope',
+      'logSyncResult',
+      'logSyncError',
+      'tokenStoreInstance',
+      'resolveTokenStore',
+    ]) {
+      if (entrySource.includes(retiredResponsibility)) {
+        violations.push(`main/electron-entry.ts still owns ${retiredResponsibility}`);
+      }
+    }
+    for (const [index, adapterSource] of adapterSources.entries()) {
+      for (const forbiddenDependency of [
+        "from 'electron'",
+        'from "electron"',
+        "from './runtime'",
+        "from '../storage/",
+        'createSqliteStore',
+        'createMemoryStore',
+      ]) {
+        if (adapterSource.includes(forbiddenDependency)) {
+          violations.push(`main adapter ${index} depends on ${forbiddenDependency}`);
+        }
+      }
+    }
+    for (const relativePath of sourceFiles) {
+      if (
+        !relativePath.startsWith('main/') ||
+        relativePath.endsWith('.test.ts') ||
+        relativePath === 'main/electron-entry.ts'
+      ) {
+        continue;
+      }
+      const source = await readSource(relativePath);
+      if (/from\s+['"]electron['"]/.test(source)) {
+        violations.push(`${relativePath} imports electron outside the main entry`);
+      }
+    }
+
+    expect(violations).toEqual([]);
+  });
+
   it('gives every existing capability a public module surface', async () => {
     const publicSurfaces = await Promise.all(
       CAPABILITY_DIRECTORIES.map((directory) => readSource(`${directory}/public.ts`)),
