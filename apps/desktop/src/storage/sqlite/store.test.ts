@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createSyncQueueSummary } from '../../sync/public';
+import { createSyncQueueSummary } from '../../sync/index';
 import { recoverSyncQueue } from '../../sync/recovery';
 import {
   type AssetCacheRef,

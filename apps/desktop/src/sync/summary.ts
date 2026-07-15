@@ -1,4 +1,4 @@
-import type { BackpressureDecision, OutboxJob } from '../storage/public';
+import type { BackpressureDecision, OutboxJob } from '../storage/index';
 import { toSyncPresentationError } from './errors';
 import type { SyncQueueSummary } from './types';
 

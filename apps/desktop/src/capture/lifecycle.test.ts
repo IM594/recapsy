@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { HelperLifecycle } from '../helper/public';
+import type { HelperLifecycle } from '../helper/index';
 import { createMemoryStore } from '../storage';
 import { recoverSyncQueue } from '../sync/recovery';
 import { createCaptureLifecycle } from './lifecycle';

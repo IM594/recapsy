@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ServerApiTransportRequest } from '../server/public';
+import type { ServerApiTransportRequest } from '../server/index';
 import { createHttpTransport } from './http-transport';
 
 const request = (body?: unknown): ServerApiTransportRequest => ({

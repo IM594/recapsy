@@ -4,12 +4,12 @@ import {
   createAuthClient,
   createInMemoryTokenStore,
   createLoginWindowPrompter,
-} from '../auth/public';
-import { createHelperProcessClient } from '../helper/public';
-import { createServerApiClient } from '../server/public';
+} from '../auth/index';
+import { createHelperProcessClient } from '../helper/index';
+import { createServerApiClient } from '../server/index';
+import { createSqliteStore } from '../storage/index';
 import { createNodeSqliteDatabase } from '../storage/node';
-import { createSqliteStore } from '../storage/public';
-import type { SyncAssetReader } from '../sync/public';
+import type { SyncAssetReader } from '../sync/index';
 import { createLocalAssetReader } from './asset-reader';
 import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';

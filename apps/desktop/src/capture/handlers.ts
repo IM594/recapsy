@@ -1,4 +1,4 @@
-import type { CaptureHelperState } from '../helper/public';
+import type { CaptureHelperState } from '../helper/index';
 import {
   type CaptureEventSummaryDto,
   type CaptureStatusDto,
@@ -7,8 +7,8 @@ import {
   type IpcErrorCode,
   type IpcHandlerMap,
   createRendererSafeSuccess,
-} from '../ipc/public';
-import type { OutboxJob, SafeOperationalError } from '../storage/public';
+} from '../ipc/index';
+import type { OutboxJob, SafeOperationalError } from '../storage/index';
 import type { CaptureHelperEventHandler } from './helper-event-handler';
 import type { CaptureLifecycle } from './lifecycle';
 import type { CaptureHistoryReader } from './store';

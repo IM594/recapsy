@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { HELPER_PROTOCOL_VERSION, type HelperEnvelope } from '../helper/public';
+import { HELPER_PROTOCOL_VERSION, type HelperEnvelope } from '../helper/index';
 import { createDevVisibility } from './dev-visibility';
 
 function captureResultEnvelope(): HelperEnvelope<'capture.result'> {

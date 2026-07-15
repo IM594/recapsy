@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type { HelperEnvelope, HelperToMainPayloadByType, MainToHelperType } from '../helper/public';
+import type { HelperEnvelope, HelperToMainPayloadByType, MainToHelperType } from '../helper/index';
 import {
   HELPER_PROTOCOL_VERSION,
   decodeHelperEnvelopeLine,
   validateHelperToMainEnvelope,
-} from '../helper/public';
+} from '../helper/index';
 import { type BackpressureConfig, createMemoryStore } from '../storage';
 import {
   type CaptureHelperCommandClient,

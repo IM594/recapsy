@@ -3,7 +3,7 @@ import type {
   OperationalStoreResult,
   OutboxJob,
   OutboxTerminalUpdate,
-} from '../storage/public';
+} from '../storage/index';
 import type { SyncJobExecutor } from './job';
 import type { SyncCancelResult, SyncClock, SyncRunResult, SyncWorkspaceProvider } from './types';
 

@@ -3,7 +3,7 @@ import type {
   AssetCacheRefRole,
   CapturePrivacyDecision,
   SafeOperationalError,
-} from '../storage/public';
+} from '../storage/index';
 import type { HelperEnvelope, HelperToMainType, MainToHelperType } from './protocol/types';
 
 export type CaptureHelperState =

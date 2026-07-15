@@ -1,11 +1,11 @@
-import type { HelperEnvelope, HelperToMainType } from '../helper/public';
-import type { CaptureHelperClient } from '../helper/public';
+import type { HelperEnvelope, HelperToMainType } from '../helper/index';
+import type { CaptureHelperClient } from '../helper/index';
 import {
   type AssetAvailabilityResolver,
   type AssetReconciliationStore,
   type BackpressureConfig,
   reconcileAssetRefs,
-} from '../storage/public';
+} from '../storage/index';
 import { createCaptureHelperController } from './helper-controller';
 import {
   type CaptureHelperCommandClient,

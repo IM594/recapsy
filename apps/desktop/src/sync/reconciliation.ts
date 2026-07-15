@@ -1,4 +1,4 @@
-import type { OutboxJob } from '../storage/public';
+import type { OutboxJob } from '../storage/index';
 import type { SyncRunResult } from './types';
 
 type ReconciliationJob = Pick<OutboxJob, 'id' | 'serverCaptureId' | 'state' | 'workspaceId'>;

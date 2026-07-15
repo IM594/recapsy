@@ -8,6 +8,7 @@ export { reconcileAssetRefs } from './reconciliation';
 export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
+  AssetReconciliationStore,
   AssetReconciliationOptions,
   AssetReconciliationSummary,
 } from './reconciliation';

@@ -3,7 +3,7 @@ import {
   type LoginPrompter,
   type TokenStore,
   createSessionStartup,
-} from '../auth/public';
+} from '../auth/index';
 import {
   type CaptureHelperClient,
   type CaptureHelperCommandClient,
@@ -13,11 +13,11 @@ import {
   type CaptureRuntimeStore,
   createCaptureIpcHandlers,
   createCaptureRuntime,
-} from '../capture/public';
-import type { HelperEnvelope, HelperToMainType } from '../helper/public';
-import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/public';
-import { createStatusHandlers } from '../status/public';
-import type { BackpressureConfig, StoreLifecycle } from '../storage/public';
+} from '../capture/index';
+import type { HelperEnvelope, HelperToMainType } from '../helper/index';
+import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/index';
+import { createStatusHandlers } from '../status/index';
+import type { BackpressureConfig, StoreLifecycle } from '../storage/index';
 import {
   type RetryBackoffConfig,
   type SyncAssetReader,
@@ -28,7 +28,7 @@ import {
   type SyncServerApi,
   createSyncIpcHandlers,
   createSyncRuntime,
-} from '../sync/public';
+} from '../sync/index';
 
 export type ElectronQuitEvent = {
   preventDefault(): void;
@@ -43,7 +43,7 @@ export type ElectronAppLike = {
   dock?: { hide(): void } | null;
 };
 
-export type { ElectronIpcMainLike } from '../ipc/public';
+export type { ElectronIpcMainLike } from '../ipc/index';
 
 export type DesktopStore = StoreLifecycle &
   CaptureRuntimeStore &

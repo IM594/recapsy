@@ -5,7 +5,7 @@ import type {
   OperationalStoreSnapshot,
   OutboxJob,
   OutboxJobListFilter,
-} from '../storage/public';
+} from '../storage/index';
 
 export type CaptureIntakeStore = {
   createCaptureOutboxEntry(

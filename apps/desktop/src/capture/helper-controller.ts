@@ -8,12 +8,12 @@ import {
   type HelperEnvelope,
   type HelperLifecycle,
   type HelperToMainType,
-} from '../helper/public';
+} from '../helper/index';
 import type {
   CapturePrivacyDecision,
   HelperPermissionState,
   SafeOperationalError,
-} from '../storage/public';
+} from '../storage/index';
 import type { HelperStateStore } from './store';
 
 export type {
@@ -23,7 +23,7 @@ export type {
   CaptureHelperStartOptions,
   CaptureHelperState,
   CaptureHelperStatus,
-} from '../helper/public';
+} from '../helper/index';
 
 export type CaptureHelperControllerOptions = {
   client: CaptureHelperClient;

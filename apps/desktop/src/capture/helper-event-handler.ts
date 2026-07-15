@@ -7,18 +7,18 @@ import {
   type HelperToMainType,
   type MainToHelperPayloadByType,
   type MainToHelperType,
-} from '../helper/public';
+} from '../helper/index';
 import {
   type BackpressureConfig,
   type HelperPermissionState,
   type HelperRuntimeState,
   type SafeOperationalError,
   evaluateOperationalStoreBackpressure,
-} from '../storage/public';
+} from '../storage/index';
 import { projectCaptureOutboxEntry } from './outbox-entry';
 import type { CaptureIntakeStore, HelperStateStore } from './store';
 
-export type { CaptureHelperCommandClient } from '../helper/public';
+export type { CaptureHelperCommandClient } from '../helper/index';
 
 export type CaptureHelperEventStatus = {
   lastObservedAt?: string;

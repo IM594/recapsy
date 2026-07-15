@@ -29,18 +29,18 @@ const DESKTOP_CAPABILITIES = [
   'sync',
 ];
 
-function publicSurfaceRules(rulePrefix, sourceRoot, capabilities, exceptions = {}) {
+function capabilityEntrypointRules(rulePrefix, sourceRoot, capabilities, exceptions = {}) {
   return capabilities.map((targetCapability) => {
     const exceptionSurfaces = exceptions[targetCapability] ?? [];
-    const allowedSurfaces = ['public', ...exceptionSurfaces]
+    const allowedSurfaces = ['index', ...exceptionSurfaces]
       .map((surface) => `${surface}[.]ts`)
       .join('|');
 
     return {
-      name: `${rulePrefix}-${targetCapability}-only-public-surface`,
+      name: `${rulePrefix}-${targetCapability}-only-index-entrypoint`,
       severity: 'error',
       comment:
-        'All production code outside a capability must depend on it through its public.ts surface.',
+        'All production code outside a capability must depend on it through its index.ts entrypoint.',
       from: {
         path: `^${sourceRoot}/`,
         pathNot: `(?:${TEST_SOURCE_PATH}|^${sourceRoot}/${targetCapability}/)`,
@@ -65,7 +65,7 @@ module.exports = {
         circular: true,
       },
     },
-    ...publicSurfaceRules('server', SERVER_SOURCE_ROOT, SERVER_CAPABILITIES),
+    ...capabilityEntrypointRules('server', SERVER_SOURCE_ROOT, SERVER_CAPABILITIES),
     {
       name: 'server-ai-not-to-database',
       severity: 'error',
@@ -104,7 +104,7 @@ module.exports = {
         path: `^${SERVER_SOURCE_ROOT}/(?:audit|identity|registration|subscriptions)/`,
       },
     },
-    ...publicSurfaceRules('desktop', DESKTOP_SOURCE_ROOT, DESKTOP_CAPABILITIES, {
+    ...capabilityEntrypointRules('desktop', DESKTOP_SOURCE_ROOT, DESKTOP_CAPABILITIES, {
       storage: ['node'],
     }),
     {

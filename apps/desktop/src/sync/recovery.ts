@@ -1,4 +1,4 @@
-import type { OutboxJob, SafeOperationalError } from '../storage/public';
+import type { OutboxJob, SafeOperationalError } from '../storage/index';
 import { reconcileOutboxJobFromServerCapture } from './reconciliation';
 import type { SyncClock, SyncQueueStore, SyncServerApi } from './types';
 

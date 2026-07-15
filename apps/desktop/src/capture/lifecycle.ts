@@ -1,6 +1,6 @@
-import type { CaptureHelperStatus, HelperLifecycle } from '../helper/public';
+import type { CaptureHelperStatus, HelperLifecycle } from '../helper/index';
 
-export type { HelperLifecycle } from '../helper/public';
+export type { HelperLifecycle } from '../helper/index';
 
 export type CaptureStartupRecovery = {
   recover(): Promise<void>;

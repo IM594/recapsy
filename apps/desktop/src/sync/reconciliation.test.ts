@@ -4,7 +4,7 @@ import type {
   OutboxJob,
   OutboxJobState,
   OutboxTerminalUpdate,
-} from '../storage/public';
+} from '../storage/index';
 import {
   type ServerCaptureReconciliationApi,
   type ServerCaptureReconciliationClock,

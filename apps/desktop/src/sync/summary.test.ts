@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { BackpressureReason, OutboxJob, OutboxJobState } from '../storage/public';
+import type { BackpressureReason, OutboxJob, OutboxJobState } from '../storage/index';
 import { type SyncSummaryStore, createSyncQueueSummary } from './summary';
 
 const now = '2026-07-06T00:00:00.000Z';

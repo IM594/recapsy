@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { AuthTokenSet, SecretStore, TokenStore } from '../auth/public';
+import type { AuthTokenSet, SecretStore, TokenStore } from '../auth/index';
 import { createAuthStorage } from './auth-storage';
 
 function memoryTokenStore(): TokenStore {

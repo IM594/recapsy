@@ -1,6 +1,6 @@
-import type { HelperEnvelope, HelperToMainType } from '../helper/public';
+import type { HelperEnvelope, HelperToMainType } from '../helper/index';
 import { redactSensitiveString } from '../logging/redaction';
-import type { SyncRunResult } from '../sync/public';
+import type { SyncRunResult } from '../sync/index';
 
 export type DevVisibilityLogger = {
   log(...args: unknown[]): void;

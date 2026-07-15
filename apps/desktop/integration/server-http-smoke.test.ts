@@ -8,13 +8,13 @@ import type {
   AiRuntime,
   RunVisionTextFailureReason,
   createAiRuntime,
-} from '../../server/src/ai/public';
+} from '../../server/src/ai/index';
 import type { CaptureRepositorySnapshot } from '../../server/src/capture/models';
 import type { InMemoryCaptureRepository } from '../../server/src/capture/repositories/memory';
 import type {
   InMemoryProviderSettingsRepository,
   createProviderCredentialResolver,
-} from '../../server/src/provider-settings/public';
+} from '../../server/src/provider-settings/index';
 import type { Logger } from '../../server/src/shared/logger';
 import { createServerApiClient } from '../src/server/client';
 import type { ServerApiTransport } from '../src/server/types';
@@ -670,13 +670,13 @@ async function loadServerModules(): Promise<ServerModules> {
     new URL('../../server/src/__tests__/app-harness.ts', import.meta.url).href
   );
   const aiRuntimeModule = await import(
-    new URL('../../server/src/ai/public.ts', import.meta.url).href
+    new URL('../../server/src/ai/index.ts', import.meta.url).href
   );
   const captureRepositoryModule = await import(
     new URL('../../server/src/capture/repositories/memory.ts', import.meta.url).href
   );
   const providerSettingsModule = await import(
-    new URL('../../server/src/provider-settings/public.ts', import.meta.url).href
+    new URL('../../server/src/provider-settings/index.ts', import.meta.url).href
   );
 
   return {

@@ -1,9 +1,5 @@
-import type { CaptureLifecycle } from '../capture/public';
-import {
-  type IpcHandlerMap,
-  type RuntimeStatusDto,
-  createRendererSafeSuccess,
-} from '../ipc/public';
+import type { CaptureLifecycle } from '../capture/index';
+import { type IpcHandlerMap, type RuntimeStatusDto, createRendererSafeSuccess } from '../ipc/index';
 
 export type StatusSource = {
   getLastObservedAt(): string | undefined;

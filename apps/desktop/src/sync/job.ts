@@ -6,7 +6,7 @@ import type {
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
   StoredOcrResult,
-} from '../storage/public';
+} from '../storage/index';
 import {
   classifySyncError,
   isLocalAssetSyncErrorCode,

@@ -3,14 +3,14 @@ import type {
   CaptureAssetPayload,
   CaptureResultPayload,
   SafeCaptureContextPayload,
-} from '../helper/public';
+} from '../helper/index';
 import { redactSensitiveString } from '../logging/redaction';
 import type {
   AssetCacheRefRole,
   CaptureOutboxEntryCreateInput,
   CaptureOutboxPayloadInput,
   CapturePrivacyDecision,
-} from '../storage/public';
+} from '../storage/index';
 
 export type ProjectCaptureOutboxEntryInput = {
   payload: CaptureResultPayload;

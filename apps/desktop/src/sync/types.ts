@@ -16,7 +16,7 @@ import type {
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
   RecoverInterruptedOutboxJobInput,
-} from '../storage/public';
+} from '../storage/index';
 
 export type SyncCaptureCreateInput = CaptureOutboxPayload & {
   workspaceId: string;

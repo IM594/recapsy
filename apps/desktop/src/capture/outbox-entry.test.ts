@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { CaptureResultPayload } from '../helper/public';
+import type { CaptureResultPayload } from '../helper/index';
 import { projectCaptureOutboxEntry } from './outbox-entry';
 
 const observedAt = '2026-07-07T08:00:00.000Z';

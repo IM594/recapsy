@@ -1,4 +1,4 @@
-import type { ServerApiTransport } from '../server/public';
+import type { ServerApiTransport } from '../server/index';
 
 export type HttpFetch = (input: URL, init: RequestInit) => Promise<Response>;
 

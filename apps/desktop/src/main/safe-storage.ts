@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { SecretStore } from '../auth/public';
+import type { SecretStore } from '../auth/index';
 
 /**
  * Duck-typed surface of Electron's `safeStorage` module (see

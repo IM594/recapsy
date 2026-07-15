@@ -3,7 +3,7 @@ import {
   type TokenStore,
   createInMemoryTokenStore,
   createSecretTokenStore,
-} from '../auth/public';
+} from '../auth/index';
 
 const ENCRYPTION_UNAVAILABLE_WARNING =
   '[recapsy-desktop] OS-backed encryption unavailable; falling back to in-memory token store (login will not persist across restarts).';

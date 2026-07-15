@@ -1,4 +1,4 @@
-import type { SafeOperationalError } from '../storage/public';
+import type { SafeOperationalError } from '../storage/index';
 import type { SyncPresentationErrorCode, SyncQueueSummary } from './types';
 
 export type ClassifiedSyncError = {

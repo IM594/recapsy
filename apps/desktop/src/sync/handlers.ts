@@ -1,4 +1,4 @@
-import { type IpcHandlerMap, createRendererSafeSuccess } from '../ipc/public';
+import { type IpcHandlerMap, createRendererSafeSuccess } from '../ipc/index';
 import { type SyncSummaryStore, createSyncQueueSummary } from './summary';
 
 export type SyncIpcHandlerOptions = {

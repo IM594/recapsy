@@ -196,22 +196,38 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('gives every existing capability a public module surface', async () => {
-    const publicSurfaces = await Promise.all(
-      CAPABILITY_DIRECTORIES.map((directory) => readSource(`${directory}/public.ts`)),
-    );
+  it('gives every capability one standard index entrypoint', async () => {
+    const violations: string[] = [];
 
-    expect(publicSurfaces.every((source) => source.includes('export'))).toBe(true);
+    for (const capability of CAPABILITY_DIRECTORIES) {
+      try {
+        const source = await readSource(`${capability}/index.ts`);
+        if (!source.includes('export')) {
+          violations.push(`${capability}/index.ts does not export a capability surface`);
+        }
+      } catch {
+        violations.push(`${capability}/index.ts is missing`);
+      }
+
+      try {
+        await readSource(`${capability}/public.ts`);
+        violations.push(`${capability}/public.ts must not exist`);
+      } catch {
+        // Expected: index.ts is the capability's only entrypoint.
+      }
+    }
+
+    expect(violations).toEqual([]);
   });
 
-  it('keeps the Node SQLite adapter out of the storage public surface', async () => {
-    const [publicSource, nodeSource] = await Promise.all([
-      readSource('storage/public.ts'),
+  it('keeps the Node SQLite adapter out of the storage index entrypoint', async () => {
+    const [indexSource, nodeSource] = await Promise.all([
+      readSource('storage/index.ts'),
       readSource('storage/node.ts'),
     ]);
 
-    expect(publicSource).not.toContain('node-driver');
-    expect(publicSource).not.toContain('createNodeSqliteDatabase');
+    expect(indexSource).not.toContain('node-driver');
+    expect(indexSource).not.toContain('createNodeSqliteDatabase');
     expect(nodeSource).toContain('createNodeSqliteDatabase');
   });
 
@@ -396,7 +412,7 @@ describe('desktop architecture boundaries', () => {
     const [handlerSource, projectionSource, capturePublicSource] = await Promise.all([
       readSource('capture/helper-event-handler.ts'),
       readSource('capture/outbox-entry.ts'),
-      readSource('capture/public.ts'),
+      readSource('capture/index.ts'),
     ]);
     const violations: string[] = [];
 
@@ -456,7 +472,7 @@ describe('desktop architecture boundaries', () => {
     }
 
     if (capturePublicSource.includes('projectCaptureOutboxEntry')) {
-      violations.push('capture/public.ts exposes an internal-only outbox entry projection');
+      violations.push('capture/index.ts exposes an internal-only outbox entry projection');
     }
 
     expect(violations).toEqual([]);
@@ -482,12 +498,7 @@ describe('desktop architecture boundaries', () => {
       }
     }
 
-    for (const relativePath of [
-      'storage/types.ts',
-      'storage/index.ts',
-      'storage/public.ts',
-      'index.ts',
-    ]) {
+    for (const relativePath of ['storage/types.ts', 'storage/index.ts', 'index.ts']) {
       const source = await readSource(relativePath);
       if (source.includes(retiredType)) {
         violations.push(`${relativePath} still exports the retired repository type`);
@@ -499,8 +510,8 @@ describe('desktop architecture boundaries', () => {
 
   it('publishes capture and storage operational ports from capability surfaces', async () => {
     const [capturePublicSource, storagePublicSource] = await Promise.all([
-      readSource('capture/public.ts'),
-      readSource('storage/public.ts'),
+      readSource('capture/index.ts'),
+      readSource('storage/index.ts'),
     ]);
     const sourceFiles: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
@@ -519,12 +530,12 @@ describe('desktop architecture boundaries', () => {
       'CaptureRuntimeStore',
     ]) {
       if (!new RegExp(`\\b${symbol}\\b`).test(capturePublicSource)) {
-        violations.push(`capture/public.ts does not export ${symbol}`);
+        violations.push(`capture/index.ts does not export ${symbol}`);
       }
     }
     for (const symbol of ['AssetReconciliationStore', 'StoreLifecycle']) {
       if (!new RegExp(`\\b${symbol}\\b`).test(storagePublicSource)) {
-        violations.push(`storage/public.ts does not export ${symbol}`);
+        violations.push(`storage/index.ts does not export ${symbol}`);
       }
     }
 
@@ -706,7 +717,7 @@ describe('desktop architecture boundaries', () => {
   it('gives retry policy its own sync module and test ownership', async () => {
     const [jobSource, publicSource] = await Promise.all([
       readSource('sync/job.ts'),
-      readSource('sync/public.ts'),
+      readSource('sync/index.ts'),
     ]);
     const sourceFiles: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
@@ -739,14 +750,14 @@ describe('desktop architecture boundaries', () => {
         publicSource,
       )
     ) {
-      violations.push('sync/public.ts does not export computeRetryBackoffDelayMs from ./retry');
+      violations.push('sync/index.ts does not export computeRetryBackoffDelayMs from ./retry');
     }
     if (
       /export\s*\{[^}]*\bcomputeRetryBackoffDelayMs\b[^}]*\}\s*from\s*['"]\.\/worker['"]/s.test(
         publicSource,
       )
     ) {
-      violations.push('sync/public.ts still exports computeRetryBackoffDelayMs from ./worker');
+      violations.push('sync/index.ts still exports computeRetryBackoffDelayMs from ./worker');
     }
 
     expect(violations).toEqual([]);
@@ -801,7 +812,7 @@ describe('desktop architecture boundaries', () => {
   it('owns sync queue summary projection in a narrow read module', async () => {
     const [workerSource, publicSource, handlersSource] = await Promise.all([
       readSource('sync/worker.ts'),
-      readSource('sync/public.ts'),
+      readSource('sync/index.ts'),
       readSource('sync/handlers.ts'),
     ]);
     const sourceFiles: string[] = [];
@@ -854,21 +865,21 @@ describe('desktop architecture boundaries', () => {
         publicSource,
       )
     ) {
-      violations.push('sync/public.ts does not export createSyncQueueSummary from ./summary');
+      violations.push('sync/index.ts does not export createSyncQueueSummary from ./summary');
     }
     if (
       !/export\s+type\s*\{[^}]*\bSyncSummaryStore\b[^}]*\}\s*from\s*['"]\.\/summary['"]/s.test(
         publicSource,
       )
     ) {
-      violations.push('sync/public.ts does not export SyncSummaryStore from ./summary');
+      violations.push('sync/index.ts does not export SyncSummaryStore from ./summary');
     }
     if (
       /export\s*\{[^}]*\bcreateSyncQueueSummary\b[^}]*\}\s*from\s*['"]\.\/worker['"]/s.test(
         publicSource,
       )
     ) {
-      violations.push('sync/public.ts still exports createSyncQueueSummary from ./worker');
+      violations.push('sync/index.ts still exports createSyncQueueSummary from ./worker');
     }
     if (
       !/import\s*\{[^}]*\bcreateSyncQueueSummary\b[^}]*\}\s*from\s*['"]\.\/summary['"]/s.test(
@@ -891,7 +902,7 @@ describe('desktop architecture boundaries', () => {
     const [jobSource, recoverySource, publicSource] = await Promise.all([
       readSource('sync/job.ts'),
       readSource('sync/recovery.ts'),
-      readSource('sync/public.ts'),
+      readSource('sync/index.ts'),
     ]);
     const sourceFiles: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
@@ -965,7 +976,7 @@ describe('desktop architecture boundaries', () => {
       )
     ) {
       violations.push(
-        'sync/public.ts does not export reconcileOutboxJobFromServerCapture from ./reconciliation',
+        'sync/index.ts does not export reconcileOutboxJobFromServerCapture from ./reconciliation',
       );
     }
     if (
@@ -973,7 +984,7 @@ describe('desktop architecture boundaries', () => {
         publicSource,
       )
     ) {
-      violations.push('sync/public.ts does not export server-capture reconciliation ports');
+      violations.push('sync/index.ts does not export server-capture reconciliation ports');
     }
     if (
       /export\s*\{[^}]*\breconcileOutboxJobFromServerCapture\b[^}]*\}\s*from\s*['"]\.\/worker['"]/s.test(
@@ -981,14 +992,14 @@ describe('desktop architecture boundaries', () => {
       )
     ) {
       violations.push(
-        'sync/public.ts still exports reconcileOutboxJobFromServerCapture from ./worker',
+        'sync/index.ts still exports reconcileOutboxJobFromServerCapture from ./worker',
       );
     }
 
     expect(violations).toEqual([]);
   });
 
-  it('routes every production import into a capability through its public surface', async () => {
+  it('routes every production import into a capability through its index entrypoint', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('**/*.ts');
 
@@ -1013,7 +1024,7 @@ describe('desktop architecture boundaries', () => {
 
         const isElectronNodeStorageImport =
           relativePath === 'main/electron-entry.ts' && targetPath === 'storage/node';
-        if (targetPath !== `${targetCapability}/public` && !isElectronNodeStorageImport) {
+        if (targetPath !== `${targetCapability}/index` && !isElectronNodeStorageImport) {
           violations.push(`${relativePath} -> ${specifier}`);
         }
       }
@@ -1026,7 +1037,7 @@ describe('desktop architecture boundaries', () => {
     const source = await readSource('capture/lifecycle.ts');
 
     expect(source).not.toMatch(/from ['"]\.\/helper-controller['"]/);
-    expect(source).toMatch(/from ['"]\.\.\/helper\/public['"]/);
+    expect(source).toMatch(/from ['"]\.\.\/helper\/index['"]/);
   });
 
   it('keeps helper adapters independent from the status capability', async () => {
@@ -1109,7 +1120,7 @@ describe('desktop architecture boundaries', () => {
       }
       const source = await readSource(relativePath);
       if (/from\s+['"][^'"]*helper\/protocol(?:\/|['"])/.test(source)) {
-        violations.push(`${relativePath} bypasses helper/public.ts for protocol access`);
+        violations.push(`${relativePath} bypasses helper/index.ts for protocol access`);
       }
     }
 
@@ -1117,7 +1128,7 @@ describe('desktop architecture boundaries', () => {
     for await (const relativePath of glob.scan({ cwd: integrationRoot })) {
       const source = await readFile(path.resolve(integrationRoot, relativePath), 'utf8');
       if (/from\s+['"][^'"]*helper\/protocol(?:\/|['"])/.test(source)) {
-        violations.push(`integration/${relativePath} bypasses helper/public.ts`);
+        violations.push(`integration/${relativePath} bypasses helper/index.ts`);
       }
     }
 

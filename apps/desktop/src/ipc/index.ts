@@ -48,3 +48,9 @@ export type {
   PreloadAllowlist,
   PreloadInvoke,
 } from './preload';
+export { createRendererSafeSuccess, registerIpcHandlers } from './handlers';
+export type {
+  ElectronIpcMainLike,
+  IpcHandler,
+  IpcHandlerMap,
+} from './handlers';
