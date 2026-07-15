@@ -7,10 +7,14 @@
     "@recapsy/contracts": "workspace:*"
   },
   "scripts": {
-    "test": "bun test src",
+    "test": "pnpm run test:unit && pnpm run test:integration",
+    "test:unit": "bun test src",
+    "test:integration": "bun test integration/server-http-smoke.test.ts integration/auth-login-sync-smoke.test.ts integration/capture-helper-process.test.ts",
     "test:server-http": "bun test integration/server-http-smoke.test.ts",
+    "test:auth-login-sync": "bun test integration/auth-login-sync-smoke.test.ts",
     "test:capture-helper-process": "bun test integration/capture-helper-process.test.ts",
     "test:capture-bundle-process": "bun test integration/capture-bundle-process.test.ts",
+    "test:macos": "swift build --package-path macos --target CaptureCoreTests && swift test --package-path macos --skip-build && pnpm run build:capture && pnpm run test:capture-bundle-process",
     "build:capture": "bash macos/build-capture-bundle.sh",
     "typecheck": "tsc --noEmit && pnpm run typecheck:integration",
     "typecheck:integration": "tsc --noEmit -p tsconfig.integration.json",

@@ -22,7 +22,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.2.10
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -39,4 +39,30 @@ jobs:
       - name: Test
         run: pnpm test
 
-      # Coverage enforcement will be added when tests exist
+  desktop-macos:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.10
+
+      - name: Install libwebp
+        run: brew install webp
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test macOS capture
+        env:
+          RECAPSY_CAPTURE_SIGN_IDENTITY: "-"
+        run: pnpm --filter @recapsy/desktop run test:macos
