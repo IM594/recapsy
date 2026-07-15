@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AiOcrResponse } from '@recapsy/contracts';
-import { OcrResultInvalidError, mapOcrScreenText } from './screen-text';
+import { mapOcrScreenText } from './screen-text';
 
 function ocrResponse(blocks: AiOcrResponse['blocks']): AiOcrResponse {
   return {
@@ -81,13 +81,19 @@ describe('mapOcrScreenText', () => {
     expect(result.blocks.every((block) => block.bbox === undefined)).toBe(true);
   });
 
-  it('throws OcrResultInvalidError when no block has any text', () => {
-    expect(() => mapOcrScreenText(ocrResponse([{ text: '' }, { text: '  ' }]))).toThrow(
-      OcrResultInvalidError,
-    );
+  it('maps whitespace-only OCR blocks to a valid empty screen-text result', () => {
+    expect(mapOcrScreenText(ocrResponse([{ text: '' }, { text: '  ' }]))).toEqual({
+      blocks: [],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    });
   });
 
-  it('throws OcrResultInvalidError for an empty block list', () => {
-    expect(() => mapOcrScreenText(ocrResponse([]))).toThrow(OcrResultInvalidError);
+  it('maps an empty OCR transcript to a valid empty screen-text result', () => {
+    expect(mapOcrScreenText(ocrResponse([]))).toEqual({
+      blocks: [],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    });
   });
 });

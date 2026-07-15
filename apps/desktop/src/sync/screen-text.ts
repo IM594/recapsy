@@ -8,8 +8,8 @@ import {
 
 /**
  * Raised when an `AiOcrResponse` cannot be mapped to a valid screen-text
- * result — either no non-empty block survives, or the assembled shape fails
- * `OcrScreenTextResultSchema`. The proxy transcript is deterministic input, so
+ * result because the assembled shape fails `OcrScreenTextResultSchema`. The
+ * proxy transcript is deterministic input, so
  * re-mapping the same bytes would fail identically; the sync job executor treats
  * this as `result_invalid` and retries by re-running the proxy for a fresh
  * provider response, not by re-mapping. See
@@ -18,7 +18,7 @@ import {
 export class OcrResultInvalidError extends Error {
   readonly code = 'result_invalid';
 
-  constructor(message = 'OCR response produced no valid screen-text blocks.') {
+  constructor(message = 'Mapped screen-text result failed schema validation.') {
     super(message);
     this.name = 'OcrResultInvalidError';
   }
@@ -46,7 +46,8 @@ const KNOWN_SCREEN_TEXT_KINDS = new Set<OcrScreenTextBlockKind>([
  *   width/height) rather than failing the whole block; a missing box stays
  *   absent.
  *
- * Throws {@link OcrResultInvalidError} when nothing valid remains.
+ * An empty block list is valid: an image without visible text is a successful
+ * OCR result that must still be submitted for server-side success auditing.
  */
 export function mapOcrScreenText(response: AiOcrResponse): OcrScreenTextResult {
   const blocks: OcrScreenTextBlock[] = [];
@@ -66,10 +67,6 @@ export function mapOcrScreenText(response: AiOcrResponse): OcrScreenTextResult {
       ...(bbox ? { bbox } : {}),
     });
   });
-
-  if (blocks.length === 0) {
-    throw new OcrResultInvalidError();
-  }
 
   const parsed = OcrScreenTextResultSchema.safeParse({
     blocks,

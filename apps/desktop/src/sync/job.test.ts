@@ -355,22 +355,26 @@ describe('desktop sync job executor', () => {
     });
   });
 
-  it('retries a job as result_invalid when the proxy response maps to no usable text', async () => {
+  it('submits an empty screen-text result and syncs without a paid OCR retry', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
+    let proxyCalls = 0;
+    const submissions: Parameters<SyncServerApi['submitOcrResult']>[0][] = [];
     const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
+          proxyCalls += 1;
           return {
-            blocks: [{ text: '   ' }, { text: '' }],
+            blocks: [],
             durationMs: 900,
             model: 'test-model',
             providerName: 'test-provider',
             text: '',
           };
         },
-        async submitOcrResult() {
-          throw new Error('submitOcrResult must not run when the local mapping is invalid');
+        async submitOcrResult(input) {
+          submissions.push(input);
+          return createSubmitResponse();
         },
       }),
       store,
@@ -378,15 +382,25 @@ describe('desktop sync job executor', () => {
 
     const result = await worker.runOnce();
 
-    expect(result).toMatchObject({ status: 'retry_wait' });
-    expect(await store.getOutboxJob('job_1')).toMatchObject({
-      attempt: 1,
-      lastSafeError: {
-        code: 'result_invalid',
-        retryable: true,
-      },
-      state: 'pending',
+    expect(result).toEqual({
+      jobId: 'job_1',
+      processed: 1,
+      status: 'synced',
     });
+    expect(proxyCalls).toBe(1);
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]?.screenText).toEqual({
+      blocks: [],
+      readingOrder: 'top_to_bottom_left_to_right',
+      source: 'image_ocr',
+    });
+    const job = await store.getOutboxJob('job_1');
+    expect(job).toMatchObject({
+      attempt: 0,
+      state: 'synced',
+      terminalReason: 'ocr_synced',
+    });
+    expect(job?.lastSafeError).toBeUndefined();
   });
 
   it('retries only the submission and keeps the transcript when result submission fails', async () => {
