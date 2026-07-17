@@ -474,6 +474,34 @@ describe('electron main runtime wiring', () => {
     expect(syncLoop.stopCalls).toBe(1);
   });
 
+  it('keeps the tray shell available when the capture helper fails during startup', async () => {
+    const { app, helperClient, ipcMain, store, syncLoop } = harness();
+    helperClient.startImpl = async () => {
+      throw new Error('helper startup failed');
+    };
+    const shell = new FakeDesktopShell();
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        createShell: () => shell,
+        helperClient,
+        ipcMain,
+        store,
+        syncLoop,
+      }),
+    );
+
+    app.triggerReady();
+    const state = await handle.ready;
+
+    expect(state.lifecycle.getSnapshot()).toMatchObject({
+      captureHelper: { lastSafeError: { code: 'helper_start_failed' }, state: 'failed' },
+      status: 'stopped',
+    });
+    expect(syncLoop.startCalls).toBe(1);
+    expect(shell.refreshCalls).toBe(1);
+  });
+
   it('assembles the desktop shell, exposes its main-window IPC action, and disposes it during quit', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const syncLoop = new FakeSyncLoop();
@@ -743,6 +771,7 @@ class FakeSyncLoop implements SyncLoop {
 
 class FakeDesktopShell implements DesktopShell {
   disposeCalls = 0;
+  refreshCalls = 0;
   showMainWindowCalls = 0;
 
   constructor(private readonly options: { disposeThrows?: boolean } = {}) {}
@@ -754,7 +783,13 @@ class FakeDesktopShell implements DesktopShell {
     }
   }
 
+  async showMainWindow(): Promise<{ shown: true }> {
+    this.showMainWindowCalls += 1;
+    return { shown: true };
+  }
+
   async refresh() {
+    this.refreshCalls += 1;
     return {
       accessibility: 'granted',
       capturePaused: false,
@@ -765,11 +800,6 @@ class FakeDesktopShell implements DesktopShell {
       syncPending: 0,
       syncRetrying: 0,
     };
-  }
-
-  async showMainWindow(): Promise<{ shown: true }> {
-    this.showMainWindowCalls += 1;
-    return { shown: true };
   }
 }
 
@@ -901,6 +931,7 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   resumeCalls = 0;
   beginCaptureReasons: Array<'runtime_started' | 'user_resumed'> = [];
   sentCommands: Array<HelperEnvelope<MainToHelperType>> = [];
+  startImpl: () => Promise<void> = () => Promise.resolve();
   stopImpl: () => Promise<void> = () => Promise.resolve();
   onSendCommand: ((command: HelperEnvelope<MainToHelperType>) => Promise<void>) | undefined;
   private onEnvelope: ((envelope: HelperEnvelope<HelperToMainType>) => Promise<void>) | undefined;
@@ -908,6 +939,7 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   async start(options: CaptureHelperStartOptions = {}): Promise<void> {
     this.startCalls += 1;
     this.onEnvelope = options.onEnvelope;
+    await this.startImpl();
   }
 
   async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {

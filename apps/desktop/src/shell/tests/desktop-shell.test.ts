@@ -241,6 +241,37 @@ describe('desktop shell', () => {
     harness.shell.dispose();
   });
 
+  it('notifies once for an active health issue and makes the menu-bar status actionable', async () => {
+    let current = status();
+    const harness = createShellHarness({
+      statusSource: {
+        async getStatus() {
+          return current;
+        },
+      },
+    });
+
+    await harness.shell.refresh();
+    current = status({ lastErrorCode: 'helper_unexpected_exit' });
+    await harness.shell.refresh();
+    await harness.shell.refresh();
+
+    expect(harness.notifications).toEqual([
+      {
+        body: 'Capture stopped unexpectedly. Open Recapsy to restore capture.',
+        title: 'Recapsy capture stopped',
+      },
+    ]);
+    expect(harness.tooltipUpdates.at(-1)).toContain('Capture stopped');
+    expect(
+      harness.menuBuilds
+        .at(-1)
+        ?.some((item) => item.kind === 'action' && item.label === 'Attention: Capture stopped'),
+    ).toBe(true);
+
+    harness.shell.dispose();
+  });
+
   it.each([
     {
       name: 'running capture without Screen Recording permission',
@@ -293,6 +324,7 @@ function createShellHarness(
   } = {},
 ) {
   const menuBuilds: DesktopShellMenuItem[][] = [];
+  const notifications: Array<{ body: string; title: string }> = [];
   const sent: unknown[] = [];
   const tooltipUpdates: string[] = [];
   let trayDestroyed = false;
@@ -318,6 +350,9 @@ function createShellHarness(
     createTray: () => tray,
     createWindow: () => window,
     quit() {},
+    showNotification(notification) {
+      notifications.push(notification);
+    },
   };
 
   const shell = createDesktopShell({
@@ -352,6 +387,7 @@ function createShellHarness(
 
   return {
     menuBuilds,
+    notifications,
     get refreshPermissionCalls() {
       return refreshPermissionCalls;
     },

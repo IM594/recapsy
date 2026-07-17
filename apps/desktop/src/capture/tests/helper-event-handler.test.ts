@@ -370,6 +370,40 @@ describe('capture helper event handler', () => {
     expect(serialized).not.toContain('Quarterly Planning');
   });
 
+  it('counts consecutive native capture failures and resets the count after a durable capture result', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+
+    await handler.handleEnvelope(
+      helperEnvelope('capture.error', {
+        captureId: 'capture_error_1',
+        code: 'capture_failed',
+        message: 'first failure',
+      }),
+    );
+    await handler.handleEnvelope(
+      helperEnvelope('capture.error', {
+        captureId: 'capture_error_2',
+        code: 'capture_failed',
+        message: 'second failure',
+      }),
+    );
+
+    expect(handler.getStatus().captureFailureCount).toBe(2);
+
+    await handler.handleEnvelope(captureResultEnvelope());
+
+    expect(handler.getStatus().captureFailureCount).toBe(0);
+  });
+
   it('keeps helper unexpected exit observable without deleting or resetting outbox jobs', async () => {
     const store = createMemoryStore();
     await store.createOutboxJob({

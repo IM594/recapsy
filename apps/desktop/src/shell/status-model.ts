@@ -7,10 +7,18 @@ export type DesktopShellStatus = {
   syncRetrying: number;
   syncFailed: number;
   syncBlocked: number;
+  captureFailureCount?: number;
+  lastErrorCode?: string;
   lastErrorMessage?: string;
 };
 
-export function formatTrayTooltip(status: DesktopShellStatus): string {
+export function formatTrayTooltip(
+  status: DesktopShellStatus,
+  activeAlerts: readonly { trayLabel: string }[] = [],
+): string {
+  if (activeAlerts.length > 0) {
+    return `Recapsy · Attention required · ${activeAlerts.map((alert) => alert.trayLabel).join(', ')}`;
+  }
   const permissionLabel =
     status.screenRecording === 'granted' ? 'Screen recording granted' : 'Screen recording required';
   const syncLabel =

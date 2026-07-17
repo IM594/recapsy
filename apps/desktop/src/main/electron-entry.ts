@@ -1,5 +1,15 @@
 import path from 'node:path';
-import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, safeStorage, shell } from 'electron';
+import {
+  BrowserWindow,
+  Menu,
+  Notification,
+  Tray,
+  app,
+  ipcMain,
+  nativeImage,
+  safeStorage,
+  shell,
+} from 'electron';
 import {
   createAuthClient,
   createInMemoryTokenStore,
@@ -288,6 +298,11 @@ const { ready } = createElectronMainRuntime({
             width: 480,
           }),
         quit: () => app.quit(),
+        showNotification: ({ body, title }) => {
+          if (Notification.isSupported()) {
+            new Notification({ body, title }).show();
+          }
+        },
       },
       mainWindowHtmlPath,
       statusSource: {
@@ -300,8 +315,10 @@ const { ready } = createElectronMainRuntime({
 
           return {
             accessibility: permissions.accessibility,
+            captureFailureCount: captureStatus.captureFailureCount ?? 0,
             capturePaused: snapshot.status === 'paused',
             captureState: snapshot.status,
+            ...(lastError ? { lastErrorCode: lastError.code } : {}),
             ...(lastError ? { lastErrorMessage: lastError.message } : {}),
             screenRecording: permissions.screenRecording,
             syncBlocked: sync.blocked,

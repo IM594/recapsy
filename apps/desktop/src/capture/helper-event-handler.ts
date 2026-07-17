@@ -21,6 +21,7 @@ import type { CaptureIntakeStore, HelperStateStore } from './store';
 export type { CaptureHelperCommandClient } from '../helper/index';
 
 export type CaptureHelperEventStatus = {
+  captureFailureCount?: number;
   lastObservedAt?: string;
   lastSafeError?: SafeOperationalError;
   lastSkippedCapture?: {
@@ -182,6 +183,7 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
 
       this.status = {
         ...this.status,
+        captureFailureCount: 0,
         lastObservedAt: envelope.sentAt,
         lastSafeError: undefined,
       };
@@ -219,6 +221,8 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
     const safeError = safeCaptureError(envelope.payload.code);
     this.status = {
       ...this.status,
+      captureFailureCount:
+        envelope.payload.code === 'capture_failed' ? (this.status.captureFailureCount ?? 0) + 1 : 0,
       lastObservedAt: envelope.sentAt,
       lastSafeError: safeError,
     };

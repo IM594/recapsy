@@ -163,9 +163,6 @@ export function createElectronMainRuntime(
       workspaceId,
     });
 
-    await captureRuntime.lifecycle.start();
-    syncRuntime.start();
-
     const shell = options.createShell
       ? await options.createShell({
           commandClient: captureRuntime.commandClient,
@@ -175,6 +172,24 @@ export function createElectronMainRuntime(
           workspaceId,
         })
       : undefined;
+
+    try {
+      await captureRuntime.lifecycle.start();
+    } catch (error) {
+      const helperStatus = captureRuntime.lifecycle.getSnapshot().captureHelper;
+      // A failing helper is an actionable desktop condition, not a reason to
+      // terminate before the user can see the tray state or receive a macOS
+      // notification. Other startup failures remain fail-closed and surface to
+      // the caller unchanged.
+      if (!shell || helperStatus?.lastSafeError?.code !== 'helper_start_failed') {
+        throw error;
+      }
+    }
+    syncRuntime.start();
+    // Shell construction starts its own initial refresh before capture startup
+    // settles. Refresh once more so a classified startup failure is immediately
+    // visible instead of waiting for the next periodic poll.
+    await shell?.refresh();
 
     if (options.ipcMain) {
       const privacySettings = createPrivacySettingsOpener(

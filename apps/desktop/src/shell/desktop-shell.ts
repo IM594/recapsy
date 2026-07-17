@@ -1,3 +1,8 @@
+import {
+  type DesktopHealthAlert,
+  type DesktopHealthMonitor,
+  createDesktopHealthMonitor,
+} from './health-monitor';
 import type { DesktopShellStatus } from './status-model';
 import {
   formatPermissionLabel,
@@ -36,11 +41,17 @@ export type DesktopShellMenuItem =
 
 export type DesktopShellMenu = unknown;
 
+export type DesktopShellNotification = {
+  title: string;
+  body: string;
+};
+
 export type DesktopShellAdapters = {
   createWindow(): DesktopShellWindow;
   createTray(): DesktopShellTray;
   buildMenu(items: DesktopShellMenuItem[]): DesktopShellMenu;
   quit(): void;
+  showNotification?(notification: DesktopShellNotification): void;
 };
 
 export type DesktopShellStatusSource = {
@@ -62,6 +73,7 @@ export type DesktopShellOptions = {
   mainWindowHtmlPath: string;
   refreshIntervalMs?: number;
   now?(): number;
+  healthMonitor?: DesktopHealthMonitor;
   onSafeError?(message: 'Desktop shell operation failed.'): void;
 };
 
@@ -89,8 +101,10 @@ class DesktopShellController implements DesktopShell {
   private refreshInFlight: Promise<DesktopShellStatus> | undefined;
   private permissionRefreshPending = false;
   private permissionRefreshToken = 0;
+  private readonly healthMonitor: DesktopHealthMonitor;
 
   constructor(private readonly options: DesktopShellOptions) {
+    this.healthMonitor = options.healthMonitor ?? createDesktopHealthMonitor();
     this.tray = options.adapters.createTray();
     this.tray.on('click', () => {
       this.runInBackground(() => this.showMainWindow());
@@ -150,8 +164,14 @@ class DesktopShellController implements DesktopShell {
         }
 
         this.lastStatus = status;
-        this.tray.setToolTip(formatTrayTooltip(status));
-        this.tray.setContextMenu(this.options.adapters.buildMenu(this.buildMenuItems(status)));
+        const health = this.healthMonitor.evaluate(status, this.options.now?.() ?? Date.now());
+        this.tray.setToolTip(formatTrayTooltip(status, health.activeAlerts));
+        this.tray.setContextMenu(
+          this.options.adapters.buildMenu(this.buildMenuItems(status, health.activeAlerts)),
+        );
+        for (const alert of health.newAlerts) {
+          this.showHealthNotification(alert);
+        }
         if (this.window && !this.window.isDestroyed() && this.window.isVisible()) {
           this.window.webContents.send(STATUS_PUSH_CHANNEL, status);
         }
@@ -180,7 +200,10 @@ class DesktopShellController implements DesktopShell {
     }
   }
 
-  private buildMenuItems(status: DesktopShellStatus): DesktopShellMenuItem[] {
+  private buildMenuItems(
+    status: DesktopShellStatus,
+    activeAlerts: readonly DesktopHealthAlert[],
+  ): DesktopShellMenuItem[] {
     const blocked = isCaptureBlockedByPermissions(status);
     return [
       {
@@ -190,6 +213,11 @@ class DesktopShellController implements DesktopShell {
         kind: 'action',
         label: 'Open Recapsy',
       },
+      ...activeAlerts.map<DesktopShellMenuItem>((alert) => ({
+        enabled: false,
+        kind: 'action',
+        label: `Attention: ${alert.trayLabel}`,
+      })),
       { kind: 'separator' },
       {
         click: () => {
@@ -299,6 +327,14 @@ class DesktopShellController implements DesktopShell {
   private clearRefreshInFlight(refresh: Promise<DesktopShellStatus>): void {
     if (this.refreshInFlight === refresh) {
       this.refreshInFlight = undefined;
+    }
+  }
+
+  private showHealthNotification(alert: DesktopHealthAlert): void {
+    try {
+      this.options.adapters.showNotification?.({ body: alert.body, title: alert.title });
+    } catch {
+      this.reportSafeError();
     }
   }
 
