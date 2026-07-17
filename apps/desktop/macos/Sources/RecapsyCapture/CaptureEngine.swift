@@ -43,7 +43,6 @@ final class CaptureEngine {
     static let helperVersion = "recapsy-capture/0.1.0"
     private static let defaultCaptureIntervalMs = 3000
     private static let heartbeatIntervalMs = 1000
-    private static let unconfiguredPolicyVersion = "capture-unconfigured"
 
     private let emitter: LineEmitter
     private let assetRoot: URL?
@@ -59,7 +58,6 @@ final class CaptureEngine {
     private var messageSequence = 0
     private var heartbeatSequence = 0
     private var captureCounter = 0
-    private var policyVersion = CaptureEngine.unconfiguredPolicyVersion
     private var configuredPolicy: ConfiguredPolicy?
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
@@ -130,7 +128,6 @@ final class CaptureEngine {
                 return
             }
             configuredPolicy = policy
-            policyVersion = policy.version
             if let interval = payload["captureIntervalMs"] as? Int, interval > 0 {
                 captureIntervalMs = interval
             }
@@ -145,7 +142,7 @@ final class CaptureEngine {
             _ = ScreenshotCapturer.requestScreenCaptureAccessIfNeeded()
             emitPermissionStatus()
         case "capture.start":
-            guard let policy = configuredPolicy, !policy.paused else {
+            guard let policy = configuredPolicy, !policy.sourcePolicy.paused else {
                 state = .paused
                 stopCaptureTimer()
                 emitStatus(status: "paused", reason: "policy_unavailable")
@@ -160,7 +157,7 @@ final class CaptureEngine {
             emitStatus(status: "paused", reason: reason)
             stopCaptureTimer()
         case "capture.resume":
-            guard let policy = configuredPolicy, !policy.paused else {
+            guard let policy = configuredPolicy, !policy.sourcePolicy.paused else {
                 state = .paused
                 stopCaptureTimer()
                 emitStatus(status: "paused", reason: "policy_unavailable")
@@ -230,7 +227,7 @@ final class CaptureEngine {
     // MARK: - Capture orchestration (state queue)
 
     private func onCaptureTick() {
-        guard state == .ready, configuredPolicy != nil, !captureInFlight else {
+        guard state == .ready, let configuredPolicy, !captureInFlight else {
             return
         }
         captureInFlight = true
@@ -241,14 +238,13 @@ final class CaptureEngine {
         )
         let observedAt = CaptureEngine.iso8601(Date())
         let root = assetRoot
-        let policy = policyVersion
 
         captureQueue.async { [weak self] in
             self?.performCapture(
                 captureId: captureId,
                 observedAt: observedAt,
                 assetRoot: root,
-                policyVersion: policy
+                configuredPolicy: configuredPolicy
             )
             self?.stateQueue.async {
                 self?.captureInFlight = false
@@ -262,7 +258,7 @@ final class CaptureEngine {
         captureId: String,
         observedAt: String,
         assetRoot: URL?,
-        policyVersion: String
+        configuredPolicy: ConfiguredPolicy
     ) {
         guard let assetRoot else {
             emitCaptureError(
@@ -275,7 +271,7 @@ final class CaptureEngine {
 
         let encoded: EncodedScreenshot
         do {
-            encoded = try ScreenshotCapturer.capture()
+            encoded = try ScreenshotCapturer.capture(policy: configuredPolicy.sourcePolicy)
         } catch ScreenshotError.permissionMissing {
             emitPermissionStatus()
             emitCaptureError(
@@ -296,6 +292,16 @@ final class CaptureEngine {
                     Data("capture skipped: no active window (since \(captureId))\n".utf8)
                 )
             }
+            return
+        } catch ScreenshotError.policyDenied {
+            emit(
+                type: "capture.skipped",
+                payload: CaptureSkippedPayload(
+                    captureId: captureId,
+                    reason: "policy_denied",
+                    observedAt: observedAt
+                )
+            )
             return
         } catch ScreenshotError.encodeFailed {
             emitCaptureError(
@@ -363,7 +369,10 @@ final class CaptureEngine {
         let context = CaptureContextPayload(
             app: encoded.application,
             observedAt: observedAt,
-            policy: CapturePolicyPayload(version: policyVersion, decision: "allow")
+            policy: CapturePolicyPayload(
+                version: configuredPolicy.version,
+                decision: encoded.policyDecision.rawValue
+            )
         )
         let payload = CaptureResultPayload(
             captureId: captureId,
@@ -458,20 +467,9 @@ final class CaptureEngine {
     /// evaluates window owner identity; later capture gates must never need to
     /// re-fetch or reconstruct policy data from a summary.
     private struct ConfiguredPolicy {
-        struct Rule {
-            let id: String
-            let kind: String
-            let scope: String
-            let pattern: String
-            let action: String
-            let enabled: Bool
-        }
-
         let hash: String
         let version: String
-        let paused: Bool
-        let defaultAction: String
-        let rules: [Rule]
+        let sourcePolicy: CaptureSourcePolicy
 
         static func fromPayload(_ payload: [String: Any]?) -> ConfiguredPolicy? {
             guard
@@ -481,14 +479,14 @@ final class CaptureEngine {
                 let version = payload["version"] as? String,
                 !version.isEmpty,
                 let paused = payload["paused"] as? Bool,
-                let defaultAction = payload["defaultAction"] as? String,
-                Self.isAction(defaultAction),
+                let defaultActionRaw = payload["defaultAction"] as? String,
+                let defaultAction = CaptureSourcePolicyAction(rawValue: defaultActionRaw),
                 let rawRules = payload["rules"] as? [[String: Any]]
             else {
                 return nil
             }
 
-            var rules: [Rule] = []
+            var rules: [CaptureSourcePolicyRule] = []
             for rawRule in rawRules {
                 guard
                     let id = rawRule["id"] as? String,
@@ -499,14 +497,14 @@ final class CaptureEngine {
                     Self.isScope(scope),
                     let pattern = rawRule["pattern"] as? String,
                     !pattern.isEmpty,
-                    let action = rawRule["action"] as? String,
-                    Self.isAction(action),
+                    let actionRaw = rawRule["action"] as? String,
+                    let action = CaptureSourcePolicyAction(rawValue: actionRaw),
                     let enabled = rawRule["enabled"] as? Bool
                 else {
                     return nil
                 }
                 rules.append(
-                    Rule(
+                    CaptureSourcePolicyRule(
                         id: id,
                         kind: kind,
                         scope: scope,
@@ -520,14 +518,13 @@ final class CaptureEngine {
             return ConfiguredPolicy(
                 hash: hash,
                 version: version,
-                paused: paused,
-                defaultAction: defaultAction,
-                rules: rules
+                sourcePolicy: CaptureSourcePolicy(
+                    version: version,
+                    paused: paused,
+                    defaultAction: defaultAction,
+                    rules: rules
+                )
             )
-        }
-
-        private static func isAction(_ value: String) -> Bool {
-            return ["allow", "block_capture", "redact_context", "block_ocr"].contains(value)
         }
 
         private static func isKind(_ value: String) -> Bool {

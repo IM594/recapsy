@@ -140,6 +140,26 @@ final class ProtocolEncodingTests: XCTestCase {
         XCTAssertEqual(payload["policyHash"] as? String, "sha256:" + String(repeating: "a", count: 64))
     }
 
+    func testCaptureSkippedPayloadHasNoAssetOrContextFields() throws {
+        let envelope = HelperEnvelope(
+            messageId: "cap-msg-skipped-1",
+            correlationId: nil,
+            sentAt: "2026-07-18T00:00:00.000Z",
+            type: "capture.skipped",
+            payload: CaptureSkippedPayload(
+                captureId: "cap-1",
+                reason: "policy_denied",
+                observedAt: "2026-07-18T00:00:00.000Z"
+            )
+        )
+
+        let payload = try XCTUnwrap(try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any])
+        XCTAssertEqual(payload["captureId"] as? String, "cap-1")
+        XCTAssertEqual(payload["reason"] as? String, "policy_denied")
+        XCTAssertFalse(payload.keys.contains("assets"))
+        XCTAssertFalse(payload.keys.contains("context"))
+    }
+
     func testCaptureResultKeepsRelativeRefSlashUnescaped() throws {
         let asset = CaptureAssetPayload(
             role: "screenshot",
@@ -377,5 +397,120 @@ final class ActiveWindowSelectorTests: XCTestCase {
                 frontmostProcessId: 42
             )
         )
+    }
+}
+
+final class CaptureSourcePolicyTests: XCTestCase {
+    private func rule(
+        id: String,
+        kind: String,
+        pattern: String,
+        action: CaptureSourcePolicyAction,
+        enabled: Bool = true
+    ) -> CaptureSourcePolicyRule {
+        return CaptureSourcePolicyRule(
+            id: id,
+            kind: kind,
+            scope: "workspace_default",
+            pattern: pattern,
+            action: action,
+            enabled: enabled
+        )
+    }
+
+    private func policy(
+        defaultAction: CaptureSourcePolicyAction = .allow,
+        paused: Bool = false,
+        rules: [CaptureSourcePolicyRule] = []
+    ) -> CaptureSourcePolicy {
+        return CaptureSourcePolicy(
+            version: "policy-1",
+            paused: paused,
+            defaultAction: defaultAction,
+            rules: rules
+        )
+    }
+
+    private let safari = CaptureSourceIdentity(
+        applicationName: "Safari",
+        bundleId: "com.apple.Safari"
+    )
+
+    func testMissingFinalWindowIdentityFailsClosed() {
+        let decision = CaptureSourcePolicyEvaluator.decide(policy: policy(), source: nil)
+        XCTAssertEqual(decision.action, .blockCapture)
+    }
+
+    func testExactBundleRuleBlocksBeforeScreenshotEncoding() {
+        let decision = CaptureSourcePolicyEvaluator.decide(
+            policy: policy(rules: [
+                rule(
+                    id: "block-safari",
+                    kind: "bundle_id",
+                    pattern: "com.apple.Safari",
+                    action: .blockCapture
+                )
+            ]),
+            source: safari
+        )
+
+        XCTAssertEqual(decision.action, .blockCapture)
+        XCTAssertEqual(decision.matchedRuleIds, ["block-safari"])
+    }
+
+    func testAllowRuleCannotLoosenEarlierBlockAndRedactionOutranksOcrBlock() {
+        let blocked = CaptureSourcePolicyEvaluator.decide(
+            policy: policy(rules: [
+                rule(
+                    id: "hard-block",
+                    kind: "bundle_id",
+                    pattern: "com.apple.Safari",
+                    action: .blockCapture
+                ),
+                rule(
+                    id: "attempted-allow",
+                    kind: "bundle_id",
+                    pattern: "com.apple.Safari",
+                    action: .allow
+                )
+            ]),
+            source: safari
+        )
+        XCTAssertEqual(blocked.action, .blockCapture)
+
+        let redacted = CaptureSourcePolicyEvaluator.decide(
+            policy: policy(rules: [
+                rule(
+                    id: "no-ocr",
+                    kind: "app_name",
+                    pattern: "Safari",
+                    action: .blockOcr
+                ),
+                rule(
+                    id: "redact",
+                    kind: "app_name",
+                    pattern: "Safari",
+                    action: .redactContext
+                )
+            ]),
+            source: safari
+        )
+        XCTAssertEqual(redacted.action, .redactContext)
+    }
+
+    func testUnobservableNonAllowRuleFailsClosedInsteadOfBeingSilentlyIgnored() {
+        let decision = CaptureSourcePolicyEvaluator.decide(
+            policy: policy(rules: [
+                rule(
+                    id: "domain-not-available",
+                    kind: "domain",
+                    pattern: "private.example.test",
+                    action: .blockOcr
+                )
+            ]),
+            source: safari
+        )
+
+        XCTAssertEqual(decision.action, .blockCapture)
     }
 }

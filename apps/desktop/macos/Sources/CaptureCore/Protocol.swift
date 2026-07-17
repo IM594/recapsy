@@ -152,6 +152,18 @@ public struct CaptureErrorPayload: Encodable {
     }
 }
 
+public struct CaptureSkippedPayload: Encodable {
+    public let captureId: String
+    public let reason: String
+    public let observedAt: String
+
+    public init(captureId: String, reason: String, observedAt: String) {
+        self.captureId = captureId
+        self.reason = reason
+        self.observedAt = observedAt
+    }
+}
+
 public struct CaptureAssetPayload: Encodable {
     public let role: String
     public let ref: String

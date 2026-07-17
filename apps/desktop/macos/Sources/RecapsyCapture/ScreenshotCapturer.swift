@@ -8,7 +8,8 @@ import CWebP
 /// Outcome of one screenshot attempt: the encoded WebP bytes, ready to write.
 struct EncodedScreenshot {
     let imageData: Data
-    let application: CaptureApplicationPayload?
+    let application: CaptureApplicationPayload
+    let policyDecision: CaptureSourcePolicyAction
 }
 
 enum ScreenshotError: Error {
@@ -17,6 +18,7 @@ enum ScreenshotError: Error {
     /// desktop with nothing open). Not an error surface — the caller skips the
     /// tick and retries on the next interval; no `capture.result` / `capture.error`.
     case noActiveWindow
+    case policyDenied
     case captureFailed
     case encodeFailed
 }
@@ -35,7 +37,7 @@ enum ScreenshotCapturer {
     private static let maxTargetBytes = 800 * 1024
     private static let captureTimeout: DispatchTimeInterval = .seconds(5)
 
-    static func capture() throws -> EncodedScreenshot {
+    static func capture(policy: CaptureSourcePolicy) throws -> EncodedScreenshot {
         guard ScreenCaptureAuthorization.probe({ CGPreflightScreenCaptureAccess() }) else {
             // Capture is a background operation. A missing permission is
             // reported to the shell, but must never summon a macOS prompt from
@@ -50,17 +52,23 @@ enum ScreenshotCapturer {
             throw ScreenshotError.noActiveWindow
         }
 
-        let outcome = captureActiveWindowImage(frontmostPid: Int(frontmostPid))
+        let outcome = captureActiveWindowImage(frontmostPid: Int(frontmostPid), policy: policy)
         switch outcome {
         case .noWindow:
             throw ScreenshotError.noActiveWindow
         case .failed:
             throw ScreenshotError.captureFailed
-        case .image(let cgImage, let application):
+        case .policyDenied:
+            throw ScreenshotError.policyDenied
+        case .image(let cgImage, let application, let policyDecision):
             guard let encoded = encodeWebP(cgImage: cgImage) else {
                 throw ScreenshotError.encodeFailed
             }
-            return EncodedScreenshot(imageData: encoded, application: application)
+            return EncodedScreenshot(
+                imageData: encoded,
+                application: application,
+                policyDecision: policyDecision
+            )
         }
     }
 
@@ -79,12 +87,16 @@ enum ScreenshotCapturer {
     }
 
     private enum CaptureOutcome {
-        case image(CGImage, CaptureApplicationPayload?)
+        case image(CGImage, CaptureApplicationPayload, CaptureSourcePolicyAction)
         case noWindow
+        case policyDenied
         case failed
     }
 
-    private static func captureActiveWindowImage(frontmostPid: Int) -> CaptureOutcome {
+    private static func captureActiveWindowImage(
+        frontmostPid: Int,
+        policy: CaptureSourcePolicy
+    ) -> CaptureOutcome {
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: CaptureOutcome = .failed
 
@@ -115,10 +127,24 @@ enum ScreenshotCapturer {
                     outcome = .noWindow
                     return
                 }
-                let application = CaptureApplicationPayload.fromRuntimeMetadata(
+                guard let application = CaptureApplicationPayload.fromRuntimeMetadata(
                     name: window.owningApplication?.applicationName,
                     bundleId: window.owningApplication?.bundleIdentifier
+                ) else {
+                    outcome = .policyDenied
+                    return
+                }
+                let policyDecision = CaptureSourcePolicyEvaluator.decide(
+                    policy: policy,
+                    source: CaptureSourceIdentity(
+                        applicationName: application.name,
+                        bundleId: application.bundleId
+                    )
                 )
+                guard policyDecision.action != .blockCapture else {
+                    outcome = .policyDenied
+                    return
+                }
 
                 let filter = SCContentFilter(desktopIndependentWindow: window)
                 let config = SCStreamConfiguration()
@@ -132,7 +158,7 @@ enum ScreenshotCapturer {
                     contentFilter: filter,
                     configuration: config
                 )
-                outcome = .image(image, application)
+                outcome = .image(image, application, policyDecision.action)
             } catch {
                 // Swallowed intentionally: the caller reports a generic
                 // capture_failed; the underlying error may carry no useful,

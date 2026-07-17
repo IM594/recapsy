@@ -16,7 +16,7 @@
     "test:capture-process": "bun test tests/integration/capture-process.test.ts",
     "test:capture-bundle-process": "bun test tests/integration/capture-bundle-process.test.ts",
     "test:packaged-layout": "bun test tests/integration/packaged-layout.test.ts",
-    "test:macos": "swift build --package-path macos --target CaptureCoreTests && swift test --package-path macos --skip-build && pnpm run package:macos && bun scripts/test-packaged-capture-bundle.ts && pnpm run test:packaged-layout",
+    "test:macos": "bash macos/test-capture-core.sh && pnpm run package:macos && bun scripts/test-packaged-capture-bundle.ts && pnpm run test:packaged-layout",
     "build:capture": "bash macos/build-capture-bundle.sh",
     "package:macos": "pnpm run build:capture && pnpm run build && bun scripts/package-macos.ts",
     "typecheck": "tsc --noEmit && pnpm run typecheck:tests",
