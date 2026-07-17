@@ -172,6 +172,46 @@ final class ProtocolEncodingTests: XCTestCase {
         XCTAssertEqual(policy["decision"] as? String, "allow")
         XCTAssertEqual(policy["version"] as? String, "policy-1")
     }
+
+    func testCaptureResultIncludesSafeCapturedApplicationIdentity() throws {
+        let context = CaptureContextPayload(
+            app: CaptureApplicationPayload.fromRuntimeMetadata(
+                name: "Google Chrome",
+                bundleId: "com.google.Chrome"
+            ),
+            observedAt: "2026-07-17T12:00:00.000Z",
+            policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
+        )
+        let envelope = HelperEnvelope(
+            messageId: "cap-msg-app-1",
+            correlationId: nil,
+            sentAt: "2026-07-17T12:00:00.000Z",
+            type: "capture.result",
+            payload: context
+        )
+
+        let payload = try XCTUnwrap(try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any])
+        let app = try XCTUnwrap(payload["app"] as? [String: Any])
+        XCTAssertEqual(app["name"] as? String, "Google Chrome")
+        XCTAssertEqual(app["bundleId"] as? String, "com.google.Chrome")
+    }
+
+    func testCaptureApplicationIdentityOmitsIncompleteAndUnsafeMetadata() {
+        XCTAssertNil(CaptureApplicationPayload.fromRuntimeMetadata(name: nil, bundleId: "com.google.Chrome"))
+        XCTAssertNil(CaptureApplicationPayload.fromRuntimeMetadata(name: "Chrome", bundleId: nil))
+        XCTAssertNil(
+            CaptureApplicationPayload.fromRuntimeMetadata(
+                name: "/Applications/Chrome.app",
+                bundleId: "com.google.Chrome"
+            )
+        )
+        XCTAssertNil(
+            CaptureApplicationPayload.fromRuntimeMetadata(
+                name: "Secret Dashboard",
+                bundleId: "com.example.dashboard"
+            )
+        )
+    }
 }
 
 final class ActiveWindowSelectorTests: XCTestCase {

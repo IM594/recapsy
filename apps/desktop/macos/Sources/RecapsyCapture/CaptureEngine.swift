@@ -336,6 +336,7 @@ final class CaptureEngine {
             sizeBytes: 0
         )
         let context = CaptureContextPayload(
+            app: encoded.application,
             observedAt: observedAt,
             policy: CapturePolicyPayload(version: policyVersion, decision: "allow")
         )

@@ -165,11 +165,88 @@ public struct CapturePolicyPayload: Encodable {
     }
 }
 
+public struct CaptureApplicationPayload: Encodable, Equatable {
+    public let name: String
+    public let bundleId: String
+
+    public init(name: String, bundleId: String) {
+        self.name = name
+        self.bundleId = bundleId
+    }
+
+    /// Converts the narrow app-level metadata exposed by macOS into the helper
+    /// protocol shape. Missing or unsafe values are omitted rather than causing
+    /// a whole capture envelope to fail validation in the Electron process.
+    public static func fromRuntimeMetadata(name: String?, bundleId: String?) -> CaptureApplicationPayload? {
+        guard
+            let safeName = normalizedName(name),
+            let safeBundleId = normalizedBundleId(bundleId)
+        else {
+            return nil
+        }
+        return CaptureApplicationPayload(name: safeName, bundleId: safeBundleId)
+    }
+
+    private static func normalizedName(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !trimmed.isEmpty,
+            trimmed.count <= 256,
+            !trimmed.hasPrefix("/"),
+            !trimmed.lowercased().hasPrefix("file://"),
+            !matches(trimmed, pattern: #"\b(token|secret|password|credential|api[ _-]?key)\b"#),
+            !matches(
+                trimmed,
+                pattern: #"https?://\S+[?&](token|auth|access_token|refresh_token|secret|password|credential|api[_-]?key)="#
+            )
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func normalizedBundleId(_ value: String?) -> String? {
+        guard let value else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            !trimmed.isEmpty,
+            trimmed.count <= 256,
+            matches(trimmed, pattern: "^[A-Za-z0-9.-]+$", caseInsensitive: false)
+        else {
+            return nil
+        }
+        return trimmed
+    }
+
+    private static func matches(
+        _ value: String,
+        pattern: String,
+        caseInsensitive: Bool = true
+    ) -> Bool {
+        var options: String.CompareOptions = [.regularExpression]
+        if caseInsensitive {
+            options.insert(.caseInsensitive)
+        }
+        return value.range(of: pattern, options: options) != nil
+    }
+}
+
 public struct CaptureContextPayload: Encodable {
+    public let app: CaptureApplicationPayload?
     public let observedAt: String
     public let policy: CapturePolicyPayload
 
-    public init(observedAt: String, policy: CapturePolicyPayload) {
+    public init(
+        app: CaptureApplicationPayload? = nil,
+        observedAt: String,
+        policy: CapturePolicyPayload
+    ) {
+        self.app = app
         self.observedAt = observedAt
         self.policy = policy
     }

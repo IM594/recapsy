@@ -8,6 +8,7 @@ import CWebP
 /// Outcome of one screenshot attempt: the encoded WebP bytes, ready to write.
 struct EncodedScreenshot {
     let imageData: Data
+    let application: CaptureApplicationPayload?
 }
 
 enum ScreenshotError: Error {
@@ -54,11 +55,11 @@ enum ScreenshotCapturer {
             throw ScreenshotError.noActiveWindow
         case .failed:
             throw ScreenshotError.captureFailed
-        case .image(let cgImage):
+        case .image(let cgImage, let application):
             guard let encoded = encodeWebP(cgImage: cgImage) else {
                 throw ScreenshotError.encodeFailed
             }
-            return encoded
+            return EncodedScreenshot(imageData: encoded, application: application)
         }
     }
 
@@ -67,7 +68,7 @@ enum ScreenshotCapturer {
     }
 
     private enum CaptureOutcome {
-        case image(CGImage)
+        case image(CGImage, CaptureApplicationPayload?)
         case noWindow
         case failed
     }
@@ -103,6 +104,10 @@ enum ScreenshotCapturer {
                     outcome = .noWindow
                     return
                 }
+                let application = CaptureApplicationPayload.fromRuntimeMetadata(
+                    name: window.owningApplication?.applicationName,
+                    bundleId: window.owningApplication?.bundleIdentifier
+                )
 
                 let filter = SCContentFilter(desktopIndependentWindow: window)
                 let config = SCStreamConfiguration()
@@ -116,7 +121,7 @@ enum ScreenshotCapturer {
                     contentFilter: filter,
                     configuration: config
                 )
-                outcome = .image(image)
+                outcome = .image(image, application)
             } catch {
                 // Swallowed intentionally: the caller reports a generic
                 // capture_failed; the underlying error may carry no useful,
@@ -216,7 +221,7 @@ enum ScreenshotCapturer {
 
     // MARK: - WebP encoding
 
-    private static func encodeWebP(cgImage: CGImage) -> EncodedScreenshot? {
+    private static func encodeWebP(cgImage: CGImage) -> Data? {
         guard let rgb = rgbBytes(from: cgImage) else {
             return nil
         }
@@ -234,7 +239,7 @@ enum ScreenshotCapturer {
         guard let data = best else {
             return nil
         }
-        return EncodedScreenshot(imageData: data)
+        return data
     }
 
     private struct RGBImage {
