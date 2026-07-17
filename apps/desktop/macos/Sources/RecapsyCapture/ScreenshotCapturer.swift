@@ -9,6 +9,7 @@ import CWebP
 struct EncodedScreenshot {
     let imageData: Data
     let application: CaptureApplicationPayload
+    let frameFingerprint: CaptureFrameFingerprint
     let policyDecision: CaptureSourcePolicyAction
 }
 
@@ -19,6 +20,8 @@ enum ScreenshotError: Error {
     /// tick and retries on the next interval; no `capture.result` / `capture.error`.
     case noActiveWindow
     case policyDenied
+    case blankFrame
+    case duplicateFrame
     case captureFailed
     case encodeFailed
 }
@@ -37,7 +40,10 @@ enum ScreenshotCapturer {
     private static let maxTargetBytes = 800 * 1024
     private static let captureTimeout: DispatchTimeInterval = .seconds(5)
 
-    static func capture(policy: CaptureSourcePolicy) throws -> EncodedScreenshot {
+    static func capture(
+        policy: CaptureSourcePolicy,
+        previousFingerprint: CaptureFrameFingerprint?
+    ) throws -> EncodedScreenshot {
         guard ScreenCaptureAuthorization.probe({ CGPreflightScreenCaptureAccess() }) else {
             // Capture is a background operation. A missing permission is
             // reported to the shell, but must never summon a macOS prompt from
@@ -52,7 +58,11 @@ enum ScreenshotCapturer {
             throw ScreenshotError.noActiveWindow
         }
 
-        let outcome = captureActiveWindowImage(frontmostPid: Int(frontmostPid), policy: policy)
+        let outcome = captureActiveWindowImage(
+            frontmostPid: Int(frontmostPid),
+            policy: policy,
+            previousFingerprint: previousFingerprint
+        )
         switch outcome {
         case .noWindow:
             throw ScreenshotError.noActiveWindow
@@ -60,13 +70,18 @@ enum ScreenshotCapturer {
             throw ScreenshotError.captureFailed
         case .policyDenied:
             throw ScreenshotError.policyDenied
-        case .image(let cgImage, let application, let policyDecision):
+        case .blank:
+            throw ScreenshotError.blankFrame
+        case .duplicate:
+            throw ScreenshotError.duplicateFrame
+        case .image(let cgImage, let application, let fingerprint, let policyDecision):
             guard let encoded = encodeWebP(cgImage: cgImage) else {
                 throw ScreenshotError.encodeFailed
             }
             return EncodedScreenshot(
                 imageData: encoded,
                 application: application,
+                frameFingerprint: fingerprint,
                 policyDecision: policyDecision
             )
         }
@@ -87,15 +102,18 @@ enum ScreenshotCapturer {
     }
 
     private enum CaptureOutcome {
-        case image(CGImage, CaptureApplicationPayload, CaptureSourcePolicyAction)
+        case image(CGImage, CaptureApplicationPayload, CaptureFrameFingerprint, CaptureSourcePolicyAction)
         case noWindow
         case policyDenied
+        case blank
+        case duplicate
         case failed
     }
 
     private static func captureActiveWindowImage(
         frontmostPid: Int,
-        policy: CaptureSourcePolicy
+        policy: CaptureSourcePolicy,
+        previousFingerprint: CaptureFrameFingerprint?
     ) -> CaptureOutcome {
         let semaphore = DispatchSemaphore(value: 0)
         var outcome: CaptureOutcome = .failed
@@ -158,7 +176,28 @@ enum ScreenshotCapturer {
                     contentFilter: filter,
                     configuration: config
                 )
-                outcome = .image(image, application, policyDecision.action)
+                guard let luminance = sampledLuminance(from: image) else {
+                    outcome = .failed
+                    return
+                }
+                let frameDecision = CaptureFrameEconomy.evaluate(
+                    luminance: luminance,
+                    width: CaptureFrameEconomy.sampleWidth,
+                    height: CaptureFrameEconomy.sampleHeight,
+                    context: CaptureFrameContext(
+                        bundleId: application.bundleId,
+                        windowId: Int(window.windowID)
+                    ),
+                    previous: previousFingerprint
+                )
+                switch frameDecision {
+                case .skip(.blank):
+                    outcome = .blank
+                case .skip(.duplicate):
+                    outcome = .duplicate
+                case .accept(let fingerprint):
+                    outcome = .image(image, application, fingerprint, policyDecision.action)
+                }
             } catch {
                 // Swallowed intentionally: the caller reports a generic
                 // capture_failed; the underlying error may carry no useful,
@@ -171,6 +210,51 @@ enum ScreenshotCapturer {
             return .failed
         }
         return outcome
+    }
+
+    /// Downsamples directly from the in-memory CGImage before WebP encoding.
+    /// The temporary RGBA buffer is discarded before this method returns; only
+    /// the one-way digest produced by CaptureFrameEconomy survives a frame.
+    private static func sampledLuminance(from image: CGImage) -> [UInt8]? {
+        let width = CaptureFrameEconomy.sampleWidth
+        let height = CaptureFrameEconomy.sampleHeight
+        let bytesPerRow = width * 4
+        var rgba = Array(repeating: UInt8(0), count: bytesPerRow * height)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+
+        let didDraw = rgba.withUnsafeMutableBytes { buffer -> Bool in
+            guard let baseAddress = buffer.baseAddress,
+                  let context = CGContext(
+                      data: baseAddress,
+                      width: width,
+                      height: height,
+                      bitsPerComponent: 8,
+                      bytesPerRow: bytesPerRow,
+                      space: colorSpace,
+                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+                  )
+            else {
+                return false
+            }
+            context.interpolationQuality = .low
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard didDraw else {
+            return nil
+        }
+
+        var luminance: [UInt8] = []
+        luminance.reserveCapacity(width * height)
+        var offset = 0
+        while offset < rgba.count {
+            let red = UInt16(rgba[offset])
+            let green = UInt16(rgba[offset + 1])
+            let blue = UInt16(rgba[offset + 2])
+            luminance.append(UInt8((54 * red + 183 * green + 19 * blue + 128) >> 8))
+            offset += 4
+        }
+        return luminance
     }
 
     /// Resolve a verified `SCWindow` for this tick. A CGWindowList fallback may

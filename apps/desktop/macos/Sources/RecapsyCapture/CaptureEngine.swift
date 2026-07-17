@@ -59,6 +59,9 @@ final class CaptureEngine {
     private var heartbeatSequence = 0
     private var captureCounter = 0
     private var configuredPolicy: ConfiguredPolicy?
+    // Accessed exclusively from the serial capture queue. The fingerprint is
+    // committed only after the corresponding WebP has been atomically written.
+    private var lastAcceptedFrameFingerprint: CaptureFrameFingerprint?
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
     // Edge-tracks the "no capturable active window" condition so a long stretch
@@ -271,7 +274,10 @@ final class CaptureEngine {
 
         let encoded: EncodedScreenshot
         do {
-            encoded = try ScreenshotCapturer.capture(policy: configuredPolicy.sourcePolicy)
+            encoded = try ScreenshotCapturer.capture(
+                policy: configuredPolicy.sourcePolicy,
+                previousFingerprint: lastAcceptedFrameFingerprint
+            )
         } catch ScreenshotError.permissionMissing {
             emitPermissionStatus()
             emitCaptureError(
@@ -298,7 +304,27 @@ final class CaptureEngine {
                 type: "capture.skipped",
                 payload: CaptureSkippedPayload(
                     captureId: captureId,
-                    reason: "policy_denied",
+                    reason: .policyDenied,
+                    observedAt: observedAt
+                )
+            )
+            return
+        } catch ScreenshotError.blankFrame {
+            emit(
+                type: "capture.skipped",
+                payload: CaptureSkippedPayload(
+                    captureId: captureId,
+                    reason: .blank,
+                    observedAt: observedAt
+                )
+            )
+            return
+        } catch ScreenshotError.duplicateFrame {
+            emit(
+                type: "capture.skipped",
+                payload: CaptureSkippedPayload(
+                    captureId: captureId,
+                    reason: .duplicate,
                     observedAt: observedAt
                 )
             )
@@ -344,6 +370,7 @@ final class CaptureEngine {
             )
             return
         }
+        lastAcceptedFrameFingerprint = encoded.frameFingerprint
 
         let relativeKey = CaptureAsset.screenshotRelativeKey(captureId: captureId)
         let hash = CaptureAsset.contentHash(for: encoded.imageData)

@@ -148,7 +148,7 @@ final class ProtocolEncodingTests: XCTestCase {
             type: "capture.skipped",
             payload: CaptureSkippedPayload(
                 captureId: "cap-1",
-                reason: "policy_denied",
+                reason: .policyDenied,
                 observedAt: "2026-07-18T00:00:00.000Z"
             )
         )
@@ -512,5 +512,84 @@ final class CaptureSourcePolicyTests: XCTestCase {
         )
 
         XCTAssertEqual(decision.action, .blockCapture)
+    }
+}
+
+final class CaptureFrameEconomyTests: XCTestCase {
+    private let sameContext = CaptureFrameContext(
+        bundleId: "com.apple.Safari",
+        windowId: 101
+    )
+
+    private func evaluate(
+        _ luminance: [UInt8],
+        context: CaptureFrameContext? = nil,
+        previous: CaptureFrameFingerprint? = nil
+    ) -> CaptureFrameEconomyDecision {
+        return CaptureFrameEconomy.evaluate(
+            luminance: luminance,
+            width: 8,
+            height: 6,
+            context: context ?? sameContext,
+            previous: previous
+        )
+    }
+
+    private func acceptedFingerprint(_ decision: CaptureFrameEconomyDecision) throws -> CaptureFrameFingerprint {
+        guard case let .accept(fingerprint) = decision else {
+            throw XCTSkip("Expected the fixture to be admitted.")
+        }
+        return fingerprint
+    }
+
+    func testUniformWhiteAndDarkFramesAreSkippedBeforeEncoding() {
+        XCTAssertEqual(evaluate(Array(repeating: 255, count: 48)), .skip(.blank))
+        XCTAssertEqual(evaluate(Array(repeating: 3, count: 48)), .skip(.blank))
+    }
+
+    func testQuantizedNearDuplicateInSameWindowIsSkipped() throws {
+        let initial = Array(repeating: UInt8(192), count: 48)
+        let fingerprint = try acceptedFingerprint(evaluate(initial))
+
+        var displayJitter = initial
+        displayJitter[17] = 195
+        XCTAssertEqual(evaluate(displayJitter, previous: fingerprint), .skip(.duplicate))
+    }
+
+    func testWindowOrApplicationChangeAdmitsTheFirstFrame() throws {
+        let frame = Array(repeating: UInt8(192), count: 48)
+        let fingerprint = try acceptedFingerprint(evaluate(frame))
+
+        XCTAssertNoThrow(
+            try acceptedFingerprint(
+                evaluate(
+                    frame,
+                    context: CaptureFrameContext(bundleId: "com.apple.Safari", windowId: 102),
+                    previous: fingerprint
+                )
+            )
+        )
+        XCTAssertNoThrow(
+            try acceptedFingerprint(
+                evaluate(
+                    frame,
+                    context: CaptureFrameContext(bundleId: "com.apple.TextEdit", windowId: 101),
+                    previous: fingerprint
+                )
+            )
+        )
+    }
+
+    func testVisibleTextChangeIsNeverClassifiedAsDuplicateByCalibrationFixture() throws {
+        var initial = Array(repeating: UInt8(245), count: 48)
+        // A dark 2x3 glyph-like mark represents visible text on a light page.
+        for index in [10, 11, 18, 19, 26, 27] {
+            initial[index] = 25
+        }
+        let fingerprint = try acceptedFingerprint(evaluate(initial))
+
+        var textChanged = initial
+        textChanged[28] = 25
+        XCTAssertNoThrow(try acceptedFingerprint(evaluate(textChanged, previous: fingerprint)))
     }
 }

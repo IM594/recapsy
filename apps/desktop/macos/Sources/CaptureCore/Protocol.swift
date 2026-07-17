@@ -152,12 +152,21 @@ public struct CaptureErrorPayload: Encodable {
     }
 }
 
+public enum CaptureSkippedReason: String, Encodable {
+    case paused
+    case policyDenied = "policy_denied"
+    case duplicate
+    case blank
+    case secureInput = "secure_input"
+    case privateContext = "private_context"
+}
+
 public struct CaptureSkippedPayload: Encodable {
     public let captureId: String
-    public let reason: String
+    public let reason: CaptureSkippedReason
     public let observedAt: String
 
-    public init(captureId: String, reason: String, observedAt: String) {
+    public init(captureId: String, reason: CaptureSkippedReason, observedAt: String) {
         self.captureId = captureId
         self.reason = reason
         self.observedAt = observedAt
