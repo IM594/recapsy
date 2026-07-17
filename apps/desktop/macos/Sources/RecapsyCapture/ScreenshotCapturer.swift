@@ -147,47 +147,22 @@ enum ScreenshotCapturer {
         return outcome
     }
 
-    /// Resolve an `SCWindow` for this tick.
-    ///
-    /// Order:
-    /// 1. Frontmost app via SCK + `ActiveWindowSelector`.
-    /// 2. Same rule over CGWindowList, then re-attach by `windowID` in SCK
-    ///    (covers SCK `owningApplication` holes).
-    /// 3. If the frontmost app has no capturable window, take the topmost
-    ///    capturable on-screen window (CG front-to-back) and re-attach in SCK.
-    ///    This covers hosts that remain NSWorkspace-frontmost with no visible
-    ///    window (e.g. a dock-hidden Electron after its login window closes).
+    /// Resolve a verified `SCWindow` for this tick. A CGWindowList fallback may
+    /// fill ScreenCaptureKit ownership gaps, but the selected window must still
+    /// belong to the foreground process. Capturing another app's topmost window
+    /// would make any policy decision about the foreground app unsound.
     private static func selectShareableWindow(
         content: SCShareableContent,
         frontmostPid: Int
     ) -> SCWindow? {
-        let excluded: Set<Int> = [Int(getpid())]
         let sckInfos = content.windows.map(captureWindowInfo(from:))
-
-        if let selectedId = ActiveWindowSelector.selectWindowId(
-            windows: sckInfos,
+        let cgInfos = cgWindowInfos()
+        if let selectedId = ActiveWindowSelector.selectVerifiedWindowId(
+            primaryWindows: sckInfos,
+            fallbackWindows: cgInfos,
             frontmostProcessId: frontmostPid
         ),
             let window = content.windows.first(where: { Int($0.windowID) == selectedId })
-        {
-            return window
-        }
-
-        let cgInfos = cgWindowInfos()
-        if let cgSelectedId = ActiveWindowSelector.selectWindowId(
-            windows: cgInfos,
-            frontmostProcessId: frontmostPid
-        ),
-            let window = content.windows.first(where: { Int($0.windowID) == cgSelectedId })
-        {
-            return window
-        }
-
-        if let topId = ActiveWindowSelector.selectTopmostCapturableWindowId(
-            windowsFrontToBack: cgInfos,
-            excludingOwnerProcessIds: excluded
-        ),
-            let window = content.windows.first(where: { Int($0.windowID) == topId })
         {
             return window
         }

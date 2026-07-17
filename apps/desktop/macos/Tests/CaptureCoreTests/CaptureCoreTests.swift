@@ -329,4 +329,34 @@ final class ActiveWindowSelectorTests: XCTestCase {
             2
         )
     }
+
+    func testVerifiedSelectionFallsBackToMatchingProcessOnly() {
+        let primary = [window(id: 1, pid: 999)]
+        let fallback = [
+            window(id: 2, pid: 999, width: 1920, height: 1055),
+            window(id: 3, pid: 42, width: 1200, height: 800),
+        ]
+
+        XCTAssertEqual(
+            ActiveWindowSelector.selectVerifiedWindowId(
+                primaryWindows: primary,
+                fallbackWindows: fallback,
+                frontmostProcessId: 42
+            ),
+            3
+        )
+    }
+
+    func testVerifiedSelectionNeverFallsBackToAnotherApplication() {
+        let primary = [window(id: 1, pid: 999)]
+        let fallback = [window(id: 2, pid: 999, width: 1920, height: 1055)]
+
+        XCTAssertNil(
+            ActiveWindowSelector.selectVerifiedWindowId(
+                primaryWindows: primary,
+                fallbackWindows: fallback,
+                frontmostProcessId: 42
+            )
+        )
+    }
 }

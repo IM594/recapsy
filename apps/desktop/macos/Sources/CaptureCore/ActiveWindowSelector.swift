@@ -84,6 +84,19 @@ public enum ActiveWindowSelector {
         }?.windowId
     }
 
+    /// Select a capturable window for the foreground process across two system
+    /// enumerations. The fallback may improve reliability when ScreenCaptureKit
+    /// omits ownership metadata, but it must never widen capture to another
+    /// application's topmost window.
+    public static func selectVerifiedWindowId(
+        primaryWindows: [CaptureWindowInfo],
+        fallbackWindows: [CaptureWindowInfo],
+        frontmostProcessId: Int
+    ) -> Int? {
+        selectWindowId(windows: primaryWindows, frontmostProcessId: frontmostProcessId)
+            ?? selectWindowId(windows: fallbackWindows, frontmostProcessId: frontmostProcessId)
+    }
+
     /// First capturable window in a front-to-back ordered list.
     ///
     /// `windowsFrontToBack` must already be ordered frontmost-first (as returned
