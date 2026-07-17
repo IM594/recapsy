@@ -109,6 +109,17 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
           policyVersion = configure.payload.policyVersion;
           return;
         }
+        case 'permission.refresh':
+        case 'permission.request_screen_capture':
+          // This development-only process has no native TCC integration. It
+          // still returns a fresh observation so the Electron protocol paths
+          // remain testable, but it never attempts to summon a system prompt.
+          emitEnvelope('permission.status', {
+            accessibility: 'not_determined',
+            observedAt: now(),
+            screenCapture: 'not_determined',
+          });
+          return;
         case 'capture.start':
           state = 'ready';
           emitEnvelope('helper.status', { status: 'ready' });

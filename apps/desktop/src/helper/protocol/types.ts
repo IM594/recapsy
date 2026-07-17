@@ -96,6 +96,7 @@ export type HelperToMainPayloadByType = {
 export type MainToHelperPayloadByType = {
   'helper.configure': { captureIntervalMs?: number; policyVersion: string };
   'permission.refresh': Record<string, never>;
+  'permission.request_screen_capture': Record<string, never>;
   'capture.start': { reason: 'runtime_started' | 'user_resumed' };
   'capture.pause': {
     reason: 'user_paused' | 'backpressure' | 'permission_missing' | 'runtime_stopping';

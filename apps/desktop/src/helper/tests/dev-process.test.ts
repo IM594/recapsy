@@ -59,6 +59,32 @@ describe('dev helper runtime', () => {
     });
   });
 
+  it('answers both permission commands with a status observation without changing capture state', () => {
+    const lines: string[] = [];
+    const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
+
+    runtime.handleEnvelope({
+      envelope: commandEnvelope('permission.refresh', {}),
+      ok: true,
+    });
+    runtime.handleEnvelope({
+      envelope: commandEnvelope('permission.request_screen_capture', {}),
+      ok: true,
+    });
+
+    expect(runtime.getState()).toBe('starting');
+    const observations = lines.map((line) =>
+      decodeHelperEnvelopeLine(line, validateHelperToMainEnvelope),
+    );
+    expect(observations).toHaveLength(2);
+    for (const observation of observations) {
+      expect(observation).toMatchObject({
+        envelope: { payload: { screenCapture: 'not_determined' }, type: 'permission.status' },
+        ok: true,
+      });
+    }
+  });
+
   it('pauses and resumes, emitting helper.status for each transition', () => {
     const lines: string[] = [];
     const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });

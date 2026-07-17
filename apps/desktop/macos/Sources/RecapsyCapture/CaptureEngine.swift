@@ -131,6 +131,9 @@ final class CaptureEngine {
             }
         case "permission.refresh":
             emitPermissionStatus()
+        case "permission.request_screen_capture":
+            _ = ScreenshotCapturer.requestScreenCaptureAccessIfNeeded()
+            emitPermissionStatus()
         case "capture.start":
             state = .ready
             emitStatus(status: "ready")

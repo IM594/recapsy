@@ -28,6 +28,7 @@ const HELPER_TO_MAIN_TYPES: readonly HelperToMainType[] = [
 const MAIN_TO_HELPER_TYPES: readonly MainToHelperType[] = [
   'helper.configure',
   'permission.refresh',
+  'permission.request_screen_capture',
   'capture.start',
   'capture.pause',
   'capture.resume',
@@ -134,6 +135,7 @@ function isPayloadForType(type: HelperMessageType, payload: unknown): boolean {
     case 'helper.configure':
       return isHelperConfigurePayload(payload);
     case 'permission.refresh':
+    case 'permission.request_screen_capture':
       return isRecord(payload) && hasOnlyKeys(payload, []);
     case 'capture.start':
       return isReasonPayload(payload, ['runtime_started', 'user_resumed']);

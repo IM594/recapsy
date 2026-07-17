@@ -10,6 +10,8 @@ export const IPC_ERROR_CODES = [
   'provider_unavailable',
   'permission_refresh_timeout',
   'permission_refresh_unavailable',
+  'permission_request_timeout',
+  'permission_request_unavailable',
   'input_too_large',
   'unsupported_format',
   'validation_failed',

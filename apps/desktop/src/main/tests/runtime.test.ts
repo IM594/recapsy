@@ -264,6 +264,19 @@ describe('electron main runtime wiring', () => {
       ok: true,
     });
 
+    const requestResponse = await ipcMain.invoke('permissions.requestScreenRecording', undefined);
+    expect(requestResponse).toMatchObject({
+      data: {
+        screenRecording: 'granted',
+        screenRecordingRequired: false,
+      },
+      ok: true,
+    });
+    expect(helperClient.sentCommands.map((command) => command.type)).toEqual([
+      'permission.refresh',
+      'permission.request_screen_capture',
+    ]);
+
     await expect(
       ipcMain.invoke('permissions.openScreenRecordingSettings', undefined),
     ).resolves.toMatchObject({ data: { opened: true }, ok: true });

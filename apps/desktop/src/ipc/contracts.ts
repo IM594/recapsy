@@ -244,6 +244,13 @@ export const IPC_CHANNEL_REGISTRY = [
     namespace: 'permissions',
     request: validateEmptyRequest,
   }),
+  defineChannel<EmptyRequest, PermissionStatusDto>({
+    channel: 'permissions.requestScreenRecording',
+    description: 'Explicitly requests Screen Recording access after a user action.',
+    methodName: 'permissionsRequestScreenRecording',
+    namespace: 'permissions',
+    request: validateEmptyRequest,
+  }),
   defineChannel<EmptyRequest, PrivacySettingsOpenResultDto>({
     channel: 'permissions.openScreenRecordingSettings',
     description: 'Opens the macOS Screen Recording privacy pane.',

@@ -8,9 +8,11 @@ import {
 import type { PrivacySettingsOpener } from './privacy-settings';
 import {
   PermissionRefreshError,
+  PermissionRequestError,
   type PermissionStatusSource,
   readCapturePermissions,
   refreshCapturePermissions,
+  requestScreenRecordingPermission,
 } from './refresh';
 
 export type PermissionIpcHandlerOptions = {
@@ -19,6 +21,7 @@ export type PermissionIpcHandlerOptions = {
   now(): string;
   privacySettings: PrivacySettingsOpener;
   refreshTimeoutMs?: number;
+  screenRecordingRequestTimeoutMs?: number;
 };
 
 export function createPermissionIpcHandlers(options: PermissionIpcHandlerOptions): IpcHandlerMap {
@@ -40,11 +43,38 @@ export function createPermissionIpcHandlers(options: PermissionIpcHandlerOptions
         return createPermissionRefreshErrorEnvelope(error);
       }
     },
+    'permissions.requestScreenRecording': async () => {
+      try {
+        const permissions = await requestScreenRecordingPermission({
+          client: options.client,
+          eventHandler: options.eventHandler,
+          now: options.now,
+          timeoutMs: options.screenRecordingRequestTimeoutMs,
+        });
+        return createRendererSafeSuccess(toPermissionStatusDto(permissions));
+      } catch (error) {
+        return createPermissionRequestErrorEnvelope(error);
+      }
+    },
     'permissions.openAccessibilitySettings': async () =>
       createRendererSafeSuccess(await options.privacySettings.open('accessibility')),
     'permissions.openScreenRecordingSettings': async () =>
       createRendererSafeSuccess(await options.privacySettings.open('screen_recording')),
   };
+}
+
+function createPermissionRequestErrorEnvelope(error: unknown) {
+  if (error instanceof PermissionRequestError && error.code === 'permission_request_timeout') {
+    return createIpcErrorEnvelope(
+      'permission_request_timeout',
+      'Screen Recording permission request timed out.',
+    );
+  }
+
+  return createIpcErrorEnvelope(
+    'permission_request_unavailable',
+    'Screen Recording permission request is unavailable.',
+  );
 }
 
 function createPermissionRefreshErrorEnvelope(error: unknown) {

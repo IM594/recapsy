@@ -9,6 +9,7 @@ import {
   type PermissionSnapshot,
   readCapturePermissions,
   refreshCapturePermissions,
+  requestScreenRecordingPermission,
 } from '../refresh';
 
 describe('capture permission refresh', () => {
@@ -89,6 +90,62 @@ describe('capture permission refresh', () => {
         protocolVersion: HELPER_PROTOCOL_VERSION,
         sentAt: '2026-07-16T00:00:00.500Z',
         type: 'permission.refresh',
+      },
+    ]);
+  });
+
+  it('sends an explicit screen-recording request and waits for its status observation', async () => {
+    const commands: HelperEnvelope<MainToHelperType>[] = [];
+    let permissionStatusSequence = 4;
+    const permissions: PermissionSnapshot = {
+      accessibility: 'not_determined',
+      screenRecording: 'granted',
+    };
+    let listener:
+      | ((status: {
+          lastObservedAt?: string;
+          permissions?: PermissionSnapshot;
+          permissionStatusSequence?: number;
+        }) => void)
+      | undefined;
+
+    const request = requestScreenRecordingPermission({
+      client: {
+        async sendCommand(command) {
+          commands.push(command);
+          permissionStatusSequence += 1;
+          listener?.({
+            lastObservedAt: '2026-07-16T00:00:02.000Z',
+            permissions,
+            permissionStatusSequence,
+          });
+        },
+      },
+      eventHandler: {
+        getStatus: () => ({
+          permissions,
+          permissionStatusSequence,
+        }),
+        subscribeToPermissionStatus(next) {
+          listener = next;
+          return () => {
+            listener = undefined;
+          };
+        },
+      },
+      now: () => '2026-07-16T00:00:00.500Z',
+      timeoutMs: 200,
+    });
+
+    await expect(request).resolves.toEqual(permissions);
+    expect(commands).toEqual([
+      {
+        correlationId: null,
+        messageId: 'permission-request-screen-recording-2026-07-16T00:00:00.500Z',
+        payload: {},
+        protocolVersion: HELPER_PROTOCOL_VERSION,
+        sentAt: '2026-07-16T00:00:00.500Z',
+        type: 'permission.request_screen_capture',
       },
     ]);
   });

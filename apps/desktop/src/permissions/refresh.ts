@@ -27,7 +27,10 @@ export type RefreshCapturePermissionsOptions = {
   timeoutMs?: number;
 };
 
-const DEFAULT_REFRESH_TIMEOUT_MS = 2000;
+export type RequestScreenRecordingPermissionOptions = RefreshCapturePermissionsOptions;
+
+const DEFAULT_PERMISSION_REFRESH_TIMEOUT_MS = 2000;
+const DEFAULT_SCREEN_RECORDING_REQUEST_TIMEOUT_MS = 60_000;
 
 export const PERMISSION_REFRESH_ERROR_CODES = [
   'permission_refresh_timeout',
@@ -36,10 +39,24 @@ export const PERMISSION_REFRESH_ERROR_CODES = [
 
 export type PermissionRefreshErrorCode = (typeof PERMISSION_REFRESH_ERROR_CODES)[number];
 
+export const PERMISSION_REQUEST_ERROR_CODES = [
+  'permission_request_timeout',
+  'permission_request_unavailable',
+] as const;
+
+export type PermissionRequestErrorCode = (typeof PERMISSION_REQUEST_ERROR_CODES)[number];
+
 export class PermissionRefreshError extends Error {
   constructor(public readonly code: PermissionRefreshErrorCode) {
     super(permissionRefreshErrorMessage(code));
     this.name = 'PermissionRefreshError';
+  }
+}
+
+export class PermissionRequestError extends Error {
+  constructor(public readonly code: PermissionRequestErrorCode) {
+    super(permissionRequestErrorMessage(code));
+    this.name = 'PermissionRequestError';
   }
 }
 
@@ -51,35 +68,32 @@ export class PermissionRefreshError extends Error {
 export async function refreshCapturePermissions(
   options: RefreshCapturePermissionsOptions,
 ): Promise<PermissionSnapshot> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_REFRESH_TIMEOUT_MS;
-  const previousPermissionStatusSequence =
-    options.eventHandler.getStatus().permissionStatusSequence;
-  let observation: PermissionObservation | undefined;
+  return runPermissionCommand({
+    ...options,
+    commandType: 'permission.refresh',
+    defaultTimeoutMs: DEFAULT_PERMISSION_REFRESH_TIMEOUT_MS,
+    messageIdPrefix: 'permission-refresh',
+    timeoutError: () => new PermissionRefreshError('permission_refresh_timeout'),
+    unavailableError: () => new PermissionRefreshError('permission_refresh_unavailable'),
+  });
+}
 
-  try {
-    // Subscribe before sending so an immediate response cannot be missed.
-    observation = observeNewPermissionStatus(
-      options.eventHandler,
-      previousPermissionStatusSequence,
-    );
-    await options.client.sendCommand({
-      correlationId: null,
-      messageId: `permission-refresh-${options.now()}`,
-      payload: {},
-      protocolVersion: HELPER_PROTOCOL_VERSION,
-      sentAt: options.now(),
-      type: 'permission.refresh',
-    });
-  } catch {
-    observation?.cancel();
-    throw new PermissionRefreshError('permission_refresh_unavailable');
-  }
-
-  try {
-    return await waitForPermissionObservation(observation.promise, timeoutMs);
-  } finally {
-    observation.cancel();
-  }
+/**
+ * Deliberately requests macOS Screen Recording access after a renderer user
+ * gesture. The native helper still preflights first, so an existing grant
+ * returns a fresh status observation without opening a redundant prompt.
+ */
+export async function requestScreenRecordingPermission(
+  options: RequestScreenRecordingPermissionOptions,
+): Promise<PermissionSnapshot> {
+  return runPermissionCommand({
+    ...options,
+    commandType: 'permission.request_screen_capture',
+    defaultTimeoutMs: DEFAULT_SCREEN_RECORDING_REQUEST_TIMEOUT_MS,
+    messageIdPrefix: 'permission-request-screen-recording',
+    timeoutError: () => new PermissionRequestError('permission_request_timeout'),
+    unavailableError: () => new PermissionRequestError('permission_request_unavailable'),
+  });
 }
 
 export function readCapturePermissions(eventHandler: PermissionStatusSource): PermissionSnapshot {
@@ -99,6 +113,49 @@ type PermissionObservation = {
   promise: Promise<PermissionSnapshot>;
   cancel(): void;
 };
+
+type PermissionCommandOptions = RefreshCapturePermissionsOptions & {
+  commandType: 'permission.refresh' | 'permission.request_screen_capture';
+  defaultTimeoutMs: number;
+  messageIdPrefix: string;
+  timeoutError(): Error;
+  unavailableError(): Error;
+};
+
+async function runPermissionCommand(
+  options: PermissionCommandOptions,
+): Promise<PermissionSnapshot> {
+  const timeoutMs = options.timeoutMs ?? options.defaultTimeoutMs;
+  const previousPermissionStatusSequence =
+    options.eventHandler.getStatus().permissionStatusSequence;
+  let observation: PermissionObservation | undefined;
+
+  try {
+    // Subscribe before sending so an immediate helper reply cannot be missed.
+    observation = observeNewPermissionStatus(
+      options.eventHandler,
+      previousPermissionStatusSequence,
+    );
+    const sentAt = options.now();
+    await options.client.sendCommand({
+      correlationId: null,
+      messageId: `${options.messageIdPrefix}-${sentAt}`,
+      payload: {},
+      protocolVersion: HELPER_PROTOCOL_VERSION,
+      sentAt,
+      type: options.commandType,
+    });
+  } catch {
+    observation?.cancel();
+    throw options.unavailableError();
+  }
+
+  try {
+    return await waitForPermissionObservation(observation.promise, timeoutMs, options.timeoutError);
+  } finally {
+    observation.cancel();
+  }
+}
 
 function observeNewPermissionStatus(
   eventHandler: PermissionStatusSource,
@@ -136,10 +193,11 @@ function observeNewPermissionStatus(
 function waitForPermissionObservation(
   observation: Promise<PermissionSnapshot>,
   timeoutMs: number,
+  timeoutError: () => Error,
 ): Promise<PermissionSnapshot> {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new PermissionRefreshError('permission_refresh_timeout'));
+      reject(timeoutError());
     }, timeoutMs);
 
     observation.then(
@@ -159,4 +217,10 @@ function permissionRefreshErrorMessage(code: PermissionRefreshErrorCode): string
   return code === 'permission_refresh_timeout'
     ? 'Permission refresh timed out.'
     : 'Permission refresh is unavailable.';
+}
+
+function permissionRequestErrorMessage(code: PermissionRequestErrorCode): string {
+  return code === 'permission_request_timeout'
+    ? 'Screen Recording permission request timed out.'
+    : 'Screen Recording permission request is unavailable.';
 }

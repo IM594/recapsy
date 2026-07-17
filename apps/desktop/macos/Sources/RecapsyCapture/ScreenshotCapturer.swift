@@ -36,10 +36,11 @@ enum ScreenshotCapturer {
     private static let captureTimeout: DispatchTimeInterval = .seconds(5)
 
     static func capture() throws -> EncodedScreenshot {
-        guard CGPreflightScreenCaptureAccess() else {
-            // Trigger registration / the system prompt for the capture bundle's
-            // own identity, then report the permission as missing for this tick.
-            _ = CGRequestScreenCaptureAccess()
+        guard ScreenCaptureAuthorization.probe({ CGPreflightScreenCaptureAccess() }) else {
+            // Capture is a background operation. A missing permission is
+            // reported to the shell, but must never summon a macOS prompt from
+            // this timer-driven path. The dedicated, user-initiated permission
+            // command below is the sole request path.
             throw ScreenshotError.permissionMissing
         }
 
@@ -64,7 +65,17 @@ enum ScreenshotCapturer {
     }
 
     static var isScreenCaptureGranted: Bool {
-        return CGPreflightScreenCaptureAccess()
+        return ScreenCaptureAuthorization.probe({ CGPreflightScreenCaptureAccess() })
+    }
+
+    /// The only native path permitted to invoke the macOS Screen Recording
+    /// request API. It first performs a side-effect-free preflight check, so a
+    /// user who already granted access is never shown a redundant prompt.
+    static func requestScreenCaptureAccessIfNeeded() -> Bool {
+        return ScreenCaptureAuthorization.requestIfNeeded(
+            preflight: { CGPreflightScreenCaptureAccess() },
+            request: { CGRequestScreenCaptureAccess() }
+        )
     }
 
     private enum CaptureOutcome {
