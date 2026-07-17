@@ -8,7 +8,8 @@ export type DesktopApplicationPaths = {
 };
 
 /** Resolves renderer assets identically from a package directory or app.asar. */
-export function resolveDesktopApplicationPaths(packageRoot: string): DesktopApplicationPaths {
+export function resolveDesktopApplicationPaths(appPath: string): DesktopApplicationPaths {
+  const packageRoot = resolvePackageRoot(appPath);
   const authDirectory = path.join(packageRoot, 'dist', 'auth');
   const shellDirectory = path.join(packageRoot, 'dist', 'shell');
   return {
@@ -17,4 +18,17 @@ export function resolveDesktopApplicationPaths(packageRoot: string): DesktopAppl
     mainWindowHtmlPath: path.join(shellDirectory, 'main-window.html'),
     mainWindowPreloadPath: path.join(shellDirectory, 'main-preload.js'),
   };
+}
+
+function resolvePackageRoot(appPath: string) {
+  const normalizedPath = path.normalize(appPath);
+  const parentDirectory = path.dirname(normalizedPath);
+
+  // `electron dist/main/electron-entry.js` treats `dist/main` as appPath in
+  // development, whereas packaged Electron returns the app.asar root.
+  if (path.basename(normalizedPath) === 'main' && path.basename(parentDirectory) === 'dist') {
+    return path.dirname(parentDirectory);
+  }
+
+  return normalizedPath;
 }
