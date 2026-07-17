@@ -23,7 +23,8 @@ import {
 import { createSqliteStore } from '../storage/index';
 import { createNodeSqliteDatabase } from '../storage/node';
 import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
-import { resolveDesktopApplicationPaths, resolveDesktopPackageRoot } from './application-layout';
+import { resolveDesktopApplicationPaths } from './application-layout';
+import { configureDesktopApplicationProfile } from './application-profile';
 import { createLocalAssetReader } from './asset-reader';
 import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';
@@ -55,6 +56,11 @@ const deviceId = process.env.RECAPSY_DESKTOP_DEVICE_ID ?? 'dev-device';
 // Dev-only default matches `apps/server`'s own dev default (`PORT=3000` in
 // `apps/server/.env.example`), not a production domain or port.
 const serverEndpoint = process.env.RECAPSY_SERVER_ENDPOINT ?? 'http://localhost:3000';
+
+// `electron .` uses the package root in development while packaged Electron
+// uses app.asar. Set the product-owned profile before any userData consumer so
+// both layouts keep one stable local state directory.
+configureDesktopApplicationProfile(app);
 
 /**
  * Opt-in diagnostic mode for local development (the #1 complaint blocking
@@ -168,7 +174,7 @@ const authClient = createAuthClient({
   transport: fetchTransport,
 });
 
-const desktopPackageRoot = resolveDesktopPackageRoot(app.getAppPath());
+const desktopPackageRoot = app.getAppPath();
 const { loginWindowHtmlPath, loginWindowPreloadPath, mainWindowHtmlPath, mainWindowPreloadPath } =
   resolveDesktopApplicationPaths(desktopPackageRoot);
 

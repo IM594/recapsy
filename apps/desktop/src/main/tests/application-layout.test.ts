@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveDesktopApplicationPaths, resolveDesktopPackageRoot } from '../application-layout';
+import { resolveDesktopApplicationPaths } from '../application-layout';
 
 describe('desktop application layout', () => {
   it('resolves login and main-window assets from the Electron application root', () => {
@@ -17,10 +17,8 @@ describe('desktop application layout', () => {
     });
   });
 
-  it('resolves renderer assets from the package root when Electron starts the built dev entry', () => {
-    expect(
-      resolveDesktopApplicationPaths('/Users/example/Projects/recapsy/apps/desktop/dist/main'),
-    ).toEqual({
+  it('resolves renderer assets from the Desktop package root during development', () => {
+    expect(resolveDesktopApplicationPaths('/Users/example/Projects/recapsy/apps/desktop')).toEqual({
       loginWindowHtmlPath:
         '/Users/example/Projects/recapsy/apps/desktop/dist/auth/login-window.html',
       loginWindowPreloadPath:
@@ -30,11 +28,5 @@ describe('desktop application layout', () => {
       mainWindowPreloadPath:
         '/Users/example/Projects/recapsy/apps/desktop/dist/shell/main-preload.js',
     });
-  });
-
-  it('resolves the package root for capture assets when Electron starts the built dev entry', () => {
-    expect(
-      resolveDesktopPackageRoot('/Users/example/Projects/recapsy/apps/desktop/dist/main'),
-    ).toBe('/Users/example/Projects/recapsy/apps/desktop');
   });
 });
