@@ -113,6 +113,10 @@ function helperToMainEnvelopes(): unknown[] {
       pid: 42,
     }),
     envelope('helper.status', { status: 'ready' }),
+    envelope('helper.policy_applied', {
+      policyHash: `sha256:${'a'.repeat(64)}`,
+      policyVersion: 'policy-v1',
+    }),
     envelope('permission.status', {
       accessibility: 'granted',
       observedAt: sentAt,
@@ -128,7 +132,7 @@ function helperToMainEnvelopes(): unknown[] {
 
 function mainToHelperEnvelopes(): unknown[] {
   return [
-    envelope('helper.configure', { captureIntervalMs: 1000, policyVersion: 'policy-v1' }),
+    envelope('helper.configure', { captureIntervalMs: 1000, policy: capturePolicy() }),
     envelope('permission.refresh', {}),
     envelope('permission.request_screen_capture', {}),
     envelope('capture.start', { reason: 'runtime_started' }),
@@ -183,5 +187,15 @@ function captureResultPayload() {
       sizeBytes: 0,
     },
     observedAt: sentAt,
+  };
+}
+
+function capturePolicy() {
+  return {
+    defaultAction: 'allow',
+    paused: false,
+    policyHash: `sha256:${'a'.repeat(64)}`,
+    rules: [],
+    version: 'policy-v1',
   };
 }

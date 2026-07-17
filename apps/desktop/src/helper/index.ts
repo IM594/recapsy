@@ -22,6 +22,9 @@ export type {
   CaptureAssetPayload,
   CaptureAssetRole,
   CaptureResultPayload,
+  HelperCapturePolicy,
+  HelperCapturePolicyAction,
+  HelperCapturePolicyRule,
   HelperEnvelope,
   HelperMessageType,
   HelperProtocolError,
@@ -41,7 +44,7 @@ export {
   validateMainToHelperEnvelope,
 } from './protocol/validation';
 export type { HelperEnvelopeValidator } from './protocol/validation';
-export { createHelperProcessClient } from './process-client';
+export { HelperPolicyActivationError, createHelperProcessClient } from './process-client';
 export type {
   HelperProcess,
   HelperProcessClientOptions,

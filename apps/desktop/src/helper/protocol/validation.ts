@@ -17,6 +17,7 @@ export type HelperEnvelopeValidator<TEnvelope extends HelperEnvelope> = (
 const HELPER_TO_MAIN_TYPES: readonly HelperToMainType[] = [
   'helper.hello',
   'helper.status',
+  'helper.policy_applied',
   'permission.status',
   'capture.result',
   'capture.skipped',
@@ -120,6 +121,8 @@ function isPayloadForType(type: HelperMessageType, payload: unknown): boolean {
       return isHelperHelloPayload(payload);
     case 'helper.status':
       return isHelperStatusPayload(payload);
+    case 'helper.policy_applied':
+      return isHelperPolicyAppliedPayload(payload);
     case 'permission.status':
       return isPermissionStatusPayload(payload);
     case 'capture.result':
@@ -181,6 +184,15 @@ function isHelperStatusPayload(payload: unknown): boolean {
     hasOnlyKeys(payload, ['status', 'reason']) &&
     isOneOf(payload.status, ['starting', 'ready', 'paused', 'stopping', 'stopped', 'error']) &&
     optionalSafeVisibleString(payload.reason)
+  );
+}
+
+function isHelperPolicyAppliedPayload(payload: unknown): boolean {
+  return (
+    isRecord(payload) &&
+    hasOnlyKeys(payload, ['policyHash', 'policyVersion']) &&
+    isPolicyHash(payload.policyHash) &&
+    isString(payload.policyVersion)
   );
 }
 
@@ -299,10 +311,51 @@ function isHelperExitingPayload(payload: unknown): boolean {
 function isHelperConfigurePayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
-    hasOnlyKeys(payload, ['captureIntervalMs', 'policyVersion']) &&
+    hasOnlyKeys(payload, ['captureIntervalMs', 'policy']) &&
     optionalInteger(payload.captureIntervalMs) &&
-    isString(payload.policyVersion)
+    isHelperCapturePolicy(payload.policy)
   );
+}
+
+function isHelperCapturePolicy(payload: unknown): boolean {
+  return (
+    isRecord(payload) &&
+    hasOnlyKeys(payload, ['policyHash', 'version', 'paused', 'defaultAction', 'rules']) &&
+    isPolicyHash(payload.policyHash) &&
+    isString(payload.version) &&
+    typeof payload.paused === 'boolean' &&
+    isPolicyAction(payload.defaultAction) &&
+    Array.isArray(payload.rules) &&
+    payload.rules.every(isHelperCapturePolicyRule)
+  );
+}
+
+function isHelperCapturePolicyRule(payload: unknown): boolean {
+  return (
+    isRecord(payload) &&
+    hasOnlyKeys(payload, ['id', 'kind', 'scope', 'pattern', 'action', 'enabled']) &&
+    isString(payload.id) &&
+    isOneOf(payload.kind, [
+      'pause',
+      'app_name',
+      'bundle_id',
+      'domain',
+      'document_path',
+      'window_title',
+    ]) &&
+    isOneOf(payload.scope, ['hard', 'local_user', 'workspace_default']) &&
+    isString(payload.pattern) &&
+    isPolicyAction(payload.action) &&
+    typeof payload.enabled === 'boolean'
+  );
+}
+
+function isPolicyAction(value: unknown): boolean {
+  return isOneOf(value, ['allow', 'block_capture', 'redact_context', 'block_ocr']);
+}
+
+function isPolicyHash(value: unknown): boolean {
+  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/.test(value);
 }
 
 function isCaptureNackPayload(payload: unknown): boolean {

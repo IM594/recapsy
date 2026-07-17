@@ -121,6 +121,25 @@ final class ProtocolEncodingTests: XCTestCase {
         XCTAssertEqual(payload["reason"] as? String, "user_paused")
     }
 
+    func testPolicyAppliedPayloadPreservesVersionHashAndCorrelation() throws {
+        let envelope = HelperEnvelope(
+            messageId: "cap-msg-policy-1",
+            correlationId: "policy-config-1",
+            sentAt: "2026-07-18T00:00:00.000Z",
+            type: "helper.policy_applied",
+            payload: PolicyAppliedPayload(
+                policyHash: "sha256:" + String(repeating: "a", count: 64),
+                policyVersion: "policy-1"
+            )
+        )
+
+        let object = try decode(try encodeEnvelopeLine(envelope))
+        XCTAssertEqual(object["correlationId"] as? String, "policy-config-1")
+        let payload = try XCTUnwrap(object["payload"] as? [String: Any])
+        XCTAssertEqual(payload["policyVersion"] as? String, "policy-1")
+        XCTAssertEqual(payload["policyHash"] as? String, "sha256:" + String(repeating: "a", count: 64))
+    }
+
     func testCaptureResultKeepsRelativeRefSlashUnescaped() throws {
         let asset = CaptureAssetPayload(
             role: "screenshot",

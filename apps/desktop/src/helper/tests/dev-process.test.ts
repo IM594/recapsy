@@ -25,6 +25,16 @@ function commandEnvelope<TType extends MainToHelperType>(
   } as HelperEnvelope<TType>;
 }
 
+function capturePolicy(version = 'policy_1') {
+  return {
+    defaultAction: 'allow' as const,
+    paused: false,
+    policyHash: `sha256:${'a'.repeat(64)}`,
+    rules: [],
+    version,
+  };
+}
+
 describe('dev helper runtime', () => {
   it('emits a helper.hello with mock capabilities on start', () => {
     const lines: string[] = [];
@@ -149,7 +159,7 @@ describe('dev helper runtime', () => {
     const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
 
     runtime.handleEnvelope({
-      envelope: commandEnvelope('helper.configure', { policyVersion: 'policy_v7' }),
+      envelope: commandEnvelope('helper.configure', { policy: capturePolicy('policy_v7') }),
       ok: true,
     });
 

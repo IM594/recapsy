@@ -31,6 +31,25 @@ export type CaptureAssetPayload = {
   sizeBytes: number;
 };
 
+export type HelperCapturePolicyAction = 'allow' | 'block_capture' | 'redact_context' | 'block_ocr';
+
+export type HelperCapturePolicyRule = {
+  id: string;
+  kind: 'pause' | 'app_name' | 'bundle_id' | 'domain' | 'document_path' | 'window_title';
+  scope: 'hard' | 'local_user' | 'workspace_default';
+  pattern: string;
+  action: HelperCapturePolicyAction;
+  enabled: boolean;
+};
+
+export type HelperCapturePolicy = {
+  policyHash: string;
+  version: string;
+  paused: boolean;
+  defaultAction: HelperCapturePolicyAction;
+  rules: HelperCapturePolicyRule[];
+};
+
 export type SafeCaptureContextPayload = {
   observedAt: string;
   app?: { name: string; bundleId: string };
@@ -60,6 +79,10 @@ export type HelperToMainPayloadByType = {
   'helper.status': {
     status: 'starting' | 'ready' | 'paused' | 'stopping' | 'stopped' | 'error';
     reason?: string;
+  };
+  'helper.policy_applied': {
+    policyHash: string;
+    policyVersion: string;
   };
   'permission.status': {
     screenCapture: 'granted' | 'denied' | 'not_determined' | 'unknown';
@@ -94,7 +117,7 @@ export type HelperToMainPayloadByType = {
 };
 
 export type MainToHelperPayloadByType = {
-  'helper.configure': { captureIntervalMs?: number; policyVersion: string };
+  'helper.configure': { captureIntervalMs?: number; policy: HelperCapturePolicy };
   'permission.refresh': Record<string, never>;
   'permission.request_screen_capture': Record<string, never>;
   'capture.start': { reason: 'runtime_started' | 'user_resumed' };

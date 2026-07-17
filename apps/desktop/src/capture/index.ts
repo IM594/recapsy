@@ -27,6 +27,16 @@ export type {
   HelperLifecycle,
 } from './lifecycle';
 export { createCaptureRuntime } from './runtime';
+export {
+  CapturePolicyActivationError,
+  compileCapturePolicy,
+  createCapturePolicyActivation,
+} from './policy';
+export type {
+  CapturePolicyActivation,
+  CapturePolicyActivationConfiguration,
+  CompiledCapturePolicy,
+} from './policy';
 export type {
   CaptureRuntime,
   CaptureRuntimeOptions,

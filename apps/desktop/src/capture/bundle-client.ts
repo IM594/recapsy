@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { HelperEnvelope, MainToHelperType } from '../helper/index';
+import type { HelperCapturePolicy, HelperEnvelope, MainToHelperType } from '../helper/index';
 import { createHelperProcessClient } from '../helper/index';
 import type {
   CaptureHelperClient,
@@ -140,6 +140,13 @@ export function createCaptureBundleClient(
     },
     async stop(): Promise<void> {
       await processClient?.stop();
+    },
+    async configureCapture(policy: HelperCapturePolicy): Promise<void> {
+      const client = await getProcessClient();
+      if (!client.configureCapture) {
+        throw new Error('capture_helper_policy_configuration_unsupported');
+      }
+      await client.configureCapture(policy);
     },
     async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
       await processClient?.beginCapture(reason);

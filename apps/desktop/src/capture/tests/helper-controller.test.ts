@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   HELPER_PROTOCOL_VERSION,
+  type HelperCapturePolicy,
   type HelperEnvelope,
   type MainToHelperType,
 } from '../../helper/index';
@@ -12,6 +13,7 @@ import {
   createCaptureHelperController,
 } from '../helper-controller';
 import { createCaptureHelperEventHandler } from '../helper-event-handler';
+import { type CapturePolicyActivation, CapturePolicyActivationError } from '../policy';
 import type { HelperStateStore } from '../store';
 
 const now = '2026-07-07T08:00:00.000Z';
@@ -22,6 +24,35 @@ const backpressure: BackpressureConfig = {
 };
 
 describe('capture helper controller', () => {
+  it('keeps the helper idle and creates no capture work when policy activation is unavailable', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperClient();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      policyActivation: {
+        async activate(): Promise<never> {
+          throw new CapturePolicyActivationError('policy_unavailable');
+        },
+      },
+      store,
+    });
+
+    await controller.start();
+
+    expect(client.calls).toEqual(['start']);
+    expect(client.beginCaptureReasons).toEqual([]);
+    expect(await store.listOutboxJobs()).toEqual([]);
+    expect(controller.getStatus()).toMatchObject({
+      lastSafeError: {
+        code: 'policy_unavailable',
+        retryable: true,
+      },
+      state: 'paused',
+    });
+  });
+
   it('starts the helper through explicit dependency injection and records running state', async () => {
     const client = new RecordingCaptureHelperClient();
     const store = createMemoryStore();
@@ -29,12 +60,13 @@ describe('capture helper controller', () => {
       client,
       deviceId: 'device_1',
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
 
     await controller.start();
 
-    expect(client.calls).toEqual(['start', 'beginCapture']);
+    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture']);
     expect(client.beginCaptureReasons).toEqual(['runtime_started']);
     expect(controller.getStatus()).toMatchObject({
       state: 'running',
@@ -57,6 +89,7 @@ describe('capture helper controller', () => {
       client,
       deviceId: 'device_1',
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
 
@@ -136,6 +169,7 @@ describe('capture helper controller', () => {
         workspaceId: 'workspace_1',
       }),
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
     await controller.start();
@@ -205,6 +239,7 @@ describe('capture helper controller', () => {
         workspaceId: 'workspace_1',
       }),
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
     await controller.start();
@@ -238,6 +273,7 @@ describe('capture helper controller', () => {
       deviceId: 'device_1',
       eventHandler,
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
     await controller.start();
@@ -271,6 +307,7 @@ describe('capture helper controller', () => {
         workspaceId: 'workspace_1',
       }),
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
     await controller.start();
@@ -286,6 +323,7 @@ describe('capture helper controller', () => {
       client: new RecordingCaptureHelperClient(),
       deviceId: 'device_1',
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store,
     });
     await controller.start();
@@ -315,6 +353,7 @@ describe('capture helper controller', () => {
         },
       },
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store: createMemoryStore(),
     });
 
@@ -330,6 +369,7 @@ describe('capture helper controller', () => {
       client,
       deviceId: 'device_1',
       now: () => now,
+      policyActivation: activePolicyActivation(),
       store: createMemoryStore(),
     });
     await controller.start();
@@ -337,7 +377,7 @@ describe('capture helper controller', () => {
     await controller.shutdown();
     await controller.shutdown();
 
-    expect(client.calls).toEqual(['start', 'beginCapture', 'stop']);
+    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture', 'stop']);
     expect(controller.getStatus()).toMatchObject({
       state: 'stopped',
     });
@@ -366,6 +406,10 @@ class RecordingCaptureHelperClient implements CaptureHelperClient {
   async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
     this.calls.push('beginCapture');
     this.beginCaptureReasons.push(reason);
+  }
+
+  async configureCapture(_policy: HelperCapturePolicy): Promise<void> {
+    this.calls.push('configureCapture');
   }
 
   async stop(): Promise<void> {
@@ -465,5 +509,21 @@ function helperStatusEnvelope(): HelperEnvelope<'helper.status'> {
     protocolVersion: HELPER_PROTOCOL_VERSION,
     sentAt: now,
     type: 'helper.status',
+  };
+}
+
+function activePolicyActivation(): CapturePolicyActivation {
+  return {
+    async activate() {
+      return {
+        policy: {
+          defaultAction: 'allow',
+          paused: false,
+          policyHash: `sha256:${'a'.repeat(64)}`,
+          rules: [],
+          version: 'policy_1',
+        },
+      };
+    },
   };
 }

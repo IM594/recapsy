@@ -7,6 +7,7 @@ import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
   type HelperLifecycle,
+  HelperPolicyActivationError,
   type HelperToMainType,
 } from '../helper/index';
 import type {
@@ -14,6 +15,7 @@ import type {
   HelperPermissionState,
   SafeOperationalError,
 } from '../storage/index';
+import { type CapturePolicyActivation, CapturePolicyActivationError } from './policy';
 import type { HelperStateStore } from './store';
 
 export type {
@@ -32,6 +34,7 @@ export type CaptureHelperControllerOptions = {
     handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   };
   now(): string;
+  policyActivation?: CapturePolicyActivation;
   store: HelperStateStore;
 };
 
@@ -52,6 +55,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   };
   private started = false;
   private stopped = false;
+  private policyReady = false;
 
   constructor(private readonly options: CaptureHelperControllerOptions) {}
 
@@ -94,17 +98,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
 
     this.started = true;
     this.stopped = false;
-    this.status = {
-      state: 'running',
-      updatedAt: this.options.now(),
-    };
-    await this.persistHelperState();
-
-    // Spawning the helper only wires up the process; the capture engine stays
-    // idle until it is explicitly told to begin. Now that the process is
-    // running, drive it to start capturing. Failure paths above return early,
-    // so this only fires when the helper actually reached `running`.
-    await this.options.client.beginCapture('runtime_started');
+    await this.activatePolicyAndStart('runtime_started');
   }
 
   async pauseCapture(): Promise<void> {
@@ -125,12 +119,46 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       return;
     }
 
+    if (!this.policyReady) {
+      await this.activatePolicyAndStart('user_resumed');
+      return;
+    }
+
     await this.options.client.resumeCapture();
     this.status = {
       state: 'running',
       updatedAt: this.options.now(),
     };
     await this.persistHelperState();
+  }
+
+  private async activatePolicyAndStart(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
+    try {
+      const configuration = await this.options.policyActivation?.activate();
+      if (!configuration) {
+        throw new CapturePolicyActivationError('policy_unavailable');
+      }
+      if (!this.options.client.configureCapture) {
+        throw new HelperPolicyActivationError('helper_unavailable');
+      }
+      await this.options.client.configureCapture(configuration.policy);
+      this.policyReady = true;
+      this.status = {
+        state: 'running',
+        updatedAt: this.options.now(),
+      };
+      await this.persistHelperState();
+      await this.options.client.beginCapture(reason);
+    } catch (error) {
+      this.policyReady = false;
+      const safeError = policyActivationSafeError(error);
+      this.status = {
+        lastSafeError: safeError,
+        state: 'paused',
+        updatedAt: this.options.now(),
+      };
+      await this.persistHelperState();
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -248,6 +276,16 @@ function safeOperationalError(
     message,
     retryable,
   };
+}
+
+function policyActivationSafeError(error: unknown): SafeOperationalError {
+  if (error instanceof CapturePolicyActivationError) {
+    return safeOperationalError(error.code, error.message, true);
+  }
+  if (error instanceof HelperPolicyActivationError) {
+    return safeOperationalError(error.code, error.message, true);
+  }
+  return safeOperationalError('policy_unavailable', 'Capture policy is unavailable.', true);
 }
 
 function cloneStatus(status: CaptureHelperStatus): CaptureHelperStatus {

@@ -25,6 +25,7 @@ import {
   createPermissionIpcHandlers,
   createPrivacySettingsOpener,
 } from '../permissions/index';
+import type { ServerApiClient } from '../server/index';
 import type { DesktopShell } from '../shell/index';
 import { createStatusHandlers } from '../status/index';
 import type { BackpressureConfig, StoreLifecycle } from '../storage/index';
@@ -77,7 +78,7 @@ export type ElectronMainRuntimeOptions = {
   tokenStore: TokenStore;
   authClient: Pick<AuthClient, 'getActiveSession'>;
   loginPrompter: LoginPrompter;
-  createServerApi(): SyncServerApi;
+  createServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'>;
   readAssetBytes?: SyncAssetReader;
   syncIdleDelayMs?: number;
   syncActiveDelayMs?: number;
@@ -158,6 +159,7 @@ export function createElectronMainRuntime(
       deviceId: options.deviceId,
       now,
       onHelperEnvelope: options.onHelperEnvelope,
+      policyApi: options.createServerApi(),
       startupRecovery: syncRuntime,
       store,
       workspaceId,

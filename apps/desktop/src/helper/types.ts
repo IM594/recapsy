@@ -4,7 +4,12 @@ import type {
   CapturePrivacyDecision,
   SafeOperationalError,
 } from '../storage/index';
-import type { HelperEnvelope, HelperToMainType, MainToHelperType } from './protocol/types';
+import type {
+  HelperCapturePolicy,
+  HelperEnvelope,
+  HelperToMainType,
+  MainToHelperType,
+} from './protocol/types';
 
 export type CaptureHelperState =
   | 'idle'
@@ -74,6 +79,7 @@ export type CaptureHelperStartOptions = {
 export type CaptureHelperClient = {
   start(options?: CaptureHelperStartOptions): Promise<void>;
   stop(): Promise<void>;
+  configureCapture?(policy: HelperCapturePolicy): Promise<void>;
   beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void>;
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;

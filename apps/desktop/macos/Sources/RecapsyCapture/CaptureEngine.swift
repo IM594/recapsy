@@ -60,6 +60,7 @@ final class CaptureEngine {
     private var heartbeatSequence = 0
     private var captureCounter = 0
     private var policyVersion = CaptureEngine.unconfiguredPolicyVersion
+    private var configuredPolicy: ConfiguredPolicy?
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
     // Edge-tracks the "no capturable active window" condition so a long stretch
@@ -111,30 +112,45 @@ final class CaptureEngine {
             return
         }
         let payload = envelope["payload"] as? [String: Any] ?? [:]
+        let correlationId = envelope["correlationId"] as? String
 
         stateQueue.async { [weak self] in
-            self?.dispatchCommand(type: type, payload: payload)
+            self?.dispatchCommand(type: type, payload: payload, correlationId: correlationId)
         }
     }
 
-    private func dispatchCommand(type: String, payload: [String: Any]) {
+    private func dispatchCommand(type: String, payload: [String: Any], correlationId: String?) {
         switch type {
         case "helper.configure":
-            if let version = payload["policyVersion"] as? String, !version.isEmpty {
-                policyVersion = version
+            guard let policy = ConfiguredPolicy.fromPayload(payload["policy"] as? [String: Any]) else {
+                configuredPolicy = nil
+                state = .paused
+                stopCaptureTimer()
+                emitStatus(status: "paused", reason: "policy_unavailable")
+                return
             }
+            configuredPolicy = policy
+            policyVersion = policy.version
             if let interval = payload["captureIntervalMs"] as? Int, interval > 0 {
                 captureIntervalMs = interval
-                if state == .ready {
-                    startCaptureTimer()
-                }
             }
+            emit(
+                type: "helper.policy_applied",
+                payload: PolicyAppliedPayload(policyHash: policy.hash, policyVersion: policy.version),
+                correlationId: correlationId
+            )
         case "permission.refresh":
             emitPermissionStatus()
         case "permission.request_screen_capture":
             _ = ScreenshotCapturer.requestScreenCaptureAccessIfNeeded()
             emitPermissionStatus()
         case "capture.start":
+            guard let policy = configuredPolicy, !policy.paused else {
+                state = .paused
+                stopCaptureTimer()
+                emitStatus(status: "paused", reason: "policy_unavailable")
+                return
+            }
             state = .ready
             emitStatus(status: "ready")
             startCaptureTimer()
@@ -144,6 +160,12 @@ final class CaptureEngine {
             emitStatus(status: "paused", reason: reason)
             stopCaptureTimer()
         case "capture.resume":
+            guard let policy = configuredPolicy, !policy.paused else {
+                state = .paused
+                stopCaptureTimer()
+                emitStatus(status: "paused", reason: "policy_unavailable")
+                return
+            }
             state = .ready
             let reason = payload["reason"] as? String
             emitStatus(status: "ready", reason: reason)
@@ -208,7 +230,7 @@ final class CaptureEngine {
     // MARK: - Capture orchestration (state queue)
 
     private func onCaptureTick() {
-        guard state == .ready, !captureInFlight else {
+        guard state == .ready, configuredPolicy != nil, !captureInFlight else {
             return
         }
         captureInFlight = true
@@ -408,7 +430,11 @@ final class CaptureEngine {
         )
     }
 
-    private func emit<Payload: Encodable>(type: String, payload: Payload) {
+    private func emit<Payload: Encodable>(
+        type: String,
+        payload: Payload,
+        correlationId: String? = nil
+    ) {
         emitLock.lock()
         messageSequence += 1
         let sequence = messageSequence
@@ -416,7 +442,7 @@ final class CaptureEngine {
 
         let envelope = HelperEnvelope(
             messageId: "cap-msg-\(sequence)",
-            correlationId: nil,
+            correlationId: correlationId,
             sentAt: CaptureEngine.iso8601(Date()),
             type: type,
             payload: payload
@@ -425,6 +451,92 @@ final class CaptureEngine {
             return
         }
         emitter.emit(line)
+    }
+
+    /// Canonical policy payload received from Electron. The helper keeps the
+    /// full executable rule set even though the first source-only gate only
+    /// evaluates window owner identity; later capture gates must never need to
+    /// re-fetch or reconstruct policy data from a summary.
+    private struct ConfiguredPolicy {
+        struct Rule {
+            let id: String
+            let kind: String
+            let scope: String
+            let pattern: String
+            let action: String
+            let enabled: Bool
+        }
+
+        let hash: String
+        let version: String
+        let paused: Bool
+        let defaultAction: String
+        let rules: [Rule]
+
+        static func fromPayload(_ payload: [String: Any]?) -> ConfiguredPolicy? {
+            guard
+                let payload,
+                let hash = payload["policyHash"] as? String,
+                hash.range(of: "^sha256:[a-f0-9]{64}$", options: .regularExpression) != nil,
+                let version = payload["version"] as? String,
+                !version.isEmpty,
+                let paused = payload["paused"] as? Bool,
+                let defaultAction = payload["defaultAction"] as? String,
+                Self.isAction(defaultAction),
+                let rawRules = payload["rules"] as? [[String: Any]]
+            else {
+                return nil
+            }
+
+            var rules: [Rule] = []
+            for rawRule in rawRules {
+                guard
+                    let id = rawRule["id"] as? String,
+                    !id.isEmpty,
+                    let kind = rawRule["kind"] as? String,
+                    Self.isKind(kind),
+                    let scope = rawRule["scope"] as? String,
+                    Self.isScope(scope),
+                    let pattern = rawRule["pattern"] as? String,
+                    !pattern.isEmpty,
+                    let action = rawRule["action"] as? String,
+                    Self.isAction(action),
+                    let enabled = rawRule["enabled"] as? Bool
+                else {
+                    return nil
+                }
+                rules.append(
+                    Rule(
+                        id: id,
+                        kind: kind,
+                        scope: scope,
+                        pattern: pattern,
+                        action: action,
+                        enabled: enabled
+                    )
+                )
+            }
+
+            return ConfiguredPolicy(
+                hash: hash,
+                version: version,
+                paused: paused,
+                defaultAction: defaultAction,
+                rules: rules
+            )
+        }
+
+        private static func isAction(_ value: String) -> Bool {
+            return ["allow", "block_capture", "redact_context", "block_ocr"].contains(value)
+        }
+
+        private static func isKind(_ value: String) -> Bool {
+            return ["pause", "app_name", "bundle_id", "domain", "document_path", "window_title"].contains(value)
+        }
+
+        private static func isScope(_ value: String) -> Bool {
+            return ["hard", "local_user", "workspace_default"].contains(value)
+        }
     }
 
     private func terminate(code: Int32) {

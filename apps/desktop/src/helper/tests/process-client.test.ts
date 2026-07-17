@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import type { CaptureHelperEvent } from '../../capture/index';
 import { type HelperProcess, createHelperProcessClient } from '../process-client';
 import { decodeHelperEnvelopeLine, encodeHelperEnvelope } from '../protocol/codec';
-import type { HelperEnvelope } from '../protocol/types';
+import type { HelperCapturePolicy, HelperEnvelope } from '../protocol/types';
 import { validateMainToHelperEnvelope } from '../protocol/validation';
 
 /**
@@ -51,6 +51,16 @@ function helloLine(): string {
     type: 'helper.hello',
   };
   return encodeHelperEnvelope(envelope);
+}
+
+function capturePolicy(): HelperCapturePolicy {
+  return {
+    defaultAction: 'allow',
+    paused: false,
+    policyHash: `sha256:${'a'.repeat(64)}`,
+    rules: [],
+    version: 'policy_1',
+  };
 }
 
 async function completeStartup(
@@ -446,6 +456,69 @@ describe('helper process client', () => {
       envelope: { type: 'capture.start', payload: { reason: 'runtime_started' } },
       ok: true,
     });
+  });
+
+  it('waits for a matching helper.policy_applied acknowledgement before policy configuration resolves', async () => {
+    const child = new FakeChildProcess();
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+    const configured = client.configureCapture(capturePolicy());
+    const command = decodeHelperEnvelopeLine(
+      child.stdin.written[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
+    expect(command).toMatchObject({ envelope: { type: 'helper.configure' }, ok: true });
+    if (!command.ok) return;
+
+    child.stdout.emit(
+      'data',
+      encodeHelperEnvelope({
+        correlationId: command.envelope.correlationId,
+        messageId: 'policy_applied_1',
+        payload: { policyHash: capturePolicy().policyHash, policyVersion: 'policy_1' },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-08T00:00:00.000Z',
+        type: 'helper.policy_applied',
+      }),
+    );
+
+    await expect(configured).resolves.toBeUndefined();
+  });
+
+  it('rejects a mismatched policy acknowledgement instead of starting with a different policy', async () => {
+    const child = new FakeChildProcess();
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+    const configured = client.configureCapture(capturePolicy());
+    const command = decodeHelperEnvelopeLine(
+      child.stdin.written[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
+    if (!command.ok) throw new Error('Expected helper.configure command.');
+
+    child.stdout.emit(
+      'data',
+      encodeHelperEnvelope({
+        correlationId: command.envelope.correlationId,
+        messageId: 'policy_applied_wrong',
+        payload: { policyHash: `sha256:${'b'.repeat(64)}`, policyVersion: 'policy_1' },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-08T00:00:00.000Z',
+        type: 'helper.policy_applied',
+      }),
+    );
+
+    await expect(configured).rejects.toMatchObject({ code: 'policy_ack_mismatch' });
   });
 
   it('drops beginCapture writes silently when no child is running', async () => {

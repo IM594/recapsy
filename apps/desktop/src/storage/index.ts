@@ -52,7 +52,6 @@ export type {
   OutboxSafeErrorInput,
   OutboxTerminalState,
   OutboxTerminalUpdate,
-  PolicyAction,
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,

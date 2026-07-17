@@ -11,7 +11,13 @@ import type {
   CaptureHelperCommandClient,
   CaptureHelperStartOptions,
 } from '../../capture/index';
-import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../../helper/index';
+import type {
+  HelperCapturePolicy,
+  HelperEnvelope,
+  HelperToMainType,
+  MainToHelperType,
+} from '../../helper/index';
+import type { CapturePoliciesResult, ServerApiClient } from '../../server/index';
 import type { DesktopShell } from '../../shell/index';
 import { createMemoryStore } from '../../storage';
 import type { SyncLoop, SyncLoopOptions, SyncRunResult, SyncServerApi } from '../../sync/index';
@@ -741,7 +747,7 @@ function fakeAuthClient(
   };
 }
 
-function notImplementedServerApi(): SyncServerApi {
+function notImplementedServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'> {
   const notImplemented = () => {
     throw new Error('server API should not be called in this test');
   };
@@ -749,14 +755,51 @@ function notImplementedServerApi(): SyncServerApi {
   return {
     getAxAllowlist: notImplemented,
     getCapabilities: notImplemented,
-    getCapturePolicies: notImplemented,
+    async getCapturePolicies(input: {
+      workspaceId: string;
+      deviceId?: string;
+    }): Promise<CapturePoliciesResult> {
+      return {
+        axAllowlist: {
+          axTextUploadEnabled: false,
+          enabled: false,
+          reason: 'ax_text_upload_disabled',
+          status: 'disabled',
+          workspaceId: input.workspaceId,
+        },
+        capturePolicy: {
+          actionCounts: {},
+          axTextUploadEnabled: false,
+          defaultAction: 'allow',
+          expiresAt: '2026-07-08T01:00:00.000Z',
+          id: 'snapshot_runtime',
+          paused: false,
+          policy: {
+            axTextUploadEnabled: false,
+            defaultAction: 'allow',
+            paused: false,
+            rules: [],
+          },
+          rules: [],
+          ttlSeconds: 3600,
+          version: 'policy_runtime',
+        },
+        deviceId: input.deviceId ?? null,
+        generatedAt: now,
+        storagePolicy: {
+          allowLongTermRemoteOriginal: false,
+          authoritativeOriginalLocation: 'local_device',
+        },
+        workspaceId: input.workspaceId,
+      };
+    },
     getCapture: notImplemented,
     createCapture: notImplemented,
     querySearch: notImplemented,
     queryTimeline: notImplemented,
     runOcrProxy: notImplemented,
     submitOcrResult: notImplemented,
-  } as unknown as SyncServerApi;
+  } as unknown as SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'>;
 }
 
 class FakeLoginPrompter implements LoginPrompter {
@@ -958,6 +1001,8 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   async beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
     this.beginCaptureReasons.push(reason);
   }
+
+  async configureCapture(_policy: HelperCapturePolicy): Promise<void> {}
 
   async stop(): Promise<void> {
     this.stopCalls += 1;

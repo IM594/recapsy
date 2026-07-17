@@ -1,5 +1,6 @@
 import type { HelperEnvelope, HelperToMainType } from '../helper/index';
 import type { CaptureHelperClient } from '../helper/index';
+import type { CapturePoliciesResult } from '../server/index';
 import {
   type AssetAvailabilityResolver,
   type AssetReconciliationStore,
@@ -17,7 +18,9 @@ import {
   type CaptureStartupRecovery,
   createCaptureLifecycle,
 } from './lifecycle';
+import { createCapturePolicyActivation } from './policy';
 import type { CaptureIntakeStore, HelperStateStore } from './store';
+import type { CapturePolicyCacheStore } from './store';
 
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 750 * 1024 * 1024,
@@ -31,7 +34,10 @@ const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
   },
 };
 
-export type CaptureRuntimeStore = CaptureIntakeStore & HelperStateStore & AssetReconciliationStore;
+export type CaptureRuntimeStore = CaptureIntakeStore &
+  HelperStateStore &
+  CapturePolicyCacheStore &
+  AssetReconciliationStore;
 
 export type CaptureRuntimeOptions = {
   assetResolver?: AssetAvailabilityResolver;
@@ -40,6 +46,12 @@ export type CaptureRuntimeOptions = {
   deviceId: string;
   now(): string;
   onHelperEnvelope?(envelope: HelperEnvelope<HelperToMainType>): void;
+  policyApi: {
+    getCapturePolicies(input: {
+      deviceId: string;
+      workspaceId: string;
+    }): Promise<CapturePoliciesResult>;
+  };
   startupRecovery: CaptureStartupRecovery;
   store: CaptureRuntimeStore;
   workspaceId: string;
@@ -66,6 +78,13 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     deviceId: options.deviceId,
     eventHandler,
     now: options.now,
+    policyActivation: createCapturePolicyActivation({
+      api: options.policyApi,
+      deviceId: options.deviceId,
+      now: options.now,
+      store: options.store,
+      workspaceId: options.workspaceId,
+    }),
     store: options.store,
   });
   const lifecycle = createCaptureLifecycle({

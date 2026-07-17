@@ -52,26 +52,33 @@ export class SqliteCachePersistence {
       .prepare(
         `INSERT INTO policy_cache (
           workspace_id,
+          device_id,
+          policy_snapshot_id,
           policy_version,
-          actions_json,
+          policy_json,
           fetched_at,
           ttl_seconds
         ) VALUES (
           $workspaceId,
+          $deviceId,
+          $policySnapshotId,
           $policyVersion,
-          $actionsJson,
+          $policyJson,
           $fetchedAt,
           $ttlSeconds
         )
-        ON CONFLICT(workspace_id) DO UPDATE SET
+        ON CONFLICT(workspace_id, device_id) DO UPDATE SET
+          policy_snapshot_id = excluded.policy_snapshot_id,
           policy_version = excluded.policy_version,
-          actions_json = excluded.actions_json,
+          policy_json = excluded.policy_json,
           fetched_at = excluded.fetched_at,
           ttl_seconds = excluded.ttl_seconds`,
       )
       .run({
-        $actionsJson: JSON.stringify(cloned.actions),
+        $deviceId: cloned.deviceId,
         $fetchedAt: cloned.fetchedAt,
+        $policyJson: JSON.stringify(cloned.policy),
+        $policySnapshotId: cloned.policySnapshotId,
         $policyVersion: cloned.policyVersion,
         $ttlSeconds: cloned.ttlSeconds,
         $workspaceId: cloned.workspaceId,
@@ -82,16 +89,17 @@ export class SqliteCachePersistence {
 
   async getPolicyCache(
     workspaceId: string,
+    deviceId: string,
     options: PolicyCacheReadOptions,
   ): Promise<PolicyCacheRead | null> {
     const row = this.database
       .prepare<PolicyCacheRow>(
         `SELECT *
          FROM policy_cache
-         WHERE workspace_id = $workspaceId
+         WHERE workspace_id = $workspaceId AND device_id = $deviceId
          LIMIT 1`,
       )
-      .get({ $workspaceId: workspaceId });
+      .get({ $deviceId: deviceId, $workspaceId: workspaceId });
 
     if (!row) {
       return null;
@@ -200,8 +208,10 @@ export class SqliteCachePersistence {
 
 type PolicyCacheRow = SqliteRow & {
   workspace_id: string;
+  device_id: string;
+  policy_snapshot_id: string;
   policy_version: string;
-  actions_json: string;
+  policy_json: string;
   fetched_at: string;
   ttl_seconds: number;
 };
@@ -224,8 +234,10 @@ type SettingsCacheRow = SqliteRow & {
 
 function policyCacheFromRow(row: PolicyCacheRow): PolicyCacheEntry {
   return clonePolicyCache({
-    actions: parseJson<PolicyCacheEntry['actions']>(row.actions_json),
+    deviceId: row.device_id,
     fetchedAt: row.fetched_at,
+    policy: parseJson<PolicyCacheEntry['policy']>(row.policy_json),
+    policySnapshotId: row.policy_snapshot_id,
     policyVersion: row.policy_version,
     ttlSeconds: row.ttl_seconds,
     workspaceId: row.workspace_id,
@@ -263,7 +275,13 @@ function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {
 }
 
 function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {
-  return { ...entry, actions: [...entry.actions] };
+  return {
+    ...entry,
+    policy: {
+      ...entry.policy,
+      rules: entry.policy.rules.map((rule) => ({ ...rule })),
+    },
+  };
 }
 
 function cloneSyncCursor(cursor: SyncCursor): SyncCursor {

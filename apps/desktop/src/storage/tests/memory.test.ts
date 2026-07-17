@@ -401,15 +401,22 @@ describe('memory operational store', () => {
   it('expires policy cache entries by TTL', async () => {
     const store = createMemoryStore();
     await store.setPolicyCache({
-      actions: ['block_capture'],
+      deviceId: 'device_1',
       fetchedAt: '2026-07-06T00:00:00.000Z',
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: 'allow',
+        paused: false,
+        rules: [],
+      },
+      policySnapshotId: 'snapshot_1',
       policyVersion: 'policy_primary',
       ttlSeconds: 60,
       workspaceId: 'workspace_1',
     });
 
     expect(
-      await store.getPolicyCache('workspace_1', {
+      await store.getPolicyCache('workspace_1', 'device_1', {
         now: '2026-07-06T00:00:30.000Z',
       }),
     ).toMatchObject({
@@ -417,7 +424,7 @@ describe('memory operational store', () => {
       policyVersion: 'policy_primary',
     });
     expect(
-      await store.getPolicyCache('workspace_1', {
+      await store.getPolicyCache('workspace_1', 'device_1', {
         now: '2026-07-06T00:01:01.000Z',
       }),
     ).toMatchObject({

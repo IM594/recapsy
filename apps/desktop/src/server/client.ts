@@ -2,6 +2,8 @@ import {
   AiOcrResponseSchema,
   CaptureCreateRequestSchema,
   CaptureNextActionSchema,
+  type CapturePolicyAction,
+  type CapturePolicyRule,
   OcrResultSubmitRequestSchema,
   OcrResultSubmitResponseSchema,
 } from '@recapsy/contracts';
@@ -323,7 +325,7 @@ function toCapturePoliciesResult(body: unknown): CapturePoliciesResult {
   const capturePolicy = readObject(body, 'capturePolicy');
   const policy = readObject(capturePolicy, 'policy');
   const storagePolicy = readObject(body, 'storagePolicy');
-  const rules = readArray(policy, 'rules').map((entry) => readObject(entry, undefined));
+  const rules = readArray(policy, 'rules').map(readCapturePolicyRule);
 
   return {
     axAllowlist: toAxAllowlistResult(readObject(body, 'axAllowlist'), {
@@ -333,9 +335,17 @@ function toCapturePoliciesResult(body: unknown): CapturePoliciesResult {
     capturePolicy: {
       actionCounts: countPolicyActions(rules),
       axTextUploadEnabled: false,
-      defaultAction: readString(policy, 'defaultAction'),
+      defaultAction: readPolicyAction(policy, 'defaultAction'),
       expiresAt: readString(capturePolicy, 'expiresAt'),
+      id: readString(capturePolicy, 'id'),
       paused: readBoolean(policy, 'paused'),
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: readPolicyAction(policy, 'defaultAction'),
+        paused: readBoolean(policy, 'paused'),
+        rules,
+      },
+      rules,
       ttlSeconds: readNumber(capturePolicy, 'ttlSeconds'),
       version: readString(capturePolicy, 'version'),
     },
@@ -741,15 +751,57 @@ function readBoolean(value: unknown, key: string): boolean {
   return typeof entry === 'boolean' ? entry : false;
 }
 
-function countPolicyActions(rules: Record<string, unknown>[]): Record<string, number> {
+function countPolicyActions(
+  rules: readonly Pick<CapturePolicyRule, 'action'>[],
+): Record<string, number> {
   const counts: Record<string, number> = {};
 
   for (const rule of rules) {
-    const action = readOptionalString(rule, 'action') ?? 'unknown';
+    const action = rule.action;
     counts[action] = (counts[action] ?? 0) + 1;
   }
 
   return counts;
+}
+
+function readCapturePolicyRule(value: unknown): CapturePolicyRule {
+  const rule = readObject(value, undefined);
+  const reason = readOptionalString(rule, 'reason');
+  return {
+    action: readPolicyAction(rule, 'action'),
+    enabled: readBoolean(rule, 'enabled'),
+    id: readString(rule, 'id'),
+    kind: readPolicyRuleKind(rule, 'kind'),
+    pattern: readString(rule, 'pattern'),
+    scope: readPolicyRuleScope(rule, 'scope'),
+    ...(reason ? { reason } : {}),
+  };
+}
+
+function readPolicyAction(value: unknown, key: string): CapturePolicyAction {
+  const action = readString(value, key);
+  if (!['allow', 'block_capture', 'redact_context', 'block_ocr'].includes(action)) {
+    throw invalidResponse();
+  }
+  return action as CapturePolicyAction;
+}
+
+function readPolicyRuleKind(value: unknown, key: string): CapturePolicyRule['kind'] {
+  const kind = readString(value, key);
+  if (
+    !['pause', 'app_name', 'bundle_id', 'domain', 'document_path', 'window_title'].includes(kind)
+  ) {
+    throw invalidResponse();
+  }
+  return kind as CapturePolicyRule['kind'];
+}
+
+function readPolicyRuleScope(value: unknown, key: string): CapturePolicyRule['scope'] {
+  const scope = readString(value, key);
+  if (!['local_user', 'workspace_default'].includes(scope)) {
+    throw invalidResponse();
+  }
+  return scope as CapturePolicyRule['scope'];
 }
 
 function invalidResponse(): ServerApiError {

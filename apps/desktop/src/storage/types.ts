@@ -1,4 +1,4 @@
-import type { AiOcrUsage, OcrScreenTextResult } from '@recapsy/contracts';
+import type { AiOcrUsage, CaptureDefaultPolicy, OcrScreenTextResult } from '@recapsy/contracts';
 
 export type OutboxJobState =
   | 'pending'
@@ -220,12 +220,12 @@ export type HelperRuntimeState = {
   updatedAt: string;
 };
 
-export type PolicyAction = 'block_capture' | 'redact_context' | 'block_ocr';
-
 export type PolicyCacheEntry = {
   workspaceId: string;
+  deviceId: string;
+  policySnapshotId: string;
   policyVersion: string;
-  actions: PolicyAction[];
+  policy: CaptureDefaultPolicy;
   fetchedAt: string;
   ttlSeconds: number;
 };

@@ -258,7 +258,7 @@ describe('desktop server API client', () => {
     expect(assertRendererSafeDto(search)).toEqual({ ok: true });
   });
 
-  it('reads capabilities and policy boundaries without exposing policy patterns or secrets', async () => {
+  it('reads full policy snapshots in the trusted main-process boundary without exposing secrets', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const client = createClient(calls, async (request) => {
       if (request.path === '/v1/capabilities') {
@@ -293,6 +293,7 @@ describe('desktop server API client', () => {
             status: 'disabled',
           },
           capturePolicy: {
+            id: 'snapshot_1',
             expiresAt: '2026-07-06T00:30:00.000Z',
             policy: {
               axTextUploadEnabled: false,
@@ -371,7 +372,12 @@ describe('desktop server API client', () => {
       enabled: false,
       status: 'disabled',
     });
-    expect(serialized).not.toContain('secret.example.test');
+    expect(policies.capturePolicy.rules).toEqual([
+      expect.objectContaining({
+        action: 'block_ocr',
+        pattern: 'secret.example.test',
+      }),
+    ]);
     expect(serialized).not.toContain('access-token-secret');
   });
 

@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { HelperNdjsonLineParser, encodeHelperEnvelope } from './protocol/codec';
 import {
   HELPER_PROTOCOL_VERSION,
+  type HelperCapturePolicy,
   type HelperEnvelope,
   type HelperProtocolError,
   type HelperProtocolResult,
@@ -18,6 +19,7 @@ import type {
 
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 3000;
 const DEFAULT_STARTUP_TIMEOUT_MS = 5000;
+const DEFAULT_POLICY_ACK_TIMEOUT_MS = 5000;
 const FORCE_KILL_GRACE_MS = 1000;
 
 type HelperProcessStartupErrorCode =
@@ -46,6 +48,33 @@ type PendingStartup = {
   promise: Promise<void>;
   resolve: () => void;
   reject: (error: HelperProcessStartupError) => void;
+  timeout: ReturnType<typeof setTimeout>;
+};
+
+type HelperPolicyActivationErrorCode =
+  | 'helper_unavailable'
+  | 'policy_ack_mismatch'
+  | 'policy_ack_timeout';
+
+export class HelperPolicyActivationError extends Error {
+  readonly name = 'HelperPolicyActivationError';
+
+  constructor(readonly code: HelperPolicyActivationErrorCode) {
+    super(
+      code === 'policy_ack_mismatch'
+        ? 'Capture helper applied a different policy.'
+        : code === 'policy_ack_timeout'
+          ? 'Capture helper policy acknowledgement timed out.'
+          : 'Capture helper is unavailable.',
+    );
+  }
+}
+
+type PendingPolicyAck = {
+  policyHash: string;
+  policyVersion: string;
+  reject: (error: HelperPolicyActivationError) => void;
+  resolve: () => void;
   timeout: ReturnType<typeof setTimeout>;
 };
 
@@ -121,7 +150,10 @@ export type HelperProcessClientOptions = {
  */
 export function createHelperProcessClient(
   options: HelperProcessClientOptions,
-): CaptureHelperClient & CaptureHelperCommandClient {
+): CaptureHelperClient &
+  CaptureHelperCommandClient & {
+    configureCapture(policy: HelperCapturePolicy): Promise<void>;
+  } {
   return new HelperProcessClient(options);
 }
 
@@ -131,6 +163,7 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
   private stopRequested = false;
   private pendingStopResolvers: Array<() => void> = [];
   private pendingStartup: PendingStartup | undefined;
+  private readonly pendingPolicyAcks = new Map<string, PendingPolicyAck>();
   private readonly expectedExitChildren = new WeakSet<HelperProcess>();
 
   constructor(private readonly options: HelperProcessClientOptions) {}
@@ -217,6 +250,28 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     }
   }
 
+  async configureCapture(policy: HelperCapturePolicy): Promise<void> {
+    const child = this.child;
+    if (!child || !child.stdin) {
+      throw new HelperPolicyActivationError('helper_unavailable');
+    }
+
+    const correlationId = `policy_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    return await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.rejectPolicyAck(correlationId, 'policy_ack_timeout');
+      }, DEFAULT_POLICY_ACK_TIMEOUT_MS);
+      this.pendingPolicyAcks.set(correlationId, {
+        policyHash: policy.policyHash,
+        policyVersion: policy.version,
+        reject,
+        resolve,
+        timeout,
+      });
+      this.writeCommand(child, 'helper.configure', { policy }, correlationId);
+    });
+  }
+
   async pauseCapture(): Promise<void> {
     if (this.child) {
       this.writeCommand(this.child, 'capture.pause', { reason: 'user_paused' });
@@ -259,6 +314,10 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
         this.resolveStartup(child);
       }
 
+      if (result.envelope.type === 'helper.policy_applied') {
+        this.resolvePolicyAck(result.envelope as HelperEnvelope<'helper.policy_applied'>);
+      }
+
       void this.startOptions.onEnvelope?.(result.envelope);
       return;
     }
@@ -285,6 +344,7 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
 
     const wasStopRequested = this.stopRequested;
     this.child = undefined;
+    this.rejectPolicyAcks('helper_unavailable');
     this.settlePendingStopWaiters();
 
     if (wasStopRequested) {
@@ -310,6 +370,7 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
 
     const wasStopRequested = this.stopRequested;
     this.child = undefined;
+    this.rejectPolicyAcks('helper_unavailable');
     this.settlePendingStopWaiters();
 
     if (wasStopRequested) {
@@ -352,6 +413,7 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     if (this.child === child) {
       this.child = undefined;
     }
+    this.rejectPolicyAcks('helper_unavailable');
     this.settlePendingStopWaiters();
 
     if (terminateChild) {
@@ -397,9 +459,10 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     child: HelperProcess,
     type: TType,
     payload: MainToHelperPayloadByType[TType],
+    correlationId: string | null = null,
   ): void {
     const envelope = {
-      correlationId: null,
+      correlationId,
       messageId: `main_${type}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       payload,
       protocolVersion: HELPER_PROTOCOL_VERSION,
@@ -408,6 +471,43 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     } as HelperEnvelope<TType>;
 
     child.stdin?.write(encodeHelperEnvelope(envelope));
+  }
+
+  private resolvePolicyAck(envelope: HelperEnvelope<'helper.policy_applied'>): void {
+    const correlationId = envelope.correlationId;
+    if (!correlationId) {
+      return;
+    }
+    const pending = this.pendingPolicyAcks.get(correlationId);
+    if (!pending) {
+      return;
+    }
+    if (
+      pending.policyHash !== envelope.payload.policyHash ||
+      pending.policyVersion !== envelope.payload.policyVersion
+    ) {
+      this.rejectPolicyAck(correlationId, 'policy_ack_mismatch');
+      return;
+    }
+    clearTimeout(pending.timeout);
+    this.pendingPolicyAcks.delete(correlationId);
+    pending.resolve();
+  }
+
+  private rejectPolicyAck(correlationId: string, code: HelperPolicyActivationErrorCode): void {
+    const pending = this.pendingPolicyAcks.get(correlationId);
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timeout);
+    this.pendingPolicyAcks.delete(correlationId);
+    pending.reject(new HelperPolicyActivationError(code));
+  }
+
+  private rejectPolicyAcks(code: HelperPolicyActivationErrorCode): void {
+    for (const correlationId of this.pendingPolicyAcks.keys()) {
+      this.rejectPolicyAck(correlationId, code);
+    }
   }
 
   private forceKill(child: HelperProcess): void {

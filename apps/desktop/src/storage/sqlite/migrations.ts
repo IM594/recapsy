@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -13,6 +13,7 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
 
   ensureAssetAvailabilityColumns(database);
   migrateOutboxJobsToV2(database);
+  migratePolicyCacheToWorkspaceDevice(database);
 
   database.run(
     `INSERT OR IGNORE INTO schema_migrations (version, applied_at)
@@ -22,6 +23,58 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
       $version: SCHEMA_VERSION,
     },
   );
+}
+
+function migratePolicyCacheToWorkspaceDevice(database: SqliteDatabase): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }>('PRAGMA table_info(policy_cache)')
+      .all()
+      .map((column) => column.name),
+  );
+
+  if (columns.has('device_id') && columns.has('policy_json') && columns.has('policy_snapshot_id')) {
+    return;
+  }
+
+  let transactionOpen = false;
+  try {
+    database.run('BEGIN IMMEDIATE');
+    transactionOpen = true;
+    database.run(buildPolicyCacheTable('policy_cache__v3', false));
+    database.run(
+      `INSERT INTO policy_cache__v3 (
+        workspace_id,
+        device_id,
+        policy_snapshot_id,
+        policy_version,
+        policy_json,
+        fetched_at,
+        ttl_seconds
+      )
+      SELECT
+        workspace_id,
+        'legacy-device',
+        'legacy:' || policy_version,
+        policy_version,
+        json_object(
+          'paused', false,
+          'defaultAction', 'allow',
+          'axTextUploadEnabled', false,
+          'rules', json('[]')
+        ),
+        fetched_at,
+        ttl_seconds
+      FROM policy_cache`,
+    );
+    database.run('DROP TABLE policy_cache');
+    database.run('ALTER TABLE policy_cache__v3 RENAME TO policy_cache');
+    database.run('COMMIT');
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) database.run('ROLLBACK');
+    throw error;
+  }
 }
 
 function ensureAssetAvailabilityColumns(database: SqliteDatabase): void {
@@ -165,6 +218,19 @@ function buildOutboxJobsTable(tableName: string, ifNotExists: boolean): string {
 const OUTBOX_JOBS_INDEX_STATEMENT = `CREATE INDEX IF NOT EXISTS idx_outbox_jobs_workspace_state_retry
     ON outbox_jobs(workspace_id, state, next_retry_at, created_at)`;
 
+function buildPolicyCacheTable(tableName: string, ifNotExists: boolean): string {
+  return `CREATE TABLE ${ifNotExists ? 'IF NOT EXISTS ' : ''}${tableName} (
+    workspace_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    policy_snapshot_id TEXT NOT NULL,
+    policy_version TEXT NOT NULL,
+    policy_json TEXT NOT NULL CHECK (json_valid(policy_json)),
+    fetched_at TEXT NOT NULL,
+    ttl_seconds INTEGER NOT NULL CHECK (ttl_seconds >= 0),
+    PRIMARY KEY(workspace_id, device_id)
+  )`;
+}
+
 const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -202,13 +268,7 @@ const schemaStatements = [
     state_json TEXT NOT NULL CHECK (json_valid(state_json)),
     updated_at TEXT NOT NULL
   )`,
-  `CREATE TABLE IF NOT EXISTS policy_cache (
-    workspace_id TEXT PRIMARY KEY,
-    policy_version TEXT NOT NULL,
-    actions_json TEXT NOT NULL CHECK (json_valid(actions_json)),
-    fetched_at TEXT NOT NULL,
-    ttl_seconds INTEGER NOT NULL CHECK (ttl_seconds >= 0)
-  )`,
+  buildPolicyCacheTable('policy_cache', true),
   `CREATE TABLE IF NOT EXISTS sync_cursors (
     workspace_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('timeline', 'search', 'settings', 'capabilities')),

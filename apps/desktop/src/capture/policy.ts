@@ -1,0 +1,194 @@
+import { createHash } from 'node:crypto';
+import type { CaptureDefaultPolicy, CapturePolicyRule } from '@recapsy/contracts';
+import type { HelperCapturePolicy, HelperCapturePolicyRule } from '../helper/index';
+import type { CapturePoliciesResult } from '../server/index';
+import type { PolicyCacheEntry, PolicyCacheRead } from '../storage/index';
+
+const HARD_CAPTURE_RULES: readonly CompiledCapturePolicyRule[] = [
+  {
+    action: 'block_capture',
+    enabled: true,
+    id: 'hard:recapsy-capture',
+    kind: 'bundle_id',
+    pattern: 'one.recapsy.desktop.capture',
+    scope: 'hard',
+  },
+  {
+    action: 'block_capture',
+    enabled: true,
+    id: 'hard:recapsy-desktop',
+    kind: 'bundle_id',
+    pattern: 'one.recapsy.desktop',
+    scope: 'hard',
+  },
+];
+
+type CompiledCapturePolicyRule = HelperCapturePolicyRule;
+
+export type CompiledCapturePolicy = HelperCapturePolicy;
+
+export type CapturePolicyActivationConfiguration = {
+  policy: CompiledCapturePolicy;
+};
+
+export type CapturePolicyActivation = {
+  activate(): Promise<CapturePolicyActivationConfiguration>;
+};
+
+type CapturePolicyCacheStore = {
+  getPolicyCache(
+    workspaceId: string,
+    deviceId: string,
+    options: { now: string },
+  ): Promise<PolicyCacheRead | null>;
+  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry>;
+};
+
+export type CapturePolicyActivationOptions = {
+  api: Pick<
+    {
+      getCapturePolicies(input: {
+        workspaceId: string;
+        deviceId: string;
+      }): Promise<CapturePoliciesResult>;
+    },
+    'getCapturePolicies'
+  >;
+  deviceId: string;
+  now(): string;
+  store: CapturePolicyCacheStore;
+  workspaceId: string;
+};
+
+export class CapturePolicyActivationError extends Error {
+  readonly name = 'CapturePolicyActivationError';
+
+  constructor(readonly code: 'policy_unavailable' | 'policy_requires_unavailable_context') {
+    super(
+      code === 'policy_requires_unavailable_context'
+        ? 'Capture policy requires unavailable local context.'
+        : 'Capture policy is unavailable.',
+    );
+  }
+}
+
+export function createCapturePolicyActivation(
+  options: CapturePolicyActivationOptions,
+): CapturePolicyActivation {
+  return {
+    async activate(): Promise<CapturePolicyActivationConfiguration> {
+      const fetched = await fetchOrReadCachedPolicy(options);
+      const compiled = compileCapturePolicy({
+        policy: fetched.policy,
+        version: fetched.policyVersion,
+      });
+
+      if (compiled.rules.some(requiresUnavailableContext)) {
+        throw new CapturePolicyActivationError('policy_requires_unavailable_context');
+      }
+
+      return { policy: compiled };
+    },
+  };
+}
+
+export function compileCapturePolicy(input: {
+  policy: CaptureDefaultPolicy;
+  version: string;
+}): CompiledCapturePolicy {
+  const rules: CompiledCapturePolicyRule[] = [
+    ...input.policy.rules.map((rule) => toCompiledRule(rule)),
+    ...HARD_CAPTURE_RULES.map((rule) => ({ ...rule })),
+  ].sort(compareRules);
+  const canonical = {
+    defaultAction: input.policy.defaultAction,
+    paused: input.policy.paused,
+    rules,
+    version: input.version,
+  };
+
+  return {
+    ...canonical,
+    policyHash: `sha256:${createHash('sha256')
+      .update(JSON.stringify(canonical), 'utf8')
+      .digest('hex')}`,
+  };
+}
+
+async function fetchOrReadCachedPolicy(
+  options: CapturePolicyActivationOptions,
+): Promise<PolicyCacheEntry> {
+  try {
+    const response = await options.api.getCapturePolicies({
+      deviceId: options.deviceId,
+      workspaceId: options.workspaceId,
+    });
+    if (
+      response.workspaceId !== options.workspaceId ||
+      response.deviceId !== options.deviceId ||
+      response.capturePolicy.version.length === 0
+    ) {
+      throw new CapturePolicyActivationError('policy_unavailable');
+    }
+
+    const entry: PolicyCacheEntry = {
+      deviceId: options.deviceId,
+      fetchedAt: options.now(),
+      policy: clonePolicy(response.capturePolicy.policy),
+      policySnapshotId: response.capturePolicy.id,
+      policyVersion: response.capturePolicy.version,
+      ttlSeconds: response.capturePolicy.ttlSeconds,
+      workspaceId: options.workspaceId,
+    };
+    await options.store.setPolicyCache(entry);
+    return entry;
+  } catch {
+    const cached = await options.store.getPolicyCache(options.workspaceId, options.deviceId, {
+      now: options.now(),
+    });
+    if (!cached || cached.expired) {
+      throw new CapturePolicyActivationError('policy_unavailable');
+    }
+    return cached;
+  }
+}
+
+function requiresUnavailableContext(rule: CompiledCapturePolicyRule): boolean {
+  return (
+    rule.enabled &&
+    rule.action !== 'allow' &&
+    !['app_name', 'bundle_id', 'pause'].includes(rule.kind)
+  );
+}
+
+function compareRules(left: CompiledCapturePolicyRule, right: CompiledCapturePolicyRule): number {
+  return stableRuleKey(left).localeCompare(stableRuleKey(right));
+}
+
+function stableRuleKey(rule: CompiledCapturePolicyRule): string {
+  return [rule.scope, rule.id, rule.kind, rule.pattern, rule.action, rule.enabled ? '1' : '0'].join(
+    '\u0000',
+  );
+}
+
+function clonePolicy(policy: CaptureDefaultPolicy): CaptureDefaultPolicy {
+  return {
+    ...policy,
+    rules: policy.rules.map(cloneRule),
+  };
+}
+
+function toCompiledRule(rule: CapturePolicyRule): CompiledCapturePolicyRule {
+  return {
+    action: rule.action,
+    enabled: rule.enabled,
+    id: rule.id,
+    kind: rule.kind,
+    pattern: rule.pattern,
+    scope: rule.scope,
+  };
+}
+
+function cloneRule(rule: CapturePolicyRule): CapturePolicyRule {
+  return { ...rule };
+}

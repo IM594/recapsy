@@ -1,7 +1,10 @@
 import type {
   AiOcrResponse,
   AiOcrUsage,
+  CaptureDefaultPolicy,
   CaptureNextAction,
+  CapturePolicyAction,
+  CapturePolicyRule,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -236,13 +239,16 @@ export type CapturePoliciesResult = {
   workspaceId: string;
   deviceId?: string | null;
   capturePolicy: {
+    id: string;
     version: string;
     paused: boolean;
-    defaultAction: string;
+    defaultAction: CapturePolicyAction;
     axTextUploadEnabled: false;
     ttlSeconds: number;
     expiresAt: string;
     actionCounts: Record<string, number>;
+    policy: CaptureDefaultPolicy;
+    rules: CapturePolicyRule[];
   };
   storagePolicy: {
     authoritativeOriginalLocation: 'local_device';

@@ -5,6 +5,8 @@ import type {
   OperationalStoreSnapshot,
   OutboxJob,
   OutboxJobListFilter,
+  PolicyCacheEntry,
+  PolicyCacheRead,
 } from '../storage/index';
 
 export type CaptureIntakeStore = {
@@ -17,6 +19,15 @@ export type CaptureIntakeStore = {
 export type HelperStateStore = {
   setHelperState(state: HelperRuntimeState): Promise<HelperRuntimeState>;
   getHelperState(): Promise<HelperRuntimeState | null>;
+};
+
+export type CapturePolicyCacheStore = {
+  getPolicyCache(
+    workspaceId: string,
+    deviceId: string,
+    options: { now: string },
+  ): Promise<PolicyCacheRead | null>;
+  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry>;
 };
 
 export type CaptureHistoryReader = {

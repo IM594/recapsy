@@ -74,10 +74,11 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
   function emitEnvelope<TType extends HelperToMainType>(
     type: TType,
     payload: HelperEnvelope<TType>['payload'],
+    correlationId: string | null = null,
   ): HelperEnvelope<TType> {
     messageSequence += 1;
     const envelope: HelperEnvelope<TType> = {
-      correlationId: null,
+      correlationId,
       messageId: `dev_helper_${messageSequence}`,
       payload,
       protocolVersion: HELPER_PROTOCOL_VERSION,
@@ -106,7 +107,15 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
       switch (envelope.type) {
         case 'helper.configure': {
           const configure = envelope as HelperEnvelope<'helper.configure'>;
-          policyVersion = configure.payload.policyVersion;
+          policyVersion = configure.payload.policy.version;
+          emitEnvelope(
+            'helper.policy_applied',
+            {
+              policyHash: configure.payload.policy.policyHash,
+              policyVersion,
+            },
+            configure.correlationId,
+          );
           return;
         }
         case 'permission.refresh':

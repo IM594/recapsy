@@ -415,15 +415,16 @@ class InMemoryOperationalStore {
 
   async setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
     const cloned = clonePolicyCache(entry);
-    this.policyCache.set(entry.workspaceId, cloned);
+    this.policyCache.set(policyCacheKey(entry.workspaceId, entry.deviceId), cloned);
     return clonePolicyCache(cloned);
   }
 
   async getPolicyCache(
     workspaceId: string,
+    deviceId: string,
     options: PolicyCacheReadOptions,
   ): Promise<PolicyCacheRead | null> {
-    const entry = this.policyCache.get(workspaceId);
+    const entry = this.policyCache.get(policyCacheKey(workspaceId, deviceId));
 
     if (!entry) {
       return null;
@@ -473,7 +474,7 @@ class InMemoryOperationalStore {
   async clearWorkspaceCache(workspaceId: string): Promise<void> {
     deleteMatching(this.outboxJobs, (job) => job.workspaceId === workspaceId);
     deleteMatching(this.assetRefs, (asset) => asset.workspaceId === workspaceId);
-    this.policyCache.delete(workspaceId);
+    deleteMatching(this.policyCache, (entry) => entry.workspaceId === workspaceId);
     deleteMatching(this.syncCursors, (cursor) => cursor.workspaceId === workspaceId);
     this.settingsCache.delete(workspaceId);
   }
@@ -656,8 +657,15 @@ function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {
 function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {
   return {
     ...entry,
-    actions: [...entry.actions],
+    policy: {
+      ...entry.policy,
+      rules: entry.policy.rules.map((rule) => ({ ...rule })),
+    },
   };
+}
+
+function policyCacheKey(workspaceId: string, deviceId: string): string {
+  return `${workspaceId}:${deviceId}`;
 }
 
 function cloneSyncCursor(cursor: SyncCursor): SyncCursor {

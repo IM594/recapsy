@@ -95,6 +95,19 @@ public struct StatusPayload: Encodable {
     }
 }
 
+/// Confirms that the helper has accepted the exact canonical policy supplied
+/// by Electron. The correlation id lives on the surrounding envelope so the
+/// process client can reject stale or mismatched acknowledgements safely.
+public struct PolicyAppliedPayload: Encodable {
+    public let policyHash: String
+    public let policyVersion: String
+
+    public init(policyHash: String, policyVersion: String) {
+        self.policyHash = policyHash
+        self.policyVersion = policyVersion
+    }
+}
+
 public struct PermissionStatusPayload: Encodable {
     public let screenCapture: String
     public let accessibility: String

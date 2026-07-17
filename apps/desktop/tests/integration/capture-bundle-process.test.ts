@@ -135,6 +135,13 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
       await waitForEnvelope(envelopes, 'helper.hello');
       const heartbeatsBeforeStart = countEnvelopes(envelopes, 'helper.heartbeat');
 
+      await client.configureCapture(capturePolicy());
+      const policyApplied = await waitForEnvelope(envelopes, 'helper.policy_applied');
+      expect(policyApplied.payload).toEqual({
+        policyHash: capturePolicy().policyHash,
+        policyVersion: capturePolicy().version,
+      });
+
       // Drive the capture loop by sending the real `capture.start` command the
       // Electron runtime sends; the engine then begins its cadence.
       await client.sendCommand({
@@ -417,6 +424,16 @@ function requireCaptureProcessId(processId: number | null): number {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function capturePolicy() {
+  return {
+    defaultAction: 'allow' as const,
+    paused: false,
+    policyHash: `sha256:${'a'.repeat(64)}`,
+    rules: [],
+    version: 'bundle-policy-1',
+  };
 }
 
 type CaptureBundleSelection = {

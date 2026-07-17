@@ -68,7 +68,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 2,
+      version: 3,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -242,7 +242,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(2);
+    ).toBe(3);
 
     const rowById = (id: string) =>
       database
@@ -332,8 +332,15 @@ describe('SQLite operational store', () => {
     await first.createOutboxJob(createJob());
     await first.setHelperState(createHelperState());
     await first.setPolicyCache({
-      actions: ['block_ocr'],
+      deviceId: 'device_1',
       fetchedAt: now,
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: 'allow',
+        paused: false,
+        rules: [],
+      },
+      policySnapshotId: 'snapshot_primary',
       policyVersion: 'policy_primary',
       ttlSeconds: 120,
       workspaceId: 'workspace_1',
@@ -380,7 +387,7 @@ describe('SQLite operational store', () => {
       helperVersion: 'mock-helper-1.0.0',
       restartCount: 1,
     });
-    expect(await reopened.getPolicyCache('workspace_1', { now })).toMatchObject({
+    expect(await reopened.getPolicyCache('workspace_1', 'device_1', { now })).toMatchObject({
       expired: false,
       policyVersion: 'policy_primary',
     });
@@ -947,8 +954,15 @@ describe('SQLite operational store', () => {
   it('expires policy cache entries by TTL and persists sync cursor and settings cache', async () => {
     const store = await createTempStore();
     await store.setPolicyCache({
-      actions: ['block_capture', 'redact_context'],
+      deviceId: 'device_1',
       fetchedAt: '2026-07-06T00:00:00.000Z',
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: 'allow',
+        paused: false,
+        rules: [],
+      },
+      policySnapshotId: 'snapshot_primary',
       policyVersion: 'policy_primary',
       ttlSeconds: 60,
       workspaceId: 'workspace_1',
@@ -973,7 +987,7 @@ describe('SQLite operational store', () => {
     });
 
     expect(
-      await store.getPolicyCache('workspace_1', {
+      await store.getPolicyCache('workspace_1', 'device_1', {
         now: '2026-07-06T00:00:30.000Z',
       }),
     ).toMatchObject({
@@ -981,7 +995,7 @@ describe('SQLite operational store', () => {
       policyVersion: 'policy_primary',
     });
     expect(
-      await store.getPolicyCache('workspace_1', {
+      await store.getPolicyCache('workspace_1', 'device_1', {
         now: '2026-07-06T00:01:01.000Z',
       }),
     ).toMatchObject({
@@ -1018,8 +1032,15 @@ describe('SQLite operational store', () => {
     );
     await store.setHelperState(createHelperState());
     await store.setPolicyCache({
-      actions: ['block_capture'],
+      deviceId: 'device_1',
       fetchedAt: now,
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: 'allow',
+        paused: false,
+        rules: [],
+      },
+      policySnapshotId: 'snapshot_primary',
       policyVersion: 'policy_primary',
       ttlSeconds: 60,
       workspaceId: 'workspace_1',
@@ -1041,7 +1062,7 @@ describe('SQLite operational store', () => {
 
     expect(await store.getOutboxJob('job_1')).toBeNull();
     expect(await store.getAssetCacheRef('asset_1')).toBeNull();
-    expect(await store.getPolicyCache('workspace_1', { now })).toBeNull();
+    expect(await store.getPolicyCache('workspace_1', 'device_1', { now })).toBeNull();
     expect(await store.getOutboxJob('job_2')).toMatchObject({
       workspaceId: 'workspace_2',
     });

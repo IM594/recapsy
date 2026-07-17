@@ -213,9 +213,10 @@ class SqliteOperationalStore {
 
   getPolicyCache(
     workspaceId: string,
+    deviceId: string,
     options: PolicyCacheReadOptions,
   ): Promise<PolicyCacheRead | null> {
-    return this.cache.getPolicyCache(workspaceId, options);
+    return this.cache.getPolicyCache(workspaceId, deviceId, options);
   }
 
   setSyncCursor(cursor: SyncCursor): Promise<SyncCursor> {
