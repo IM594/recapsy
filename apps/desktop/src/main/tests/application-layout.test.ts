@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { resolveDesktopApplicationPaths } from '../application-layout';
+import { resolveDesktopApplicationPaths, resolveDesktopPackageRoot } from '../application-layout';
 
 describe('desktop application layout', () => {
   it('resolves login and main-window assets from the Electron application root', () => {
@@ -30,5 +30,11 @@ describe('desktop application layout', () => {
       mainWindowPreloadPath:
         '/Users/example/Projects/recapsy/apps/desktop/dist/shell/main-preload.js',
     });
+  });
+
+  it('resolves the package root for capture assets when Electron starts the built dev entry', () => {
+    expect(
+      resolveDesktopPackageRoot('/Users/example/Projects/recapsy/apps/desktop/dist/main'),
+    ).toBe('/Users/example/Projects/recapsy/apps/desktop');
   });
 });

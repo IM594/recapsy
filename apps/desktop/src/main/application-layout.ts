@@ -9,7 +9,7 @@ export type DesktopApplicationPaths = {
 
 /** Resolves renderer assets identically from a package directory or app.asar. */
 export function resolveDesktopApplicationPaths(appPath: string): DesktopApplicationPaths {
-  const packageRoot = resolvePackageRoot(appPath);
+  const packageRoot = resolveDesktopPackageRoot(appPath);
   const authDirectory = path.join(packageRoot, 'dist', 'auth');
   const shellDirectory = path.join(packageRoot, 'dist', 'shell');
   return {
@@ -20,7 +20,8 @@ export function resolveDesktopApplicationPaths(appPath: string): DesktopApplicat
   };
 }
 
-function resolvePackageRoot(appPath: string) {
+/** Resolves Electron's runtime app path to the Desktop package root. */
+export function resolveDesktopPackageRoot(appPath: string): string {
   const normalizedPath = path.normalize(appPath);
   const parentDirectory = path.dirname(normalizedPath);
 

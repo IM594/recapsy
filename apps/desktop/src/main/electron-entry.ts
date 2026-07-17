@@ -23,7 +23,7 @@ import {
 import { createSqliteStore } from '../storage/index';
 import { createNodeSqliteDatabase } from '../storage/node';
 import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
-import { resolveDesktopApplicationPaths } from './application-layout';
+import { resolveDesktopApplicationPaths, resolveDesktopPackageRoot } from './application-layout';
 import { createLocalAssetReader } from './asset-reader';
 import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';
@@ -168,8 +168,9 @@ const authClient = createAuthClient({
   transport: fetchTransport,
 });
 
+const desktopPackageRoot = resolveDesktopPackageRoot(app.getAppPath());
 const { loginWindowHtmlPath, loginWindowPreloadPath, mainWindowHtmlPath, mainWindowPreloadPath } =
-  resolveDesktopApplicationPaths(app.getAppPath());
+  resolveDesktopApplicationPaths(desktopPackageRoot);
 
 const loginPrompter = createLoginWindowPrompter({
   authClient,
@@ -211,7 +212,7 @@ const { ready } = createElectronMainRuntime({
             command: helperCommandOverride,
           }
         : undefined,
-      packageRoot: app.getAppPath(),
+      packageRoot: desktopPackageRoot,
       resourcesPath: process.resourcesPath,
       validationAdapter: captureBundleValidationAdapter,
     }),
