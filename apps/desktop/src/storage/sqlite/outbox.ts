@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   ClaimRetryableOutboxJobInput,
   OperationalStoreError,
@@ -21,6 +22,7 @@ const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'failed',
   'cancelled',
 ]);
+const OUTBOX_LEASE_DURATION_MS = 60_000;
 
 export class SqliteOutboxPersistence {
   constructor(
@@ -105,12 +107,14 @@ export class SqliteOutboxPersistence {
              ocr_result_json = COALESCE($ocrResultJson, ocr_result_json)
          WHERE id = $id
            AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+           AND (($leaseToken IS NULL AND lease_token IS NULL) OR lease_token = $leaseToken)
          RETURNING *`,
       )
       .get({
         $id: id,
         $nextRetryAt: update.nextRetryAt ?? null,
         $ocrResultJson: update.ocrResult ? JSON.stringify(update.ocrResult) : null,
+        $leaseToken: update.leaseToken ?? null,
         $serverCaptureId: update.serverCaptureId ?? null,
         $state: update.state,
         $updatedAt: update.now,
@@ -127,6 +131,8 @@ export class SqliteOutboxPersistence {
         `UPDATE outbox_jobs
          SET state = 'syncing',
              locked_at = $now,
+             lease_token = $leaseToken,
+             lease_expires_at = $leaseExpiresAt,
              updated_at = $now
          WHERE id = (
            SELECT id
@@ -142,6 +148,8 @@ export class SqliteOutboxPersistence {
       )
       .get({
         $maxAttempts: input.maxAttempts,
+        $leaseExpiresAt: new Date(Date.parse(input.now) + OUTBOX_LEASE_DURATION_MS).toISOString(),
+        $leaseToken: randomUUID(),
         $now: input.now,
         $workspaceId: input.workspaceId,
       });
@@ -160,16 +168,20 @@ export class SqliteOutboxPersistence {
              updated_at = $updatedAt,
              next_retry_at = NULL,
              locked_at = NULL,
+             lease_token = NULL,
+             lease_expires_at = NULL,
              server_capture_id = $serverCaptureId,
              last_safe_error_json = $lastSafeErrorJson,
              terminal_reason = $terminalReason
          WHERE id = $id
            AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+           AND (($leaseToken IS NULL AND lease_token IS NULL) OR lease_token = $leaseToken)
          RETURNING *`,
       )
       .get({
         $id: id,
         $lastSafeErrorJson: update.lastSafeError ? JSON.stringify(update.lastSafeError) : null,
+        $leaseToken: update.leaseToken ?? null,
         $serverCaptureId: update.serverCaptureId ?? null,
         $state: update.state,
         $terminalReason: update.reason,
@@ -204,6 +216,8 @@ export class SqliteOutboxPersistence {
                ELSE NULL
              END,
              locked_at = NULL,
+             lease_token = NULL,
+             lease_expires_at = NULL,
              last_safe_error_json = $lastSafeErrorJson,
              terminal_reason = CASE
                WHEN $retryable = 1 AND attempt + 1 < $maxAttempts THEN NULL
@@ -211,6 +225,7 @@ export class SqliteOutboxPersistence {
              END
          WHERE id = $id
            AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+           AND (($leaseToken IS NULL AND lease_token IS NULL) OR lease_token = $leaseToken)
          RETURNING *`,
       )
       .get({
@@ -220,6 +235,7 @@ export class SqliteOutboxPersistence {
           message: input.message,
           retryable: input.retryable,
         }),
+        $leaseToken: input.leaseToken ?? null,
         $maxAttempts: input.maxAttempts,
         $retryAt: input.retryAt ?? null,
         $retryable: input.retryable ? 1 : 0,
@@ -247,15 +263,19 @@ export class SqliteOutboxPersistence {
              updated_at = $updatedAt,
              next_retry_at = $nextRetryAt,
              locked_at = NULL,
+             lease_token = NULL,
+             lease_expires_at = NULL,
              last_safe_error_json = $lastSafeErrorJson,
              terminal_reason = NULL
          WHERE id = $id
            AND state IN ('syncing', 'result_pending')
+           AND (($leaseToken IS NULL AND lease_token IS NULL) OR lease_token = $leaseToken)
          RETURNING *`,
       )
       .get({
         $id: input.id,
         $lastSafeErrorJson: JSON.stringify(input.lastSafeError),
+        $leaseToken: input.leaseToken ?? null,
         $nextRetryAt: input.nextRetryAt,
         $updatedAt: input.now,
       });
@@ -359,8 +379,9 @@ export class SqliteOutboxPersistence {
     terminalError: OperationalStoreError,
   ): OperationalStoreError {
     const existing = this.database
-      .prepare<{ state: OutboxJobState }>(
+      .prepare<{ state: OutboxJobState; lease_token?: string | null }>(
         `SELECT state
+                , lease_token
          FROM outbox_jobs
          WHERE id = $id
          LIMIT 1`,
@@ -369,6 +390,12 @@ export class SqliteOutboxPersistence {
 
     if (!existing) return { code: 'outbox_job_not_found', message: 'Outbox job was not found.' };
     if (isTerminalOutboxState(existing.state)) return terminalError;
+    if (existing.lease_token) {
+      return {
+        code: 'outbox_lease_lost',
+        message: 'Outbox job lease is no longer held by this worker.',
+      };
+    }
     return {
       code: 'terminal_state_conflict',
       message: 'Outbox job state changed before the update could be applied.',
@@ -447,6 +474,8 @@ type OutboxJobRow = SqliteRow & {
   updated_at: string;
   next_retry_at?: string | null;
   locked_at?: string | null;
+  lease_token?: string | null;
+  lease_expires_at?: string | null;
   server_capture_id?: string | null;
   ocr_result_json?: string | null;
   last_safe_error_json?: string | null;
@@ -470,6 +499,8 @@ function outboxJobFromRow(row: OutboxJobRow): OutboxJob {
       ? { lastSafeError: parseJson<OutboxJob['lastSafeError']>(row.last_safe_error_json) }
       : {}),
     ...(row.locked_at ? { lockedAt: row.locked_at } : {}),
+    ...(row.lease_token ? { leaseToken: row.lease_token } : {}),
+    ...(row.lease_expires_at ? { leaseExpiresAt: row.lease_expires_at } : {}),
     ...(row.next_retry_at ? { nextRetryAt: row.next_retry_at } : {}),
     ...(row.server_capture_id ? { serverCaptureId: row.server_capture_id } : {}),
     ...(row.ocr_result_json ? { ocrResult: parseJson<StoredOcrResult>(row.ocr_result_json) } : {}),

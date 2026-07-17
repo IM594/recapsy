@@ -1,7 +1,10 @@
 import type { OutboxJob } from '../storage/index';
 import type { SyncRunResult } from './types';
 
-type ReconciliationJob = Pick<OutboxJob, 'id' | 'serverCaptureId' | 'state' | 'workspaceId'>;
+type ReconciliationJob = Pick<
+  OutboxJob,
+  'id' | 'leaseToken' | 'serverCaptureId' | 'state' | 'workspaceId'
+>;
 
 type ServerCaptureOcrStatus =
   | 'not_requested'
@@ -27,6 +30,7 @@ export type ServerCaptureReconciliationStore = {
     id: string,
     update: {
       now: string;
+      leaseToken?: string;
       reason: 'ocr_synced';
       serverCaptureId: string;
       state: 'synced';
@@ -66,6 +70,7 @@ export async function reconcileOutboxJobFromServerCapture(
   }
 
   await options.store.markOutboxJobTerminal(job.id, {
+    leaseToken: job.leaseToken,
     now: options.clock.now(),
     reason: 'ocr_synced',
     serverCaptureId: job.serverCaptureId,

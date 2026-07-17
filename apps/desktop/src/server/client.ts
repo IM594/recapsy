@@ -108,7 +108,10 @@ export function createServerApiClient(
     async runOcrProxy(input): Promise<RunOcrProxyResult> {
       const body = await request(options, endpoint, {
         body: input.bytes,
-        headers: { 'content-type': input.mimeType },
+        headers: {
+          'content-type': input.mimeType,
+          'idempotency-key': input.operationKey,
+        },
         method: 'POST',
         path: '/v1/ai/ocr',
         query: { workspaceId: input.workspaceId },
@@ -571,6 +574,8 @@ function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
     'provider_auth_failed',
     'provider_rate_limited',
     'provider_timeout',
+    'operation_in_progress',
+    'operation_conflict',
     'input_too_large',
     'unsupported_format',
     'temporary_location_missing',
@@ -613,6 +618,14 @@ function defaultSafeMessage(code: ServerApiErrorCode): string {
 
   if (code === 'provider_timeout') {
     return 'Provider timed out.';
+  }
+
+  if (code === 'operation_in_progress') {
+    return 'OCR operation is still processing.';
+  }
+
+  if (code === 'operation_conflict') {
+    return 'OCR operation key conflicts with this image.';
   }
 
   if (code === 'server_unavailable') {
@@ -668,7 +681,8 @@ function isRetryableCode(code: ServerApiErrorCode): boolean {
     code === 'server_unavailable' ||
     code === 'provider_unavailable' ||
     code === 'provider_rate_limited' ||
-    code === 'provider_timeout'
+    code === 'provider_timeout' ||
+    code === 'operation_in_progress'
   );
 }
 

@@ -68,7 +68,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 3,
+      version: 4,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -242,7 +242,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(3);
+    ).toBe(4);
 
     const rowById = (id: string) =>
       database
@@ -653,6 +653,7 @@ describe('SQLite operational store', () => {
     });
     const retry = await store.recordOutboxSafeError('job_ready', {
       code: 'provider_unavailable',
+      leaseToken: claimed?.leaseToken,
       maxAttempts: 3,
       message: 'Provider is unavailable.',
       now: '2026-07-06T00:02:30.000Z',
@@ -728,6 +729,49 @@ describe('SQLite operational store', () => {
       id: 'job_later',
       state: 'syncing',
     });
+  });
+
+  it('uses lease-token compare-and-set so an old worker cannot overwrite a reclaimed job', async () => {
+    const store = await createTempStore();
+    await store.createOutboxJob(createJob({ id: 'job_lease', idempotencyKey: 'idem_lease' }));
+
+    const first = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now: '2026-07-06T00:00:00.000Z',
+      workspaceId: 'workspace_1',
+    });
+    await store.recoverInterruptedOutboxJob({
+      id: 'job_lease',
+      lastSafeError: {
+        code: 'interrupted_during_sync',
+        message: 'Outbox sync was interrupted before startup recovery.',
+        retryable: true,
+      },
+      leaseToken: first?.leaseToken,
+      nextRetryAt: '2026-07-06T00:00:01.000Z',
+      now: '2026-07-06T00:00:01.000Z',
+    });
+    const second = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now: '2026-07-06T00:00:01.000Z',
+      workspaceId: 'workspace_1',
+    });
+
+    const stale = await store.markOutboxJobTerminal('job_lease', {
+      leaseToken: first?.leaseToken,
+      now: '2026-07-06T00:00:02.000Z',
+      reason: 'ocr_synced',
+      state: 'synced',
+    });
+    const current = await store.markOutboxJobTerminal('job_lease', {
+      leaseToken: second?.leaseToken,
+      now: '2026-07-06T00:00:03.000Z',
+      reason: 'ocr_synced',
+      state: 'synced',
+    });
+
+    expect(stale).toMatchObject({ ok: false, error: { code: 'outbox_lease_lost' } });
+    expect(current).toMatchObject({ ok: true, value: { state: 'synced' } });
   });
 
   it('keeps a stale terminal update from overwriting a concurrent cancellation', async () => {

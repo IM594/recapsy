@@ -13,6 +13,7 @@ import {
   isTerminalBlockingSyncErrorCode,
   syncSafeMessage,
 } from './errors';
+import { createOcrOperationKey } from './ocr-operation';
 import { reconcileOutboxJobFromServerCapture } from './reconciliation';
 import { computeRetryBackoffDelayMs } from './retry';
 import { OcrResultInvalidError, mapOcrScreenText } from './screen-text';
@@ -116,39 +117,51 @@ async function executeSyncJob(
       workspaceId: activeJob.workspaceId,
     });
 
-    await options.store.updateOutboxJobState(activeJob.id, {
-      now: options.clock.now(),
-      serverCaptureId: capture.captureId,
-      state: 'syncing',
-    });
+    await requireOutboxWrite(
+      options.store.updateOutboxJobState(activeJob.id, {
+        leaseToken: activeJob.leaseToken,
+        now: options.clock.now(),
+        serverCaptureId: capture.captureId,
+        state: 'syncing',
+      }),
+    );
 
     if (activeJob.capture.privacyDecision.action === 'block_capture') {
-      await options.store.markOutboxJobTerminal(activeJob.id, {
-        now: options.clock.now(),
-        reason: 'capture_blocked_by_local_policy',
-        serverCaptureId: capture.captureId,
-        state: 'synced',
-      });
+      await requireOutboxWrite(
+        options.store.markOutboxJobTerminal(activeJob.id, {
+          leaseToken: activeJob.leaseToken,
+          now: options.clock.now(),
+          reason: 'capture_blocked_by_local_policy',
+          serverCaptureId: capture.captureId,
+          state: 'synced',
+        }),
+      );
       return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
     if (activeJob.capture.privacyDecision.action === 'block_ocr') {
-      await options.store.markOutboxJobTerminal(activeJob.id, {
-        now: options.clock.now(),
-        reason: 'ocr_blocked_by_local_policy',
-        serverCaptureId: capture.captureId,
-        state: 'synced',
-      });
+      await requireOutboxWrite(
+        options.store.markOutboxJobTerminal(activeJob.id, {
+          leaseToken: activeJob.leaseToken,
+          now: options.clock.now(),
+          reason: 'ocr_blocked_by_local_policy',
+          serverCaptureId: capture.captureId,
+          state: 'synced',
+        }),
+      );
       return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
     if (capture.nextAction === 'none') {
-      await options.store.markOutboxJobTerminal(activeJob.id, {
-        now: options.clock.now(),
-        reason: 'metadata_synced',
-        serverCaptureId: capture.captureId,
-        state: 'synced',
-      });
+      await requireOutboxWrite(
+        options.store.markOutboxJobTerminal(activeJob.id, {
+          leaseToken: activeJob.leaseToken,
+          now: options.clock.now(),
+          reason: 'metadata_synced',
+          serverCaptureId: capture.captureId,
+          state: 'synced',
+        }),
+      );
       return { jobId: activeJob.id, processed: 1, status: 'synced' };
     }
 
@@ -161,6 +174,12 @@ async function executeSyncJob(
     const ocrResponse = await options.api.runOcrProxy({
       bytes,
       mimeType: asset.mimeType,
+      operationKey: createOcrOperationKey({
+        captureId: activeJob.id,
+        mimeType: asset.mimeType,
+        sourceAssetHash: asset.hash,
+        workspaceId: activeJob.workspaceId,
+      }),
       workspaceId: activeJob.workspaceId,
     });
 
@@ -188,14 +207,21 @@ async function executeSyncJob(
       ...(ocrResponse.usage ? { usage: ocrResponse.usage } : {}),
     };
 
+    if (await isLocallyCancelled(options.store, activeJob.id)) {
+      return { jobId: activeJob.id, processed: 1, status: 'cancelled' };
+    }
+
     // Persist the transcript before submitting so a submit failure retries only
     // the submit, never another billed proxy call (裁决 1 Option B, §3.2).
-    await options.store.updateOutboxJobState(activeJob.id, {
-      now: options.clock.now(),
-      ocrResult: storedResult,
-      serverCaptureId: capture.captureId,
-      state: 'result_pending',
-    });
+    await requireOutboxWrite(
+      options.store.updateOutboxJobState(activeJob.id, {
+        leaseToken: activeJob.leaseToken,
+        now: options.clock.now(),
+        ocrResult: storedResult,
+        serverCaptureId: capture.captureId,
+        state: 'result_pending',
+      }),
+    );
 
     const submitted = await submitStoredOcrResult(
       options,
@@ -204,6 +230,14 @@ async function executeSyncJob(
     );
     return submitted;
   } catch (error) {
+    if (error instanceof OutboxLeaseLostError) {
+      return { code: 'lease_lost', jobId: activeJob.id, processed: 0, status: 'skipped' };
+    }
+    if (isOutboxTerminalConflict(error)) {
+      return (await isLocallyCancelled(options.store, activeJob.id))
+        ? { jobId: activeJob.id, processed: 1, status: 'cancelled' }
+        : { jobId: activeJob.id, processed: 0, status: 'skipped' };
+    }
     return handleSyncError(options, activeJob, error);
   }
 }
@@ -240,12 +274,15 @@ async function submitStoredOcrResult(
     ...(storedResult.usage ? { usage: storedResult.usage } : {}),
   });
 
-  await options.store.markOutboxJobTerminal(job.id, {
-    now: options.clock.now(),
-    reason: 'ocr_synced',
-    serverCaptureId: job.serverCaptureId,
-    state: 'synced',
-  });
+  await requireOutboxWrite(
+    options.store.markOutboxJobTerminal(job.id, {
+      leaseToken: job.leaseToken,
+      now: options.clock.now(),
+      reason: 'ocr_synced',
+      serverCaptureId: job.serverCaptureId,
+      state: 'synced',
+    }),
+  );
   return { jobId: job.id, processed: 1, status: 'synced' };
 }
 
@@ -295,17 +332,20 @@ async function markJobTerminalWithSafeError(
     serverCaptureId?: string;
   },
 ): Promise<void> {
-  await options.store.markOutboxJobTerminal(job.id, {
-    lastSafeError: {
-      code: input.code,
-      message: syncSafeMessage(input.code),
-      retryable: input.retryable,
-    },
-    now: options.clock.now(),
-    reason: input.code,
-    serverCaptureId: input.serverCaptureId ?? job.serverCaptureId,
-    state,
-  });
+  await requireOutboxWrite(
+    options.store.markOutboxJobTerminal(job.id, {
+      leaseToken: job.leaseToken,
+      lastSafeError: {
+        code: input.code,
+        message: syncSafeMessage(input.code),
+        retryable: input.retryable,
+      },
+      now: options.clock.now(),
+      reason: input.code,
+      serverCaptureId: input.serverCaptureId ?? job.serverCaptureId,
+      state,
+    }),
+  );
 }
 
 async function ensureWorkspaceStillActive(
@@ -336,17 +376,49 @@ async function recordSafeError(
     job.attempt,
     options.jitterRandom ?? Math.random,
   );
-  await options.store.recordOutboxSafeError(job.id, {
-    code: error.code,
-    maxAttempts: options.maxAttempts,
-    message: syncSafeMessage(error.code),
-    now: options.clock.now(),
-    retryAt: new Date(Date.parse(retryBase) + delayMs).toISOString(),
-    retryable: error.retryable,
+  await requireOutboxWrite(
+    options.store.recordOutboxSafeError(job.id, {
+      code: error.code,
+      maxAttempts: options.maxAttempts,
+      leaseToken: job.leaseToken,
+      message: syncSafeMessage(error.code),
+      now: options.clock.now(),
+      retryAt: new Date(Date.parse(retryBase) + delayMs).toISOString(),
+      retryable: error.retryable,
+    }),
+  );
+}
+
+class OutboxLeaseLostError extends Error {
+  constructor() {
+    super('Outbox job lease is no longer held by this worker.');
+    this.name = 'OutboxLeaseLostError';
+  }
+}
+
+async function requireOutboxWrite(
+  result: Promise<OperationalStoreResult<OutboxJob>>,
+): Promise<void> {
+  const settled = await result;
+  if (settled.ok) return;
+  if (settled.error.code === 'outbox_lease_lost') {
+    throw new OutboxLeaseLostError();
+  }
+  throw Object.assign(new Error('Outbox state transition was rejected.'), {
+    code: settled.error.code,
   });
 }
 
 async function isLocallyCancelled(store: SyncJobStore, jobId: string): Promise<boolean> {
   const job = await store.getOutboxJob(jobId);
   return job?.state === 'cancelled';
+}
+
+function isOutboxTerminalConflict(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === 'terminal_state_conflict'
+  );
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
@@ -200,6 +201,9 @@ class InMemoryOperationalStore {
     if (isTerminalOutboxState(job.state)) {
       return failure(terminalTransitionConflict());
     }
+    if (!leaseMatches(job, update.leaseToken)) {
+      return failure(leaseLost());
+    }
 
     const updated: OutboxJob = {
       ...job,
@@ -237,6 +241,8 @@ class InMemoryOperationalStore {
 
     const claimed: OutboxJob = {
       ...job,
+      leaseExpiresAt: new Date(Date.parse(input.now) + OUTBOX_LEASE_DURATION_MS).toISOString(),
+      leaseToken: randomUUID(),
       lockedAt: input.now,
       state: 'syncing',
       updatedAt: input.now,
@@ -263,11 +269,16 @@ class InMemoryOperationalStore {
         message: 'Terminal outbox jobs cannot transition to another terminal state.',
       });
     }
+    if (!leaseMatches(job, update.leaseToken)) {
+      return failure(leaseLost());
+    }
 
     const updated: OutboxJob = {
       ...job,
       lastSafeError: update.lastSafeError ? { ...update.lastSafeError } : undefined,
       lockedAt: undefined,
+      leaseExpiresAt: undefined,
+      leaseToken: undefined,
       nextRetryAt: undefined,
       state: update.state,
       terminalReason: update.reason,
@@ -296,6 +307,9 @@ class InMemoryOperationalStore {
         message: 'Terminal outbox jobs cannot be retried.',
       });
     }
+    if (!leaseMatches(job, input.leaseToken)) {
+      return failure(leaseLost());
+    }
 
     const attempt = job.attempt + 1;
     const retryable = input.retryable && attempt < input.maxAttempts;
@@ -309,6 +323,8 @@ class InMemoryOperationalStore {
         retryable: input.retryable,
       },
       lockedAt: undefined,
+      leaseExpiresAt: undefined,
+      leaseToken: undefined,
       state,
       updatedAt: input.now,
     };
@@ -344,11 +360,16 @@ class InMemoryOperationalStore {
         message: 'Only interrupted outbox jobs can be recovered at startup.',
       });
     }
+    if (!leaseMatches(job, input.leaseToken)) {
+      return failure(leaseLost());
+    }
 
     const updated: OutboxJob = {
       ...job,
       lastSafeError: { ...input.lastSafeError },
       lockedAt: undefined,
+      leaseExpiresAt: undefined,
+      leaseToken: undefined,
       nextRetryAt: input.nextRetryAt,
       state: 'pending',
       terminalReason: undefined,
@@ -508,6 +529,19 @@ function terminalTransitionConflict(): OperationalStoreError {
   return {
     code: 'terminal_state_conflict',
     message: 'Terminal outbox jobs cannot transition to another state.',
+  };
+}
+
+const OUTBOX_LEASE_DURATION_MS = 60_000;
+
+function leaseMatches(job: OutboxJob, expectedLeaseToken: string | undefined) {
+  return job.leaseToken ? job.leaseToken === expectedLeaseToken : expectedLeaseToken === undefined;
+}
+
+function leaseLost(): OperationalStoreError {
+  return {
+    code: 'outbox_lease_lost',
+    message: 'Outbox job lease is no longer held by this worker.',
   };
 }
 

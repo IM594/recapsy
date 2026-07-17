@@ -50,6 +50,8 @@ export type ServerApiErrorCode =
   | 'provider_auth_failed'
   | 'provider_rate_limited'
   | 'provider_timeout'
+  | 'operation_in_progress'
+  | 'operation_conflict'
   | 'input_too_large'
   | 'unsupported_format'
   | 'temporary_location_missing'
@@ -145,6 +147,7 @@ export type RunOcrProxyInput = {
   workspaceId: string;
   mimeType: string;
   bytes: Uint8Array;
+  operationKey: string;
 };
 
 export type RunOcrProxyResult = AiOcrResponse;

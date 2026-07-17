@@ -214,6 +214,56 @@ describe('memory operational store', () => {
     });
   });
 
+  it('rejects a stale worker write after recovery grants the job a new lease', async () => {
+    const store = createMemoryStore();
+    await store.createOutboxJob(createJob({ id: 'job_lease', idempotencyKey: 'idem_lease' }));
+
+    const first = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now: '2026-07-06T00:00:00.000Z',
+      workspaceId: 'workspace_1',
+    });
+    expect(first?.leaseToken).toBeDefined();
+    await store.recoverInterruptedOutboxJob({
+      id: 'job_lease',
+      lastSafeError: {
+        code: 'interrupted_during_sync',
+        message: 'Outbox sync was interrupted before startup recovery.',
+        retryable: true,
+      },
+      leaseToken: first?.leaseToken,
+      nextRetryAt: '2026-07-06T00:00:01.000Z',
+      now: '2026-07-06T00:00:01.000Z',
+    });
+    const second = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now: '2026-07-06T00:00:01.000Z',
+      workspaceId: 'workspace_1',
+    });
+
+    const stale = await store.markOutboxJobTerminal('job_lease', {
+      leaseToken: first?.leaseToken,
+      now: '2026-07-06T00:00:02.000Z',
+      reason: 'ocr_synced',
+      state: 'synced',
+    });
+    const current = await store.markOutboxJobTerminal('job_lease', {
+      leaseToken: second?.leaseToken,
+      now: '2026-07-06T00:00:03.000Z',
+      reason: 'ocr_synced',
+      state: 'synced',
+    });
+
+    expect(stale).toEqual({
+      error: {
+        code: 'outbox_lease_lost',
+        message: 'Outbox job lease is no longer held by this worker.',
+      },
+      ok: false,
+    });
+    expect(current).toMatchObject({ ok: true, value: { state: 'synced' } });
+  });
+
   it('records retryable safe errors with backoff and terminal failures at max attempts', async () => {
     const store = createMemoryStore();
     await store.createOutboxJob(createJob());

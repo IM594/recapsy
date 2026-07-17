@@ -44,6 +44,7 @@ export type SyncServerApi = {
     workspaceId: string;
     mimeType: string;
     bytes: Uint8Array;
+    operationKey: string;
   }): Promise<AiOcrResponse>;
   submitOcrResult(input: {
     workspaceId: string;
@@ -122,7 +123,12 @@ export type SyncRunResult = {
   status: SyncRunStatus;
   processed: number;
   jobId?: string;
-  code?: 'workspace_required' | 'backpressure_active' | 'offline' | 'server_unavailable';
+  code?:
+    | 'workspace_required'
+    | 'backpressure_active'
+    | 'offline'
+    | 'server_unavailable'
+    | 'lease_lost';
 };
 
 export type SyncCancelResult = {

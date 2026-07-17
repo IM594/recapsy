@@ -39,6 +39,8 @@ const SYNC_SAFE_MESSAGES: Record<string, string> = {
   provider_auth_failed: 'Provider authentication failed.',
   provider_rate_limited: 'Provider is rate limited.',
   provider_timeout: 'OCR provider timed out.',
+  operation_in_progress: 'OCR operation is still processing.',
+  operation_conflict: 'OCR operation key conflicts with this image.',
   input_too_large: 'Input is too large.',
   unsupported_format: 'Input format is unsupported.',
   validation_failed: 'Request validation failed.',

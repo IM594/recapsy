@@ -52,6 +52,8 @@ export type OutboxJob = {
   updatedAt: string;
   nextRetryAt?: string;
   lockedAt?: string;
+  leaseToken?: string;
+  leaseExpiresAt?: string;
   serverCaptureId?: string;
   ocrResult?: StoredOcrResult;
   lastSafeError?: SafeOperationalError;
@@ -123,6 +125,7 @@ export type OutboxJobStateUpdate = {
   nextRetryAt?: string;
   serverCaptureId?: string;
   ocrResult?: StoredOcrResult;
+  leaseToken?: string;
 };
 
 export type OutboxTerminalUpdate = {
@@ -131,6 +134,7 @@ export type OutboxTerminalUpdate = {
   reason: string;
   serverCaptureId?: string;
   lastSafeError?: SafeOperationalError;
+  leaseToken?: string;
 };
 
 export type OutboxSafeErrorInput = {
@@ -140,6 +144,7 @@ export type OutboxSafeErrorInput = {
   retryAt?: string;
   now: string;
   maxAttempts: number;
+  leaseToken?: string;
 };
 
 export type RecoverInterruptedOutboxJobInput = {
@@ -147,6 +152,7 @@ export type RecoverInterruptedOutboxJobInput = {
   now: string;
   nextRetryAt: string;
   lastSafeError: SafeOperationalError;
+  leaseToken?: string;
 };
 
 export type ClaimRetryableOutboxJobInput = {
@@ -268,6 +274,7 @@ export type OperationalStoreErrorCode =
   | 'asset_ref_conflict'
   | 'idempotency_key_conflict'
   | 'terminal_state_conflict'
+  | 'outbox_lease_lost'
   | 'storage_corruption'
   | 'capacity_exceeded';
 

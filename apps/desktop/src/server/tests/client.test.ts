@@ -562,6 +562,7 @@ describe('desktop server API client', () => {
       expect(request.method).toBe('POST');
       expect(request.body).toBeInstanceOf(Uint8Array);
       expect(request.headers['content-type']).toBe('image/webp');
+      expect(request.headers['idempotency-key']).toBe('ocr-operation-1');
       expect(request.query).toMatchObject({ workspaceId });
       return createJsonResponse({
         blocks: [{ order: 0, text: 'quarterly plan draft' }],
@@ -575,6 +576,7 @@ describe('desktop server API client', () => {
     const result = await client.runOcrProxy({
       bytes: new Uint8Array([1, 2, 3]),
       mimeType: 'image/webp',
+      operationKey: 'ocr-operation-1',
       workspaceId,
     });
 
@@ -605,6 +607,7 @@ describe('desktop server API client', () => {
       client.runOcrProxy({
         bytes: new Uint8Array([1, 2, 3]),
         mimeType: 'image/webp',
+        operationKey: 'ocr-operation-1',
         workspaceId,
       }),
     ).rejects.toMatchObject({
@@ -631,6 +634,7 @@ describe('desktop server API client', () => {
       client.runOcrProxy({
         bytes: new Uint8Array([1, 2, 3]),
         mimeType: 'image/webp',
+        operationKey: 'ocr-operation-1',
         workspaceId,
       }),
     ).rejects.toMatchObject({

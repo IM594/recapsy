@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -13,6 +13,7 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
 
   ensureAssetAvailabilityColumns(database);
   migrateOutboxJobsToV2(database);
+  ensureOutboxLeaseColumns(database);
   migratePolicyCacheToWorkspaceDevice(database);
 
   database.run(
@@ -23,6 +24,21 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
       $version: SCHEMA_VERSION,
     },
   );
+}
+
+function ensureOutboxLeaseColumns(database: SqliteDatabase): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }>('PRAGMA table_info(outbox_jobs)')
+      .all()
+      .map((column) => column.name),
+  );
+  if (!columns.has('lease_token')) {
+    database.run('ALTER TABLE outbox_jobs ADD COLUMN lease_token TEXT');
+  }
+  if (!columns.has('lease_expires_at')) {
+    database.run('ALTER TABLE outbox_jobs ADD COLUMN lease_expires_at TEXT');
+  }
 }
 
 function migratePolicyCacheToWorkspaceDevice(database: SqliteDatabase): void {
@@ -203,6 +219,8 @@ function buildOutboxJobsTable(tableName: string, ifNotExists: boolean): string {
     updated_at TEXT NOT NULL,
     next_retry_at TEXT,
     locked_at TEXT,
+    lease_token TEXT,
+    lease_expires_at TEXT,
     server_capture_id TEXT,
     ocr_result_json TEXT CHECK (
       ocr_result_json IS NULL OR json_valid(ocr_result_json)

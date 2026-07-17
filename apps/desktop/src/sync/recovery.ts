@@ -130,6 +130,7 @@ async function recoverJob(
   const result = await options.store.recoverInterruptedOutboxJob({
     id: job.id,
     lastSafeError,
+    leaseToken: job.leaseToken,
     nextRetryAt: options.now,
     now: options.now,
   });

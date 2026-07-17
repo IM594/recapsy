@@ -61,7 +61,7 @@ describe('desktop sync job executor', () => {
           };
         },
         async runOcrProxy(input) {
-          calls.push(`proxy:${input.bytes.byteLength}:${input.mimeType}`);
+          calls.push(`proxy:${input.bytes.byteLength}:${input.mimeType}:${input.operationKey}`);
           return createOcrResponse();
         },
         async submitOcrResult(input) {
@@ -79,7 +79,10 @@ describe('desktop sync job executor', () => {
       processed: 1,
       status: 'synced',
     });
-    expect(calls).toEqual(['create:idem_1', 'proxy:4:image/png', `submit:capture_1:${assetHash}`]);
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toBe('create:idem_1');
+    expect(calls[1]).toMatch(/^proxy:4:image\/png:ocr:[a-f0-9]{64}$/);
+    expect(calls[2]).toBe(`submit:capture_1:${assetHash}`);
     const job = await store.getOutboxJob('job_1');
     expect(job).toMatchObject({
       serverCaptureId: 'capture_1',
@@ -459,7 +462,9 @@ describe('desktop sync job executor', () => {
     const worker = createJobRunner({
       api: createApi({
         async runOcrProxy() {
+          const claimed = await store.getOutboxJob('job_1');
           await store.markOutboxJobTerminal('job_1', {
+            leaseToken: claimed?.leaseToken,
             now: '2026-07-06T00:00:03.000Z',
             reason: 'user_cancelled',
             state: 'cancelled',
@@ -483,6 +488,44 @@ describe('desktop sync job executor', () => {
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'cancelled',
       terminalReason: 'user_cancelled',
+    });
+  });
+
+  it('reports lease_lost when recovery reclaims a job while OCR is in flight', async () => {
+    const store = createMemoryStore();
+    await seedPendingCapture(store);
+    const worker = createJobRunner({
+      api: createApi({
+        async runOcrProxy() {
+          const first = await store.getOutboxJob('job_1');
+          await store.recoverInterruptedOutboxJob({
+            id: 'job_1',
+            lastSafeError: {
+              code: 'interrupted_during_sync',
+              message: 'Outbox sync was interrupted before startup recovery.',
+              retryable: true,
+            },
+            leaseToken: first?.leaseToken,
+            nextRetryAt: now,
+            now,
+          });
+          const reclaimed = await store.claimNextRetryableOutboxJob({
+            maxAttempts: 3,
+            now,
+            workspaceId: 'workspace_1',
+          });
+          expect(reclaimed?.leaseToken).toBeDefined();
+          return createOcrResponse();
+        },
+      }),
+      store,
+    });
+
+    await expect(worker.runOnce()).resolves.toEqual({
+      code: 'lease_lost',
+      jobId: 'job_1',
+      processed: 0,
+      status: 'skipped',
     });
   });
 

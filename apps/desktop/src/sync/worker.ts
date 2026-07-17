@@ -44,6 +44,7 @@ export function createSyncWorker(options: SyncWorkerOptions) {
       // The thin-proxy model has no remote OCR job to cancel. A local terminal
       // state is sufficient to stop future claims and result submission.
       const terminal = await options.store.markOutboxJobTerminal(job.id, {
+        leaseToken: job.leaseToken,
         now: options.clock.now(),
         reason,
         serverCaptureId: job.serverCaptureId,

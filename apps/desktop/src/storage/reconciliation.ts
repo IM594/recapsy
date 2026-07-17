@@ -112,6 +112,7 @@ export async function reconcileAssetRefs(
 
       const result = await options.store.markOutboxJobTerminal(job.id, {
         lastSafeError: blockingError,
+        leaseToken: job.leaseToken,
         now: options.now,
         reason: blockingError.code,
         serverCaptureId: job.serverCaptureId,
