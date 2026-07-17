@@ -50,6 +50,21 @@ export type CaptureStatusDto = {
   lastError?: IpcError;
 };
 
+export type PermissionStatusDto = {
+  screenRecording: 'granted' | 'denied' | 'not_determined' | 'unknown';
+  accessibility: 'granted' | 'denied' | 'not_determined' | 'unknown';
+  screenRecordingRequired: boolean;
+  accessibilityRequired: boolean;
+};
+
+export type PrivacySettingsOpenResultDto = {
+  opened: true;
+};
+
+export type AppWindowActionResultDto = {
+  shown: true;
+};
+
 export type CaptureEventSummaryDto = {
   id: string;
   observedAt: string;

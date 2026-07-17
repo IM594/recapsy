@@ -12,11 +12,14 @@ export type {
 } from './contracts';
 export { assertRendererSafeDto } from './dto';
 export type {
+  AppWindowActionResultDto,
   CaptureEventSummaryDto,
   CaptureStatusDto,
   DiagnosticsBundleDto,
   DiagnosticsLogEntryDto,
   OcrJobSummaryDto,
+  PermissionStatusDto,
+  PrivacySettingsOpenResultDto,
   RendererSafeDtoResult,
   RuntimeStatusDto,
   SafeSessionSummary,

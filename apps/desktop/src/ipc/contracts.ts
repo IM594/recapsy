@@ -1,9 +1,12 @@
 import type {
+  AppWindowActionResultDto,
   CaptureEventSummaryDto,
   CaptureStatusDto,
   DiagnosticsBundleDto,
   DiagnosticsLogEntryDto,
   OcrJobSummaryDto,
+  PermissionStatusDto,
+  PrivacySettingsOpenResultDto,
   RuntimeStatusDto,
   SafeSessionSummary,
   SearchQueryRequestDto,
@@ -26,7 +29,9 @@ export type IpcNamespace =
   | 'timeline'
   | 'search'
   | 'settings'
-  | 'diagnostics';
+  | 'diagnostics'
+  | 'permissions'
+  | 'app';
 
 export type RequestValidationResult<TRequest> =
   | {
@@ -223,6 +228,41 @@ export const IPC_CHANNEL_REGISTRY = [
     description: 'Exports a redacted diagnostics bundle descriptor.',
     methodName: 'diagnosticsExportBundle',
     namespace: 'diagnostics',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, PermissionStatusDto>({
+    channel: 'permissions.getStatus',
+    description: 'Returns native screen-recording and accessibility permission state.',
+    methodName: 'permissionsGetStatus',
+    namespace: 'permissions',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, PermissionStatusDto>({
+    channel: 'permissions.refresh',
+    description: 'Asks the capture process to re-probe permissions and returns the result.',
+    methodName: 'permissionsRefresh',
+    namespace: 'permissions',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, PrivacySettingsOpenResultDto>({
+    channel: 'permissions.openScreenRecordingSettings',
+    description: 'Opens the macOS Screen Recording privacy pane.',
+    methodName: 'permissionsOpenScreenRecordingSettings',
+    namespace: 'permissions',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, PrivacySettingsOpenResultDto>({
+    channel: 'permissions.openAccessibilitySettings',
+    description: 'Opens the macOS Accessibility privacy pane.',
+    methodName: 'permissionsOpenAccessibilitySettings',
+    namespace: 'permissions',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, AppWindowActionResultDto>({
+    channel: 'app.showMainWindow',
+    description: 'Shows or focuses the desktop main window.',
+    methodName: 'appShowMainWindow',
+    namespace: 'app',
     request: validateEmptyRequest,
   }),
 ] as const;

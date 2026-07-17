@@ -15,7 +15,17 @@ import {
   createCaptureRuntime,
 } from '../capture/index';
 import type { HelperEnvelope, HelperToMainType } from '../helper/index';
-import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/index';
+import {
+  type ElectronIpcMainLike,
+  createRendererSafeSuccess,
+  registerIpcHandlers,
+} from '../ipc/index';
+import {
+  type OpenExternalUrl,
+  createPermissionIpcHandlers,
+  createPrivacySettingsOpener,
+} from '../permissions/index';
+import type { DesktopShell } from '../shell/index';
 import { createStatusHandlers } from '../status/index';
 import type { BackpressureConfig, StoreLifecycle } from '../storage/index';
 import {
@@ -50,6 +60,14 @@ export type DesktopStore = StoreLifecycle &
   CaptureHistoryReader &
   SyncQueueStore;
 
+export type DesktopShellFactoryContext = {
+  commandClient: CaptureHelperCommandClient;
+  eventHandler: CaptureHelperEventHandler;
+  lifecycle: CaptureLifecycle;
+  store: DesktopStore;
+  workspaceId: string;
+};
+
 export type ElectronMainRuntimeOptions = {
   app: ElectronAppLike;
   ipcMain?: ElectronIpcMainLike;
@@ -73,15 +91,19 @@ export type ElectronMainRuntimeOptions = {
   onSyncResult?(result: SyncRunResult): void;
   onSyncError?(error: unknown): void;
   quitTimeoutMs?: number;
+  openExternalUrl?: OpenExternalUrl;
+  createShell?(context: DesktopShellFactoryContext): DesktopShell | Promise<DesktopShell>;
 };
 
 export type ElectronMainRuntimeReadyState = {
   store: DesktopStore;
   lifecycle: CaptureLifecycle;
   eventHandler: CaptureHelperEventHandler;
+  commandClient: CaptureHelperCommandClient;
   workspaceId: string;
   workspaceIdVerified: boolean;
   syncLoop: SyncLoop;
+  shell?: DesktopShell;
 };
 
 export type ElectronMainRuntimeHandle = {
@@ -104,8 +126,6 @@ export function createElectronMainRuntime(
   if (options.hideDockIcon !== false) {
     options.app.dock?.hide();
   }
-
-  options.app.on('window-all-closed', () => {});
 
   const ready: Promise<ElectronMainRuntimeReadyState> = options.app.whenReady().then(async () => {
     const sessionStartup = createSessionStartup({
@@ -146,7 +166,21 @@ export function createElectronMainRuntime(
     await captureRuntime.lifecycle.start();
     syncRuntime.start();
 
+    const shell = options.createShell
+      ? await options.createShell({
+          commandClient: captureRuntime.commandClient,
+          eventHandler: captureRuntime.eventHandler,
+          lifecycle: captureRuntime.lifecycle,
+          store,
+          workspaceId,
+        })
+      : undefined;
+
     if (options.ipcMain) {
+      const privacySettings = createPrivacySettingsOpener(
+        options.openExternalUrl ?? (async () => undefined),
+      );
+
       registerIpcHandlers(options.ipcMain, {
         ...createCaptureIpcHandlers({
           eventHandler: captureRuntime.eventHandler,
@@ -161,17 +195,35 @@ export function createElectronMainRuntime(
           },
         }),
         ...createSyncIpcHandlers({ store, workspaceId }),
+        ...createPermissionIpcHandlers({
+          client: captureRuntime.commandClient,
+          eventHandler: captureRuntime.eventHandler,
+          now,
+          privacySettings,
+        }),
+        ...(shell
+          ? {
+              'app.showMainWindow': async () =>
+                createRendererSafeSuccess(await shell.showMainWindow()),
+            }
+          : {}),
       });
     }
 
     return {
+      commandClient: captureRuntime.commandClient,
       eventHandler: captureRuntime.eventHandler,
       lifecycle: captureRuntime.lifecycle,
+      ...(shell ? { shell } : {}),
       store,
       syncLoop: syncRuntime,
       workspaceId,
       workspaceIdVerified,
     };
+  });
+
+  options.app.on('window-all-closed', () => {
+    void ready.then(({ lifecycle }) => lifecycle.handleLastWindowClosed()).catch(() => undefined);
   });
 
   const quitTimeoutMs = options.quitTimeoutMs ?? DEFAULT_QUIT_TIMEOUT_MS;
@@ -186,7 +238,13 @@ export function createElectronMainRuntime(
 
     void raceWithTimeout(
       ready
-        .then(({ lifecycle, syncLoop }) => Promise.all([lifecycle.requestQuit(), syncLoop.stop()]))
+        .then(({ lifecycle, shell, syncLoop }) => {
+          return Promise.allSettled([
+            Promise.resolve().then(() => shell?.dispose()),
+            Promise.resolve().then(() => lifecycle.requestQuit()),
+            Promise.resolve().then(() => syncLoop.stop()),
+          ]);
+        })
         .catch(() => undefined),
       quitTimeoutMs,
     ).then(() => options.app.exit(0));

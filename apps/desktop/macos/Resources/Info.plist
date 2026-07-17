@@ -38,5 +38,12 @@
 	-->
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Recapsy captures screenshots to build your private, searchable activity timeline.</string>
+	<!--
+	  Accessibility is used only for focused-window / context metadata sampling,
+	  never for uploading AX subtree text. The usage string must stay product-
+	  facing and must not invent implementation words.
+	-->
+	<key>NSAccessibilityUsageDescription</key>
+	<string>Recapsy uses Accessibility to identify the active window and app context for your private timeline.</string>
 </dict>
 </plist>

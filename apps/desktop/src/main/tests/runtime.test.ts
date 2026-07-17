@@ -12,9 +12,11 @@ import type {
   CaptureHelperStartOptions,
 } from '../../capture/index';
 import type { HelperEnvelope, HelperToMainType, MainToHelperType } from '../../helper/index';
+import type { DesktopShell } from '../../shell/index';
 import { createMemoryStore } from '../../storage';
 import type { SyncLoop, SyncLoopOptions, SyncRunResult, SyncServerApi } from '../../sync/index';
 import {
+  type DesktopShellFactoryContext,
   type DesktopStore,
   type ElectronAppLike,
   type ElectronIpcMainLike,
@@ -194,6 +196,84 @@ describe('electron main runtime wiring', () => {
     expect(helperClient.resumeCalls).toBe(1);
     expect(pauseResponse).toMatchObject({ data: { paused: true, state: 'paused' }, ok: true });
     expect(resumeResponse).toMatchObject({ data: { paused: false, state: 'capturing' }, ok: true });
+  });
+
+  it('permissions IPC reads helper status, refreshes, and opens privacy settings', async () => {
+    const opened: string[] = [];
+    const { app, ipcMain, helperClient, store } = harness();
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        helperClient,
+        ipcMain,
+        openExternalUrl: async (url) => {
+          opened.push(url);
+        },
+        store,
+      }),
+    );
+    app.triggerReady();
+    await handle.ready;
+
+    await helperClient.emit({
+      correlationId: null,
+      messageId: 'perm_status_1',
+      payload: {
+        accessibility: 'not_determined',
+        observedAt: now,
+        screenCapture: 'denied',
+      },
+      protocolVersion: 'recapsy.capture-helper',
+      sentAt: now,
+      type: 'permission.status',
+    });
+
+    const statusResponse = await ipcMain.invoke('permissions.getStatus', undefined);
+    expect(statusResponse).toMatchObject({
+      data: {
+        accessibility: 'not_determined',
+        accessibilityRequired: true,
+        screenRecording: 'denied',
+        screenRecordingRequired: true,
+      },
+      ok: true,
+    });
+
+    helperClient.onSendCommand = async () => {
+      await helperClient.emit({
+        correlationId: null,
+        messageId: 'perm_status_2',
+        payload: {
+          accessibility: 'granted',
+          observedAt: '2026-07-08T00:00:01.000Z',
+          screenCapture: 'granted',
+        },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-08T00:00:01.000Z',
+        type: 'permission.status',
+      });
+    };
+
+    const refreshResponse = await ipcMain.invoke('permissions.refresh', undefined);
+    expect(refreshResponse).toMatchObject({
+      data: {
+        accessibility: 'granted',
+        screenRecording: 'granted',
+        screenRecordingRequired: false,
+      },
+      ok: true,
+    });
+
+    await expect(
+      ipcMain.invoke('permissions.openScreenRecordingSettings', undefined),
+    ).resolves.toMatchObject({ data: { opened: true }, ok: true });
+    await expect(
+      ipcMain.invoke('permissions.openAccessibilitySettings', undefined),
+    ).resolves.toMatchObject({ data: { opened: true }, ok: true });
+    expect(opened).toEqual([
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+    ]);
   });
 
   it('rejects invalid capture.getRecentEvents payloads via schema validation', async () => {
@@ -392,6 +472,74 @@ describe('electron main runtime wiring', () => {
     await flushMicrotasks();
 
     expect(syncLoop.stopCalls).toBe(1);
+  });
+
+  it('assembles the desktop shell, exposes its main-window IPC action, and disposes it during quit', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const syncLoop = new FakeSyncLoop();
+    const shell = new FakeDesktopShell();
+    let shellContext: DesktopShellFactoryContext | undefined;
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        createShell(context) {
+          shellContext = context;
+          return shell;
+        },
+        helperClient,
+        ipcMain,
+        store,
+        syncLoop,
+      }),
+    );
+    app.triggerReady();
+    const state = await handle.ready;
+
+    expect(shellContext).toMatchObject({
+      eventHandler: state.eventHandler,
+      lifecycle: state.lifecycle,
+      store,
+      workspaceId,
+    });
+    expect(shellContext?.commandClient).toBe(state.commandClient);
+    expect(state.shell).toBe(shell);
+    await expect(ipcMain.invoke('app.showMainWindow', undefined)).resolves.toEqual({
+      data: { shown: true },
+      ok: true,
+    });
+    expect(shell.showMainWindowCalls).toBe(1);
+
+    app.emitBeforeQuit(new FakeQuitEvent());
+    await flushMicrotasks();
+    expect(shell.disposeCalls).toBe(1);
+    expect(helperClient.stopCalls).toBe(1);
+    expect(syncLoop.stopCalls).toBe(1);
+  });
+
+  it('continues runtime shutdown when synchronous shell disposal fails', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const syncLoop = new FakeSyncLoop();
+    const failingShell = new FakeDesktopShell({ disposeThrows: true });
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        createShell: () => failingShell,
+        helperClient,
+        ipcMain,
+        store,
+        syncLoop,
+      }),
+    );
+    app.triggerReady();
+    await handle.ready;
+
+    app.emitBeforeQuit(new FakeQuitEvent());
+    await flushMicrotasks();
+
+    expect(failingShell.disposeCalls).toBe(1);
+    expect(helperClient.stopCalls).toBe(1);
+    expect(syncLoop.stopCalls).toBe(1);
+    expect(app.exitCalls).toEqual([0]);
   });
 
   it('invokes onHelperEnvelope with the same envelope before it reaches the real handler', async () => {
@@ -593,6 +741,38 @@ class FakeSyncLoop implements SyncLoop {
   }
 }
 
+class FakeDesktopShell implements DesktopShell {
+  disposeCalls = 0;
+  showMainWindowCalls = 0;
+
+  constructor(private readonly options: { disposeThrows?: boolean } = {}) {}
+
+  dispose(): void {
+    this.disposeCalls += 1;
+    if (this.options.disposeThrows) {
+      throw new Error('shell dispose failure');
+    }
+  }
+
+  async refresh() {
+    return {
+      accessibility: 'granted',
+      capturePaused: false,
+      captureState: 'running',
+      screenRecording: 'granted',
+      syncBlocked: 0,
+      syncFailed: 0,
+      syncPending: 0,
+      syncRetrying: 0,
+    };
+  }
+
+  async showMainWindow(): Promise<{ shown: true }> {
+    this.showMainWindowCalls += 1;
+    return { shown: true };
+  }
+}
+
 function testStore(): DesktopStore & { initializeCalls: number; closeCalls: number } {
   const store = Object.assign(createMemoryStore(), {
     closeCalls: 0,
@@ -722,6 +902,7 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   beginCaptureReasons: Array<'runtime_started' | 'user_resumed'> = [];
   sentCommands: Array<HelperEnvelope<MainToHelperType>> = [];
   stopImpl: () => Promise<void> = () => Promise.resolve();
+  onSendCommand: ((command: HelperEnvelope<MainToHelperType>) => Promise<void>) | undefined;
   private onEnvelope: ((envelope: HelperEnvelope<HelperToMainType>) => Promise<void>) | undefined;
 
   async start(options: CaptureHelperStartOptions = {}): Promise<void> {
@@ -748,6 +929,7 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
 
   async sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void> {
     this.sentCommands.push(command);
+    await this.onSendCommand?.(command);
   }
 
   async emit(envelope: HelperEnvelope<HelperToMainType>): Promise<void> {

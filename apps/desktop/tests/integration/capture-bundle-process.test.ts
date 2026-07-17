@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  realpathSync,
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,17 +41,15 @@ import {
  * only the user can grant screen-recording to in System Settings; that path is
  * covered by the manual E2E checklist in `macos/README.md`, never faked here.
  */
-const launcherPath = fileURLToPath(
-  new URL('../../macos/build/Recapsy.app/Contents/MacOS/CaptureLauncher', import.meta.url),
-);
-const captureBinaryPath = fileURLToPath(
-  new URL('../../macos/build/Recapsy.app/Contents/MacOS/Recapsy', import.meta.url),
-);
+const desktopRoot = fileURLToPath(new URL('../../', import.meta.url));
+const captureBundle = resolveCaptureBundlePath(process.env.RECAPSY_CAPTURE_BUNDLE);
+const launcherPath = path.join(captureBundle.path, 'Contents', 'MacOS', 'CaptureLauncher');
+const captureBinaryPath = path.join(captureBundle.path, 'Contents', 'MacOS', 'Recapsy');
 const launcherSourcePath = fileURLToPath(
   new URL('../../macos/Sources/CaptureLauncher/main.c', import.meta.url),
 );
 
-const bundleBuilt = existsSync(launcherPath) && existsSync(captureBinaryPath);
+const bundleBuilt = validateCaptureBundleAvailability(captureBundle);
 // When the bundle has not been built yet (`pnpm run build:capture`), skip rather
 // than fail: skipping is honest, a fabricated pass is not.
 const bundleIt = bundleBuilt ? it : it.skip;
@@ -88,6 +87,19 @@ afterEach(async () => {
 });
 
 describe('capture bundle subprocess (real signed Swift bundle via disclaim launcher)', () => {
+  it('uses the explicitly configured capture bundle for both spawned executables', () => {
+    if (captureBundle.selection !== 'configured') {
+      return;
+    }
+
+    expect(path.relative(captureBundle.path, launcherPath)).toBe(
+      path.join('Contents', 'MacOS', 'CaptureLauncher'),
+    );
+    expect(path.relative(captureBundle.path, captureBinaryPath)).toBe(
+      path.join('Contents', 'MacOS', 'Recapsy'),
+    );
+  });
+
   bundleIt('receives a real helper.hello with mock=false through the launcher', async () => {
     const { client, envelopes } = startBundleClient();
 
@@ -109,8 +121,9 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
     expect(['granted', 'denied', 'not_determined', 'unknown']).toContain(
       permission.payload.screenCapture,
     );
-    // Accessibility is out of 1B scope and must be reported as undetermined.
-    expect(permission.payload.accessibility).toBe('not_determined');
+    // Accessibility is probed by the real capture process; accept either
+    // granted (already trusted) or not_determined (needs System Settings).
+    expect(['granted', 'not_determined']).toContain(permission.payload.accessibility);
 
     await client.stop();
   });
@@ -404,4 +417,48 @@ function requireCaptureProcessId(processId: number | null): number {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type CaptureBundleSelection = {
+  path: string;
+  selection: 'configured' | 'default';
+};
+
+function resolveCaptureBundlePath(configuredPath: string | undefined): CaptureBundleSelection {
+  const selection = configuredPath ? 'configured' : 'default';
+  const requestedPath = configuredPath ?? path.join('macos', 'build', 'Recapsy.app');
+  const resolvedPath = path.resolve(desktopRoot, requestedPath);
+
+  if (!isPathInside(desktopRoot, resolvedPath) || path.extname(resolvedPath) !== '.app') {
+    throw new Error('The configured capture bundle must be an application bundle inside desktop.');
+  }
+
+  return { path: resolvedPath, selection };
+}
+
+function validateCaptureBundleAvailability(selection: CaptureBundleSelection): boolean {
+  const executablesExist = existsSync(launcherPath) && existsSync(captureBinaryPath);
+  if (!executablesExist) {
+    if (selection.selection === 'configured') {
+      throw new Error('The configured capture bundle is unavailable.');
+    }
+    return false;
+  }
+
+  let canonicalBundlePath: string;
+  try {
+    canonicalBundlePath = realpathSync(selection.path);
+  } catch {
+    throw new Error('The configured capture bundle is unavailable.');
+  }
+  if (!isPathInside(realpathSync(desktopRoot), canonicalBundlePath)) {
+    throw new Error('The configured capture bundle must be an application bundle inside desktop.');
+  }
+
+  return true;
+}
+
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relativePath = path.relative(rootPath, candidatePath);
+  return relativePath !== '' && !relativePath.startsWith(`..${path.sep}`) && relativePath !== '..';
 }

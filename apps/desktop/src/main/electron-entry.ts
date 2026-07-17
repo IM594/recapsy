@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { BrowserWindow, app, ipcMain, safeStorage } from 'electron';
+import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, safeStorage, shell } from 'electron';
 import {
   createAuthClient,
   createInMemoryTokenStore,
@@ -9,10 +9,20 @@ import {
   createCaptureBundleClient,
   createNodeCaptureBundleValidationAdapter,
 } from '../capture/index';
+import {
+  createPrivacySettingsOpener,
+  readCapturePermissions,
+  refreshCapturePermissions,
+} from '../permissions/index';
 import { createServerApiClient } from '../server/index';
+import {
+  type DesktopShellStatus,
+  createDesktopShell,
+  createTrayIconPngBuffer,
+} from '../shell/index';
 import { createSqliteStore } from '../storage/index';
 import { createNodeSqliteDatabase } from '../storage/node';
-import type { SyncAssetReader } from '../sync/index';
+import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
 import { resolveDesktopApplicationPaths } from './application-layout';
 import { createLocalAssetReader } from './asset-reader';
 import { createAuthStorage } from './auth-storage';
@@ -25,7 +35,7 @@ import { createSafeStorageSecretStore } from './safe-storage';
  * Thin, genuinely-`electron`-importing entry point. Lifecycle decisions live
  * in `runtime.ts`, while HTTP, diagnostics, and auth storage are isolated in
  * narrow testable adapters; this file only supplies real
- * `app`/`ipcMain`/`BrowserWindow` plus concrete dependency instances. It
+ * `app`/`ipcMain`/`BrowserWindow`/`Tray` plus concrete dependency instances. It
  * cannot itself be exercised under `bun test` (real Electron is required),
  * so it is verified by manual smoke test instead — see the task notes for
  * that run.
@@ -158,9 +168,8 @@ const authClient = createAuthClient({
   transport: fetchTransport,
 });
 
-const { loginWindowHtmlPath, loginWindowPreloadPath } = resolveDesktopApplicationPaths(
-  app.getAppPath(),
-);
+const { loginWindowHtmlPath, loginWindowPreloadPath, mainWindowHtmlPath, mainWindowPreloadPath } =
+  resolveDesktopApplicationPaths(app.getAppPath());
 
 const loginPrompter = createLoginWindowPrompter({
   authClient,
@@ -178,6 +187,10 @@ const loginPrompter = createLoginWindowPrompter({
     }),
   htmlFilePath: loginWindowHtmlPath,
   ipcMain,
+});
+
+const privacySettings = createPrivacySettingsOpener(async (url) => {
+  await shell.openExternal(url);
 });
 
 // `createElectronMainRuntime` itself registers `window-all-closed` and
@@ -210,6 +223,89 @@ const { ready } = createElectronMainRuntime({
       endpoint: serverEndpoint,
       transport: fetchTransport,
     }),
+  createShell: (context) => {
+    const trayIcon = nativeImage.createFromBuffer(createTrayIconPngBuffer());
+    if (process.platform === 'darwin') {
+      trayIcon.setTemplateImage(true);
+    }
+
+    return createDesktopShell({
+      actions: {
+        openAccessibilitySettings: async () => {
+          await privacySettings.open('accessibility');
+        },
+        openScreenRecordingSettings: async () => {
+          await privacySettings.open('screen_recording');
+        },
+        pauseCapture: async () => {
+          await context.lifecycle.pause();
+        },
+        refreshPermissions: async () => {
+          await refreshCapturePermissions({
+            client: context.commandClient,
+            eventHandler: context.eventHandler,
+            now: () => new Date().toISOString(),
+          });
+        },
+        resumeCapture: async () => {
+          await context.lifecycle.resume();
+        },
+      },
+      adapters: {
+        buildMenu: (items) =>
+          Menu.buildFromTemplate(
+            items.map((item) => {
+              if (item.kind === 'separator') {
+                return { type: 'separator' as const };
+              }
+              return {
+                click: item.click,
+                enabled: item.enabled,
+                label: item.label,
+              };
+            }),
+          ),
+        createTray: () => new Tray(trayIcon),
+        createWindow: () =>
+          new BrowserWindow({
+            height: 560,
+            minHeight: 420,
+            minWidth: 420,
+            show: false,
+            title: 'Recapsy',
+            webPreferences: {
+              contextIsolation: true,
+              nodeIntegration: false,
+              preload: mainWindowPreloadPath,
+            },
+            width: 480,
+          }),
+        quit: () => app.quit(),
+      },
+      mainWindowHtmlPath,
+      statusSource: {
+        async getStatus(): Promise<DesktopShellStatus> {
+          const snapshot = context.lifecycle.getSnapshot();
+          const captureStatus = context.eventHandler.getStatus();
+          const permissions = readCapturePermissions(context.eventHandler);
+          const sync = await createSyncQueueSummary(context.store, context.workspaceId);
+          const lastError = snapshot.captureHelper?.lastSafeError ?? captureStatus.lastSafeError;
+
+          return {
+            accessibility: permissions.accessibility,
+            capturePaused: snapshot.status === 'paused',
+            captureState: snapshot.status,
+            ...(lastError ? { lastErrorMessage: lastError.message } : {}),
+            screenRecording: permissions.screenRecording,
+            syncBlocked: sync.blocked,
+            syncFailed: sync.failed,
+            syncPending: sync.pending,
+            syncRetrying: sync.retrying,
+          };
+        },
+      },
+    });
+  },
   createStore: () => {
     const sqlitePath =
       process.env.RECAPSY_DESKTOP_SQLITE_PATH ??
@@ -224,6 +320,9 @@ const { ready } = createElectronMainRuntime({
   onHelperEnvelope: devVisibilityEnabled ? devVisibility.onHelperEnvelope : undefined,
   onSyncError: devVisibilityEnabled ? devVisibility.onSyncError : undefined,
   onSyncResult: devVisibilityEnabled ? devVisibility.onSyncResult : undefined,
+  openExternalUrl: async (url) => {
+    await shell.openExternal(url);
+  },
   // Real asset-byte reader for the sync loop, replacing the runtime's
   // fail-closed default. Bound to the same `resolveCaptureAssetRoot()` the
   // capture process is handed above, so writer and reader share one root.

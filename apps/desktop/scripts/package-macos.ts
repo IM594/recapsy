@@ -98,21 +98,28 @@ async function prepareMinimalApplication(): Promise<void> {
   const mainBundlePath = path.join(desktopRoot, 'dist', 'main', 'electron-entry.js');
   const preloadBundlePath = path.join(desktopRoot, 'dist', 'auth', 'login-preload.js');
   const loginWindowPath = path.join(desktopRoot, 'dist', 'auth', 'login-window.html');
+  const mainWindowPreloadPath = path.join(desktopRoot, 'dist', 'shell', 'main-preload.js');
+  const mainWindowPath = path.join(desktopRoot, 'dist', 'shell', 'main-window.html');
 
   await Promise.all([
     access(captureBundlePath),
     access(mainBundlePath),
     access(preloadBundlePath),
     access(loginWindowPath),
+    access(mainWindowPreloadPath),
+    access(mainWindowPath),
   ]);
 
   await rm(stagingRoot, { force: true, recursive: true });
   await mkdir(path.join(stagingRoot, 'dist', 'main'), { recursive: true });
   await mkdir(path.join(stagingRoot, 'dist', 'auth'), { recursive: true });
+  await mkdir(path.join(stagingRoot, 'dist', 'shell'), { recursive: true });
   await Promise.all([
     cp(mainBundlePath, path.join(stagingRoot, 'dist', 'main', 'electron-entry.js')),
     cp(preloadBundlePath, path.join(stagingRoot, 'dist', 'auth', 'login-preload.js')),
     cp(loginWindowPath, path.join(stagingRoot, 'dist', 'auth', 'login-window.html')),
+    cp(mainWindowPreloadPath, path.join(stagingRoot, 'dist', 'shell', 'main-preload.js')),
+    cp(mainWindowPath, path.join(stagingRoot, 'dist', 'shell', 'main-window.html')),
   ]);
   await writeFile(
     path.join(stagingRoot, 'package.json'),

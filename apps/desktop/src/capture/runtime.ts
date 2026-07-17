@@ -48,6 +48,7 @@ export type CaptureRuntimeOptions = {
 export type CaptureRuntime = {
   eventHandler: CaptureHelperEventHandler;
   lifecycle: CaptureLifecycle;
+  commandClient: CaptureHelperCommandClient;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
@@ -82,7 +83,7 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     startupRecovery: options.startupRecovery,
   });
 
-  return { eventHandler, lifecycle };
+  return { commandClient: options.client, eventHandler, lifecycle };
 }
 
 function decorateEventHandler(
@@ -95,6 +96,7 @@ function decorateEventHandler(
 
   return {
     getStatus: () => eventHandler.getStatus(),
+    subscribeToPermissionStatus: (listener) => eventHandler.subscribeToPermissionStatus(listener),
     async handleEnvelope(envelope) {
       onHelperEnvelope(envelope);
       await eventHandler.handleEnvelope(envelope);

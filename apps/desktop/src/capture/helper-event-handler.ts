@@ -32,12 +32,14 @@ export type CaptureHelperEventStatus = {
     accessibility: HelperPermissionState;
     screenRecording: HelperPermissionState;
   };
+  permissionStatusSequence?: number;
 };
 
 export type CaptureHelperEventHandler = {
   getStatus(): CaptureHelperEventStatus;
   handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   handleProtocolResult(result: HelperProtocolResult<HelperEnvelope>): Promise<void>;
+  subscribeToPermissionStatus(listener: (status: CaptureHelperEventStatus) => void): () => void;
 };
 
 export type CaptureHelperEventHandlerOptions = {
@@ -59,6 +61,9 @@ export function createCaptureHelperEventHandler(
 
 class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler {
   private messageSequence = 0;
+  private readonly permissionStatusListeners = new Set<
+    (status: CaptureHelperEventStatus) => void
+  >();
   private status: CaptureHelperEventStatus = {};
 
   constructor(private readonly options: CaptureHelperEventHandlerOptions) {}
@@ -71,6 +76,13 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         ? { lastSkippedCapture: { ...this.status.lastSkippedCapture } }
         : {}),
       ...(this.status.permissions ? { permissions: { ...this.status.permissions } } : {}),
+    };
+  }
+
+  subscribeToPermissionStatus(listener: (status: CaptureHelperEventStatus) => void): () => void {
+    this.permissionStatusListeners.add(listener);
+    return () => {
+      this.permissionStatusListeners.delete(listener);
     };
   }
 
@@ -237,8 +249,22 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         accessibility: envelope.payload.accessibility,
         screenRecording: envelope.payload.screenCapture,
       },
+      permissionStatusSequence: (this.status.permissionStatusSequence ?? 0) + 1,
     };
+    this.notifyPermissionStatusListeners();
     await this.persistHelperState();
+  }
+
+  private notifyPermissionStatusListeners(): void {
+    const status = this.getStatus();
+    for (const listener of this.permissionStatusListeners) {
+      try {
+        listener(status);
+      } catch {
+        // Permission observers are read-only consumers and cannot disrupt
+        // capture-event persistence or later observers.
+      }
+    }
   }
 
   private async recordUnexpectedEventFailure(envelope: HelperEnvelope): Promise<void> {

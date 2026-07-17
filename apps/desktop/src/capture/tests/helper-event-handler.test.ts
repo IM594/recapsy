@@ -458,6 +458,98 @@ describe('capture helper event handler', () => {
       },
     });
   });
+
+  it('advances the permission observation sequence only for permission.status events', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+
+    await handler.handleEnvelope(
+      helperEnvelope('permission.status', {
+        accessibility: 'not_determined',
+        observedAt,
+        screenCapture: 'denied',
+      }),
+    );
+    expect(handler.getStatus().permissionStatusSequence).toBe(1);
+
+    await handler.handleEnvelope(
+      helperEnvelope('helper.heartbeat', {
+        sequence: 1,
+        status: 'ready',
+      }),
+    );
+    expect(handler.getStatus().permissionStatusSequence).toBe(1);
+
+    await handler.handleEnvelope(
+      helperEnvelope('permission.status', {
+        accessibility: 'granted',
+        observedAt,
+        screenCapture: 'granted',
+      }),
+    );
+    expect(handler.getStatus().permissionStatusSequence).toBe(2);
+  });
+
+  it('notifies permission observers only for new permission.status events', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+    const observations: Array<{
+      permissionStatusSequence?: number;
+      screenRecording?: string;
+    }> = [];
+    const unsubscribe = handler.subscribeToPermissionStatus((status) => {
+      observations.push({
+        permissionStatusSequence: status.permissionStatusSequence,
+        screenRecording: status.permissions?.screenRecording,
+      });
+    });
+
+    await handler.handleEnvelope(
+      helperEnvelope('helper.heartbeat', {
+        sequence: 1,
+        status: 'ready',
+      }),
+    );
+    await handler.handleEnvelope(
+      helperEnvelope('permission.status', {
+        accessibility: 'granted',
+        observedAt,
+        screenCapture: 'denied',
+      }),
+    );
+
+    unsubscribe();
+    await handler.handleEnvelope(
+      helperEnvelope('permission.status', {
+        accessibility: 'granted',
+        observedAt,
+        screenCapture: 'granted',
+      }),
+    );
+
+    expect(observations).toEqual([
+      {
+        permissionStatusSequence: 1,
+        screenRecording: 'denied',
+      },
+    ]);
+  });
 });
 
 class RecordingCaptureHelperCommandClient implements CaptureHelperCommandClient {

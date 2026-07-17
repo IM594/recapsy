@@ -57,8 +57,9 @@ pnpm run package:macos
 命令先构建真实 capture bundle 与 Electron main / preload，再由
 `@electron/packager` 生成宿主机架构的
 `dist/release/Recapsy-darwin-<arch>/Recapsy.app`。应用代码来自最小 staging，
-`app.asar` 只包含 `dist/main/electron-entry.js`、login preload / HTML 和最小
-manifest；源码、tests、SwiftPM `.build` 与 package `node_modules` 不会进入产物。
+`app.asar` 只包含 `dist/main/electron-entry.js`、login preload / HTML、shell
+main preload / HTML 和最小 manifest；源码、tests、SwiftPM `.build` 与 package
+`node_modules` 不会进入产物。
 采集 bundle 位于标准 nested-code 路径
 `Recapsy.app/Contents/Frameworks/RecapsyCapture.app`，`Contents/Resources` 不保留
 重复副本。
@@ -72,8 +73,8 @@ Developer ID 时，Packager 使用同一发行身份 inside-out 签完整应用�
 凭据、notarization 和正式分发仍由后续独立发行任务完成。
 
 当前命令只生成 host-native 架构，不生成 universal 或另一架构产物；也不包含 DMG、
-notarization、auto-update、Tray / Main Window 或权限引导。自动化不得把 ad-hoc
-GREEN 宣称为 Developer ID、Gatekeeper 或正式发行完成。
+notarization 或 auto-update。自动化不得把 ad-hoc GREEN 宣称为 Developer ID、
+Gatekeeper 或正式发行完成。
 
 ## 自动化测试(不依赖屏幕录制授权)
 
@@ -126,7 +127,7 @@ pnpm run test:capture-bundle-process
 
    > 关键复验:显示名必须是 `Recapsy`(取自可执行名 `Recapsy` / `CFBundleName`,不是只靠 `CFBundleDisplayName`,ADR 约束③)。若显示成别的名字,说明可执行名或 bundle 装配错了。
 
-5. **辅助功能本阶段不做**(ADR 约束②,阶段 3 才引导);采集体对 `accessibility` 恒报 `not_determined`,不影响截图。
+5. **辅助功能**:Tray / 主窗口可打开「辅助功能」设置面板。采集体通过 `AXIsProcessTrusted()` 探测并上报 `granted` / `not_determined`;用户须手动 `+` 添加并启用 **Recapsy**(ADR 约束②)。辅助功能不影响截图,但缺少时 context metadata 无法采样。
 
 6. **观察闭环**:授权后采集体截取当前活跃窗口、产出真实 WebP 写入 `userData/captures/<captureId>/screenshot.webp`,`capture.result` 的 `asset.ref` 为相对键 `<captureId>/screenshot.webp`、`asset.mimeType` 为 `image/webp`;主进程按同一资产根读回字节,sync job 从 `blocked` 转为 `synced`。
 

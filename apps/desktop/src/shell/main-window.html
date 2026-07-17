@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Recapsy</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        line-height: 1.4;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+        font-weight: 600;
+      }
+      .muted {
+        opacity: 0.7;
+        font-size: 13px;
+      }
+      section {
+        margin-top: 18px;
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin: 6px 0;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      button {
+        padding: 6px 10px;
+      }
+      .error {
+        color: #b00020;
+        margin-top: 8px;
+      }
+      .warn {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Recapsy</h1>
+    <p class="muted">Capture status, sync queue, and macOS permission guidance.</p>
+
+    <section>
+      <h2>Capture</h2>
+      <div class="row"><span>State</span><strong id="capture-state">—</strong></div>
+      <div class="row"><span>Paused</span><strong id="capture-paused">—</strong></div>
+      <div class="row"><span>Last error</span><strong id="capture-error">None</strong></div>
+      <div class="actions">
+        <button id="pause" type="button">Pause</button>
+        <button id="resume" type="button">Resume</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Permissions</h2>
+      <div class="row"><span>Screen Recording</span><strong id="perm-screen">—</strong></div>
+      <div class="row"><span>Accessibility</span><strong id="perm-ax">—</strong></div>
+      <div id="permission-guide" class="warn" hidden></div>
+      <div class="actions">
+        <button id="open-screen" type="button">Open Screen Recording Settings</button>
+        <button id="open-ax" type="button">Open Accessibility Settings</button>
+        <button id="refresh-perms" type="button">Refresh Permissions</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Sync</h2>
+      <div class="row"><span>Pending</span><strong id="sync-pending">—</strong></div>
+      <div class="row"><span>Retrying</span><strong id="sync-retrying">—</strong></div>
+      <div class="row"><span>Failed</span><strong id="sync-failed">—</strong></div>
+      <div class="row"><span>Blocked</span><strong id="sync-blocked">—</strong></div>
+    </section>
+
+    <p id="status" class="muted" role="status"></p>
+    <p id="error" class="error" role="alert"></p>
+
+    <script>
+      const api = window.recapsyDesktop;
+      const statusEl = document.getElementById('status');
+      const errorEl = document.getElementById('error');
+      const guideEl = document.getElementById('permission-guide');
+
+      function setText(id, value) {
+        document.getElementById(id).textContent = value;
+      }
+
+      function permissionLabel(value) {
+        if (value === 'granted') return 'Granted';
+        if (value === 'denied') return 'Denied';
+        if (value === 'not_determined') return 'Not determined';
+        return 'Unknown';
+      }
+
+      function renderShellStatus(status) {
+        setText('capture-state', status.captureState);
+        setText('capture-paused', status.capturePaused ? 'Yes' : 'No');
+        setText('capture-error', status.lastErrorMessage || 'None');
+        setText('perm-screen', permissionLabel(status.screenRecording));
+        setText('perm-ax', permissionLabel(status.accessibility));
+        setText('sync-pending', String(status.syncPending));
+        setText('sync-retrying', String(status.syncRetrying ?? 0));
+        setText('sync-failed', String(status.syncFailed));
+        setText('sync-blocked', String(status.syncBlocked ?? 0));
+
+        const needsScreen = status.screenRecording !== 'granted';
+        const needsAx = status.accessibility !== 'granted';
+        if (needsScreen || needsAx) {
+          guideEl.hidden = false;
+          guideEl.textContent = needsScreen
+            ? 'Screen Recording is required. Open System Settings, enable Recapsy, then refresh.'
+            : 'Accessibility is optional for capture but required for context metadata. Open System Settings, add Recapsy manually, enable it, then refresh.';
+        } else {
+          guideEl.hidden = true;
+        }
+      }
+
+      async function unwrap(promise) {
+        const response = await promise;
+        if (!response || !response.ok) {
+          throw new Error((response && response.error && response.error.message) || 'Request failed');
+        }
+        return response.data;
+      }
+
+      async function refreshAll() {
+        errorEl.textContent = '';
+        statusEl.textContent = 'Refreshing…';
+        const [capture, sync, permissions] = await Promise.all([
+          unwrap(api.captureGetStatus()),
+          unwrap(api.syncGetSummary()),
+          unwrap(api.permissionsGetStatus()),
+        ]);
+        renderShellStatus({
+          captureState: capture.state,
+          capturePaused: capture.paused,
+          lastErrorMessage: capture.lastError && capture.lastError.message,
+          screenRecording: permissions.screenRecording,
+          accessibility: permissions.accessibility,
+          syncPending: sync.pending,
+          syncRetrying: sync.retrying,
+          syncFailed: sync.failed,
+          syncBlocked: sync.blocked,
+        });
+        statusEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+      }
+
+      document.getElementById('pause').addEventListener('click', async () => {
+        try {
+          await unwrap(api.capturePause());
+          await refreshAll();
+        } catch (error) {
+          errorEl.textContent = error.message || 'Pause failed';
+        }
+      });
+
+      document.getElementById('resume').addEventListener('click', async () => {
+        try {
+          await unwrap(api.captureResume());
+          await refreshAll();
+        } catch (error) {
+          errorEl.textContent = error.message || 'Resume failed';
+        }
+      });
+
+      document.getElementById('open-screen').addEventListener('click', async () => {
+        try {
+          await unwrap(api.permissionsOpenScreenRecordingSettings());
+          statusEl.textContent = 'Opened Screen Recording settings. Enable Recapsy, then refresh.';
+        } catch (error) {
+          errorEl.textContent = error.message || 'Could not open settings';
+        }
+      });
+
+      document.getElementById('open-ax').addEventListener('click', async () => {
+        try {
+          await unwrap(api.permissionsOpenAccessibilitySettings());
+          statusEl.textContent =
+            'Opened Accessibility settings. Add Recapsy with +, enable it, then refresh.';
+        } catch (error) {
+          errorEl.textContent = error.message || 'Could not open settings';
+        }
+      });
+
+      document.getElementById('refresh-perms').addEventListener('click', async () => {
+        try {
+          await unwrap(api.permissionsRefresh());
+          await refreshAll();
+        } catch (error) {
+          errorEl.textContent = error.message || 'Refresh failed';
+        }
+      });
+
+      if (api.onStatusUpdated) {
+        api.onStatusUpdated((status) => {
+          renderShellStatus(status);
+          statusEl.textContent = 'Live update ' + new Date().toLocaleTimeString();
+        });
+      }
+
+      refreshAll().catch((error) => {
+        errorEl.textContent = error.message || 'Failed to load status';
+      });
+    </script>
+  </body>
+</html>

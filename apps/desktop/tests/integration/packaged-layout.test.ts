@@ -7,7 +7,12 @@ import { extractFile, listPackage } from '@electron/asar';
 
 const packagedAppPath =
   process.env.RECAPSY_DESKTOP_PACKAGED_APP ??
-  path.resolve('dist', 'release', `Recapsy-darwin-${process.arch}`, 'Recapsy.app');
+  path.resolve(
+    'dist',
+    'release',
+    `Recapsy-darwin-${process.arch === 'arm64' ? 'arm64' : 'x64'}`,
+    'Recapsy.app',
+  );
 const contentsPath = path.join(packagedAppPath, 'Contents');
 const resourcesPath = path.join(contentsPath, 'Resources');
 const applicationArchivePath = path.join(resourcesPath, 'app.asar');
@@ -31,12 +36,17 @@ describe('packaged Electron application layout', () => {
       '/dist/auth/login-window.html',
       '/dist/main',
       '/dist/main/electron-entry.js',
+      '/dist/shell',
+      '/dist/shell/main-preload.js',
+      '/dist/shell/main-window.html',
       '/package.json',
     ]);
 
     expect(archiveEntries).toContain('/dist/main/electron-entry.js');
     expect(archiveEntries).toContain('/dist/auth/login-preload.js');
     expect(archiveEntries).toContain('/dist/auth/login-window.html');
+    expect(archiveEntries).toContain('/dist/shell/main-preload.js');
+    expect(archiveEntries).toContain('/dist/shell/main-window.html');
     expect(archiveEntries.some((entry) => entry.startsWith('/src'))).toBe(false);
     expect(archiveEntries.some((entry) => entry.startsWith('/tests'))).toBe(false);
     expect(archiveEntries.some((entry) => entry.includes('/macos/.build'))).toBe(false);

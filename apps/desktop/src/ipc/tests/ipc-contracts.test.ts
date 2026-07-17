@@ -37,6 +37,8 @@ describe('desktop ipc contracts', () => {
         'search',
         'settings',
         'diagnostics',
+        'permissions',
+        'app',
       ]),
     );
   });

@@ -1,4 +1,5 @@
 import Foundation
+import ApplicationServices
 import CaptureCore
 
 /// Thread-safe stdout line emitter. All protocol output funnels through here so
@@ -128,6 +129,8 @@ final class CaptureEngine {
                     startCaptureTimer()
                 }
             }
+        case "permission.refresh":
+            emitPermissionStatus()
         case "capture.start":
             state = .ready
             emitStatus(status: "ready")
@@ -363,11 +366,13 @@ final class CaptureEngine {
 
     private func emitPermissionStatus() {
         let screenCapture = ScreenshotCapturer.isScreenCaptureGranted ? "granted" : "not_determined"
+        // Probe only — never call AXIsProcessTrustedWithOptions with prompt.
+        // Disclaimed capture processes are not auto-added to Accessibility; the
+        // desktop shell must open System Settings and guide manual enablement.
+        let accessibility = AXIsProcessTrusted() ? "granted" : "not_determined"
         let payload = PermissionStatusPayload(
             screenCapture: screenCapture,
-            // Accessibility is out of scope for 1B (ADR 0009 约束②): never probed
-            // here, always reported as not-yet-determined.
-            accessibility: "not_determined",
+            accessibility: accessibility,
             observedAt: CaptureEngine.iso8601(Date())
         )
         emit(type: "permission.status", payload: payload)

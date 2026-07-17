@@ -129,6 +129,7 @@ function helperToMainEnvelopes(): unknown[] {
 function mainToHelperEnvelopes(): unknown[] {
   return [
     envelope('helper.configure', { captureIntervalMs: 1000, policyVersion: 'policy-v1' }),
+    envelope('permission.refresh', {}),
     envelope('capture.start', { reason: 'runtime_started' }),
     envelope('capture.pause', { reason: 'user_paused' }),
     envelope('capture.resume', { reason: 'user_resumed' }),
