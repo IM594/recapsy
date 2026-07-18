@@ -238,7 +238,7 @@ function isSafeCaptureContextPayload(payload: unknown): boolean {
     isRecord(payload) &&
     hasOnlyKeys(payload, ['observedAt', 'app', 'window', 'website', 'document', 'policy']) &&
     isString(payload.observedAt) &&
-    isOptionalApp(payload.app) &&
+    isApp(payload.app) &&
     isOptionalWindow(payload.window) &&
     isOptionalWebsite(payload.website) &&
     isOptionalDocument(payload.document) &&
@@ -394,13 +394,15 @@ function isReasonPayload(payload: unknown, reasons: readonly string[]): boolean 
   return isRecord(payload) && hasOnlyKeys(payload, ['reason']) && isOneOf(payload.reason, reasons);
 }
 
-function isOptionalApp(value: unknown): boolean {
+function isApp(value: unknown): boolean {
   return (
-    value === undefined ||
-    (isRecord(value) &&
-      hasOnlyKeys(value, ['name', 'bundleId']) &&
-      isSafeVisibleString(value.name) &&
-      isString(value.bundleId))
+    isRecord(value) &&
+    hasOnlyKeys(value, ['name', 'bundleId']) &&
+    isSafeVisibleString(value.name) &&
+    value.name.trim().length > 0 &&
+    isString(value.bundleId) &&
+    value.bundleId.length <= 256 &&
+    /^[A-Za-z0-9.-]+$/.test(value.bundleId)
   );
 }
 
