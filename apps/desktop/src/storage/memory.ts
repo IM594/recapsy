@@ -507,8 +507,9 @@ class InMemoryOperationalStore {
 
     return {
       assetBytes,
-      maxAttempt: jobs.reduce((max, job) => Math.max(max, job.attempt), 0),
       queuedJobs: jobs.filter((job) => !isTerminalOutboxState(job.state)).length,
+      retryingJobs: jobs.filter((job) => job.state === 'pending' && job.nextRetryAt !== undefined)
+        .length,
     };
   }
 

@@ -250,11 +250,12 @@ class SqliteOperationalStore {
 
   async getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot> {
     const jobRow = this.options.database
-      .prepare<{ queued_jobs: number; max_attempt: number | null }>(
+      .prepare<{ queued_jobs: number; retrying_jobs: number }>(
         `SELECT
            SUM(CASE WHEN state NOT IN ('synced', 'blocked', 'failed', 'cancelled') THEN 1 ELSE 0 END)
              AS queued_jobs,
-           MAX(attempt) AS max_attempt
+           SUM(CASE WHEN state = 'pending' AND next_retry_at IS NOT NULL THEN 1 ELSE 0 END)
+             AS retrying_jobs
          FROM outbox_jobs
          WHERE workspace_id = $workspaceId`,
       )
@@ -269,8 +270,8 @@ class SqliteOperationalStore {
 
     return {
       assetBytes: assetRow?.asset_bytes ?? 0,
-      maxAttempt: jobRow?.max_attempt ?? 0,
       queuedJobs: jobRow?.queued_jobs ?? 0,
+      retryingJobs: jobRow?.retrying_jobs ?? 0,
     };
   }
 

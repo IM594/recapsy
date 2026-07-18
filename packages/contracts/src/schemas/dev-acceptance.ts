@@ -18,9 +18,13 @@ export const DevAcceptanceCapturePauseReasonSchema = z.enum([
 ]);
 
 export const DevAcceptanceAdmissionReasonSchema = z.enum([
+  'asset_write_failed',
   'max_queued_jobs_reached',
   'max_asset_bytes_reached',
+  'max_retrying_jobs_reached',
+  'min_available_storage_reached',
   'queue_state_unavailable',
+  'storage_state_unavailable',
 ]);
 
 export const DevAcceptanceSafeErrorCodeSchema = z.enum([
@@ -98,7 +102,7 @@ export const DevAcceptanceDesktopStatusSchema = z
     admission: z
       .object({
         active: z.boolean(),
-        reasons: z.array(DevAcceptanceAdmissionReasonSchema).max(3),
+        reasons: z.array(DevAcceptanceAdmissionReasonSchema).max(7),
       })
       .strict(),
   })

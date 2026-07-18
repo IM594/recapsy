@@ -100,6 +100,26 @@ describe('development acceptance desktop status contract', () => {
     ).toBe(false);
   });
 
+  test('accepts every bounded queue and storage admission reason', () => {
+    expect(
+      DevAcceptanceDesktopStatusSchema.parse({
+        ...status,
+        admission: {
+          active: true,
+          reasons: [
+            'asset_write_failed',
+            'max_queued_jobs_reached',
+            'max_asset_bytes_reached',
+            'max_retrying_jobs_reached',
+            'min_available_storage_reached',
+            'queue_state_unavailable',
+            'storage_state_unavailable',
+          ],
+        },
+      }).admission.reasons,
+    ).toHaveLength(7);
+  });
+
   test('rejects invalid counters, timestamps, identities, and impossible capacity', () => {
     const invalidStatuses = [
       { ...status, schemaVersion: 1 },

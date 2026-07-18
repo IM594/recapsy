@@ -14,8 +14,11 @@ export type {
   CaptureAdmissionController,
   CaptureAdmissionControllerOptions,
   CaptureAdmissionLifecycle,
+  CaptureAdmissionReason,
   CaptureAdmissionStatus,
   CaptureAdmissionStore,
+  CaptureStorageAdmissionOptions,
+  CaptureStorageAdmissionSnapshot,
 } from './admission';
 export type {
   CaptureHelperAssetRef,

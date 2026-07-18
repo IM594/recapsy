@@ -21,8 +21,10 @@ const deviceId = 'device_1';
 const backpressure: BackpressureConfig = {
   maxAssetBytes: 1024 * 1024,
   maxQueuedJobs: 10,
+  maxRetryingJobs: 5,
   resumeAssetBytes: 512 * 1024,
   resumeQueuedJobs: 5,
+  resumeRetryingJobs: 2,
 };
 
 describe('capture helper event handler', () => {
@@ -91,8 +93,10 @@ describe('capture helper event handler', () => {
       backpressure: {
         maxAssetBytes: 1024 * 1024,
         maxQueuedJobs: 1,
+        maxRetryingJobs: 5,
         resumeAssetBytes: 512 * 1024,
         resumeQueuedJobs: 0,
+        resumeRetryingJobs: 2,
       },
       client,
       deviceId,
@@ -121,8 +125,10 @@ describe('capture helper event handler', () => {
       backpressure: {
         maxAssetBytes: 1024 * 1024,
         maxQueuedJobs: 0,
+        maxRetryingJobs: 5,
         resumeAssetBytes: 512 * 1024,
         resumeQueuedJobs: 0,
+        resumeRetryingJobs: 2,
       },
       client,
       deviceId,
@@ -153,8 +159,10 @@ describe('capture helper event handler', () => {
       backpressure: {
         maxAssetBytes: 1024 * 1024,
         maxQueuedJobs: 0,
+        maxRetryingJobs: 5,
         resumeAssetBytes: 512 * 1024,
         resumeQueuedJobs: 0,
+        resumeRetryingJobs: 2,
       },
       client,
       deviceId,
@@ -180,11 +188,15 @@ describe('capture helper event handler', () => {
       ),
     );
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    let storageFailures = 0;
     const handler = createCaptureHelperEventHandler({
       backpressure,
       client,
       deviceId,
       now: () => observedAt,
+      onStorageFailure: async () => {
+        storageFailures += 1;
+      },
       store,
       workspaceId,
     });
@@ -205,6 +217,33 @@ describe('capture helper event handler', () => {
     expect(serialized).not.toContain('secret');
     expect(serialized).not.toContain('OCR raw text');
     expect(serialized).not.toContain('stderr');
+    expect(storageFailures).toBe(1);
+  });
+
+  it('promotes a typed storage corruption result into admission storage failure', async () => {
+    const store = createMemoryStore();
+    store.createCaptureOutboxEntry = async () => ({
+      error: { code: 'storage_corruption', message: 'Operational storage is corrupt.' },
+      ok: false,
+    });
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    let storageFailures = 0;
+    const handler = createCaptureHelperEventHandler({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      onStorageFailure: async () => {
+        storageFailures += 1;
+      },
+      store,
+      workspaceId,
+    });
+
+    await handler.handleEnvelope(captureResultEnvelope());
+
+    expect(storageFailures).toBe(1);
+    expect(client.commands).toMatchObject([{ payload: { code: 'storage_unavailable' } }]);
   });
 
   it('does not leave asset refs behind when outbox entry creation fails', async () => {
@@ -503,11 +542,15 @@ describe('capture helper event handler', () => {
   it('persists real permission.status into helper_state and preserves it across a later capture error', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    let storageWriteFailures = 0;
     const handler = createCaptureHelperEventHandler({
       backpressure,
       client,
       deviceId,
       now: () => observedAt,
+      onStorageWriteFailure: async () => {
+        storageWriteFailures += 1;
+      },
       store,
       workspaceId,
     });
@@ -550,6 +593,7 @@ describe('capture helper event handler', () => {
         screenRecording: 'granted',
       },
     });
+    expect(storageWriteFailures).toBe(1);
   });
 
   it('advances the permission observation sequence only for permission.status events', async () => {

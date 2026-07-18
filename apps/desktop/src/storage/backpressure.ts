@@ -15,6 +15,10 @@ export function evaluateOperationalStoreBackpressure(
     reasons.push('max_queued_jobs_reached');
   }
 
+  if (snapshot.retryingJobs >= config.maxRetryingJobs) {
+    reasons.push('max_retrying_jobs_reached');
+  }
+
   if (snapshot.assetBytes >= config.maxAssetBytes) {
     reasons.push('max_asset_bytes_reached');
   }

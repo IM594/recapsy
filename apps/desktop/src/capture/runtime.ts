@@ -7,7 +7,11 @@ import {
   type BackpressureConfig,
   reconcileAssetRefs,
 } from '../storage/index';
-import { type CaptureAdmissionController, createCaptureAdmissionController } from './admission';
+import {
+  type CaptureAdmissionController,
+  type CaptureStorageAdmissionOptions,
+  createCaptureAdmissionController,
+} from './admission';
 import { createCaptureHelperController } from './helper-controller';
 import {
   type CaptureHelperCommandClient,
@@ -29,8 +33,10 @@ export const DEFAULT_CAPTURE_MAX_QUEUED_JOBS = 24;
 const DEFAULT_CAPTURE_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 256 * 1024 * 1024,
   maxQueuedJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
+  maxRetryingJobs: 8,
   resumeAssetBytes: 128 * 1024 * 1024,
   resumeQueuedJobs: 8,
+  resumeRetryingJobs: 2,
 };
 
 const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
@@ -59,6 +65,7 @@ export type CaptureRuntimeOptions = {
     }): Promise<CapturePoliciesResult>;
   };
   startupRecovery: CaptureStartupRecovery;
+  storageAdmission?: CaptureStorageAdmissionOptions;
   store: CaptureRuntimeStore;
   workspaceId: string;
 };
@@ -72,22 +79,28 @@ export type CaptureRuntime = {
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
+  const admissionRef: { current?: CaptureAdmissionController } = {};
   const lifecycleRef: { current?: CaptureLifecycle } = {};
   const rawEventHandler = createCaptureHelperEventHandler({
     backpressure: options.backpressure ?? DEFAULT_CAPTURE_BACKPRESSURE,
     client: options.client,
     deviceId: options.deviceId,
     now: options.now,
-    onBackpressurePause: async (reasons) => {
-      if (lifecycleRef.current) {
-        await lifecycleRef.current.setAutomaticPause(reasons.includes('max_queued_jobs_reached'));
-        await lifecycleRef.current.setStoragePause(reasons.includes('max_asset_bytes_reached'));
+    onBackpressurePause: async () => {
+      if (admissionRef.current) {
+        await admissionRef.current.reconcile();
         return;
       }
       await options.client.pauseCapture();
     },
     onPermissionChange: async (permissions) => {
       await lifecycleRef.current?.setPermissionPause(permissions.screenRecording !== 'granted');
+    },
+    onStorageFailure: async () => {
+      await admissionRef.current?.reportStorageFailure();
+    },
+    onStorageWriteFailure: async () => {
+      await admissionRef.current?.reportStorageWriteFailure();
     },
     store: options.store,
     workspaceId: options.workspaceId,
@@ -136,9 +149,11 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
   const admission = createCaptureAdmissionController({
     backpressure: options.backpressure ?? DEFAULT_CAPTURE_BACKPRESSURE,
     lifecycle,
+    storage: options.storageAdmission,
     store: options.store,
     workspaceId: options.workspaceId,
   });
+  admissionRef.current = admission;
   const localPolicy = createLocalCapturePolicyManager({
     now: options.now,
     reloadPolicy: () => helper.refreshPolicy(),

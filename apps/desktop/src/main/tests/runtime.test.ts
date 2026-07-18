@@ -581,6 +581,76 @@ describe('electron main runtime wiring', () => {
     expect(syncLoop.stopCalls).toBe(2);
   });
 
+  it('routes native asset write failures into storage admission without dropping accepted work', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    let shellContext: DesktopShellFactoryContext | undefined;
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        createShell(context) {
+          shellContext = context;
+          return new FakeDesktopShell();
+        },
+        helperClient,
+        ipcMain,
+        storageAdmission: {
+          minAvailableBytes: 100,
+          probe: async () => ({ availableBytes: 200, writable: true }),
+          resumeAvailableBytes: 200,
+          verifyWrite: async () => undefined,
+        },
+        store,
+      }),
+    );
+    app.triggerReady();
+    await handle.ready;
+    await store.createCaptureOutboxEntry({
+      assetRefId: 'asset_accepted',
+      assetRefs: [
+        {
+          assetRefId: 'asset_accepted',
+          availabilityState: 'available',
+          cleanupState: 'retained',
+          createdAt: now,
+          hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          localAccessKey: 'capture_accepted/screenshot.webp',
+          mimeType: 'image/webp',
+          role: 'capture_original',
+          sizeBytes: 1024,
+          workspaceId,
+        },
+      ],
+      createdAt: now,
+      deviceId,
+      id: 'job_accepted',
+      idempotencyKey: 'accepted-before-write-failure',
+      payloadHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      workspaceId,
+    });
+
+    await helperClient.emit({
+      correlationId: null,
+      messageId: 'capture_error_1',
+      payload: {
+        captureId: 'capture_1',
+        code: 'asset_write_failed',
+        message: 'disk full at a private local path',
+      },
+      protocolVersion: 'recapsy.capture-helper',
+      sentAt: now,
+      type: 'capture.error',
+    });
+
+    expect(shellContext?.admission.getStatus()).toEqual({
+      active: true,
+      reasons: ['asset_write_failed'],
+    });
+    expect(shellContext?.lifecycle.getSnapshot().pauseReasons).toContain('storage');
+    expect(await store.listOutboxJobs({ workspaceId })).toMatchObject([
+      { id: 'job_accepted', state: 'pending' },
+    ]);
+  });
+
   it('continues runtime shutdown when synchronous shell disposal fails', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const syncLoop = new FakeSyncLoop();

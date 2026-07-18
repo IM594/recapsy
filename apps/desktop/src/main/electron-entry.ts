@@ -47,6 +47,10 @@ import { createDevVisibility } from './dev-visibility';
 import { createHttpTransport } from './http-transport';
 import { type ElectronMainRuntimeOptions, createElectronMainRuntime } from './runtime';
 import { createSafeStorageSecretStore } from './safe-storage';
+import {
+  createLocalStorageAdmissionProbe,
+  createLocalStorageWriteVerifier,
+} from './storage-admission';
 
 /**
  * Thin, genuinely-`electron`-importing entry point. Lifecycle decisions live
@@ -417,6 +421,12 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
   // fail-closed default. Bound to the same `resolveCaptureAssetRoot()` the
   // capture process is handed above, so writer and reader share one root.
   readAssetBytes: (localAccessKey) => resolveCaptureAssetReader()(localAccessKey),
+  storageAdmission: {
+    minAvailableBytes: 512 * 1024 * 1024,
+    probe: () => createLocalStorageAdmissionProbe({ assetRoot: resolveCaptureAssetRoot() })(),
+    resumeAvailableBytes: 1024 * 1024 * 1024,
+    verifyWrite: () => createLocalStorageWriteVerifier({ assetRoot: resolveCaptureAssetRoot() })(),
+  },
   tokenStore,
 };
 

@@ -1214,20 +1214,26 @@ describe('SQLite operational store', () => {
     const backpressure = evaluateOperationalStoreBackpressure(snapshot, {
       maxAssetBytes: 4096,
       maxQueuedJobs: 2,
+      maxRetryingJobs: 1,
       resumeAssetBytes: 2048,
       resumeQueuedJobs: 1,
+      resumeRetryingJobs: 0,
     });
     const summary = await createSyncQueueSummary(store, 'workspace_1', { backpressure });
 
     expect(snapshot).toEqual({
       assetBytes: 4096,
-      maxAttempt: 1,
       queuedJobs: 2,
+      retryingJobs: 1,
     });
     expect(summary).toMatchObject({
       backpressure: {
         active: true,
-        reasons: ['max_queued_jobs_reached', 'max_asset_bytes_reached'],
+        reasons: [
+          'max_queued_jobs_reached',
+          'max_retrying_jobs_reached',
+          'max_asset_bytes_reached',
+        ],
       },
       pending: 2,
       retrying: 1,

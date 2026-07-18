@@ -313,17 +313,22 @@ export type OperationalStoreResult<T> =
 export type OperationalStoreSnapshot = {
   queuedJobs: number;
   assetBytes: number;
-  maxAttempt: number;
+  retryingJobs: number;
 };
 
 export type BackpressureConfig = {
   maxQueuedJobs: number;
   maxAssetBytes: number;
+  maxRetryingJobs: number;
   resumeQueuedJobs: number;
   resumeAssetBytes: number;
+  resumeRetryingJobs: number;
 };
 
-export type BackpressureReason = 'max_queued_jobs_reached' | 'max_asset_bytes_reached';
+export type BackpressureReason =
+  | 'max_queued_jobs_reached'
+  | 'max_retrying_jobs_reached'
+  | 'max_asset_bytes_reached';
 
 export type BackpressureDecision = {
   action: 'allow' | 'pause';

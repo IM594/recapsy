@@ -556,14 +556,16 @@ describe('operational store backpressure', () => {
     const decision = evaluateOperationalStoreBackpressure(
       {
         assetBytes: 1024,
-        maxAttempt: 1,
         queuedJobs: 2,
+        retryingJobs: 1,
       },
       {
         maxAssetBytes: 4096,
         maxQueuedJobs: 5,
+        maxRetryingJobs: 3,
         resumeAssetBytes: 2048,
         resumeQueuedJobs: 2,
+        resumeRetryingJobs: 1,
       },
     );
 
@@ -578,21 +580,23 @@ describe('operational store backpressure', () => {
     const decision = evaluateOperationalStoreBackpressure(
       {
         assetBytes: 4096,
-        maxAttempt: 4,
         queuedJobs: 5,
+        retryingJobs: 3,
       },
       {
         maxAssetBytes: 4096,
         maxQueuedJobs: 5,
+        maxRetryingJobs: 3,
         resumeAssetBytes: 2048,
         resumeQueuedJobs: 2,
+        resumeRetryingJobs: 1,
       },
     );
 
     expect(decision).toEqual({
       action: 'pause',
       hardLimit: true,
-      reasons: ['max_queued_jobs_reached', 'max_asset_bytes_reached'],
+      reasons: ['max_queued_jobs_reached', 'max_retrying_jobs_reached', 'max_asset_bytes_reached'],
     });
   });
 });

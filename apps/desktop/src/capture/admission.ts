@@ -14,14 +14,35 @@ export type CaptureAdmissionLifecycle = {
   setStoragePause(active: boolean): Promise<void>;
 };
 
+export type CaptureAdmissionReason =
+  | BackpressureReason
+  | 'asset_write_failed'
+  | 'min_available_storage_reached'
+  | 'queue_state_unavailable'
+  | 'storage_state_unavailable';
+
 export type CaptureAdmissionStatus = {
   active: boolean;
-  reasons: readonly (BackpressureReason | 'queue_state_unavailable')[];
+  reasons: readonly CaptureAdmissionReason[];
+};
+
+export type CaptureStorageAdmissionSnapshot = {
+  availableBytes: number;
+  writable: boolean;
+};
+
+export type CaptureStorageAdmissionOptions = {
+  minAvailableBytes: number;
+  probe(): Promise<CaptureStorageAdmissionSnapshot>;
+  resumeAvailableBytes: number;
+  verifyWrite(): Promise<void>;
 };
 
 export type CaptureAdmissionController = {
   getStatus(): CaptureAdmissionStatus;
   reconcile(): Promise<CaptureAdmissionStatus>;
+  reportStorageFailure(): Promise<CaptureAdmissionStatus>;
+  reportStorageWriteFailure(): Promise<CaptureAdmissionStatus>;
   start(): Promise<void>;
   stop(): void;
 };
@@ -32,16 +53,18 @@ export type CaptureAdmissionControllerOptions = {
   intervalMs?: number;
   lifecycle: CaptureAdmissionLifecycle;
   setIntervalFn?: (callback: () => void, delayMs: number) => unknown;
+  storage?: CaptureStorageAdmissionOptions;
   store: CaptureAdmissionStore;
   workspaceId: string;
 };
 
 const DEFAULT_RECONCILIATION_INTERVAL_MS = 1000;
+const INTAKE_RECOVERY_SAMPLES = 2;
 
 /**
- * Owns automatic capture admission. The controller has hysteresis: reaching a
- * high water mark pauses new frames, and only clearing every low water mark
- * resumes them. Manual pause ownership stays in the lifecycle.
+ * Owns automatic capture admission. Queue volume, retry pressure, logical
+ * asset bytes, and physical storage are independent latches: each enters at
+ * its high-risk water mark and recovers only at its own low-risk water mark.
  */
 export function createCaptureAdmissionController(
   options: CaptureAdmissionControllerOptions,
@@ -50,32 +73,81 @@ export function createCaptureAdmissionController(
 }
 
 class StoreBackedCaptureAdmissionController implements CaptureAdmissionController {
-  private active = false;
+  private assetBytesBlocked = false;
+  private automaticPauseApplied = false;
+  private availableStorageBlocked = false;
+  private intakeStorageBlocked = false;
+  private intakeStorageFailureGeneration = 0;
+  private intakeStorageHealthySamples = 0;
   private intervalHandle: unknown;
-  private reasons: CaptureAdmissionStatus['reasons'] = [];
+  private queueBlocked = false;
+  private queueStateUnavailable = false;
+  private retryBlocked = false;
+  private reconciliationInFlight: Promise<CaptureAdmissionStatus> | undefined;
+  private pauseTransitionTail: Promise<void> = Promise.resolve();
+  private storagePauseApplied = false;
+  private storageStateUnavailable = false;
+  private storageWriteBlocked = false;
+  private storageWriteFailureGeneration = 0;
 
   constructor(private readonly options: CaptureAdmissionControllerOptions) {}
 
   getStatus(): CaptureAdmissionStatus {
-    return { active: this.active, reasons: [...this.reasons] } as CaptureAdmissionStatus;
+    const reasons: CaptureAdmissionReason[] = [
+      ...(this.queueBlocked ? (['max_queued_jobs_reached'] as const) : []),
+      ...(this.retryBlocked ? (['max_retrying_jobs_reached'] as const) : []),
+      ...(this.assetBytesBlocked ? (['max_asset_bytes_reached'] as const) : []),
+      ...(this.availableStorageBlocked ? (['min_available_storage_reached'] as const) : []),
+      ...(this.storageWriteBlocked ? (['asset_write_failed'] as const) : []),
+      ...(this.queueStateUnavailable ? (['queue_state_unavailable'] as const) : []),
+      ...(this.storageStateUnavailable || this.intakeStorageBlocked
+        ? (['storage_state_unavailable'] as const)
+        : []),
+    ];
+
+    return { active: reasons.length > 0, reasons };
   }
 
-  async reconcile(): Promise<CaptureAdmissionStatus> {
-    try {
-      const snapshot = await this.options.store.getBackpressureSnapshot(this.options.workspaceId);
-      const decision = evaluateOperationalStoreBackpressure(snapshot, this.options.backpressure);
-      if (decision.action === 'pause') {
-        await this.setPauseCauses(decision.reasons);
-      } else {
-        await this.clearRecoveredPauseCauses(snapshot);
-      }
-    } catch {
-      await this.options.lifecycle.setAutomaticPause(true);
-      await this.options.lifecycle.setStoragePause(false);
-      this.active = true;
-      this.reasons = ['queue_state_unavailable'];
+  reconcile(): Promise<CaptureAdmissionStatus> {
+    if (this.reconciliationInFlight) {
+      return this.reconciliationInFlight;
     }
 
+    const reconciliation = this.reconcileNow();
+    this.reconciliationInFlight = reconciliation;
+    void reconciliation.then(
+      () => {
+        if (this.reconciliationInFlight === reconciliation) {
+          this.reconciliationInFlight = undefined;
+        }
+      },
+      () => {
+        if (this.reconciliationInFlight === reconciliation) {
+          this.reconciliationInFlight = undefined;
+        }
+      },
+    );
+    return reconciliation;
+  }
+
+  async reportStorageFailure(): Promise<CaptureAdmissionStatus> {
+    this.intakeStorageBlocked = true;
+    this.intakeStorageHealthySamples = 0;
+    this.intakeStorageFailureGeneration += 1;
+    await this.applyPauseCauses();
+    return this.getStatus();
+  }
+
+  async reportStorageWriteFailure(): Promise<CaptureAdmissionStatus> {
+    this.storageWriteFailureGeneration += 1;
+    this.storageWriteBlocked = true;
+    await this.applyPauseCauses();
+    return this.getStatus();
+  }
+
+  private async reconcileNow(): Promise<CaptureAdmissionStatus> {
+    await Promise.all([this.reconcileQueueSignals(), this.reconcileStorageSignals()]);
+    await this.applyPauseCauses();
     return this.getStatus();
   }
 
@@ -105,48 +177,109 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
     this.intervalHandle = undefined;
   }
 
-  private async setPauseCauses(reasons: CaptureAdmissionStatus['reasons']): Promise<void> {
-    if (this.active && sameReasons(this.reasons, reasons)) {
-      return;
+  private async reconcileQueueSignals(): Promise<void> {
+    const intakeFailureGeneration = this.intakeStorageFailureGeneration;
+    try {
+      const snapshot = await this.options.store.getBackpressureSnapshot(this.options.workspaceId);
+      const decision = evaluateOperationalStoreBackpressure(snapshot, this.options.backpressure);
+      this.queueStateUnavailable = false;
+      if (
+        this.intakeStorageBlocked &&
+        intakeFailureGeneration === this.intakeStorageFailureGeneration
+      ) {
+        this.intakeStorageHealthySamples += 1;
+        if (this.intakeStorageHealthySamples >= INTAKE_RECOVERY_SAMPLES) {
+          this.intakeStorageBlocked = false;
+          this.intakeStorageHealthySamples = 0;
+        }
+      }
+      this.queueBlocked = updateUpperWaterMark(
+        this.queueBlocked,
+        decision.reasons.includes('max_queued_jobs_reached'),
+        snapshot.queuedJobs <= this.options.backpressure.resumeQueuedJobs,
+      );
+      this.retryBlocked = updateUpperWaterMark(
+        this.retryBlocked,
+        decision.reasons.includes('max_retrying_jobs_reached'),
+        snapshot.retryingJobs <= this.options.backpressure.resumeRetryingJobs,
+      );
+      this.assetBytesBlocked = updateUpperWaterMark(
+        this.assetBytesBlocked,
+        decision.reasons.includes('max_asset_bytes_reached'),
+        snapshot.assetBytes <= this.options.backpressure.resumeAssetBytes,
+      );
+    } catch {
+      this.queueStateUnavailable = true;
+      this.intakeStorageHealthySamples = 0;
     }
-    const queueBlocked = reasons.includes('max_queued_jobs_reached');
-    const storageBlocked = reasons.includes('max_asset_bytes_reached');
-    if (this.reasons.includes('max_queued_jobs_reached') !== queueBlocked) {
-      await this.options.lifecycle.setAutomaticPause(queueBlocked);
-    }
-    if (this.reasons.includes('max_asset_bytes_reached') !== storageBlocked) {
-      await this.options.lifecycle.setStoragePause(storageBlocked);
-    }
-    this.active = queueBlocked || storageBlocked;
-    this.reasons = [...reasons] as CaptureAdmissionStatus['reasons'];
   }
 
-  private async clearRecoveredPauseCauses(snapshot: OperationalStoreSnapshot): Promise<void> {
-    const queueRecovered = snapshot.queuedJobs <= this.options.backpressure.resumeQueuedJobs;
-    const storageRecovered = snapshot.assetBytes <= this.options.backpressure.resumeAssetBytes;
-    const reasons: CaptureAdmissionStatus['reasons'] = [
-      ...(!queueRecovered ? (['max_queued_jobs_reached'] as const) : []),
-      ...(!storageRecovered ? (['max_asset_bytes_reached'] as const) : []),
-    ];
-    if (this.active === reasons.length > 0 && sameReasons(this.reasons, reasons)) {
+  private async reconcileStorageSignals(): Promise<void> {
+    if (!this.options.storage) {
       return;
     }
-    const queueBlocked = !queueRecovered;
-    const storageBlocked = !storageRecovered;
-    if (this.reasons.includes('max_queued_jobs_reached') !== queueBlocked) {
-      await this.options.lifecycle.setAutomaticPause(queueBlocked);
+
+    const writeFailureGeneration = this.storageWriteFailureGeneration;
+    try {
+      const snapshot = await this.options.storage.probe();
+      this.storageStateUnavailable = false;
+      this.availableStorageBlocked = updateLowerWaterMark(
+        this.availableStorageBlocked,
+        snapshot.availableBytes <= this.options.storage.minAvailableBytes,
+        snapshot.availableBytes >= this.options.storage.resumeAvailableBytes,
+      );
+      if (!snapshot.writable) {
+        if (!this.storageWriteBlocked) {
+          this.storageWriteFailureGeneration += 1;
+        }
+        this.storageWriteBlocked = true;
+      } else if (
+        this.storageWriteBlocked &&
+        snapshot.availableBytes >= this.options.storage.resumeAvailableBytes &&
+        writeFailureGeneration === this.storageWriteFailureGeneration
+      ) {
+        try {
+          await this.options.storage.verifyWrite();
+          if (writeFailureGeneration === this.storageWriteFailureGeneration) {
+            this.storageWriteBlocked = false;
+          }
+        } catch {
+          this.storageWriteBlocked = true;
+        }
+      }
+    } catch {
+      this.storageStateUnavailable = true;
     }
-    if (this.reasons.includes('max_asset_bytes_reached') !== storageBlocked) {
-      await this.options.lifecycle.setStoragePause(storageBlocked);
-    }
-    this.active = reasons.length > 0;
-    this.reasons = reasons;
+  }
+
+  private async applyPauseCauses(): Promise<void> {
+    const transition = this.pauseTransitionTail.then(async () => {
+      const automaticPause = this.queueBlocked || this.retryBlocked || this.queueStateUnavailable;
+      const storagePause =
+        this.assetBytesBlocked ||
+        this.availableStorageBlocked ||
+        this.storageWriteBlocked ||
+        this.storageStateUnavailable ||
+        this.intakeStorageBlocked;
+
+      if (automaticPause !== this.automaticPauseApplied) {
+        await this.options.lifecycle.setAutomaticPause(automaticPause);
+        this.automaticPauseApplied = automaticPause;
+      }
+      if (storagePause !== this.storagePauseApplied) {
+        await this.options.lifecycle.setStoragePause(storagePause);
+        this.storagePauseApplied = storagePause;
+      }
+    });
+    this.pauseTransitionTail = transition.catch(() => undefined);
+    await transition;
   }
 }
 
-function sameReasons(
-  left: CaptureAdmissionStatus['reasons'],
-  right: CaptureAdmissionStatus['reasons'],
-): boolean {
-  return left.length === right.length && left.every((reason, index) => reason === right[index]);
+function updateUpperWaterMark(active: boolean, highReached: boolean, lowReached: boolean): boolean {
+  return active ? !lowReached : highReached;
+}
+
+function updateLowerWaterMark(active: boolean, lowReached: boolean, highReached: boolean): boolean {
+  return active ? !highReached : lowReached;
 }

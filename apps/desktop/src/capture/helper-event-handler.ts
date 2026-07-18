@@ -4,6 +4,7 @@ import {
   type HelperEnvelope,
   type HelperProtocolError,
   type HelperProtocolResult,
+  type HelperToMainPayloadByType,
   type HelperToMainType,
   type MainToHelperPayloadByType,
   type MainToHelperType,
@@ -27,7 +28,7 @@ export type CaptureHelperEventStatus = {
   lastSafeError?: SafeOperationalError;
   lastSkippedCapture?: {
     captureId: string;
-    reason: string;
+    reason: HelperToMainPayloadByType['capture.skipped']['reason'];
     observedAt: string;
   };
   permissions?: {
@@ -54,6 +55,8 @@ export type CaptureHelperEventHandlerOptions = {
     accessibility: HelperPermissionState;
     screenRecording: HelperPermissionState;
   }): Promise<void>;
+  onStorageFailure?(): Promise<void>;
+  onStorageWriteFailure?(): Promise<void>;
   store: CaptureIntakeStore & HelperStateStore;
   workspaceId: string;
 };
@@ -181,6 +184,9 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
       const result = await this.options.store.createCaptureOutboxEntry(entry);
 
       if (!result.ok) {
+        if (result.error.code === 'storage_corruption') {
+          await this.notifyStorageFailure();
+        }
         await this.sendNack(
           envelope,
           mapStoreErrorToNackCode(result.error.code),
@@ -208,6 +214,7 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         captureId,
       });
     } catch {
+      await this.notifyStorageFailure();
       const safeError = safeOperationalError(
         'storage_unavailable',
         safeNackMessage('storage_unavailable'),
@@ -243,6 +250,9 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
       lastObservedAt: envelope.sentAt,
       lastSafeError: safeError,
     };
+    if (envelope.payload.code === 'asset_write_failed') {
+      await this.notifyStorageWriteFailure();
+    }
     await this.persistHelperState();
   }
 
@@ -289,6 +299,23 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         // Permission observers are read-only consumers and cannot disrupt
         // capture-event persistence or later observers.
       }
+    }
+  }
+
+  private async notifyStorageFailure(): Promise<void> {
+    try {
+      await this.options.onStorageFailure?.();
+    } catch {
+      // Admission already records the failure before applying lifecycle state;
+      // event persistence and the safe NACK must still complete if pause IO fails.
+    }
+  }
+
+  private async notifyStorageWriteFailure(): Promise<void> {
+    try {
+      await this.options.onStorageWriteFailure?.();
+    } catch {
+      // Keep the native write failure observable even if lifecycle pause fails.
     }
   }
 

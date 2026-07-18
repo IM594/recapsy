@@ -12,6 +12,7 @@ import {
   type CaptureHistoryReader,
   type CaptureLifecycle,
   type CaptureRuntimeStore,
+  type CaptureStorageAdmissionOptions,
   createCaptureIpcHandlers,
   createCaptureRuntime,
 } from '../capture/index';
@@ -90,6 +91,7 @@ export type ElectronMainRuntimeOptions = {
   syncLocalMaxWorkers?: number;
   syncMaxAttempts?: number;
   syncRetryBackoff?: RetryBackoffConfig;
+  storageAdmission?: CaptureStorageAdmissionOptions;
   createSyncLoop?(loopOptions: SyncLoopOptions): SyncLoop;
   backpressure?: BackpressureConfig;
   now?(): string;
@@ -175,6 +177,7 @@ export function createElectronMainRuntime(
       },
       policyApi: options.createServerApi(),
       startupRecovery: syncRuntime,
+      storageAdmission: options.storageAdmission,
       store,
       workspaceId,
     });

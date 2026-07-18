@@ -20,8 +20,10 @@ const now = '2026-07-07T08:00:00.000Z';
 const backpressure: BackpressureConfig = {
   maxAssetBytes: 1024 * 1024,
   maxQueuedJobs: 10,
+  maxRetryingJobs: 5,
   resumeAssetBytes: 512 * 1024,
   resumeQueuedJobs: 5,
+  resumeRetryingJobs: 2,
 };
 
 describe('capture helper controller', () => {
