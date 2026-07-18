@@ -68,6 +68,8 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   private policyReady = false;
   private captureStarted = false;
   private policyRefreshTimer: unknown;
+  private policyActivationQueue: Promise<void> = Promise.resolve();
+  private shutdownRequested = false;
 
   constructor(private readonly options: CaptureHelperControllerOptions) {}
 
@@ -84,6 +86,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       state: 'starting',
       updatedAt: this.options.now(),
     };
+    this.shutdownRequested = false;
     await this.persistHelperState();
 
     try {
@@ -148,7 +151,19 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     await this.persistHelperState();
   }
 
-  private async activatePolicyAndStart(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
+  private activatePolicyAndStart(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
+    const run = this.policyActivationQueue.then(() => this.activatePolicyAndStartInternal(reason));
+    this.policyActivationQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  private async activatePolicyAndStartInternal(
+    reason: 'runtime_started' | 'user_resumed',
+  ): Promise<void> {
+    if (this.stopped || this.shutdownRequested || !this.started) {
+      return;
+    }
+
     try {
       const configuration = await this.options.policyActivation?.activate();
       if (!configuration) {
@@ -245,6 +260,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       return;
     }
 
+    this.shutdownRequested = true;
     this.clearPolicyRefreshTimer();
     this.status = {
       ...policyStatus(this.status),

@@ -429,10 +429,56 @@ describe('capture helper controller', () => {
       state: 'stopped',
     });
   });
+
+  it('serializes overlapping policy refreshes so the newest helper configuration wins', async () => {
+    const pending: Array<
+      (configuration: Awaited<ReturnType<CapturePolicyActivation['activate']>>) => void
+    > = [];
+    const activation: CapturePolicyActivation = {
+      async activate() {
+        return await new Promise((resolve) => pending.push(resolve));
+      },
+    };
+    const client = new RecordingCaptureHelperClient();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      policyActivation: activation,
+      store: createMemoryStore(),
+    });
+
+    const start = controller.start();
+    while (pending.length < 1) await Promise.resolve();
+    pending[0]?.(policyConfiguration('policy_initial', `sha256:${'a'.repeat(64)}`));
+    await start;
+
+    const olderRefresh = controller.refreshPolicy();
+    while (pending.length < 2) await Promise.resolve();
+    const newerRefresh = controller.refreshPolicy();
+    await flush();
+    expect(pending).toHaveLength(2);
+
+    pending[1]?.(policyConfiguration('policy_older', `sha256:${'b'.repeat(64)}`));
+    while (pending.length < 3) await Promise.resolve();
+    pending[2]?.(policyConfiguration('policy_newer', `sha256:${'c'.repeat(64)}`));
+    await Promise.all([olderRefresh, newerRefresh]);
+
+    expect(client.configuredPolicyVersions).toEqual([
+      'policy_initial',
+      'policy_older',
+      'policy_newer',
+    ]);
+    expect(controller.getStatus()).toMatchObject({
+      policyVersion: 'policy_newer',
+      state: 'running',
+    });
+  });
 });
 
 class RecordingCaptureHelperClient implements CaptureHelperClient {
   readonly calls: string[] = [];
+  readonly configuredPolicyVersions: string[] = [];
   readonly beginCaptureReasons: Array<'runtime_started' | 'user_resumed'> = [];
   startOptions: CaptureHelperStartOptions | undefined;
   private readonly startError?: Error;
@@ -455,8 +501,9 @@ class RecordingCaptureHelperClient implements CaptureHelperClient {
     this.beginCaptureReasons.push(reason);
   }
 
-  async configureCapture(_policy: HelperCapturePolicy): Promise<void> {
+  async configureCapture(policy: HelperCapturePolicy): Promise<void> {
     this.calls.push('configureCapture');
+    this.configuredPolicyVersions.push(policy.version);
   }
 
   async stop(): Promise<void> {
@@ -470,6 +517,20 @@ class RecordingCaptureHelperClient implements CaptureHelperClient {
   async resumeCapture(): Promise<void> {
     this.calls.push('resumeCapture');
   }
+}
+
+function policyConfiguration(version: string, policyHash: string) {
+  return {
+    maxConcurrentOcr: 2,
+    policy: {
+      defaultAction: 'allow' as const,
+      paused: false,
+      policyHash,
+      rules: [],
+      version,
+    },
+    refreshAfterMs: 60_000,
+  };
 }
 
 class RecordingCommandClient {

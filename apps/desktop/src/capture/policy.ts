@@ -71,14 +71,17 @@ export class CapturePolicyActivationError extends Error {
     readonly code:
       | 'policy_invalid_scope'
       | 'policy_unavailable'
-      | 'policy_requires_unavailable_context',
+      | 'policy_requires_unavailable_context'
+      | 'policy_stale',
   ) {
     super(
       code === 'policy_invalid_scope'
         ? 'Capture policy contains a rule with an invalid ownership scope.'
         : code === 'policy_requires_unavailable_context'
           ? 'Capture policy requires unavailable local context.'
-          : 'Capture policy is unavailable.',
+          : code === 'policy_stale'
+            ? 'Capture policy refresh was superseded by a newer snapshot.'
+            : 'Capture policy is unavailable.',
     );
   }
 }
@@ -86,11 +89,45 @@ export class CapturePolicyActivationError extends Error {
 export function createCapturePolicyActivation(
   options: CapturePolicyActivationOptions,
 ): CapturePolicyActivation {
+  let activationGeneration = 0;
+  let policyCacheWriteQueue: Promise<void> = Promise.resolve();
+
+  const persistCurrentPolicyCache = (
+    entry: PolicyCacheEntry,
+    isCurrent: () => boolean,
+  ): Promise<void> => {
+    const write = policyCacheWriteQueue.then(async () => {
+      if (!isCurrent()) {
+        return;
+      }
+
+      try {
+        await options.store.setPolicyCache(entry);
+      } catch {
+        // A current, validated server policy is safer than a stale cache. The
+        // cache is only an offline fallback, never a prerequisite for applying
+        // a stricter policy that has already been received.
+      }
+    });
+    policyCacheWriteQueue = write.catch(() => undefined);
+    return write;
+  };
+
   return {
     async activate(): Promise<CapturePolicyActivationConfiguration> {
-      const fetched = await fetchOrReadCachedPolicy(options);
+      const generation = ++activationGeneration;
+      const isCurrent = () => generation === activationGeneration;
+      const fetched = await fetchOrReadCachedPolicy(options, (entry) =>
+        persistCurrentPolicyCache(entry, isCurrent),
+      );
+      if (!isCurrent()) {
+        throw new CapturePolicyActivationError('policy_stale');
+      }
       assertWorkspacePolicyOwnership(fetched.policy);
       const localRules = await options.store.listLocalCapturePolicyRules();
+      if (!isCurrent()) {
+        throw new CapturePolicyActivationError('policy_stale');
+      }
       const compiled = compileCapturePolicy({
         localRules,
         policy: fetched.policy,
@@ -99,6 +136,10 @@ export function createCapturePolicyActivation(
 
       if (compiled.rules.some(requiresUnavailableContext)) {
         throw new CapturePolicyActivationError('policy_requires_unavailable_context');
+      }
+
+      if (!isCurrent()) {
+        throw new CapturePolicyActivationError('policy_stale');
       }
 
       const configuration = {
@@ -139,6 +180,7 @@ export function compileCapturePolicy(input: {
 
 async function fetchOrReadCachedPolicy(
   options: CapturePolicyActivationOptions,
+  persistPolicyCache: (entry: PolicyCacheEntry) => Promise<void>,
 ): Promise<PolicyCacheEntry> {
   let response: CapturePoliciesResult;
   try {
@@ -170,13 +212,7 @@ async function fetchOrReadCachedPolicy(
     workspaceId: options.workspaceId,
   };
 
-  try {
-    await options.store.setPolicyCache(entry);
-  } catch {
-    // A current, validated server policy is safer than a stale cache. The
-    // cache is only an offline fallback, never a prerequisite for applying a
-    // stricter policy that has already been received.
-  }
+  await persistPolicyCache(entry);
 
   return entry;
 }

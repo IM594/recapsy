@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { CapturePoliciesResult } from '../../server/index';
-import { createMemoryStore } from '../../storage/index';
+import { type PolicyCacheEntry, createMemoryStore } from '../../storage/index';
 import {
   CapturePolicyActivationError,
   compileCapturePolicy,
@@ -321,6 +321,128 @@ describe('capture policy activation', () => {
         }),
       ]),
     );
+  });
+
+  it('does not let a late older refresh overwrite a newer policy cache', async () => {
+    const store = createMemoryStore();
+    const pending: Array<(value: CapturePoliciesResult) => void> = [];
+    const activation = createCapturePolicyActivation({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return await new Promise((resolve) => pending.push(resolve));
+        },
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    const older = activation.activate();
+    const newer = activation.activate();
+    while (pending.length < 2) await Promise.resolve();
+
+    const newerResponse = remotePolicy({
+      rules: [
+        {
+          action: 'block_capture',
+          enabled: true,
+          id: 'newer-sensitive-app',
+          kind: 'bundle_id',
+          pattern: 'com.example.sensitive',
+          scope: 'workspace_default',
+        },
+      ],
+    });
+    newerResponse.capturePolicy.id = 'snapshot_newer';
+    newerResponse.capturePolicy.version = 'policy-newer';
+    pending[1]?.(newerResponse);
+    await newer;
+
+    const olderResponse = remotePolicy();
+    olderResponse.capturePolicy.id = 'snapshot_older';
+    olderResponse.capturePolicy.version = 'policy-older';
+    pending[0]?.(olderResponse);
+
+    await expect(older).rejects.toMatchObject({ code: 'policy_stale' });
+    expect(await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toMatchObject({
+      policySnapshotId: 'snapshot_newer',
+      policyVersion: 'policy-newer',
+      policy: {
+        rules: [expect.objectContaining({ id: 'newer-sensitive-app' })],
+      },
+    });
+  });
+
+  it('serializes cache writes so an older delayed write cannot land after a newer snapshot', async () => {
+    const backingStore = createMemoryStore();
+    const store = Object.create(backingStore) as typeof backingStore;
+    const responses: Array<(value: CapturePoliciesResult) => void> = [];
+    const writes: Array<{
+      complete(): Promise<void>;
+      entry: PolicyCacheEntry;
+    }> = [];
+    store.setPolicyCache = (entry) =>
+      new Promise((resolve) => {
+        writes.push({
+          async complete() {
+            resolve(await backingStore.setPolicyCache(entry));
+          },
+          entry,
+        });
+      });
+    const activation = createCapturePolicyActivation({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return await new Promise((resolve) => responses.push(resolve));
+        },
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    const older = activation.activate();
+    while (responses.length < 1) await Promise.resolve();
+    const olderResponse = remotePolicy();
+    olderResponse.capturePolicy.id = 'snapshot_older';
+    olderResponse.capturePolicy.version = 'policy-older';
+    responses[0]?.(olderResponse);
+    while (writes.length < 1) await Promise.resolve();
+
+    const newer = activation.activate();
+    while (responses.length < 2) await Promise.resolve();
+    const newerResponse = remotePolicy({
+      rules: [
+        {
+          action: 'block_capture',
+          enabled: true,
+          id: 'newer-sensitive-app',
+          kind: 'bundle_id',
+          pattern: 'com.example.sensitive',
+          scope: 'workspace_default',
+        },
+      ],
+    });
+    newerResponse.capturePolicy.id = 'snapshot_newer';
+    newerResponse.capturePolicy.version = 'policy-newer';
+    responses[1]?.(newerResponse);
+    for (let index = 0; index < 5; index += 1) await Promise.resolve();
+    expect(writes).toHaveLength(1);
+
+    await writes[0]?.complete();
+    await expect(older).rejects.toMatchObject({ code: 'policy_stale' });
+    while (writes.length < 2) await Promise.resolve();
+    await writes[1]?.complete();
+    await newer;
+
+    expect(
+      await backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt }),
+    ).toMatchObject({
+      policySnapshotId: 'snapshot_newer',
+      policyVersion: 'policy-newer',
+    });
   });
 });
 
