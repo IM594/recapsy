@@ -590,6 +590,7 @@ async function startServerHttpHarness(options: ServerHarnessOptions): Promise<Se
       NODE_ENV: options.useAppDefaultOcrRunner ? ('production' as const) : ('test' as const),
       OCR_MAX_INPUT_BYTES: 1024 * 1024,
       OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
+      OCR_PROXY_TIMEOUT_MS: 60_000,
       PORT: 0,
       PROVIDER_ENCRYPTION_SECRET: providerSecret,
       SESSION_SECRET: sessionSecret,
