@@ -1,4 +1,4 @@
-import type { OutboxJob } from '../storage/index';
+import type { OperationalStoreResult, OutboxJob } from '../storage/index';
 import type { SyncRunResult } from './types';
 
 type ReconciliationJob = Pick<
@@ -26,6 +26,7 @@ export type ServerCaptureReconciliationClock = {
 };
 
 export type ServerCaptureReconciliationStore = {
+  getOutboxJob(id: string): Promise<OutboxJob | null>;
   markOutboxJobTerminal(
     id: string,
     update: {
@@ -35,7 +36,7 @@ export type ServerCaptureReconciliationStore = {
       serverCaptureId: string;
       state: 'synced';
     },
-  ): Promise<unknown>;
+  ): Promise<OperationalStoreResult<OutboxJob>>;
 };
 
 type ServerCaptureReconciliationOptions = {
@@ -69,13 +70,26 @@ export async function reconcileOutboxJobFromServerCapture(
     return null;
   }
 
-  await options.store.markOutboxJobTerminal(job.id, {
+  const terminal = await options.store.markOutboxJobTerminal(job.id, {
     leaseToken: job.leaseToken,
     now: options.clock.now(),
     reason: 'ocr_synced',
     serverCaptureId: job.serverCaptureId,
     state: 'synced',
   });
+
+  if (!terminal.ok) {
+    const current = await options.store.getOutboxJob(job.id);
+    if (current?.state === 'synced' && current.serverCaptureId === job.serverCaptureId) {
+      return { jobId: job.id, processed: 1, status: 'synced' };
+    }
+    return {
+      ...(terminal.error.code === 'outbox_lease_lost' ? { code: 'lease_lost' as const } : {}),
+      jobId: job.id,
+      processed: 0,
+      status: 'skipped',
+    };
+  }
 
   return { jobId: job.id, processed: 1, status: 'synced' };
 }

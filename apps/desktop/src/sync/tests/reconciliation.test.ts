@@ -74,22 +74,76 @@ describe('server capture reconciliation', () => {
     });
   });
 
-  it('keeps reconciliation best-effort when the terminal store reports a conflict', async () => {
-    const ports = recordingPorts('succeeded', {
-      error: {
-        code: 'terminal_state_conflict',
-        message: 'The job became terminal concurrently.',
+  it('reports lease loss instead of synced when the terminal CAS loses ownership', async () => {
+    const ports = recordingPorts(
+      'succeeded',
+      {
+        error: {
+          code: 'outbox_lease_lost',
+          message: 'The outbox lease is no longer owned by this worker.',
+        },
+        ok: false,
       },
-      ok: false,
-    });
+      outboxJob('syncing', { leaseToken: 'new-owner-lease' }),
+    );
 
     const result = await reconcileOutboxJobFromServerCapture(ports, outboxJob('syncing'));
 
     expect(ports.storeWrites).toHaveLength(1);
+    expect(ports.storeReads).toEqual(['job-1']);
+    expect(result).toEqual({
+      code: 'lease_lost',
+      jobId: 'job-1',
+      processed: 0,
+      status: 'skipped',
+    });
+  });
+
+  it('treats a rejected terminal write as idempotent only after reading synced state', async () => {
+    const ports = recordingPorts(
+      'succeeded',
+      {
+        error: {
+          code: 'terminal_state_conflict',
+          message: 'The job became terminal concurrently.',
+        },
+        ok: false,
+      },
+      outboxJob('synced', { leaseToken: undefined }),
+    );
+
+    const result = await reconcileOutboxJobFromServerCapture(ports, outboxJob('syncing'));
+
+    expect(ports.storeReads).toEqual(['job-1']);
     expect(result).toEqual({
       jobId: 'job-1',
       processed: 1,
       status: 'synced',
+    });
+  });
+
+  it('does not accept a synced row bound to a different server capture', async () => {
+    const ports = recordingPorts(
+      'succeeded',
+      {
+        error: {
+          code: 'terminal_state_conflict',
+          message: 'The job became terminal concurrently.',
+        },
+        ok: false,
+      },
+      outboxJob('synced', {
+        leaseToken: undefined,
+        serverCaptureId: 'different-server-capture',
+      }),
+    );
+
+    const result = await reconcileOutboxJobFromServerCapture(ports, outboxJob('syncing'));
+
+    expect(result).toEqual({
+      jobId: 'job-1',
+      processed: 0,
+      status: 'skipped',
     });
   });
 });
@@ -101,15 +155,18 @@ type CaptureOcrStatus = Awaited<
 function recordingPorts(
   ocrStatus: CaptureOcrStatus,
   storeResult?: OperationalStoreResult<OutboxJob>,
+  currentJob: OutboxJob | null = null,
 ): {
   api: ServerCaptureReconciliationApi;
   apiReads: Array<{ workspaceId: string; captureId: string }>;
   clock: ServerCaptureReconciliationClock;
   clockReads: number;
   store: ServerCaptureReconciliationStore;
+  storeReads: string[];
   storeWrites: Array<{ id: string; update: OutboxTerminalUpdate }>;
 } {
   const apiReads: Array<{ workspaceId: string; captureId: string }> = [];
+  const storeReads: string[] = [];
   const storeWrites: Array<{ id: string; update: OutboxTerminalUpdate }> = [];
   let clockReads = 0;
   const api = {
@@ -125,6 +182,10 @@ function recordingPorts(
     },
   } satisfies ServerCaptureReconciliationClock;
   const store = {
+    async getOutboxJob(id: string) {
+      storeReads.push(id);
+      return currentJob;
+    },
     async markOutboxJobTerminal(id: string, update: OutboxTerminalUpdate) {
       storeWrites.push({ id, update });
       return storeResult ?? { ok: true, value: outboxJob('synced') };
@@ -139,6 +200,7 @@ function recordingPorts(
       return clockReads;
     },
     store,
+    storeReads,
     storeWrites,
   };
 }

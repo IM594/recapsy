@@ -85,7 +85,7 @@ async function executeSyncJob(
     // succeeded OCR result, settle locally instead of re-running the proxy.
     if (activeJob.serverCaptureId) {
       const reconciled = await reconcileOutboxJobFromServerCapture(options, activeJob);
-      if (reconciled?.status === 'synced') {
+      if (reconciled) {
         return reconciled;
       }
 

@@ -113,9 +113,11 @@ async function reconcileInterruptedCaptureJob(
     job,
   );
 
-  if (reconciled?.status === 'synced') {
-    summary.recovered += 1;
-    summary.reconciledSynced += 1;
+  if (reconciled) {
+    if (reconciled.status === 'synced') {
+      summary.recovered += 1;
+      summary.reconciledSynced += 1;
+    }
     return true;
   }
 
