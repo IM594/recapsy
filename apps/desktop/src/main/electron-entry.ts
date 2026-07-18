@@ -11,6 +11,10 @@ import {
   shell,
 } from 'electron';
 import {
+  createDesktopAcceptanceHttpTransport,
+  createDesktopAcceptancePublisher,
+} from '../acceptance/index';
+import {
   createAuthClient,
   createInMemoryTokenStore,
   createLoginWindowPrompter,
@@ -240,6 +244,17 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
       transport: fetchTransport,
     }),
   createShell: (context) => {
+    const acceptancePublisher = createDesktopAcceptancePublisher({
+      accessTokenProvider: {
+        getAccessToken: async () => (await tokenStore.getTokens())?.accessToken ?? null,
+      },
+      endpoint: serverEndpoint,
+      environment: process.env,
+      isPackaged: app.isPackaged,
+      transport: createDesktopAcceptanceHttpTransport(),
+      workspaceId: context.workspaceId,
+      workspaceIdVerified: context.workspaceIdVerified,
+    });
     const trayIcon = nativeImage.createFromBuffer(createTrayIconPngBuffer());
     if (process.platform === 'darwin') {
       trayIcon.setTemplateImage(true);
@@ -309,15 +324,16 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
           const snapshot = context.lifecycle.getSnapshot();
           const captureStatus = context.eventHandler.getStatus();
           const permissions = readCapturePermissions(context.eventHandler);
+          const workerCapacity = context.syncRuntime.getCapacityStatus();
           const sync = await createSyncQueueSummary(context.store, context.workspaceId, {
             now: new Date().toISOString(),
-            workerCapacity: context.syncRuntime.getCapacityStatus(),
+            workerCapacity,
           });
           const lastError = snapshot.captureHelper?.lastSafeError ?? captureStatus.lastSafeError;
           const admission = context.admission.getStatus();
           const helperStatus = snapshot.captureHelper;
 
-          return {
+          const status: DesktopShellStatus = {
             accessibility: permissions.accessibility,
             captureFailureCount: captureStatus.captureFailureCount ?? 0,
             capturePaused: snapshot.status === 'paused',
@@ -350,6 +366,21 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             syncRetrying: sync.retrying,
             ...(sync.workerCapacity ? { syncWorkerCapacity: sync.workerCapacity } : {}),
           };
+          void acceptancePublisher.tick({
+            captureAdmission: {
+              active: admission.active,
+              reasons: [...admission.reasons],
+            },
+            capturePaused: snapshot.status === 'paused',
+            capturePauseReasons: [...(snapshot.pauseReasons ?? [])],
+            captureState: snapshot.status,
+            syncInputPerMinute: sync.inputPerMinute,
+            ...(sync.oldestActiveAgeSeconds !== undefined
+              ? { syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds }
+              : {}),
+            syncWorkerCapacity: workerCapacity,
+          });
+          return status;
         },
       },
     });

@@ -71,6 +71,7 @@ export type DesktopShellFactoryContext = {
   store: DesktopStore;
   syncRuntime: SyncLoop & { getCapacityStatus(): import('../sync/index').SyncWorkerCapacityStatus };
   workspaceId: string;
+  workspaceIdVerified: boolean;
 };
 
 export type ElectronMainRuntimeOptions = {
@@ -188,6 +189,7 @@ export function createElectronMainRuntime(
           store,
           syncRuntime,
           workspaceId,
+          workspaceIdVerified,
         })
       : undefined;
 

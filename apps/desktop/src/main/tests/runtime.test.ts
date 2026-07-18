@@ -459,12 +459,17 @@ describe('electron main runtime wiring', () => {
     console.warn = (...args: unknown[]) => {
       warnCalls.push(args);
     };
+    let shellContext: DesktopShellFactoryContext | undefined;
 
     try {
       const handle = createElectronMainRuntime(
         baseOptions({
           app,
           authClient: fakeAuthClient({ throws: new Error('offline') }),
+          createShell(context) {
+            shellContext = context;
+            return new FakeDesktopShell();
+          },
           helperClient,
           ipcMain,
           loginPrompter,
@@ -481,6 +486,7 @@ describe('electron main runtime wiring', () => {
       expect(loginPrompter.promptCalls).toBe(0);
       expect(state.workspaceId).toBe('workspace_cached_offline');
       expect(state.workspaceIdVerified).toBe(false);
+      expect(shellContext?.workspaceIdVerified).toBe(false);
       expect(warnCalls.length).toBeGreaterThan(0);
     } finally {
       console.warn = originalWarn;
@@ -558,6 +564,7 @@ describe('electron main runtime wiring', () => {
       lifecycle: state.lifecycle,
       store,
       workspaceId,
+      workspaceIdVerified: true,
     });
     expect(shellContext?.commandClient).toBe(state.commandClient);
     expect(state.shell).toBe(shell);
