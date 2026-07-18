@@ -16,6 +16,8 @@ import type {
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
   RecoverInterruptedOutboxJobInput,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
 } from '../storage/index';
 
 export type SyncCaptureCreateInput = CaptureOutboxPayload & {
@@ -67,6 +69,7 @@ export type SyncQueueStore = {
     id: string,
     update: OutboxTerminalUpdate,
   ): Promise<OperationalStoreResult<OutboxJob>>;
+  settleServerCapture(input: ServerCaptureSettlementInput): Promise<ServerCaptureSettlement>;
   recordOutboxSafeError(
     id: string,
     input: OutboxSafeErrorInput,

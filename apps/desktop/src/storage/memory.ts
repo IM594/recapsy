@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { settleServerCapture as settleStoredServerCapture } from './reconciliation';
 import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
@@ -20,6 +21,8 @@ import type {
   PolicyCacheRead,
   PolicyCacheReadOptions,
   RecoverInterruptedOutboxJobInput,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
@@ -291,6 +294,10 @@ class InMemoryOperationalStore {
     this.outboxJobs.set(id, updated);
 
     return success(cloneOutboxJob(updated));
+  }
+
+  settleServerCapture(input: ServerCaptureSettlementInput): Promise<ServerCaptureSettlement> {
+    return settleStoredServerCapture(this, input);
   }
 
   async recordOutboxSafeError(

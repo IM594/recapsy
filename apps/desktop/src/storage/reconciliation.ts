@@ -6,6 +6,8 @@ import type {
   OutboxJobListFilter,
   OutboxTerminalUpdate,
   SafeOperationalError,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
   UpdateAssetRefAvailabilityInput,
 } from './types';
 
@@ -44,6 +46,14 @@ export type AssetReconciliationSummary = {
   unreadable: number;
   blocked: number;
   skippedTerminal: number;
+};
+
+export type ServerCaptureSettlementStore = {
+  getOutboxJob(id: string): Promise<OutboxJob | null>;
+  markOutboxJobTerminal(
+    id: string,
+    update: OutboxTerminalUpdate,
+  ): Promise<OperationalStoreResult<OutboxJob>>;
 };
 
 const TERMINAL_OUTBOX_STATES = new Set<OutboxJob['state']>([
@@ -132,6 +142,33 @@ export async function reconcileAssetRefs(
   }
 
   return summary;
+}
+
+export async function settleServerCapture(
+  store: ServerCaptureSettlementStore,
+  input: ServerCaptureSettlementInput,
+): Promise<ServerCaptureSettlement> {
+  const terminal = await store.markOutboxJobTerminal(input.id, {
+    leaseToken: input.leaseToken,
+    now: input.now,
+    reason: 'ocr_synced',
+    serverCaptureId: input.serverCaptureId,
+    state: 'synced',
+  });
+
+  if (terminal.ok) {
+    return { status: 'synced' };
+  }
+
+  const current = await store.getOutboxJob(input.id);
+  if (current?.state === 'synced' && current.serverCaptureId === input.serverCaptureId) {
+    return { status: 'synced' };
+  }
+
+  return {
+    ...(terminal.error.code === 'outbox_lease_lost' ? { code: 'lease_lost' as const } : {}),
+    status: 'skipped',
+  };
 }
 
 async function checkAvailability(

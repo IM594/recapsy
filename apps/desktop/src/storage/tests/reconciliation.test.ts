@@ -240,6 +240,66 @@ describe('asset ref reconciliation', () => {
   });
 });
 
+describe('server capture settlement', () => {
+  it('settles an owned job and preserves idempotent success for the same server capture', async () => {
+    const store = createMemoryStore();
+    await createAssetBackedJob(store, createAsset(), createJob());
+
+    expect(
+      await store.settleServerCapture({
+        id: 'job_1',
+        now: reconcileNow,
+        serverCaptureId: 'server-capture-1',
+      }),
+    ).toEqual({ status: 'synced' });
+    expect(
+      await store.settleServerCapture({
+        id: 'job_1',
+        now: reconcileNow,
+        serverCaptureId: 'server-capture-1',
+      }),
+    ).toEqual({ status: 'synced' });
+  });
+
+  it('reports lease loss without accepting another owner or a different server capture', async () => {
+    const store = createMemoryStore();
+    await createAssetBackedJob(store, createAsset(), createJob());
+    const claimed = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now,
+      workspaceId: 'workspace_1',
+    });
+    if (!claimed?.leaseToken) {
+      throw new Error('Expected a leased outbox job.');
+    }
+
+    expect(
+      await store.settleServerCapture({
+        id: 'job_1',
+        leaseToken: 'stale-owner',
+        now: reconcileNow,
+        serverCaptureId: 'server-capture-1',
+      }),
+    ).toEqual({ code: 'lease_lost', status: 'skipped' });
+
+    expect(
+      await store.settleServerCapture({
+        id: 'job_1',
+        leaseToken: claimed.leaseToken,
+        now: reconcileNow,
+        serverCaptureId: 'server-capture-1',
+      }),
+    ).toEqual({ status: 'synced' });
+    expect(
+      await store.settleServerCapture({
+        id: 'job_1',
+        now: reconcileNow,
+        serverCaptureId: 'different-server-capture',
+      }),
+    ).toEqual({ status: 'skipped' });
+  });
+});
+
 function resolverReturning(availabilityState: AssetAvailabilityState): AssetAvailabilityResolver {
   return {
     async checkAvailability() {

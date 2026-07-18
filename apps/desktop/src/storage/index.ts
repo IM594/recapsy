@@ -4,7 +4,7 @@ export {
   type MemoryStoreOptions,
 } from './memory';
 export { toRendererSafeAssetRef } from './asset-dto';
-export { reconcileAssetRefs } from './reconciliation';
+export { reconcileAssetRefs, settleServerCapture } from './reconciliation';
 export { planLocalRetentionDryRun } from './retention';
 export type {
   AssetAvailabilityCheck,
@@ -12,6 +12,7 @@ export type {
   AssetReconciliationStore,
   AssetReconciliationOptions,
   AssetReconciliationSummary,
+  ServerCaptureSettlementStore,
 } from './reconciliation';
 export type {
   LocalRetentionDryRun,
@@ -65,6 +66,8 @@ export type {
   RecoverInterruptedOutboxJobInput,
   RendererSafeAssetRef,
   SafeOperationalError,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
   SettingsCache,
   StoreLifecycle,
   StoredOcrResult,

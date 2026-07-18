@@ -1,10 +1,17 @@
-import type { OperationalStoreResult, OutboxJob } from '../storage/index';
+import type {
+  OutboxJobState,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
+} from '../storage/index';
 import type { SyncRunResult } from './types';
 
-type ReconciliationJob = Pick<
-  OutboxJob,
-  'id' | 'leaseToken' | 'serverCaptureId' | 'state' | 'workspaceId'
->;
+type ReconciliationJob = {
+  id: string;
+  leaseToken?: string;
+  serverCaptureId?: string;
+  state: OutboxJobState;
+  workspaceId: string;
+};
 
 type ServerCaptureOcrStatus =
   | 'not_requested'
@@ -26,17 +33,7 @@ export type ServerCaptureReconciliationClock = {
 };
 
 export type ServerCaptureReconciliationStore = {
-  getOutboxJob(id: string): Promise<OutboxJob | null>;
-  markOutboxJobTerminal(
-    id: string,
-    update: {
-      now: string;
-      leaseToken?: string;
-      reason: 'ocr_synced';
-      serverCaptureId: string;
-      state: 'synced';
-    },
-  ): Promise<OperationalStoreResult<OutboxJob>>;
+  settleServerCapture(input: ServerCaptureSettlementInput): Promise<ServerCaptureSettlement>;
 };
 
 type ServerCaptureReconciliationOptions = {
@@ -70,21 +67,16 @@ export async function reconcileOutboxJobFromServerCapture(
     return null;
   }
 
-  const terminal = await options.store.markOutboxJobTerminal(job.id, {
+  const settlement = await options.store.settleServerCapture({
+    id: job.id,
     leaseToken: job.leaseToken,
     now: options.clock.now(),
-    reason: 'ocr_synced',
     serverCaptureId: job.serverCaptureId,
-    state: 'synced',
   });
 
-  if (!terminal.ok) {
-    const current = await options.store.getOutboxJob(job.id);
-    if (current?.state === 'synced' && current.serverCaptureId === job.serverCaptureId) {
-      return { jobId: job.id, processed: 1, status: 'synced' };
-    }
+  if (settlement.status === 'skipped') {
     return {
-      ...(terminal.error.code === 'outbox_lease_lost' ? { code: 'lease_lost' as const } : {}),
+      ...(settlement.code ? { code: settlement.code } : {}),
       jobId: job.id,
       processed: 0,
       status: 'skipped',

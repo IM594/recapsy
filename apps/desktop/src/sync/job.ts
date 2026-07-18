@@ -5,6 +5,8 @@ import type {
   OutboxJobStateUpdate,
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
   StoredOcrResult,
 } from '../storage/index';
 import {
@@ -39,6 +41,7 @@ export type SyncJobStore = {
     id: string,
     update: OutboxTerminalUpdate,
   ): Promise<OperationalStoreResult<OutboxJob>>;
+  settleServerCapture(input: ServerCaptureSettlementInput): Promise<ServerCaptureSettlement>;
   recordOutboxSafeError(
     id: string,
     input: OutboxSafeErrorInput,

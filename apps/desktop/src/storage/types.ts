@@ -310,6 +310,17 @@ export type OperationalStoreResult<T> =
       error: OperationalStoreError;
     };
 
+export type ServerCaptureSettlementInput = {
+  id: string;
+  leaseToken?: string;
+  now: string;
+  serverCaptureId: string;
+};
+
+export type ServerCaptureSettlement =
+  | { status: 'synced' }
+  | { status: 'skipped'; code?: 'lease_lost' };
+
 /** Device-wide pressure from local resources shared by every workspace. */
 export type OperationalStoreSnapshot = {
   queuedJobs: number;

@@ -1,3 +1,4 @@
+import { settleServerCapture as settleStoredServerCapture } from '../reconciliation';
 import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
@@ -17,6 +18,8 @@ import type {
   PolicyCacheRead,
   PolicyCacheReadOptions,
   RecoverInterruptedOutboxJobInput,
+  ServerCaptureSettlement,
+  ServerCaptureSettlementInput,
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
@@ -163,6 +166,10 @@ class SqliteOperationalStore {
     update: OutboxTerminalUpdate,
   ): Promise<OperationalStoreResult<OutboxJob>> {
     return this.outbox.markTerminal(id, update);
+  }
+
+  settleServerCapture(input: ServerCaptureSettlementInput): Promise<ServerCaptureSettlement> {
+    return settleStoredServerCapture(this, input);
   }
 
   recordOutboxSafeError(
