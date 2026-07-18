@@ -20,6 +20,9 @@ describe('desktop shell', () => {
     );
 
     expect(source).toContain('Local privacy');
+    expect(source.replace(/\s+/g, ' ')).toContain(
+      'Future captures from blocked apps do not persist an asset or enter the sync queue or OCR pipeline.',
+    );
     expect(source).toContain('id="privacy-bundle-id"');
     expect(source).toContain('captureBlockBundle');
     expect(source).toContain('captureRemoveLocalRule');

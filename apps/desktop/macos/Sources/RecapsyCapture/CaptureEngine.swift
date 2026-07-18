@@ -63,8 +63,9 @@ final class CaptureEngine {
     /// capture id. The receipt file is the durable source of truth; this map
     /// only avoids rescanning the asset root for the current process.
     private var pendingCaptureAssets: [String: URL] = [:]
-    // Accessed exclusively from the serial capture queue. The fingerprint is
-    // committed only after the corresponding WebP has been atomically written.
+    // Accessed exclusively from stateQueue. Each tick snapshots it before
+    // dispatching capture work, and a new value is committed only after the
+    // policy generation fence admits the corresponding asset.
     private var lastAcceptedFrameFingerprint: CaptureFrameFingerprint?
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
@@ -272,18 +273,15 @@ final class CaptureEngine {
             counter: captureCounter
         )
         let observedAt = CaptureEngine.iso8601(Date())
-        let root = assetRoot
+        let previousFingerprint = lastAcceptedFrameFingerprint
 
         captureQueue.async { [weak self] in
             self?.performCapture(
                 captureId: captureId,
                 observedAt: observedAt,
-                assetRoot: root,
-                configuredPolicy: configuredPolicy
+                configuredPolicy: configuredPolicy,
+                previousFingerprint: previousFingerprint
             )
-            self?.stateQueue.async {
-                self?.captureInFlight = false
-            }
         }
     }
 
@@ -292,10 +290,24 @@ final class CaptureEngine {
     private func performCapture(
         captureId: String,
         observedAt: String,
-        assetRoot: URL?,
-        configuredPolicy: ConfiguredPolicy
+        configuredPolicy: ConfiguredPolicy,
+        previousFingerprint: CaptureFrameFingerprint?
     ) {
-        guard let assetRoot else {
+        var preparedCapture: PreparedCapture?
+        defer {
+            stateQueue.async { [weak self] in
+                guard let self else { return }
+                if let preparedCapture {
+                    self.finalizePreparedCapture(
+                        preparedCapture,
+                        startedPolicyHash: configuredPolicy.hash
+                    )
+                }
+                self.captureInFlight = false
+            }
+        }
+
+        guard assetRoot != nil else {
             emitCaptureError(
                 captureId: captureId,
                 code: "asset_write_failed",
@@ -308,7 +320,7 @@ final class CaptureEngine {
         do {
             encoded = try ScreenshotCapturer.capture(
                 policy: configuredPolicy.sourcePolicy,
-                previousFingerprint: lastAcceptedFrameFingerprint
+                previousFingerprint: previousFingerprint
             )
         } catch ScreenshotError.permissionMissing {
             emitPermissionStatus()
@@ -386,26 +398,6 @@ final class CaptureEngine {
             )
         }
 
-        let fileURL = CaptureAsset.screenshotFileURL(assetRoot: assetRoot, captureId: captureId)
-        let directory = CaptureAsset.captureDirectoryURL(assetRoot: assetRoot, captureId: captureId)
-        let stagedURL = CaptureReceiptStore.stagedScreenshotFileURL(
-            assetRoot: assetRoot,
-            captureId: captureId
-        )
-        do {
-            try FileManager.default.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
-            )
-            try encoded.imageData.write(to: stagedURL, options: .atomic)
-        } catch {
-            emitCaptureError(
-                captureId: captureId,
-                code: "asset_write_failed",
-                message: "Screenshot bytes could not be written."
-            )
-            return
-        }
         let relativeKey = CaptureAsset.screenshotRelativeKey(captureId: captureId)
         let hash = CaptureAsset.contentHash(for: encoded.imageData)
 
@@ -443,14 +435,10 @@ final class CaptureEngine {
             context: context
         )
 
-        // The receipt is committed while the image is still staged. Recovery
-        // can therefore either promote the staged image or replay the final
-        // image after a crash at any point before ACK.
         guard
             let workspaceId = configuredPolicy.workspaceId,
             let deviceId = configuredPolicy.deviceId
         else {
-            try? FileManager.default.removeItem(at: directory)
             emitCaptureError(
                 captureId: captureId,
                 code: "asset_write_failed",
@@ -458,38 +446,72 @@ final class CaptureEngine {
             )
             return
         }
-        do {
-            try CaptureReceiptStore.write(
-                CaptureReceipt(
-                    workspaceId: workspaceId,
-                    deviceId: deviceId,
-                    payload: payload,
-                    screenshotHash: hash,
-                    screenshotSizeBytes: encoded.imageData.count
-                ),
-                assetRoot: assetRoot,
-                captureId: captureId
-            )
-            try FileManager.default.moveItem(at: stagedURL, to: fileURL)
-        } catch {
-            try? FileManager.default.removeItem(at: directory)
+        preparedCapture = PreparedCapture(
+            captureId: captureId,
+            observedAt: observedAt,
+            receipt: CaptureReceipt(
+                workspaceId: workspaceId,
+                deviceId: deviceId,
+                payload: payload,
+                screenshotHash: hash,
+                screenshotSizeBytes: encoded.imageData.count
+            ),
+            imageData: encoded.imageData,
+            frameFingerprint: encoded.frameFingerprint
+        )
+    }
+
+    /// Runs on stateQueue after capture/encoding has completed. `helper.configure`
+    /// also runs on stateQueue, so a matching ACK is always ordered before this
+    /// fence when the new policy was activated first. `captureInFlight` remains
+    /// true through cleanup, preventing a new generation from reusing this
+    /// capture id or staging path before stale work has been discarded.
+    private func finalizePreparedCapture(
+        _ prepared: PreparedCapture,
+        startedPolicyHash: String
+    ) {
+        guard let assetRoot else {
             emitCaptureError(
-                captureId: captureId,
+                captureId: prepared.captureId,
                 code: "asset_write_failed",
-                message: "Capture receipt could not be committed."
+                message: "Capture asset root is not configured."
             )
             return
         }
 
-        lastAcceptedFrameFingerprint = encoded.frameFingerprint
-
-        // Register ownership before emitting the result. stdin command handling
-        // runs on stateQueue, so a fast NACK can never observe an untracked
-        // written directory.
-        stateQueue.sync {
-            pendingCaptureAssets[captureId] = directory
+        do {
+            let outcome = try CaptureCommitCoordinator.finalize(
+                startedPolicyHash: startedPolicyHash,
+                currentPolicyHash: configuredPolicy?.hash,
+                receipt: prepared.receipt,
+                imageData: prepared.imageData,
+                assetRoot: assetRoot,
+                captureId: prepared.captureId
+            )
+            switch outcome {
+            case let .committed(payload, directory):
+                lastAcceptedFrameFingerprint = prepared.frameFingerprint
+                // Register ownership before emitting the result. A fast NACK
+                // therefore cannot observe an untracked committed directory.
+                pendingCaptureAssets[prepared.captureId] = directory
+                emit(type: "capture.result", payload: payload)
+            case let .skipped(reason):
+                emit(
+                    type: "capture.skipped",
+                    payload: CaptureSkippedPayload(
+                        captureId: prepared.captureId,
+                        reason: reason,
+                        observedAt: prepared.observedAt
+                    )
+                )
+            }
+        } catch {
+            emitCaptureError(
+                captureId: prepared.captureId,
+                code: "asset_write_failed",
+                message: "Capture receipt could not be committed."
+            )
         }
-        emit(type: "capture.result", payload: payload)
     }
 
     /// Replays receipts only after Electron has supplied a verified identity.
@@ -645,6 +667,14 @@ final class CaptureEngine {
     /// full executable rule set even though the first source-only gate only
     /// evaluates window owner identity; later capture gates must never need to
     /// re-fetch or reconstruct policy data from a summary.
+    private struct PreparedCapture {
+        let captureId: String
+        let observedAt: String
+        let receipt: CaptureReceipt
+        let imageData: Data
+        let frameFingerprint: CaptureFrameFingerprint
+    }
+
     private struct ConfiguredPolicy {
         let hash: String
         let version: String
