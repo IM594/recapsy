@@ -24,9 +24,11 @@ import { createCapturePolicyActivation } from './policy';
 import type { CaptureIntakeStore, HelperStateStore } from './store';
 import type { CapturePolicyCacheStore } from './store';
 
-const DEFAULT_BACKPRESSURE: BackpressureConfig = {
+export const DEFAULT_CAPTURE_MAX_QUEUED_JOBS = 24;
+
+const DEFAULT_CAPTURE_BACKPRESSURE: BackpressureConfig = {
   maxAssetBytes: 256 * 1024 * 1024,
-  maxQueuedJobs: 24,
+  maxQueuedJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
   resumeAssetBytes: 128 * 1024 * 1024,
   resumeQueuedJobs: 8,
 };
@@ -72,7 +74,7 @@ export type CaptureRuntime = {
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
   const lifecycleRef: { current?: CaptureLifecycle } = {};
   const rawEventHandler = createCaptureHelperEventHandler({
-    backpressure: options.backpressure ?? DEFAULT_BACKPRESSURE,
+    backpressure: options.backpressure ?? DEFAULT_CAPTURE_BACKPRESSURE,
     client: options.client,
     deviceId: options.deviceId,
     now: options.now,
@@ -132,7 +134,7 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
   });
   lifecycleRef.current = lifecycle;
   const admission = createCaptureAdmissionController({
-    backpressure: options.backpressure ?? DEFAULT_BACKPRESSURE,
+    backpressure: options.backpressure ?? DEFAULT_CAPTURE_BACKPRESSURE,
     lifecycle,
     store: options.store,
     workspaceId: options.workspaceId,

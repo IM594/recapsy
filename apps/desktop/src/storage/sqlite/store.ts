@@ -75,15 +75,6 @@ class SqliteOperationalStore {
       this.options.database.run('BEGIN IMMEDIATE');
       transactionOpen = true;
 
-      if (this.outbox.capacityReached()) {
-        this.options.database.run('ROLLBACK');
-        transactionOpen = false;
-        return failure({
-          code: 'capacity_exceeded',
-          message: 'Outbox active job capacity has been reached.',
-        });
-      }
-
       const conflict = this.outbox.findByIdempotencyKey(entry.workspaceId, entry.idempotencyKey);
       if (conflict) {
         const matches =
@@ -101,6 +92,15 @@ class SqliteOperationalStore {
               code: 'idempotency_key_conflict',
               message: 'Outbox idempotency key already exists for this workspace.',
             });
+      }
+
+      if (this.outbox.capacityReached()) {
+        this.options.database.run('ROLLBACK');
+        transactionOpen = false;
+        return failure({
+          code: 'capacity_exceeded',
+          message: 'Outbox active job capacity has been reached.',
+        });
       }
 
       if (this.outbox.hasId(entry.id)) {

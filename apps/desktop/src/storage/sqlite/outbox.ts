@@ -31,12 +31,12 @@ export class SqliteOutboxPersistence {
   ) {}
 
   async create(job: OutboxJobCreateInput): Promise<OperationalStoreResult<OutboxJob>> {
-    if (this.capacityReached()) {
-      return failure(capacityExceeded());
-    }
-
     if (this.hasIdempotencyKey(job.workspaceId, job.idempotencyKey)) {
       return failure(idempotencyKeyConflict());
+    }
+
+    if (this.capacityReached()) {
+      return failure(capacityExceeded());
     }
 
     const created = createPendingOutboxJob(job);

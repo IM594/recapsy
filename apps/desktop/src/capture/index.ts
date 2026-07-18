@@ -44,7 +44,7 @@ export type {
   CaptureStartupRecovery,
   HelperLifecycle,
 } from './lifecycle';
-export { createCaptureRuntime } from './runtime';
+export { createCaptureRuntime, DEFAULT_CAPTURE_MAX_QUEUED_JOBS } from './runtime';
 export {
   CapturePolicyActivationError,
   compileCapturePolicy,

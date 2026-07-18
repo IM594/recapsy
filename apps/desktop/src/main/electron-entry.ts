@@ -20,6 +20,7 @@ import {
   createLoginWindowPrompter,
 } from '../auth/index';
 import {
+  DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
   createCaptureBundleClient,
   createNodeCaptureBundleValidationAdapter,
 } from '../capture/index';
@@ -390,7 +391,10 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
       process.env.RECAPSY_DESKTOP_SQLITE_PATH ??
       path.join(app.getPath('userData'), 'recapsy-desktop-dev.sqlite3');
 
-    return createSqliteStore({ database: createNodeSqliteDatabase(sqlitePath) });
+    return createSqliteStore({
+      database: createNodeSqliteDatabase(sqlitePath),
+      maxActiveOutboxJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
+    });
   },
   deviceId,
   hideDockIcon: devVisibilityEnabled ? false : undefined,

@@ -579,6 +579,41 @@ describe('SQLite operational store', () => {
     store.close();
   });
 
+  it('replays an accepted capture at capacity but rejects a new capture atomically', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    const store = createSqliteStore({ database, maxActiveOutboxJobs: 1 });
+    await store.initialize();
+    const entry = {
+      ...createJob(),
+      assetRefs: [createAsset()],
+    };
+
+    const first = await store.createCaptureOutboxEntry(entry);
+    const replay = await store.createCaptureOutboxEntry(entry);
+    const overflow = await store.createCaptureOutboxEntry({
+      ...createJob({
+        assetRefId: 'asset_2',
+        id: 'job_2',
+        idempotencyKey: 'idem_2',
+      }),
+      assetRefs: [createAsset({ assetRefId: 'asset_2' })],
+    });
+
+    expect(first.ok).toBe(true);
+    expect(replay).toMatchObject({ ok: true, value: { id: 'job_1' } });
+    expect(overflow).toEqual({
+      ok: false,
+      error: {
+        code: 'capacity_exceeded',
+        message: 'Outbox active job capacity has been reached.',
+      },
+    });
+    expect(await store.listOutboxJobs({ workspaceId: 'workspace_1' })).toHaveLength(1);
+    expect(await store.getAssetCacheRef('asset_2')).toBeNull();
+
+    store.close();
+  });
+
   it('rolls back written asset refs when the outbox insert throws', async () => {
     const database = createBunSqliteDatabase(tempDatabasePath());
     let assetWriteObserved = false;

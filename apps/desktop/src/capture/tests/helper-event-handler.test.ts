@@ -84,6 +84,36 @@ describe('capture helper event handler', () => {
     expect((await store.getOutboxJob('capture_1'))?.serverCaptureId).toBeUndefined();
   });
 
+  it('serializes concurrent capture.result intake so only the hard queue limit is accepted', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      backpressure: {
+        maxAssetBytes: 1024 * 1024,
+        maxQueuedJobs: 1,
+        resumeAssetBytes: 512 * 1024,
+        resumeQueuedJobs: 0,
+      },
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+
+    await Promise.all([
+      handler.handleEnvelope(captureResultEnvelopeFor('capture_1')),
+      handler.handleEnvelope(captureResultEnvelopeFor('capture_2')),
+    ]);
+
+    const jobs = await store.listOutboxJobs({ workspaceId });
+    expect(jobs).toHaveLength(1);
+    expect(client.commandTypes().filter((type) => type === 'capture.ack')).toHaveLength(1);
+    expect(client.commands.filter((command) => command.type === 'capture.nack')).toMatchObject([
+      { payload: { code: 'backpressure' } },
+    ]);
+  });
+
   it('nacks before writing asset refs or outbox jobs when backpressure is active', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
@@ -700,6 +730,22 @@ function captureResultEnvelope(
     },
     observedAt,
     ...overrides,
+  });
+}
+
+function captureResultEnvelopeFor(captureId: string): HelperEnvelope<'capture.result'> {
+  const base = captureResultEnvelope();
+  return helperEnvelope('capture.result', {
+    ...base.payload,
+    assets: base.payload.assets.map((asset) => ({
+      ...asset,
+      ref: asset.ref.replace('capture_1', captureId),
+    })),
+    captureId,
+    manifest: {
+      ...base.payload.manifest,
+      ref: base.payload.manifest.ref.replace('capture_1', captureId),
+    },
   });
 }
 

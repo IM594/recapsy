@@ -17,4 +17,13 @@ describe('desktop development launch', () => {
     expect(packageJson.scripts?.start).toBe('electron .');
     expect(packageJson.scripts?.dev).toBe('pnpm run build && pnpm run start');
   });
+
+  it('passes the capture queue hard limit into the production SQLite store', async () => {
+    const entrySource = await readFile(
+      path.join(desktopRoot, 'src', 'main', 'electron-entry.ts'),
+      'utf8',
+    );
+
+    expect(entrySource).toContain('maxActiveOutboxJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS');
+  });
 });

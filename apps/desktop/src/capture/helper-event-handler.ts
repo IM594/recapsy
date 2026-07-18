@@ -68,6 +68,7 @@ export function createCaptureHelperEventHandler(
 
 class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler {
   private messageSequence = 0;
+  private captureResultTail = Promise.resolve();
   private readonly permissionStatusListeners = new Set<
     (status: CaptureHelperEventStatus) => void
   >();
@@ -97,7 +98,7 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
     try {
       switch (envelope.type) {
         case 'capture.result':
-          await this.handleCaptureResult(narrowHelperEnvelope(envelope, 'capture.result'));
+          await this.enqueueCaptureResult(narrowHelperEnvelope(envelope, 'capture.result'));
           return;
         case 'capture.skipped':
           await this.recordSkippedCapture(narrowHelperEnvelope(envelope, 'capture.skipped'));
@@ -123,6 +124,12 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
     } catch {
       await this.recordUnexpectedEventFailure(envelope);
     }
+  }
+
+  private enqueueCaptureResult(envelope: HelperEnvelope<'capture.result'>): Promise<void> {
+    const result = this.captureResultTail.then(() => this.handleCaptureResult(envelope));
+    this.captureResultTail = result.catch(() => undefined);
+    return result;
   }
 
   async handleProtocolResult(result: HelperProtocolResult<HelperEnvelope>): Promise<void> {
