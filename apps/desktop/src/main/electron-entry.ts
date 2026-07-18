@@ -359,6 +359,8 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             syncCompletedPerMinute: sync.completedPerMinute,
             syncFailed: sync.failed,
             syncInputPerMinute: sync.inputPerMinute,
+            syncLastErrorCode: sync.lastError?.code,
+            syncLastErrorMessage: sync.lastError?.message,
             ...(sync.oldestActiveAgeSeconds !== undefined
               ? { syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds }
               : {}),
@@ -375,10 +377,15 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             capturePaused: snapshot.status === 'paused',
             capturePauseReasons: [...(snapshot.pauseReasons ?? [])],
             captureState: snapshot.status,
+            capturePolicyVersion: helperStatus?.policyVersion,
             syncInputPerMinute: sync.inputPerMinute,
+            syncCompletedPerMinute: sync.completedPerMinute,
+            syncProcessing: sync.processing,
+            syncPending: sync.pending,
             ...(sync.oldestActiveAgeSeconds !== undefined
               ? { syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds }
               : {}),
+            safeErrorCode: sync.lastError?.code ?? lastError?.code,
             syncWorkerCapacity: workerCapacity,
           });
           return status;

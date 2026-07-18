@@ -16,12 +16,17 @@ describe('desktop acceptance projection', () => {
 
     expect(DevAcceptanceDesktopStatusSchema.parse(projection)).toEqual(projection);
     expect(projection).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
       workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
       observedAt: '2026-07-18T08:00:00.000Z',
       acceptedCaptureInputPerMinute: 7,
+      completedPerMinute: 5,
+      processing: 2,
+      pending: 3,
       oldestActiveAgeSeconds: 42,
+      policyVersion: 'policy-primary',
+      safeErrorCode: 'provider_unavailable',
       workerCapacity: {
         activeWorkers: 2,
         localMaxWorkers: 4,
@@ -61,5 +66,27 @@ describe('desktop acceptance projection', () => {
         }),
       }),
     ).toThrow();
+  });
+
+  test('normalizes an internal error code outside the relay allowlist to unknown', () => {
+    const projection = projectDesktopAcceptanceStatus({
+      runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
+      workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
+      observedAt: '2026-07-18T08:00:00.000Z',
+      snapshot: acceptanceSnapshot({ safeErrorCode: '/private/path' }),
+    });
+
+    expect(projection.safeErrorCode).toBe('unknown');
+  });
+
+  test('drops a policy version outside the relay-safe format', () => {
+    const projection = projectDesktopAcceptanceStatus({
+      runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
+      workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
+      observedAt: '2026-07-18T08:00:00.000Z',
+      snapshot: acceptanceSnapshot({ capturePolicyVersion: '/Users/private/policy' }),
+    });
+
+    expect(projection.policyVersion).toBeNull();
   });
 });

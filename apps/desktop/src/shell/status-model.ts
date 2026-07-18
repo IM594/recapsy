@@ -11,6 +11,8 @@ export type DesktopShellStatus = {
   syncBlocked: number;
   syncInputPerMinute?: number;
   syncCompletedPerMinute?: number;
+  syncLastErrorCode?: string;
+  syncLastErrorMessage?: string;
   syncOldestActiveAgeSeconds?: number;
   syncWorkerCapacity?: {
     activeWorkers: number;
@@ -34,21 +36,13 @@ export function formatTrayTooltip(
   status: DesktopShellStatus,
   activeAlerts: readonly { trayLabel: string }[] = [],
 ): string {
-  if (activeAlerts.length > 0) {
-    return `Recapsy · Attention required · ${activeAlerts.map((alert) => alert.trayLabel).join(', ')}`;
-  }
   const permissionLabel =
     status.screenRecording === 'granted' ? 'Screen recording granted' : 'Screen recording required';
-  const syncLabel =
-    status.syncFailed > 0
-      ? `${status.syncFailed} sync failed`
-      : (status.syncProcessing ?? 0) > 0
-        ? `${status.syncProcessing} sync processing`
-        : status.syncRetrying > 0
-          ? `${status.syncRetrying} sync waiting to retry`
-          : status.syncPending > 0
-            ? `${status.syncPending} sync pending${status.syncOldestActiveAgeSeconds ? `, oldest ${formatAge(status.syncOldestActiveAgeSeconds)}` : ''}`
-            : 'Sync idle';
+  const syncLabels = [
+    `processing ${status.syncProcessing ?? 0}`,
+    `pending ${status.syncPending}`,
+    `oldest ${status.syncOldestActiveAgeSeconds === undefined ? 'none' : formatAge(status.syncOldestActiveAgeSeconds)}`,
+  ];
 
   const captureLabel =
     status.capturePauseReason === 'storage'
@@ -58,23 +52,31 @@ export function formatTrayTooltip(
         : status.capturePaused
           ? 'Paused'
           : status.captureState;
-  const throughputLabel =
-    status.syncInputPerMinute !== undefined || status.syncCompletedPerMinute !== undefined
-      ? `in ${status.syncInputPerMinute ?? 0}/min · done ${status.syncCompletedPerMinute ?? 0}/min`
+  const throughputLabel = `in ${status.syncInputPerMinute ?? 0}/min · done ${status.syncCompletedPerMinute ?? 0}/min`;
+  const admissionLabel = status.captureAdmission?.active
+    ? `admission ${status.captureAdmission.reasons.length > 0 ? status.captureAdmission.reasons.join(',') : 'closed'}`
+    : 'admission open';
+  const policyLabel = status.capturePolicy
+    ? `policy ${status.capturePolicy.version}`
+    : 'policy not applied';
+  const errorLabel =
+    status.syncLastErrorCode || status.lastErrorCode
+      ? `error ${status.syncLastErrorCode ?? status.lastErrorCode}`
+      : 'error none';
+  const alertLabel =
+    activeAlerts.length > 0
+      ? `Attention required: ${activeAlerts.map((alert) => alert.trayLabel).join(', ')}`
       : undefined;
-  const admissionLabel =
-    status.captureAdmission?.active && status.captureAdmission.reasons.length > 0
-      ? `admission ${status.captureAdmission.reasons.join(',')}`
-      : undefined;
-  const policyLabel = status.capturePolicy ? `policy ${status.capturePolicy.version}` : undefined;
   return [
     'Recapsy',
     captureLabel,
     permissionLabel,
-    syncLabel,
+    ...syncLabels,
     throughputLabel,
     admissionLabel,
     policyLabel,
+    errorLabel,
+    alertLabel,
   ]
     .filter((value): value is string => Boolean(value))
     .join(' · ');

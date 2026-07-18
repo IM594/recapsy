@@ -6,12 +6,17 @@ import {
 } from '../dev-acceptance';
 
 const status: DevAcceptanceDesktopStatus = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
   workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
   observedAt: '2026-07-18T08:00:00.000Z',
   acceptedCaptureInputPerMinute: 7,
+  completedPerMinute: 5,
+  processing: 2,
+  pending: 3,
   oldestActiveAgeSeconds: 42,
+  policyVersion: 'policy-primary',
+  safeErrorCode: 'provider_unavailable',
   workerCapacity: {
     activeWorkers: 2,
     localMaxWorkers: 4,
@@ -57,6 +62,7 @@ describe('development acceptance desktop status contract', () => {
       'ocr',
       'errorMessage',
       'policyHash',
+      'policyVersionHash',
       'token',
     ];
 
@@ -96,12 +102,17 @@ describe('development acceptance desktop status contract', () => {
 
   test('rejects invalid counters, timestamps, identities, and impossible capacity', () => {
     const invalidStatuses = [
-      { ...status, schemaVersion: 2 },
+      { ...status, schemaVersion: 1 },
       { ...status, runtimeInstanceId: 'stable-device-id' },
       { ...status, workspaceId: 'workspace-from-path' },
       { ...status, observedAt: 'yesterday' },
       { ...status, acceptedCaptureInputPerMinute: -1 },
+      { ...status, completedPerMinute: -1 },
+      { ...status, processing: -1 },
+      { ...status, pending: -1 },
       { ...status, oldestActiveAgeSeconds: -1 },
+      { ...status, policyVersion: '/Users/private/policy' },
+      { ...status, safeErrorCode: 'private message' },
       {
         ...status,
         workerCapacity: { ...status.workerCapacity, activeWorkers: 4 },

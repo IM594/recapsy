@@ -10,15 +10,24 @@ describe('desktop shell status model', () => {
     expect(
       formatTrayTooltip({
         accessibility: 'not_determined',
+        captureAdmission: { active: true, reasons: ['max_asset_bytes_reached'] },
         capturePaused: false,
+        capturePolicy: { hash: 'sha256:private', version: 'policy-primary' },
         captureState: 'running',
         screenRecording: 'granted',
         syncBlocked: 0,
+        syncCompletedPerMinute: 5,
         syncFailed: 0,
+        syncInputPerMinute: 7,
+        syncOldestActiveAgeSeconds: 42,
         syncPending: 2,
+        syncProcessing: 1,
         syncRetrying: 0,
+        syncLastErrorCode: 'provider_unavailable',
       }),
-    ).toBe('Recapsy · running · Screen recording granted · 2 sync pending');
+    ).toBe(
+      'Recapsy · running · Screen recording granted · processing 1 · pending 2 · oldest 42s · in 7/min · done 5/min · admission max_asset_bytes_reached · policy policy-primary · error provider_unavailable',
+    );
 
     expect(
       formatTrayTooltip({
@@ -32,7 +41,9 @@ describe('desktop shell status model', () => {
         syncPending: 9,
         syncRetrying: 0,
       }),
-    ).toBe('Recapsy · Catching up · Screen recording granted · 9 sync pending');
+    ).toContain(
+      'Catching up · Screen recording granted · processing 0 · pending 9 · oldest none · in 0/min · done 0/min · admission open · policy not applied · error none',
+    );
 
     expect(formatPermissionLabel('not_determined')).toBe('Not determined');
     expect(

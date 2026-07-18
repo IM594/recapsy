@@ -86,8 +86,13 @@ describe('desktop acceptance publisher', () => {
       'Bearer session-access-token',
     );
     expect(JSON.parse(String(receivedInit?.body))).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       workspaceId,
+      completedPerMinute: 5,
+      processing: 2,
+      pending: 3,
+      policyVersion: 'policy-primary',
+      safeErrorCode: 'provider_unavailable',
     });
   });
 

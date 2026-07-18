@@ -249,7 +249,12 @@
             ? `${status.syncWorkerCapacity.activeWorkers} active · server ${status.syncWorkerCapacity.serverMaxConcurrentOcr} · local ${status.syncWorkerCapacity.localMaxWorkers}`
             : 'Waiting for policy',
         );
-        setText('sync-error', status.syncLastErrorMessage || 'None');
+        setText(
+          'sync-error',
+          status.syncLastErrorCode
+            ? `${status.syncLastErrorCode}${status.syncLastErrorMessage ? ` · ${status.syncLastErrorMessage}` : ''}`
+            : 'None',
+        );
         if (status.retentionPreview) {
           setText(
             'retention-preview',
@@ -309,6 +314,7 @@
           syncCompletedPerMinute: sync.completedPerMinute,
           syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds,
           syncWorkerCapacity: sync.workerCapacity,
+          syncLastErrorCode: sync.lastError && sync.lastError.code,
           syncLastErrorMessage: sync.lastError && sync.lastError.message,
           retentionPreview,
         });

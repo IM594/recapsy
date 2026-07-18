@@ -26,6 +26,13 @@ describe('desktop acceptance composition', () => {
     expect(statusSource).toContain('void acceptancePublisher.tick({');
     expect(statusSource).toContain('capturePauseReasons: [...(snapshot.pauseReasons ?? [])]');
     expect(statusSource).toContain('syncInputPerMinute: sync.inputPerMinute');
+    expect(statusSource).toContain('syncCompletedPerMinute: sync.completedPerMinute');
+    expect(statusSource).toContain('syncProcessing: sync.processing');
+    expect(statusSource).toContain('syncPending: sync.pending');
+    expect(statusSource).toContain('syncLastErrorCode: sync.lastError?.code');
+    expect(statusSource).toContain('syncLastErrorMessage: sync.lastError?.message');
+    expect(statusSource).toContain('capturePolicyVersion: helperStatus?.policyVersion');
+    expect(statusSource).toContain('safeErrorCode: sync.lastError?.code');
     expect(statusSource).toContain('syncWorkerCapacity: sync.workerCapacity');
   });
 });

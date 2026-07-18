@@ -12,7 +12,12 @@ export function acceptanceSnapshot(
       reasons: ['max_asset_bytes_reached'],
     },
     syncInputPerMinute: 7,
+    syncCompletedPerMinute: 5,
+    syncProcessing: 2,
+    syncPending: 3,
     syncOldestActiveAgeSeconds: 42,
+    capturePolicyVersion: 'policy-primary',
+    safeErrorCode: 'provider_unavailable',
     syncWorkerCapacity: {
       activeWorkers: 2,
       localMaxWorkers: 4,

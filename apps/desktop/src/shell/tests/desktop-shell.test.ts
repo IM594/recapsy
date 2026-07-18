@@ -26,6 +26,11 @@ describe('desktop shell', () => {
     expect(source).toContain('id="privacy-bundle-id"');
     expect(source).toContain('captureBlockBundle');
     expect(source).toContain('captureRemoveLocalRule');
+    expect(source).toContain('status.syncLastErrorCode');
+    expect(source).toContain('status.syncLastErrorMessage');
+    expect(source).toContain('id="sync-processing"');
+    expect(source).toContain('id="sync-pending"');
+    expect(source).toContain('id="sync-oldest"');
   });
 
   it('creates a tray, shows the main window, and pushes status updates', async () => {
@@ -169,7 +174,7 @@ describe('desktop shell', () => {
     firstStatus.resolve(status({ syncPending: 2 }));
     await expect(firstRefresh).resolves.toEqual(status({ syncPending: 2 }));
     expect(harness.tooltipUpdates).toHaveLength(1);
-    expect(harness.tooltipUpdates[0]).toContain('2 sync pending');
+    expect(harness.tooltipUpdates[0]).toContain('pending 2');
 
     harness.shell.dispose();
   });

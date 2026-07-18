@@ -23,6 +23,38 @@ export const DevAcceptanceAdmissionReasonSchema = z.enum([
   'queue_state_unavailable',
 ]);
 
+export const DevAcceptanceSafeErrorCodeSchema = z.enum([
+  'asset_write_failed',
+  'capture_failed',
+  'cancelled',
+  'helper_start_failed',
+  'helper_unavailable',
+  'helper_unexpected_exit',
+  'input_too_large',
+  'offline',
+  'permission_missing',
+  'permission_revoked',
+  'policy_denied',
+  'policy_invalid_scope',
+  'policy_requires_unavailable_context',
+  'policy_stale',
+  'policy_unavailable',
+  'provider_not_configured',
+  'provider_unavailable',
+  'quota_exceeded',
+  'result_invalid',
+  'server_unavailable',
+  'unknown',
+  'unsupported_format',
+  'validation_failed',
+  'workspace_required',
+]);
+
+export const DevAcceptancePolicyVersionSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_.:-]+$/)
+  .max(128);
+
 const WorkerCapacitySchema = z
   .object({
     activeWorkers: z.number().int().nonnegative(),
@@ -44,12 +76,17 @@ const WorkerCapacitySchema = z
 
 export const DevAcceptanceDesktopStatusSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    schemaVersion: z.literal(2),
     runtimeInstanceId: IdSchema,
     workspaceId: IdSchema,
     observedAt: IsoDateTimeSchema,
     acceptedCaptureInputPerMinute: z.number().int().nonnegative(),
+    completedPerMinute: z.number().int().nonnegative(),
+    processing: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
     oldestActiveAgeSeconds: z.number().int().nonnegative().nullable(),
+    policyVersion: DevAcceptancePolicyVersionSchema.nullable(),
+    safeErrorCode: DevAcceptanceSafeErrorCodeSchema.nullable(),
     workerCapacity: WorkerCapacitySchema,
     capture: z
       .object({
@@ -77,6 +114,7 @@ export const DevAcceptanceDesktopStatusResponseSchema = z.discriminatedUnion('co
 export type DevAcceptanceCaptureState = z.infer<typeof DevAcceptanceCaptureStateSchema>;
 export type DevAcceptanceCapturePauseReason = z.infer<typeof DevAcceptanceCapturePauseReasonSchema>;
 export type DevAcceptanceAdmissionReason = z.infer<typeof DevAcceptanceAdmissionReasonSchema>;
+export type DevAcceptanceSafeErrorCode = z.infer<typeof DevAcceptanceSafeErrorCodeSchema>;
 export type DevAcceptanceDesktopStatus = z.infer<typeof DevAcceptanceDesktopStatusSchema>;
 export type DevAcceptanceDesktopStatusResponse = z.infer<
   typeof DevAcceptanceDesktopStatusResponseSchema
