@@ -56,7 +56,9 @@ class LifecycleController implements CaptureLifecycle {
   private lifecycleGeneration = 0;
   private menuBarActive = false;
   private readonly pauseCauses: Set<CapturePauseCause>;
+  private startInFlight: Promise<void> | undefined;
   private status: CaptureLifecycleStatus = 'stopped';
+  private stopInFlight: Promise<void> | undefined;
 
   constructor(
     private readonly helper: HelperLifecycle,
@@ -82,7 +84,24 @@ class LifecycleController implements CaptureLifecycle {
     };
   }
 
-  async start(): Promise<void> {
+  start(): Promise<void> {
+    if (this.startInFlight) {
+      return this.startInFlight;
+    }
+
+    const run = this.stopInFlight
+      ? this.stopInFlight.then(() => this.startInternal())
+      : this.startInternal();
+    const tracked = run.finally(() => {
+      if (this.startInFlight === tracked) {
+        this.startInFlight = undefined;
+      }
+    });
+    this.startInFlight = tracked;
+    return tracked;
+  }
+
+  private async startInternal(): Promise<void> {
     if (this.status === 'running' || this.status === 'paused') {
       return;
     }
@@ -157,7 +176,23 @@ class LifecycleController implements CaptureLifecycle {
     await this.stop();
   }
 
-  async stop(): Promise<void> {
+  stop(): Promise<void> {
+    if (this.stopInFlight) {
+      return this.stopInFlight;
+    }
+
+    this.startInFlight = undefined;
+    const run = this.stopInternal();
+    const tracked = run.finally(() => {
+      if (this.stopInFlight === tracked) {
+        this.stopInFlight = undefined;
+      }
+    });
+    this.stopInFlight = tracked;
+    return tracked;
+  }
+
+  private async stopInternal(): Promise<void> {
     if (this.status === 'stopped') {
       return;
     }
