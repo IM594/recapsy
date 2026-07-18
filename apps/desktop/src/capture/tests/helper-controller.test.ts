@@ -28,6 +28,45 @@ const backpressure: BackpressureConfig = {
 };
 
 describe('capture helper controller', () => {
+  it('retries a failed helper stop before executing a requested restart', async () => {
+    const client = new FailingStopCaptureHelperClient(1);
+    const { controller, lifecycle } = createActiveLifecycleHarness(client);
+    await lifecycle.start();
+
+    await expect(lifecycle.stop()).rejects.toThrow('helper stop failed');
+    expect(controller.getStatus()).toMatchObject({ state: 'stopping' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'stopping' });
+
+    await lifecycle.start();
+
+    expect(client.calls).toEqual([
+      'start',
+      'configureCapture',
+      'beginCapture',
+      'stop',
+      'stop',
+      'start',
+      'configureCapture',
+      'beginCapture',
+    ]);
+    expect(controller.getStatus()).toMatchObject({ state: 'running' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'running' });
+  });
+
+  it('rejects restart when retrying a failed helper stop still fails', async () => {
+    const client = new FailingStopCaptureHelperClient(2);
+    const { controller, lifecycle } = createActiveLifecycleHarness(client);
+    await lifecycle.start();
+
+    await expect(lifecycle.stop()).rejects.toThrow('helper stop failed');
+    await expect(lifecycle.start()).rejects.toThrow('helper stop failed');
+
+    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture', 'stop', 'stop']);
+    expect(client.calls.filter((call) => call === 'start')).toHaveLength(1);
+    expect(controller.getStatus()).toMatchObject({ state: 'stopping' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'stopping' });
+  });
+
   it('waits for an in-flight stop before executing an explicit restart', async () => {
     const client = new PendingStopCaptureHelperClient();
     const { controller, lifecycle } = createActiveLifecycleHarness(client);
@@ -879,6 +918,20 @@ class PendingStopCaptureHelperClient extends RecordingCaptureHelperClient {
   completeStop(): void {
     this.stopResolver?.();
     this.stopResolver = undefined;
+  }
+}
+
+class FailingStopCaptureHelperClient extends RecordingCaptureHelperClient {
+  constructor(private failuresRemaining: number) {
+    super();
+  }
+
+  override async stop(): Promise<void> {
+    this.calls.push('stop');
+    if (this.failuresRemaining > 0) {
+      this.failuresRemaining -= 1;
+      throw new Error('helper stop failed');
+    }
   }
 }
 

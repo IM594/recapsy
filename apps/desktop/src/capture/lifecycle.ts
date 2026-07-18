@@ -89,9 +89,8 @@ class LifecycleController implements CaptureLifecycle {
       return this.startInFlight;
     }
 
-    const run = this.stopInFlight
-      ? this.stopInFlight.then(() => this.startInternal())
-      : this.startInternal();
+    const stop = this.stopInFlight ?? (this.status === 'stopping' ? this.stop() : undefined);
+    const run = stop ? stop.then(() => this.startInternal()) : this.startInternal();
     const tracked = run.finally(() => {
       if (this.startInFlight === tracked) {
         this.startInFlight = undefined;
@@ -202,12 +201,9 @@ class LifecycleController implements CaptureLifecycle {
     this.menuBarActive = false;
     this.pauseCauses.clear();
 
-    try {
-      await this.helper.shutdown();
-    } finally {
-      if (this.isLifecycleCurrent(lifecycleGeneration)) {
-        this.status = 'stopped';
-      }
+    await this.helper.shutdown();
+    if (this.isLifecycleCurrent(lifecycleGeneration)) {
+      this.status = 'stopped';
     }
   }
 
