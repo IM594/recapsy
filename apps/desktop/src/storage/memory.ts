@@ -513,6 +513,10 @@ class InMemoryOperationalStore {
     };
   }
 
+  verifyOperationalWrite(): Promise<void> {
+    return Promise.resolve();
+  }
+
   async clearWorkspaceCache(workspaceId: string): Promise<void> {
     deleteMatching(this.outboxJobs, (job) => job.workspaceId === workspaceId);
     deleteMatching(this.assetRefs, (asset) => asset.workspaceId === workspaceId);

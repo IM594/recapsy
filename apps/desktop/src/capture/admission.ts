@@ -7,6 +7,7 @@ import {
 
 export type CaptureAdmissionStore = {
   getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot>;
+  verifyOperationalWrite(): Promise<void>;
 };
 
 export type CaptureAdmissionLifecycle = {
@@ -79,6 +80,7 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
   private intakeStorageBlocked = false;
   private intakeStorageFailureGeneration = 0;
   private intakeStorageHealthySamples = 0;
+  private intakeStorageWriteVerifiedGeneration: number | undefined;
   private intervalHandle: unknown;
   private queueBlocked = false;
   private queueStateUnavailable = false;
@@ -134,6 +136,7 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
     this.intakeStorageBlocked = true;
     this.intakeStorageHealthySamples = 0;
     this.intakeStorageFailureGeneration += 1;
+    this.intakeStorageWriteVerifiedGeneration = undefined;
     await this.applyPauseCauses();
     return this.getStatus();
   }
@@ -188,9 +191,13 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
         intakeFailureGeneration === this.intakeStorageFailureGeneration
       ) {
         this.intakeStorageHealthySamples += 1;
-        if (this.intakeStorageHealthySamples >= INTAKE_RECOVERY_SAMPLES) {
+        if (
+          this.intakeStorageHealthySamples >= INTAKE_RECOVERY_SAMPLES &&
+          this.intakeStorageWriteVerifiedGeneration === intakeFailureGeneration
+        ) {
           this.intakeStorageBlocked = false;
           this.intakeStorageHealthySamples = 0;
+          this.intakeStorageWriteVerifiedGeneration = undefined;
         }
       }
       this.queueBlocked = updateUpperWaterMark(
@@ -220,6 +227,7 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
     }
 
     const writeFailureGeneration = this.storageWriteFailureGeneration;
+    const intakeFailureGeneration = this.intakeStorageFailureGeneration;
     try {
       const snapshot = await this.options.storage.probe();
       this.storageStateUnavailable = false;
@@ -233,18 +241,32 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
           this.storageWriteFailureGeneration += 1;
         }
         this.storageWriteBlocked = true;
-      } else if (
-        this.storageWriteBlocked &&
-        snapshot.availableBytes >= this.options.storage.resumeAvailableBytes &&
-        writeFailureGeneration === this.storageWriteFailureGeneration
-      ) {
-        try {
-          await this.options.storage.verifyWrite();
-          if (writeFailureGeneration === this.storageWriteFailureGeneration) {
-            this.storageWriteBlocked = false;
+      } else if (snapshot.availableBytes >= this.options.storage.resumeAvailableBytes) {
+        const verifyAssetWriteFailure =
+          this.storageWriteBlocked && writeFailureGeneration === this.storageWriteFailureGeneration;
+        const verifyIntakeStorageFailure =
+          this.intakeStorageBlocked &&
+          intakeFailureGeneration === this.intakeStorageFailureGeneration &&
+          this.intakeStorageWriteVerifiedGeneration !== intakeFailureGeneration;
+        if (verifyAssetWriteFailure) {
+          try {
+            await this.options.storage.verifyWrite();
+            if (writeFailureGeneration === this.storageWriteFailureGeneration) {
+              this.storageWriteBlocked = false;
+            }
+          } catch {
+            // Keep the asset write-failure latch closed until a later verification succeeds.
           }
-        } catch {
-          this.storageWriteBlocked = true;
+        }
+        if (verifyIntakeStorageFailure) {
+          try {
+            await this.options.store.verifyOperationalWrite();
+            if (intakeFailureGeneration === this.intakeStorageFailureGeneration) {
+              this.intakeStorageWriteVerifiedGeneration = intakeFailureGeneration;
+            }
+          } catch {
+            // Keep the intake storage-failure latch closed until a later verification succeeds.
+          }
         }
       }
     } catch {

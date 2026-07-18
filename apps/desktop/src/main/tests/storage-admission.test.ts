@@ -218,4 +218,66 @@ describe('local storage admission probe', () => {
     await expect(verifyWrite()).rejects.toThrow('storage_write_verification_failed');
     expect(calls).toEqual(['close', 'unlink']);
   });
+
+  it('fails closed when closing its own probe fails', async () => {
+    const calls: string[] = [];
+    let unlinkCalls = 0;
+    const verifyWrite = createLocalStorageWriteVerifier({
+      assetRoot: '/volume/captures',
+      fileSystem: {
+        async mkdir() {},
+        async open() {
+          return {
+            async close() {
+              calls.push('close');
+              throw new Error('close failed');
+            },
+            async sync() {
+              calls.push('sync');
+            },
+            async writeFile() {
+              calls.push('write');
+            },
+          };
+        },
+        async unlink() {
+          unlinkCalls += 1;
+          if (unlinkCalls === 1) {
+            throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          }
+          calls.push('unlink');
+        },
+      },
+    });
+
+    await expect(verifyWrite()).rejects.toThrow('storage_write_verification_failed');
+    expect(calls).toEqual(['write', 'sync', 'close', 'unlink']);
+  });
+
+  it('fails closed when final cleanup of its own probe fails', async () => {
+    let unlinkCalls = 0;
+    const verifyWrite = createLocalStorageWriteVerifier({
+      assetRoot: '/volume/captures',
+      fileSystem: {
+        async mkdir() {},
+        async open() {
+          return {
+            async close() {},
+            async sync() {},
+            async writeFile() {},
+          };
+        },
+        async unlink() {
+          unlinkCalls += 1;
+          if (unlinkCalls === 1) {
+            throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+          }
+          throw new Error('final unlink failed');
+        },
+      },
+    });
+
+    await expect(verifyWrite()).rejects.toThrow('storage_write_verification_failed');
+    expect(unlinkCalls).toBe(2);
+  });
 });

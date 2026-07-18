@@ -82,6 +82,44 @@ describe('capture admission controller', () => {
     expect(lifecycle.storagePauseCalls).toEqual([true, false]);
   });
 
+  it('does not write a recovery probe without both an intake failure and recovered capacity', async () => {
+    const lifecycle = new RecordingLifecycle();
+    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
+    const storage = new StorageProbe({ availableBytes: 200, writable: true });
+    let assetWriteVerifications = 0;
+    let operationalWriteVerifications = 0;
+    store.verifyOperationalWrite = async () => {
+      operationalWriteVerifications += 1;
+    };
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      lifecycle,
+      storage: {
+        minAvailableBytes: 100,
+        probe: storage.probe,
+        resumeAvailableBytes: 200,
+        verifyWrite: async () => {
+          assetWriteVerifications += 1;
+        },
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    await controller.reconcile();
+    storage.snapshot = { availableBytes: 150, writable: true };
+    await controller.reportStorageFailure();
+    await controller.reconcile();
+    await controller.reconcile();
+
+    expect(controller.getStatus()).toEqual({
+      active: true,
+      reasons: ['storage_state_unavailable'],
+    });
+    expect(operationalWriteVerifications).toBe(0);
+    expect(assetWriteVerifications).toBe(0);
+  });
+
   it('turns a real asset write failure into admission pressure and clears it only after a healthy disk probe', async () => {
     const lifecycle = new RecordingLifecycle();
     const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
@@ -114,6 +152,159 @@ describe('capture admission controller', () => {
     expect(writeVerifications).toBe(1);
   });
 
+  it('does not clear an intake storage failure from two healthy reads until write verification succeeds', async () => {
+    const lifecycle = new RecordingLifecycle();
+    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
+    let storageProbes = 0;
+    let assetWriteVerifications = 0;
+    let operationalWriteVerifications = 0;
+    store.verifyOperationalWrite = async () => {
+      operationalWriteVerifications += 1;
+      throw new Error('operational write still failing');
+    };
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      lifecycle,
+      storage: {
+        minAvailableBytes: 100,
+        probe: async () => {
+          storageProbes += 1;
+          return { availableBytes: 200, writable: true };
+        },
+        resumeAvailableBytes: 200,
+        verifyWrite: async () => {
+          assetWriteVerifications += 1;
+        },
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    await expect(controller.reportStorageFailure()).resolves.toEqual({
+      active: true,
+      reasons: ['storage_state_unavailable'],
+    });
+    await expect(controller.reconcile()).resolves.toEqual({
+      active: true,
+      reasons: ['storage_state_unavailable'],
+    });
+    await expect(controller.reconcile()).resolves.toEqual({
+      active: true,
+      reasons: ['storage_state_unavailable'],
+    });
+    expect(store.reads).toBe(2);
+    expect(storageProbes).toBe(2);
+    expect(operationalWriteVerifications).toBe(2);
+    expect(assetWriteVerifications).toBe(0);
+  });
+
+  it('does not let a stale write verification clear a newer write failure', async () => {
+    const lifecycle = new RecordingLifecycle();
+    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
+    const deferredVerification = Promise.withResolvers<void>();
+    let verifyCalls = 0;
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      lifecycle,
+      storage: {
+        minAvailableBytes: 100,
+        probe: async () => ({ availableBytes: 200, writable: true }),
+        resumeAvailableBytes: 200,
+        verifyWrite: () => {
+          verifyCalls += 1;
+          return deferredVerification.promise;
+        },
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    await controller.reportStorageWriteFailure();
+    const reconciliation = controller.reconcile();
+    while (verifyCalls === 0) {
+      await Promise.resolve();
+    }
+    await controller.reportStorageWriteFailure();
+    deferredVerification.resolve();
+
+    await expect(reconciliation).resolves.toEqual({
+      active: true,
+      reasons: ['asset_write_failed'],
+    });
+  });
+
+  it('does not let a stale write verification satisfy a newer intake storage failure', async () => {
+    const lifecycle = new RecordingLifecycle();
+    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
+    const staleVerification = Promise.withResolvers<void>();
+    let verifyCalls = 0;
+    store.verifyOperationalWrite = () => {
+      verifyCalls += 1;
+      if (verifyCalls === 1) {
+        return staleVerification.promise;
+      }
+      return Promise.reject(new Error('new generation still cannot write'));
+    };
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      lifecycle,
+      storage: {
+        minAvailableBytes: 100,
+        probe: async () => ({ availableBytes: 200, writable: true }),
+        resumeAvailableBytes: 200,
+        verifyWrite: async () => undefined,
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    await controller.reportStorageFailure();
+    const staleReconciliation = controller.reconcile();
+    while (verifyCalls === 0) {
+      await Promise.resolve();
+    }
+    await controller.reportStorageFailure();
+    staleVerification.resolve();
+    await staleReconciliation;
+
+    await controller.reconcile();
+    await expect(controller.reconcile()).resolves.toEqual({
+      active: true,
+      reasons: ['storage_state_unavailable'],
+    });
+    expect(verifyCalls).toBe(3);
+  });
+
+  it('coalesces overlapping storage probes into one reconciliation', async () => {
+    const lifecycle = new RecordingLifecycle();
+    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
+    const deferredProbe = Promise.withResolvers<{ availableBytes: number; writable: boolean }>();
+    let probeCalls = 0;
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      lifecycle,
+      storage: {
+        minAvailableBytes: 100,
+        probe: () => {
+          probeCalls += 1;
+          return deferredProbe.promise;
+        },
+        resumeAvailableBytes: 200,
+        verifyWrite: async () => undefined,
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    const first = controller.reconcile();
+    const overlapping = controller.reconcile();
+    expect(overlapping).toBe(first);
+    deferredProbe.resolve({ availableBytes: 200, writable: true });
+
+    await expect(first).resolves.toEqual({ active: false, reasons: [] });
+    expect(probeCalls).toBe(1);
+  });
+
   it('does not let a disk probe started before a write failure clear that newer failure', async () => {
     const lifecycle = new RecordingLifecycle();
     const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
@@ -141,12 +332,26 @@ describe('capture admission controller', () => {
     });
   });
 
-  it('requires two healthy operational snapshots before clearing an intake storage failure', async () => {
+  it('requires two healthy operational snapshots and a successful write verification before clearing an intake storage failure', async () => {
     const lifecycle = new RecordingLifecycle();
     const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 });
+    const storage = new StorageProbe({ availableBytes: 200, writable: true });
+    let assetWriteVerifications = 0;
+    let operationalWriteVerifications = 0;
+    store.verifyOperationalWrite = async () => {
+      operationalWriteVerifications += 1;
+    };
     const controller = createCaptureAdmissionController({
       backpressure,
       lifecycle,
+      storage: {
+        minAvailableBytes: 100,
+        probe: storage.probe,
+        resumeAvailableBytes: 200,
+        verifyWrite: async () => {
+          assetWriteVerifications += 1;
+        },
+      },
       store,
       workspaceId: 'workspace_1',
     });
@@ -162,6 +367,8 @@ describe('capture admission controller', () => {
     await expect(controller.reconcile()).resolves.toEqual({ active: false, reasons: [] });
 
     expect(lifecycle.storagePauseCalls).toEqual([true, false]);
+    expect(operationalWriteVerifications).toBe(1);
+    expect(assetWriteVerifications).toBe(0);
   });
 
   it('fails only the disk admission input closed when the physical probe is unavailable', async () => {
@@ -199,6 +406,7 @@ describe('capture admission controller', () => {
         async getBackpressureSnapshot() {
           throw new Error('SQLite unavailable');
         },
+        async verifyOperationalWrite() {},
       },
       workspaceId: 'workspace_1',
     });
@@ -246,6 +454,7 @@ describe('capture admission controller', () => {
           reads += 1;
           return deferredSnapshot.promise;
         },
+        async verifyOperationalWrite() {},
       },
       workspaceId: 'workspace_1',
     });
@@ -288,6 +497,8 @@ class SnapshotStore {
     this.reads += 1;
     return this.snapshot;
   }
+
+  verifyOperationalWrite = async (): Promise<void> => undefined;
 }
 
 class FakeIntervals {

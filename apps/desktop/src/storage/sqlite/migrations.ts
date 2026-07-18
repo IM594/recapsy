@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -272,6 +272,11 @@ const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS operational_health_probe (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    generation INTEGER NOT NULL CHECK (generation >= 1),
+    updated_at TEXT NOT NULL
   )`,
   buildOutboxJobsTable('outbox_jobs', true),
   OUTBOX_JOBS_INDEX_STATEMENT,

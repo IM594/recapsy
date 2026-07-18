@@ -15,6 +15,7 @@ export type CaptureIntakeStore = {
     entry: CaptureOutboxEntryCreateInput,
   ): Promise<OperationalStoreResult<OutboxJob>>;
   getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot>;
+  verifyOperationalWrite(): Promise<void>;
 };
 
 export type HelperStateStore = {

@@ -39,6 +39,17 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
 }
 
 describe('memory operational store', () => {
+  it('provides a side-effect-free operational write verifier for runtime test doubles', async () => {
+    const store = createMemoryStore();
+
+    await expect(store.verifyOperationalWrite()).resolves.toBeUndefined();
+    expect(await store.getBackpressureSnapshot('workspace_1')).toEqual({
+      assetBytes: 0,
+      queuedJobs: 0,
+      retryingJobs: 0,
+    });
+  });
+
   it('keeps device-local capture rules across workspace and sign-out cache cleanup', async () => {
     const store = createMemoryStore();
     const rule = {

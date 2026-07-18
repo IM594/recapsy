@@ -28,6 +28,99 @@ afterEach(() => {
 });
 
 describe('SQLite operational store', () => {
+  it('commits a bounded singleton operational write probe in the primary database', async () => {
+    const { database, store } = await createTempStoreWithDatabase();
+
+    await store.verifyOperationalWrite();
+    await store.verifyOperationalWrite();
+
+    expect(
+      database
+        .prepare<{ generation: number; id: number }>(
+          'SELECT id, generation FROM operational_health_probe',
+        )
+        .get(),
+    ).toEqual({ generation: 2, id: 1 });
+  });
+
+  it('rolls back an operational write probe when commit fails', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    const healthyStore = createSqliteStore({ database });
+    await healthyStore.initialize();
+    await healthyStore.verifyOperationalWrite();
+    const failingStore = createSqliteStore({
+      database: createFailingSqliteDatabase(database, (sql) => sql === 'COMMIT'),
+    });
+
+    await expect(failingStore.verifyOperationalWrite()).rejects.toThrow(
+      'operational_write_verification_failed',
+    );
+
+    expect(
+      database
+        .prepare<{ generation: number }>(
+          'SELECT generation FROM operational_health_probe WHERE id = 1',
+        )
+        .get(),
+    ).toEqual({ generation: 1 });
+    expect(() => database.run('BEGIN IMMEDIATE')).not.toThrow();
+    database.run('ROLLBACK');
+  });
+
+  it('rolls back when the operational probe write itself fails', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    const healthyStore = createSqliteStore({ database });
+    await healthyStore.initialize();
+    const failingStore = createSqliteStore({
+      database: createFailingSqliteDatabase(database, (sql) =>
+        sql.includes('INSERT INTO operational_health_probe'),
+      ),
+    });
+
+    await expect(failingStore.verifyOperationalWrite()).rejects.toThrow(
+      'operational_write_verification_failed',
+    );
+
+    expect(
+      database
+        .prepare<{ count: number }>('SELECT COUNT(*) AS count FROM operational_health_probe')
+        .get()?.count,
+    ).toBe(0);
+    expect(() => database.run('BEGIN IMMEDIATE')).not.toThrow();
+    database.run('ROLLBACK');
+  });
+
+  it('upgrades a version 6 database with the operational health probe table', () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    database.run(
+      `CREATE TABLE schema_migrations (
+        version INTEGER PRIMARY KEY,
+        applied_at TEXT NOT NULL
+      )`,
+    );
+    database.run(
+      `INSERT INTO schema_migrations (version, applied_at)
+       VALUES (6, $appliedAt)`,
+      { $appliedAt: now },
+    );
+
+    migrateSqliteStore(database);
+
+    expect(
+      database
+        .prepare<{ name: string }>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'operational_health_probe'",
+        )
+        .get(),
+    ).toEqual({ name: 'operational_health_probe' });
+    expect(
+      database
+        .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
+        .get(),
+    ).toEqual({ version: 7 });
+    database.close();
+  });
+
   it('records schema version when migrations run repeatedly without clearing data', async () => {
     const database = createBunSqliteDatabase(tempDatabasePath());
 
@@ -68,7 +161,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 6,
+      version: 7,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -242,7 +335,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(6);
+    ).toBe(7);
 
     const rowById = (id: string) =>
       database

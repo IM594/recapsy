@@ -274,6 +274,34 @@ class SqliteOperationalStore {
     };
   }
 
+  async verifyOperationalWrite(): Promise<void> {
+    let transactionOpen = false;
+
+    try {
+      this.options.database.run('BEGIN IMMEDIATE');
+      transactionOpen = true;
+      this.options.database.run(
+        `INSERT INTO operational_health_probe (id, generation, updated_at)
+         VALUES (1, 1, $updatedAt)
+         ON CONFLICT(id) DO UPDATE SET
+           generation = operational_health_probe.generation + 1,
+           updated_at = excluded.updated_at`,
+        { $updatedAt: new Date().toISOString() },
+      );
+      this.options.database.run('COMMIT');
+      transactionOpen = false;
+    } catch {
+      if (transactionOpen) {
+        try {
+          this.options.database.run('ROLLBACK');
+        } catch {
+          // The failed transaction remains fail-closed even if rollback is unavailable.
+        }
+      }
+      throw new Error('operational_write_verification_failed');
+    }
+  }
+
   async clearWorkspaceCache(workspaceId: string): Promise<void> {
     this.options.database.run('DELETE FROM outbox_jobs WHERE workspace_id = $workspaceId', {
       $workspaceId: workspaceId,
