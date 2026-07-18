@@ -432,6 +432,65 @@ describe('capture helper controller', () => {
     });
   });
 
+  it('discards in-flight and queued policy refreshes after shutdown', async () => {
+    let invalidations = 0;
+    const pending: Array<
+      (configuration: Awaited<ReturnType<CapturePolicyActivation['activate']>>) => void
+    > = [];
+    const activation: CapturePolicyActivation = {
+      async activate() {
+        return await new Promise((resolve) => pending.push(resolve));
+      },
+      invalidate() {
+        invalidations += 1;
+      },
+    };
+    const client = new RecordingCaptureHelperClient();
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      policyActivation: activation,
+      store: createMemoryStore(),
+    });
+
+    const start = controller.start();
+    while (pending.length < 1) await Promise.resolve();
+    pending[0]?.(policyConfiguration('policy_initial', `sha256:${'a'.repeat(64)}`));
+    await start;
+
+    const inFlightRefresh = controller.refreshPolicy();
+    let inFlightSettled = false;
+    void inFlightRefresh.then(() => {
+      inFlightSettled = true;
+    });
+    while (pending.length < 2) await Promise.resolve();
+    const queuedRefresh = controller.refreshPolicy();
+    let queuedSettled = false;
+    void queuedRefresh.then(() => {
+      queuedSettled = true;
+    });
+    await flush();
+    expect(pending).toHaveLength(2);
+
+    await controller.shutdown();
+    await flush();
+    const settledAfterShutdown = { inFlightSettled, queuedSettled };
+    pending[1]?.(policyConfiguration('policy_stale', `sha256:${'b'.repeat(64)}`));
+    await Promise.all([inFlightRefresh, queuedRefresh]);
+
+    expect(pending).toHaveLength(2);
+    expect(settledAfterShutdown).toEqual({ inFlightSettled: true, queuedSettled: true });
+    expect(invalidations).toBe(1);
+    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture', 'stop']);
+    expect(client.configuredPolicyVersions).toEqual(['policy_initial']);
+    expect(client.beginCaptureReasons).toEqual(['runtime_started']);
+    expect(controller.getStatus()).toMatchObject({
+      policyVersion: 'policy_initial',
+      state: 'stopped',
+    });
+  });
+
   it('serializes overlapping policy refreshes so the newest helper configuration wins', async () => {
     const pending: Array<
       (configuration: Awaited<ReturnType<CapturePolicyActivation['activate']>>) => void

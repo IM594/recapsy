@@ -444,6 +444,38 @@ describe('capture policy activation', () => {
       policyVersion: 'policy-newer',
     });
   });
+
+  it('invalidates a pending activation before it publishes or caches new state', async () => {
+    const store = createMemoryStore();
+    const pending: Array<(value: CapturePoliciesResult) => void> = [];
+    const activatedVersions: string[] = [];
+    const activation = createCapturePolicyActivation({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return await new Promise((resolve) => pending.push(resolve));
+        },
+      },
+      deviceId,
+      now: () => fetchedAt,
+      onActivated(configuration) {
+        activatedVersions.push(configuration.policy.version);
+      },
+      store,
+      workspaceId,
+    });
+
+    const result = activation.activate();
+    while (pending.length < 1) await Promise.resolve();
+    if (!activation.invalidate) {
+      throw new Error('policy activation invalidation is required for shutdown fencing');
+    }
+    activation.invalidate();
+    pending[0]?.(remotePolicy());
+
+    await expect(result).rejects.toMatchObject({ code: 'policy_stale' });
+    expect(activatedVersions).toEqual([]);
+    expect(await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toBeNull();
+  });
 });
 
 function remotePolicy(

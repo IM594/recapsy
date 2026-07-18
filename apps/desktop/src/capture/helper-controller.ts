@@ -69,6 +69,8 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   private captureStarted = false;
   private policyRefreshTimer: unknown;
   private policyActivationQueue: Promise<void> = Promise.resolve();
+  private policyLifecycleCancellation = createPolicyLifecycleCancellation();
+  private policyLifecycleGeneration = 0;
   private shutdownRequested = false;
 
   constructor(private readonly options: CaptureHelperControllerOptions) {}
@@ -82,6 +84,10 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       return;
     }
 
+    const policyLifecycleGeneration = ++this.policyLifecycleGeneration;
+    this.policyLifecycleCancellation.cancel();
+    this.policyLifecycleCancellation = createPolicyLifecycleCancellation();
+    this.policyActivationQueue = Promise.resolve();
     this.status = {
       state: 'starting',
       updatedAt: this.options.now(),
@@ -97,6 +103,9 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
         onEvent: (event) => this.handleEvent(event),
       });
     } catch (error) {
+      if (!this.isPolicyLifecycleCurrent(policyLifecycleGeneration)) {
+        return;
+      }
       const safeError = safeOperationalError(
         'helper_start_failed',
         'Capture helper could not be started.',
@@ -111,11 +120,15 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       throw new Error(safeError.code);
     }
 
+    if (!this.isPolicyLifecycleCurrent(policyLifecycleGeneration)) {
+      return;
+    }
+
     this.started = true;
     this.stopped = false;
     this.captureStarted = false;
     this.policyReady = false;
-    await this.activatePolicyAndStart('runtime_started');
+    await this.activatePolicyAndStart('runtime_started', policyLifecycleGeneration);
   }
 
   async pauseCapture(): Promise<void> {
@@ -151,21 +164,30 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     await this.persistHelperState();
   }
 
-  private activatePolicyAndStart(reason: 'runtime_started' | 'user_resumed'): Promise<void> {
-    const run = this.policyActivationQueue.then(() => this.activatePolicyAndStartInternal(reason));
-    this.policyActivationQueue = run.catch(() => undefined);
-    return run;
+  private activatePolicyAndStart(
+    reason: 'runtime_started' | 'user_resumed',
+    policyLifecycleGeneration = this.policyLifecycleGeneration,
+  ): Promise<void> {
+    const queuedRun = this.policyActivationQueue.then(() =>
+      this.activatePolicyAndStartInternal(reason, policyLifecycleGeneration),
+    );
+    this.policyActivationQueue = queuedRun.catch(() => undefined);
+    return Promise.race([queuedRun, this.policyLifecycleCancellation.promise]);
   }
 
   private async activatePolicyAndStartInternal(
     reason: 'runtime_started' | 'user_resumed',
+    policyLifecycleGeneration: number,
   ): Promise<void> {
-    if (this.stopped || this.shutdownRequested || !this.started) {
+    if (!this.canActivatePolicy(policyLifecycleGeneration)) {
       return;
     }
 
     try {
       const configuration = await this.options.policyActivation?.activate();
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
       if (!configuration) {
         throw new CapturePolicyActivationError('policy_unavailable');
       }
@@ -179,8 +201,14 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
           }
         : undefined;
       await this.options.client.configureCapture(configuration.policy, captureIdentity);
-      this.policyReady = true;
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
       await this.options.onPolicyPauseChange?.(configuration.policy.paused);
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
+      this.policyReady = true;
       if (configuration.policy.paused || this.options.isCaptureAdmissionPaused?.()) {
         this.status = {
           policyHash: configuration.policy.policyHash,
@@ -189,6 +217,9 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
           updatedAt: this.options.now(),
         };
         await this.persistHelperState();
+        if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+          return;
+        }
         this.schedulePolicyRefresh(configuration.refreshAfterMs);
         return;
       }
@@ -199,19 +230,37 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
         updatedAt: this.options.now(),
       };
       await this.persistHelperState();
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
       if (this.captureStarted) {
         await this.options.client.resumeCapture();
       } else {
         await this.options.client.beginCapture(reason);
+        if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+          return;
+        }
         this.captureStarted = true;
+      }
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
       }
       this.schedulePolicyRefresh(configuration.refreshAfterMs);
     } catch (error) {
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
       this.policyReady = false;
       const safeError = policyActivationSafeError(error);
       await this.options.onPolicyPauseChange?.(true);
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
       if (this.captureStarted) {
         await this.options.client.pauseCapture();
+        if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+          return;
+        }
       }
       this.status = {
         lastSafeError: safeError,
@@ -219,12 +268,25 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
         updatedAt: this.options.now(),
       };
       await this.persistHelperState();
+      if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+        return;
+      }
       this.schedulePolicyRefresh();
     }
   }
 
+  private isPolicyLifecycleCurrent(policyLifecycleGeneration: number): boolean {
+    return policyLifecycleGeneration === this.policyLifecycleGeneration && !this.shutdownRequested;
+  }
+
+  private canActivatePolicy(policyLifecycleGeneration: number): boolean {
+    return (
+      this.isPolicyLifecycleCurrent(policyLifecycleGeneration) && this.started && !this.stopped
+    );
+  }
+
   private schedulePolicyRefresh(delayMs = DEFAULT_POLICY_REFRESH_FAILURE_MS): void {
-    if (!this.started || this.stopped) {
+    if (!this.started || this.stopped || this.shutdownRequested) {
       return;
     }
 
@@ -261,6 +323,9 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     }
 
     this.shutdownRequested = true;
+    this.policyLifecycleGeneration += 1;
+    this.options.policyActivation?.invalidate?.();
+    this.policyLifecycleCancellation.cancel();
     this.clearPolicyRefreshTimer();
     this.status = {
       ...policyStatus(this.status),
@@ -408,6 +473,19 @@ function normalizePolicyRefreshDelay(value: number): number {
     return DEFAULT_POLICY_REFRESH_FAILURE_MS;
   }
   return Math.min(MAX_POLICY_REFRESH_MS, Math.max(MIN_POLICY_REFRESH_MS, Math.floor(value)));
+}
+
+type PolicyLifecycleCancellation = {
+  cancel(): void;
+  promise: Promise<void>;
+};
+
+function createPolicyLifecycleCancellation(): PolicyLifecycleCancellation {
+  let cancel!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    cancel = resolve;
+  });
+  return { cancel, promise };
 }
 
 function envelopeFromInternalEvent(

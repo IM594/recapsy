@@ -35,6 +35,7 @@ export type CapturePolicyActivationConfiguration = {
 
 export type CapturePolicyActivation = {
   activate(): Promise<CapturePolicyActivationConfiguration>;
+  invalidate?(): void;
 };
 
 type CapturePolicyCacheStore = {
@@ -149,6 +150,9 @@ export function createCapturePolicyActivation(
       };
       options.onActivated?.(configuration);
       return configuration;
+    },
+    invalidate(): void {
+      activationGeneration += 1;
     },
   };
 }
