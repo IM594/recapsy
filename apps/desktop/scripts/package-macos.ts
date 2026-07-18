@@ -50,24 +50,20 @@ try {
       identity: packagerSignIdentity,
       identityValidation: false,
     } as unknown as Exclude<Parameters<typeof packager>[0]['osxSign'], undefined>,
-    afterComplete: configuredSignIdentity
-      ? undefined
-      : [
-          (buildPath, _electronVersion, platform, _arch, callback) => {
-            if (platform !== 'darwin') {
-              callback(new Error('The Recapsy application can only be signed for macOS.'));
-              return;
-            }
-            const applicationPath = path.join(buildPath, 'Recapsy.app');
-            void restoreDevelopmentCaptureSignature(applicationPath).then(
-              () => callback(),
-              (error: unknown) =>
-                callback(
-                  error instanceof Error ? error : new Error('Desktop code signing failed.'),
-                ),
-            );
-          },
-        ],
+    afterComplete: [
+      (buildPath, _electronVersion, platform, _arch, callback) => {
+        if (platform !== 'darwin') {
+          callback(new Error('The Recapsy application can only be signed for macOS.'));
+          return;
+        }
+        const applicationPath = path.join(buildPath, 'Recapsy.app');
+        void finalizeApplicationSignature(applicationPath).then(
+          () => callback(),
+          (error: unknown) =>
+            callback(error instanceof Error ? error : new Error('Desktop code signing failed.')),
+        );
+      },
+    ],
     afterCopyExtraResources: [
       (buildPath, _electronVersion, platform, _arch, callback) => {
         if (platform !== 'darwin') {
@@ -147,6 +143,27 @@ async function moveCaptureBundleIntoNestedCodeDirectory(buildPath: string): Prom
 
   await mkdir(frameworksPath, { recursive: true });
   await rename(copiedBundlePath, nestedBundlePath);
+}
+
+async function finalizeApplicationSignature(applicationPath: string): Promise<void> {
+  // Electron's framework tree is code, not ordinary bundle resources. Make
+  // every runtime component carry the channel identity before sealing the outer
+  // application. A shallow outer signature can pass `codesign --deep` while
+  // dyld still rejects a framework with a mismatched team requirement.
+  await execFileAsync('/usr/bin/codesign', [
+    '--force',
+    '--deep',
+    '--sign',
+    packagerSignIdentity,
+    applicationPath,
+  ]);
+
+  if (configuredSignIdentity) {
+    await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', applicationPath]);
+    return;
+  }
+
+  await restoreDevelopmentCaptureSignature(applicationPath);
 }
 
 async function restoreDevelopmentCaptureSignature(applicationPath: string): Promise<void> {

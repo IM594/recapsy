@@ -27,6 +27,24 @@ describe('packaged Electron application layout', () => {
     ).not.toThrow();
   });
 
+  it('loads the Electron framework before any application JavaScript runs', () => {
+    const executablePath = path.join(contentsPath, 'MacOS', 'Recapsy');
+    const result = spawnSync(
+      executablePath,
+      ['-e', 'process.stdout.write(process.versions.electron)'],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
   it('keeps the application archive minimal and resolves all login assets', () => {
     const archiveEntries = listPackage(applicationArchivePath, { isPack: false });
     const allowedArchiveEntries = new Set([
