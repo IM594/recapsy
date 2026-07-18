@@ -261,7 +261,7 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
           `Receipt recovery envelopes: ${envelopes.map((item) => item.type).join(',')}`,
         );
       }
-      const recovered = recoveredOrError;
+      const recovered = recoveredOrError as HelperEnvelope<'capture.result'>;
       expect(recovered.payload.captureId).toBe(captureId);
       expect(readFileSync(screenshotPath)).toEqual(bytes);
 

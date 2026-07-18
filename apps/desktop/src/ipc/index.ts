@@ -15,6 +15,8 @@ export type {
   AppWindowActionResultDto,
   CaptureEventSummaryDto,
   CaptureStatusDto,
+  LocalCapturePolicyRuleDto,
+  LocalCapturePolicyRulesDto,
   DiagnosticsBundleDto,
   DiagnosticsLogEntryDto,
   OcrJobSummaryDto,

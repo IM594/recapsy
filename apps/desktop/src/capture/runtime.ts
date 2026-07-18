@@ -19,6 +19,7 @@ import {
   type CaptureStartupRecovery,
   createCaptureLifecycle,
 } from './lifecycle';
+import { type LocalCapturePolicyManager, createLocalCapturePolicyManager } from './local-policy';
 import { createCapturePolicyActivation } from './policy';
 import type { CaptureIntakeStore, HelperStateStore } from './store';
 import type { CapturePolicyCacheStore } from './store';
@@ -65,6 +66,7 @@ export type CaptureRuntime = {
   eventHandler: CaptureHelperEventHandler;
   lifecycle: CaptureLifecycle;
   commandClient: CaptureHelperCommandClient;
+  localPolicy: LocalCapturePolicyManager;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
@@ -135,8 +137,13 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     store: options.store,
     workspaceId: options.workspaceId,
   });
+  const localPolicy = createLocalCapturePolicyManager({
+    now: options.now,
+    reloadPolicy: () => helper.refreshPolicy(),
+    store: options.store,
+  });
 
-  return { admission, commandClient: options.client, eventHandler, lifecycle };
+  return { admission, commandClient: options.client, eventHandler, lifecycle, localPolicy };
 }
 
 function decorateEventHandler(

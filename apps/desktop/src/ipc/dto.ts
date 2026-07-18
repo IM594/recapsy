@@ -82,6 +82,16 @@ export type CaptureEventSummaryDto = {
   reason?: string;
 };
 
+export type LocalCapturePolicyRuleDto = {
+  id: string;
+  bundleId: string;
+  enabled: boolean;
+};
+
+export type LocalCapturePolicyRulesDto = {
+  rules: LocalCapturePolicyRuleDto[];
+};
+
 export type SyncQueueSummaryDto = {
   pending: number;
   processing: number;

@@ -4,6 +4,7 @@ import type {
   CaptureStatusDto,
   DiagnosticsBundleDto,
   DiagnosticsLogEntryDto,
+  LocalCapturePolicyRulesDto,
   OcrJobSummaryDto,
   PermissionStatusDto,
   PrivacySettingsOpenResultDto,
@@ -111,6 +112,27 @@ export const IPC_CHANNEL_REGISTRY = [
     methodName: 'captureGetStatus',
     namespace: 'capture',
     request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, LocalCapturePolicyRulesDto>({
+    channel: 'capture.listLocalRules',
+    description: 'Returns device-profile bundle blocks without filesystem or capture content.',
+    methodName: 'captureListLocalRules',
+    namespace: 'capture',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<{ bundleId: string }, LocalCapturePolicyRulesDto>({
+    channel: 'capture.blockBundle',
+    description: 'Blocks future capture for one exact local application bundle identifier.',
+    methodName: 'captureBlockBundle',
+    namespace: 'capture',
+    request: validateBundleIdentifierRequest,
+  }),
+  defineChannel<{ ruleId: string }, LocalCapturePolicyRulesDto>({
+    channel: 'capture.removeLocalRule',
+    description: 'Removes one device-profile capture block by opaque local rule id.',
+    methodName: 'captureRemoveLocalRule',
+    namespace: 'capture',
+    request: validateLocalRuleRequest,
   }),
   defineChannel<EmptyRequest, CaptureStatusDto>({
     channel: 'capture.pause',
@@ -412,6 +434,34 @@ function validateJobRequest(payload: unknown): RequestValidationResult<{ jobId: 
       jobId: payload.jobId,
     },
   };
+}
+
+function validateBundleIdentifierRequest(
+  payload: unknown,
+): RequestValidationResult<{ bundleId: string }> {
+  if (!isRecord(payload) || Object.keys(payload).some((key) => key !== 'bundleId')) {
+    return { issues: ['request must contain only bundleId'], ok: false };
+  }
+  if (
+    typeof payload.bundleId !== 'string' ||
+    payload.bundleId.length > 255 ||
+    !/^[A-Za-z0-9][A-Za-z0-9-]*(?:[.][A-Za-z0-9][A-Za-z0-9-]*)+$/.test(payload.bundleId)
+  ) {
+    return { issues: ['bundleId must be an exact application bundle identifier'], ok: false };
+  }
+  return { ok: true, value: { bundleId: payload.bundleId } };
+}
+
+function validateLocalRuleRequest(payload: unknown): RequestValidationResult<{ ruleId: string }> {
+  if (
+    !isRecord(payload) ||
+    Object.keys(payload).some((key) => key !== 'ruleId') ||
+    typeof payload.ruleId !== 'string' ||
+    !/^local:[a-f0-9]{6,64}$/.test(payload.ruleId)
+  ) {
+    return { issues: ['ruleId must be an opaque local rule id'], ok: false };
+  }
+  return { ok: true, value: { ruleId: payload.ruleId } };
 }
 
 function validateOptionalLimitRequest(max: number) {

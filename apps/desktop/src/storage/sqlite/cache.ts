@@ -1,5 +1,6 @@
 import type {
   HelperRuntimeState,
+  LocalCapturePolicyRule,
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
@@ -116,6 +117,57 @@ export class SqliteCachePersistence {
     };
   }
 
+  async upsertLocalCapturePolicyRule(
+    rule: LocalCapturePolicyRule,
+  ): Promise<LocalCapturePolicyRule> {
+    const cloned = cloneLocalCapturePolicyRule(rule);
+    this.database
+      .prepare(
+        `INSERT INTO local_capture_policy_rules (
+          id, kind, pattern, action, enabled, reason, created_at, updated_at
+        ) VALUES (
+          $id, $kind, $pattern, $action, $enabled, $reason, $createdAt, $updatedAt
+        )
+        ON CONFLICT(id) DO UPDATE SET
+          kind = excluded.kind,
+          pattern = excluded.pattern,
+          action = excluded.action,
+          enabled = excluded.enabled,
+          reason = excluded.reason,
+          updated_at = excluded.updated_at`,
+      )
+      .run({
+        $action: cloned.action,
+        $createdAt: cloned.createdAt,
+        $enabled: cloned.enabled ? 1 : 0,
+        $id: cloned.id,
+        $kind: cloned.kind,
+        $pattern: cloned.pattern,
+        $reason: cloned.reason ?? null,
+        $updatedAt: cloned.updatedAt,
+      });
+    return cloneLocalCapturePolicyRule(cloned);
+  }
+
+  async listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]> {
+    return this.database
+      .prepare<LocalCapturePolicyRuleRow>(
+        `SELECT *
+         FROM local_capture_policy_rules
+         ORDER BY pattern ASC, id ASC`,
+      )
+      .all()
+      .map(localCapturePolicyRuleFromRow);
+  }
+
+  async deleteLocalCapturePolicyRule(id: string): Promise<boolean> {
+    return (
+      this.database
+        .prepare('DELETE FROM local_capture_policy_rules WHERE id = $id')
+        .run({ $id: id }).changes > 0
+    );
+  }
+
   async setSyncCursor(cursor: SyncCursor): Promise<SyncCursor> {
     const cloned = cloneSyncCursor(cursor);
     this.database
@@ -221,6 +273,17 @@ type PolicyCacheRow = SqliteRow & {
   max_concurrent_ocr: number;
 };
 
+type LocalCapturePolicyRuleRow = SqliteRow & {
+  id: string;
+  kind: 'bundle_id';
+  pattern: string;
+  action: 'block_capture';
+  enabled: number;
+  reason?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 type SyncCursorRow = SqliteRow & {
   workspace_id: string;
   kind: SyncCursorKind;
@@ -248,6 +311,20 @@ function policyCacheFromRow(row: PolicyCacheRow): PolicyCacheEntry {
     maxConcurrentOcr: row.max_concurrent_ocr,
     workspaceId: row.workspace_id,
   });
+}
+
+function localCapturePolicyRuleFromRow(row: LocalCapturePolicyRuleRow): LocalCapturePolicyRule {
+  return {
+    action: 'block_capture',
+    createdAt: row.created_at,
+    enabled: row.enabled === 1,
+    id: row.id,
+    kind: 'bundle_id',
+    pattern: row.pattern,
+    scope: 'local_user',
+    updatedAt: row.updated_at,
+    ...(row.reason ? { reason: row.reason } : {}),
+  };
 }
 
 function syncCursorFromRow(row: SyncCursorRow): SyncCursor {
@@ -288,6 +365,10 @@ function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {
       rules: entry.policy.rules.map((rule) => ({ ...rule })),
     },
   };
+}
+
+function cloneLocalCapturePolicyRule(rule: LocalCapturePolicyRule): LocalCapturePolicyRule {
+  return { ...rule };
 }
 
 function cloneSyncCursor(cursor: SyncCursor): SyncCursor {

@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -306,6 +306,18 @@ const schemaStatements = [
     updated_at TEXT NOT NULL
   )`,
   buildPolicyCacheTable('policy_cache', true),
+  `CREATE TABLE IF NOT EXISTS local_capture_policy_rules (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind = 'bundle_id'),
+    pattern TEXT NOT NULL UNIQUE,
+    action TEXT NOT NULL CHECK (action = 'block_capture'),
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_local_capture_policy_rules_enabled_pattern
+    ON local_capture_policy_rules(enabled, pattern)`,
   `CREATE TABLE IF NOT EXISTS sync_cursors (
     workspace_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('timeline', 'search', 'settings', 'capabilities')),

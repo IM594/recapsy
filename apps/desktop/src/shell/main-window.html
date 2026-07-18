@@ -40,6 +40,23 @@
       button {
         padding: 6px 10px;
       }
+      input {
+        min-width: 0;
+        flex: 1 1 240px;
+        padding: 6px 8px;
+      }
+      ul {
+        list-style: none;
+        margin: 10px 0 0;
+        padding: 0;
+      }
+      li {
+        align-items: center;
+        display: flex;
+        gap: 8px;
+        justify-content: space-between;
+        margin: 6px 0;
+      }
       .error {
         color: #b00020;
         margin-top: 8px;
@@ -67,6 +84,23 @@
         <button id="pause" type="button">Pause</button>
         <button id="resume" type="button">Resume</button>
       </div>
+    </section>
+
+    <section>
+      <h2>Local privacy</h2>
+      <p class="muted">Blocked apps never produce a screenshot, queue item, or OCR request.</p>
+      <div class="actions">
+        <input
+          id="privacy-bundle-id"
+          aria-label="Application bundle identifier"
+          autocomplete="off"
+          placeholder="com.example.SensitiveApp"
+          spellcheck="false"
+          type="text"
+        />
+        <button id="privacy-block-bundle" type="button">Block app</button>
+      </div>
+      <ul id="privacy-rules" aria-label="Blocked applications"></ul>
     </section>
 
     <section>
@@ -112,6 +146,8 @@
       const pauseButton = document.getElementById('pause');
       const requestScreenButton = document.getElementById('request-screen');
       const resumeButton = document.getElementById('resume');
+      const privacyBundleInput = document.getElementById('privacy-bundle-id');
+      const privacyRules = document.getElementById('privacy-rules');
       let screenRecordingRequestInFlight = false;
       let screenRecordingRequired = true;
 
@@ -142,6 +178,34 @@
       function formatPolicy(policy) {
         if (!policy) return 'Not applied';
         return `${policy.version} · ${policy.hash.slice(0, 15)}…`;
+      }
+
+      function renderPrivacyRules(rules) {
+        privacyRules.replaceChildren();
+        for (const rule of rules) {
+          const item = document.createElement('li');
+          const bundle = document.createElement('code');
+          bundle.textContent = rule.bundleId;
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.textContent = 'Remove';
+          remove.addEventListener('click', async () => {
+            try {
+              await unwrap(api.captureRemoveLocalRule({ ruleId: rule.id }));
+              await refreshAll();
+            } catch (error) {
+              errorEl.textContent = error.message || 'Could not remove local privacy rule';
+            }
+          });
+          item.append(bundle, remove);
+          privacyRules.append(item);
+        }
+        if (rules.length === 0) {
+          const empty = document.createElement('li');
+          empty.className = 'muted';
+          empty.textContent = 'No user-defined app blocks.';
+          privacyRules.append(empty);
+        }
       }
 
       function renderShellStatus(status) {
@@ -217,11 +281,12 @@
       async function refreshAll() {
         errorEl.textContent = '';
         statusEl.textContent = 'Refreshing…';
-        const [capture, sync, permissions, retentionPreview] = await Promise.all([
+        const [capture, sync, permissions, retentionPreview, localRules] = await Promise.all([
           unwrap(api.captureGetStatus()),
           unwrap(api.syncGetSummary()),
           unwrap(api.permissionsGetStatus()),
           unwrap(api.diagnosticsPreviewRetention({ olderThanDays: 30 })),
+          unwrap(api.captureListLocalRules()),
         ]);
         renderShellStatus({
           captureState: capture.state,
@@ -244,8 +309,21 @@
           syncLastErrorMessage: sync.lastError && sync.lastError.message,
           retentionPreview,
         });
+        renderPrivacyRules(localRules.rules);
         statusEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
       }
+
+      document.getElementById('privacy-block-bundle').addEventListener('click', async () => {
+        try {
+          errorEl.textContent = '';
+          const bundleId = privacyBundleInput.value.trim();
+          await unwrap(api.captureBlockBundle({ bundleId }));
+          privacyBundleInput.value = '';
+          await refreshAll();
+        } catch (error) {
+          errorEl.textContent = error.message || 'Could not block application';
+        }
+      });
 
       document.getElementById('pause').addEventListener('click', async () => {
         try {

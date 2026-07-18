@@ -1,4 +1,9 @@
-import type { AiOcrUsage, CaptureDefaultPolicy, OcrScreenTextResult } from '@recapsy/contracts';
+import type {
+  AiOcrUsage,
+  CaptureDefaultPolicy,
+  CapturePolicyRule,
+  OcrScreenTextResult,
+} from '@recapsy/contracts';
 
 export type OutboxJobState =
   | 'pending'
@@ -243,6 +248,17 @@ export type PolicyCacheRead = PolicyCacheEntry & {
 
 export type PolicyCacheReadOptions = {
   now: string;
+};
+
+/** Device-profile privacy rule. V0 intentionally supports one exact, locally
+ * enforceable action so the UI cannot create a rule the native helper only
+ * pretends to understand. */
+export type LocalCapturePolicyRule = Omit<CapturePolicyRule, 'action' | 'kind' | 'scope'> & {
+  action: 'block_capture';
+  kind: 'bundle_id';
+  scope: 'local_user';
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type SyncCursorKind = 'timeline' | 'search' | 'settings' | 'capabilities';

@@ -3,6 +3,7 @@ import type {
   CaptureOutboxEntryCreateInput,
   ClaimRetryableOutboxJobInput,
   HelperRuntimeState,
+  LocalCapturePolicyRule,
   OperationalStoreError,
   OperationalStoreResult,
   OperationalStoreSnapshot,
@@ -217,6 +218,18 @@ class SqliteOperationalStore {
     options: PolicyCacheReadOptions,
   ): Promise<PolicyCacheRead | null> {
     return this.cache.getPolicyCache(workspaceId, deviceId, options);
+  }
+
+  upsertLocalCapturePolicyRule(rule: LocalCapturePolicyRule): Promise<LocalCapturePolicyRule> {
+    return this.cache.upsertLocalCapturePolicyRule(rule);
+  }
+
+  listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]> {
+    return this.cache.listLocalCapturePolicyRules();
+  }
+
+  deleteLocalCapturePolicyRule(id: string): Promise<boolean> {
+    return this.cache.deleteLocalCapturePolicyRule(id);
   }
 
   setSyncCursor(cursor: SyncCursor): Promise<SyncCursor> {

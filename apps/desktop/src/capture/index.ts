@@ -1,4 +1,14 @@
 export { createCaptureHelperController } from './helper-controller';
+export {
+  LocalCapturePolicyError,
+  createLocalCapturePolicyManager,
+  isBundleIdentifier,
+} from './local-policy';
+export type {
+  LocalCapturePolicyManager,
+  LocalCapturePolicyManagerOptions,
+  LocalCapturePolicyRuleStore,
+} from './local-policy';
 export { createCaptureAdmissionController } from './admission';
 export type {
   CaptureAdmissionController,

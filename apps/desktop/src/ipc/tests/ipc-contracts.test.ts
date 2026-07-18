@@ -72,6 +72,9 @@ describe('desktop ipc contracts', () => {
     expect(methodNames).toContain('timelineQuery');
     expect(methodNames).toContain('diagnosticsGetSafeLogs');
     expect(methodNames).toContain('diagnosticsPreviewRetention');
+    expect(methodNames).toContain('captureListLocalRules');
+    expect(methodNames).toContain('captureBlockBundle');
+    expect(methodNames).toContain('captureRemoveLocalRule');
 
     for (const forbiddenMethod of FORBIDDEN_PRELOAD_METHODS) {
       expect(methodNames).not.toContain(forbiddenMethod);
@@ -159,6 +162,24 @@ describe('desktop ipc contracts', () => {
     });
     expect(validateIpcRequest('diagnostics.previewRetention', { olderThanDays: 0 })).toMatchObject({
       ok: false,
+    });
+  });
+
+  it('accepts only exact bundle identifiers for local capture blocks', () => {
+    expect(
+      validateIpcRequest('capture.blockBundle', { bundleId: 'com.example.PasswordManager' }),
+    ).toEqual({
+      ok: true,
+      value: { bundleId: 'com.example.PasswordManager' },
+    });
+    expect(
+      validateIpcRequest('capture.blockBundle', { bundleId: 'https://example.com/login' }),
+    ).toMatchObject({
+      ok: false,
+    });
+    expect(validateIpcRequest('capture.removeLocalRule', { ruleId: 'local:abc123' })).toEqual({
+      ok: true,
+      value: { ruleId: 'local:abc123' },
     });
   });
 

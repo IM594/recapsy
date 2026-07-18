@@ -68,7 +68,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 5,
+      version: 6,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -242,7 +242,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(5);
+    ).toBe(6);
 
     const rowById = (id: string) =>
       database
@@ -365,11 +365,33 @@ describe('SQLite operational store', () => {
       },
       workspaceId: 'workspace_1',
     });
+    await first.upsertLocalCapturePolicyRule({
+      action: 'block_capture',
+      createdAt: now,
+      enabled: true,
+      id: 'local-sensitive-app',
+      kind: 'bundle_id',
+      pattern: 'com.example.sensitive',
+      scope: 'local_user',
+      updatedAt: now,
+    });
     first.close();
 
     const reopenedDatabase = createBunSqliteDatabase(path);
     const reopened = createSqliteStore({ database: reopenedDatabase });
     await reopened.initialize();
+    expect(await reopened.listLocalCapturePolicyRules()).toEqual([
+      {
+        action: 'block_capture',
+        createdAt: now,
+        enabled: true,
+        id: 'local-sensitive-app',
+        kind: 'bundle_id',
+        pattern: 'com.example.sensitive',
+        scope: 'local_user',
+        updatedAt: now,
+      },
+    ]);
 
     expect(await reopened.getOutboxJob('job_1')).toMatchObject({
       capture: {

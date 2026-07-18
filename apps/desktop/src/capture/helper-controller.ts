@@ -46,6 +46,7 @@ export type CaptureHelperControllerOptions = {
 export type CaptureHelperController = HelperLifecycle & {
   getStatus(): CaptureHelperStatus;
   handleEvent(event: CaptureHelperEvent): Promise<void>;
+  refreshPolicy(): Promise<void>;
 };
 
 export function createCaptureHelperController(
@@ -232,7 +233,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     this.policyRefreshTimer = undefined;
   }
 
-  private async refreshPolicy(): Promise<void> {
+  async refreshPolicy(): Promise<void> {
     if (!this.started || this.stopped) {
       return;
     }

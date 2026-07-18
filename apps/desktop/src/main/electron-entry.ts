@@ -33,13 +33,14 @@ import {
 import { createSqliteStore } from '../storage/index';
 import { createNodeSqliteDatabase } from '../storage/node';
 import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
+import { startDesktopSingleInstance } from './application-instance';
 import { resolveDesktopApplicationPaths } from './application-layout';
 import { configureDesktopApplicationProfile } from './application-profile';
 import { createLocalAssetReader } from './asset-reader';
 import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';
 import { createHttpTransport } from './http-transport';
-import { createElectronMainRuntime } from './runtime';
+import { type ElectronMainRuntimeOptions, createElectronMainRuntime } from './runtime';
 import { createSafeStorageSecretStore } from './safe-storage';
 
 /**
@@ -210,12 +211,10 @@ const privacySettings = createPrivacySettingsOpener(async (url) => {
   await shell.openExternal(url);
 });
 
-// `createElectronMainRuntime` itself registers `window-all-closed` and
-// `before-quit` synchronously and gates store/runtime creation on
-// `app.whenReady()` internally — see its doc comment. `createStore` is a
-// lazy factory so `app.getPath('userData')` is only read once Electron is
-// actually ready, without this file needing its own `whenReady().then()`.
-const { ready } = createElectronMainRuntime({
+// This object only captures adapters and lazy factories. SQLite, helper, and
+// shell construction remain behind `createElectronMainRuntime`, which is not
+// invoked until the primary process owns Electron's single-instance lock.
+const runtimeOptions: ElectronMainRuntimeOptions = {
   app,
   authClient,
   createHelperClient: () =>
@@ -377,9 +376,19 @@ const { ready } = createElectronMainRuntime({
   // capture process is handed above, so writer and reader share one root.
   readAssetBytes: (localAccessKey) => resolveCaptureAssetReader()(localAccessKey),
   tokenStore,
+};
+
+const runtime = startDesktopSingleInstance({
+  app,
+  start: () => createElectronMainRuntime(runtimeOptions),
+  onSecondInstance(activeRuntime) {
+    void activeRuntime.ready
+      .then(({ shell: desktopShell }) => desktopShell?.showMainWindow())
+      .catch(() => undefined);
+  },
 });
 
-ready.catch((error: unknown) => {
+runtime?.ready.catch((error: unknown) => {
   // Dev-only top-level guard so a startup failure is visible instead of a
   // silently-dead process; this is not the structured/redacted logging the
   // full runtime will eventually have.

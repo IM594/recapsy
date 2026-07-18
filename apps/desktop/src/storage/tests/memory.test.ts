@@ -39,6 +39,26 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
 }
 
 describe('memory operational store', () => {
+  it('keeps device-local capture rules across workspace and sign-out cache cleanup', async () => {
+    const store = createMemoryStore();
+    const rule = {
+      action: 'block_capture' as const,
+      createdAt: now,
+      enabled: true,
+      id: 'local-sensitive-app',
+      kind: 'bundle_id' as const,
+      pattern: 'com.example.sensitive',
+      scope: 'local_user' as const,
+      updatedAt: now,
+    };
+
+    await store.upsertLocalCapturePolicyRule(rule);
+    await store.clearWorkspaceCache('workspace_1');
+    await store.clearSignOutCache();
+
+    expect(await store.listLocalCapturePolicyRules()).toEqual([rule]);
+  });
+
   it('creates, lists, reads, and updates outbox jobs', async () => {
     const store = createMemoryStore();
 

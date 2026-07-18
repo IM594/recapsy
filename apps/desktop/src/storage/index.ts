@@ -46,6 +46,7 @@ export type {
   ClaimRetryableOutboxJobInput,
   HelperPermissionState,
   HelperRuntimeState,
+  LocalCapturePolicyRule,
   OperationalStoreError,
   OperationalStoreErrorCode,
   OperationalStoreResult,

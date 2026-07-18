@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import type { CaptureDefaultPolicy, CapturePolicyRule } from '@recapsy/contracts';
 import type { HelperCapturePolicy, HelperCapturePolicyRule } from '../helper/index';
 import type { CapturePoliciesResult } from '../server/index';
-import type { PolicyCacheEntry, PolicyCacheRead } from '../storage/index';
+import type { LocalCapturePolicyRule, PolicyCacheEntry, PolicyCacheRead } from '../storage/index';
 
 const HARD_CAPTURE_RULES: readonly CompiledCapturePolicyRule[] = [
   {
@@ -44,6 +44,7 @@ type CapturePolicyCacheStore = {
     options: { now: string },
   ): Promise<PolicyCacheRead | null>;
   setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry>;
+  listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]>;
 };
 
 export type CapturePolicyActivationOptions = {
@@ -66,11 +67,18 @@ export type CapturePolicyActivationOptions = {
 export class CapturePolicyActivationError extends Error {
   readonly name = 'CapturePolicyActivationError';
 
-  constructor(readonly code: 'policy_unavailable' | 'policy_requires_unavailable_context') {
+  constructor(
+    readonly code:
+      | 'policy_invalid_scope'
+      | 'policy_unavailable'
+      | 'policy_requires_unavailable_context',
+  ) {
     super(
-      code === 'policy_requires_unavailable_context'
-        ? 'Capture policy requires unavailable local context.'
-        : 'Capture policy is unavailable.',
+      code === 'policy_invalid_scope'
+        ? 'Capture policy contains a rule with an invalid ownership scope.'
+        : code === 'policy_requires_unavailable_context'
+          ? 'Capture policy requires unavailable local context.'
+          : 'Capture policy is unavailable.',
     );
   }
 }
@@ -81,7 +89,10 @@ export function createCapturePolicyActivation(
   return {
     async activate(): Promise<CapturePolicyActivationConfiguration> {
       const fetched = await fetchOrReadCachedPolicy(options);
+      assertWorkspacePolicyOwnership(fetched.policy);
+      const localRules = await options.store.listLocalCapturePolicyRules();
       const compiled = compileCapturePolicy({
+        localRules,
         policy: fetched.policy,
         version: fetched.policyVersion,
       });
@@ -102,11 +113,13 @@ export function createCapturePolicyActivation(
 }
 
 export function compileCapturePolicy(input: {
+  localRules?: readonly LocalCapturePolicyRule[];
   policy: CaptureDefaultPolicy;
   version: string;
 }): CompiledCapturePolicy {
   const rules: CompiledCapturePolicyRule[] = [
     ...input.policy.rules.map((rule) => toCompiledRule(rule)),
+    ...(input.localRules ?? []).map((rule) => toCompiledRule(rule)),
     ...HARD_CAPTURE_RULES.map((rule) => ({ ...rule })),
   ].sort(compareRules);
   const canonical = {
@@ -144,6 +157,7 @@ async function fetchOrReadCachedPolicy(
   ) {
     return await readUnexpiredCachedPolicy(options);
   }
+  assertWorkspacePolicyOwnership(response.capturePolicy.policy);
 
   const entry: PolicyCacheEntry = {
     deviceId: options.deviceId,
@@ -181,6 +195,12 @@ async function readUnexpiredCachedPolicy(
 
 function normalizeMaxConcurrentOcr(value: number | undefined): number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 1;
+}
+
+function assertWorkspacePolicyOwnership(policy: CaptureDefaultPolicy): void {
+  if (policy.rules.some((rule) => rule.scope !== 'workspace_default')) {
+    throw new CapturePolicyActivationError('policy_invalid_scope');
+  }
 }
 
 function policyRefreshAfterMs(fetchedAt: string, ttlSeconds: number, now: string): number {

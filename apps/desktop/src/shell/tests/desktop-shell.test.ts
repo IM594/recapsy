@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PermissionRefreshError } from '../../permissions';
 import {
   type DesktopShellAdapters,
@@ -10,6 +13,18 @@ import {
 import type { DesktopShellStatus } from '../status-model';
 
 describe('desktop shell', () => {
+  it('keeps device-local privacy controls visible in the main window source', async () => {
+    const source = await readFile(
+      path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'main-window.html'),
+      'utf8',
+    );
+
+    expect(source).toContain('Local privacy');
+    expect(source).toContain('id="privacy-bundle-id"');
+    expect(source).toContain('captureBlockBundle');
+    expect(source).toContain('captureRemoveLocalRule');
+  });
+
   it('creates a tray, shows the main window, and pushes status updates', async () => {
     const menuBuilds: DesktopShellMenuItem[][] = [];
     const sent: unknown[] = [];

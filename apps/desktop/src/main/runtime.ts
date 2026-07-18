@@ -225,6 +225,7 @@ export function createElectronMainRuntime(
           admission: captureRuntime.admission,
           eventHandler: captureRuntime.eventHandler,
           lifecycle: captureRuntime.lifecycle,
+          localPolicy: captureRuntime.localPolicy,
           store,
           workspaceId,
         }),

@@ -4,6 +4,7 @@ import type {
   CaptureOutboxEntryCreateInput,
   ClaimRetryableOutboxJobInput,
   HelperRuntimeState,
+  LocalCapturePolicyRule,
   OperationalStoreError,
   OperationalStoreResult,
   OperationalStoreSnapshot,
@@ -44,6 +45,7 @@ class InMemoryOperationalStore {
   private readonly outboxJobs = new Map<string, OutboxJob>();
   private readonly assetRefs = new Map<string, AssetCacheRef>();
   private readonly policyCache = new Map<string, PolicyCacheEntry>();
+  private readonly localCapturePolicyRules = new Map<string, LocalCapturePolicyRule>();
   private readonly syncCursors = new Map<string, SyncCursor>();
   private readonly settingsCache = new Map<string, SettingsCache>();
   private helperState: HelperRuntimeState | null = null;
@@ -457,6 +459,24 @@ class InMemoryOperationalStore {
     };
   }
 
+  async upsertLocalCapturePolicyRule(
+    rule: LocalCapturePolicyRule,
+  ): Promise<LocalCapturePolicyRule> {
+    const cloned = cloneLocalCapturePolicyRule(rule);
+    this.localCapturePolicyRules.set(rule.id, cloned);
+    return cloneLocalCapturePolicyRule(cloned);
+  }
+
+  async listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]> {
+    return [...this.localCapturePolicyRules.values()]
+      .sort(compareLocalCapturePolicyRules)
+      .map(cloneLocalCapturePolicyRule);
+  }
+
+  async deleteLocalCapturePolicyRule(id: string): Promise<boolean> {
+    return this.localCapturePolicyRules.delete(id);
+  }
+
   async setSyncCursor(cursor: SyncCursor): Promise<SyncCursor> {
     const cloned = cloneSyncCursor(cursor);
     this.syncCursors.set(syncCursorKey(cursor.workspaceId, cursor.kind), cloned);
@@ -696,6 +716,17 @@ function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {
       rules: entry.policy.rules.map((rule) => ({ ...rule })),
     },
   };
+}
+
+function cloneLocalCapturePolicyRule(rule: LocalCapturePolicyRule): LocalCapturePolicyRule {
+  return { ...rule };
+}
+
+function compareLocalCapturePolicyRules(
+  left: LocalCapturePolicyRule,
+  right: LocalCapturePolicyRule,
+): number {
+  return left.pattern.localeCompare(right.pattern) || left.id.localeCompare(right.id);
 }
 
 function policyCacheKey(workspaceId: string, deviceId: string): string {
