@@ -16,13 +16,20 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { CaptureHelperEvent } from '../../src/capture/index';
+import {
+  type CaptureHelperEvent,
+  compileCapturePolicy,
+  createCapturePolicyActivation,
+} from '../../src/capture/index';
 import {
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
   type HelperToMainType,
   createHelperProcessClient,
 } from '../../src/helper/index';
+import { createServerApiClient } from '../../src/server/index';
+import { createSqliteStore } from '../../src/storage/index';
+import { createBunSqliteDatabase } from '../../src/storage/sqlite/bun';
 
 /**
  * Real cross-process test of the *signed Swift capture bundle*, spawned exactly
@@ -130,6 +137,115 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
 
     await client.stop();
   });
+
+  bundleIt(
+    'rejects a policy whose declared hash does not match its executable content',
+    async () => {
+      const { client, envelopes } = startBundleClient();
+      await waitForEnvelope(envelopes, 'helper.hello');
+      const validPolicy = capturePolicy();
+
+      await client.sendCommand({
+        correlationId: 'tampered-policy-1',
+        messageId: 'test-tampered-policy-1',
+        payload: {
+          captureIdentity: { deviceId: 'device_1', workspaceId: 'workspace_1' },
+          policy: {
+            ...validPolicy,
+            policyHash: `sha256:${'f'.repeat(64)}`,
+          },
+        },
+        protocolVersion: HELPER_PROTOCOL_VERSION,
+        sentAt: new Date().toISOString(),
+        type: 'helper.configure',
+      });
+
+      await waitForEnvelope(
+        envelopes,
+        'helper.status',
+        (envelope) =>
+          envelope.payload.status === 'paused' && envelope.payload.reason === 'policy_unavailable',
+      );
+      expect(
+        envelopes.filter((envelope) => envelope.type === 'helper.policy_applied'),
+      ).toHaveLength(0);
+
+      await client.stop();
+    },
+  );
+
+  bundleIt(
+    'composes policy GET, SQLite cache, compiler, real helper ACK, and capture start',
+    async () => {
+      const workspaceId = 'workspace_composition_1';
+      const deviceId = 'device_composition_1';
+      const now = '2026-07-18T00:00:00.000Z';
+      const { assetRoot, client, envelopes } = startBundleClient();
+      const store = createSqliteStore({
+        database: createBunSqliteDatabase(path.join(assetRoot, 'profile.sqlite')),
+      });
+
+      try {
+        await store.initialize();
+        await waitForEnvelope(envelopes, 'helper.hello');
+        const requests: Array<{ method: string; path: string; query: Record<string, string> }> = [];
+        const api = createServerApiClient({
+          accessTokenProvider: {
+            async getAccessToken() {
+              return 'composition-access-token';
+            },
+          },
+          endpoint: 'https://api.example.test',
+          async transport(request) {
+            requests.push({ method: request.method, path: request.path, query: request.query });
+            return {
+              body: capturePoliciesHttpResponse(workspaceId, deviceId, now),
+              status: 200,
+            };
+          },
+        });
+        const activation = createCapturePolicyActivation({
+          api,
+          deviceId,
+          now: () => now,
+          store,
+          workspaceId,
+        });
+
+        const configuration = await activation.activate();
+        const cached = await store.getPolicyCache(workspaceId, deviceId, { now });
+        expect(requests).toEqual([
+          {
+            method: 'GET',
+            path: '/v1/capture/policies',
+            query: { deviceId, workspaceId },
+          },
+        ]);
+        expect(cached).toMatchObject({
+          expired: false,
+          policySnapshotId: 'composition-policy-snapshot',
+          policyVersion: 'composition-policy-v1',
+        });
+        expect(configuration.policy.policyHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+
+        await client.configureCapture(configuration.policy, { deviceId, workspaceId });
+        await waitForEnvelope(
+          envelopes,
+          'helper.policy_applied',
+          (envelope) => envelope.payload.policyHash === configuration.policy.policyHash,
+        );
+        await client.beginCapture('runtime_started');
+        await waitForEnvelope(
+          envelopes,
+          'helper.status',
+          (envelope) => envelope.payload.status === 'ready',
+        );
+      } finally {
+        store.close();
+        await client.stop();
+      }
+    },
+  );
 
   bundleIt(
     'runs the capture loop after start and emits a protocol-valid capture envelope (or skips cleanly with no active window)',
@@ -517,12 +633,56 @@ function delay(ms: number): Promise<void> {
 }
 
 function capturePolicy() {
-  return {
-    defaultAction: 'allow' as const,
-    paused: false,
-    policyHash: `sha256:${'a'.repeat(64)}`,
-    rules: [],
+  return compileCapturePolicy({
+    policy: {
+      axTextUploadEnabled: false,
+      defaultAction: 'allow',
+      paused: false,
+      rules: [],
+    },
     version: 'bundle-policy-1',
+  });
+}
+
+function capturePoliciesHttpResponse(workspaceId: string, deviceId: string, generatedAt: string) {
+  return {
+    axAllowlist: {
+      axTextUploadEnabled: false,
+      enabled: false,
+      generatedAt,
+      reason: 'ax_text_upload_disabled',
+      status: 'disabled',
+      workspaceId,
+    },
+    capturePolicy: {
+      expiresAt: '2026-07-18T06:00:00.000Z',
+      id: 'composition-policy-snapshot',
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: 'allow',
+        paused: false,
+        rules: [
+          {
+            action: 'block_capture',
+            enabled: true,
+            id: 'composition-sensitive-app',
+            kind: 'bundle_id',
+            pattern: 'com.example.sensitive',
+            scope: 'workspace_default',
+          },
+        ],
+      },
+      ttlSeconds: 21_600,
+      version: 'composition-policy-v1',
+    },
+    deliveryPolicy: { maxConcurrentOcr: 2 },
+    deviceId,
+    generatedAt,
+    storagePolicy: {
+      allowLongTermRemoteOriginal: false,
+      authoritativeOriginalLocation: 'local_device',
+    },
+    workspaceId,
   };
 }
 

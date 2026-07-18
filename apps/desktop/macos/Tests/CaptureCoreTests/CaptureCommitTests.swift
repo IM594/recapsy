@@ -113,6 +113,38 @@ final class CaptureCommitCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagedURL(root, captureId).path))
     }
 
+    func testPausedPolicyGenerationDiscardsInFlightCaptureEvenWhenHashIsUnchanged() throws {
+        let root = uniqueRoot("paused-generation")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let captureId = "cap-paused-generation"
+        let image = Data("paused-generation-screen".utf8)
+        let receipt = makeReceipt(
+            image: image,
+            captureId: captureId,
+            policyVersion: "policy-current"
+        )
+
+        let outcome = try CaptureCommitCoordinator.finalize(
+            startedPolicyHash: newPolicyHash,
+            currentPolicyHash: newPolicyHash,
+            startedPolicyGeneration: 7,
+            currentPolicyGeneration: 8,
+            receipt: receipt,
+            imageData: image,
+            assetRoot: root,
+            captureId: captureId
+        )
+
+        guard case let .skipped(reason) = outcome else {
+            return XCTFail("A capture crossing a pause generation must be skipped.")
+        }
+        XCTAssertEqual(reason.rawValue, "policy_denied")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: captureDirectory(root, captureId).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: receiptURL(root, captureId).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stagedURL(root, captureId).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: finalURL(root, captureId).path))
+    }
+
     func testCommitFailureCleansPreparedCaptureWithoutDeletingSiblingCapture() throws {
         let root = uniqueRoot("failure")
         defer { try? FileManager.default.removeItem(at: root) }

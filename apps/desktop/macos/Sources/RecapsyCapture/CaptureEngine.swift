@@ -59,6 +59,7 @@ final class CaptureEngine {
     private var heartbeatSequence = 0
     private var captureCounter = 0
     private var configuredPolicy: ConfiguredPolicy?
+    private var policyGeneration: UInt64 = 0
     /// A written screenshot remains helper-owned until main acknowledges its
     /// capture id. The receipt file is the durable source of truth; this map
     /// only avoids rescanning the asset root for the current process.
@@ -133,12 +134,14 @@ final class CaptureEngine {
                 policyPayload["captureIdentity"] = identity
             }
             guard let policy = ConfiguredPolicy.fromPayload(policyPayload) else {
+                policyGeneration &+= 1
                 configuredPolicy = nil
                 state = .paused
                 stopCaptureTimer()
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
+            policyGeneration &+= 1
             configuredPolicy = policy
             if let interval = payload["captureIntervalMs"] as? Int, interval > 0 {
                 captureIntervalMs = interval
@@ -171,6 +174,7 @@ final class CaptureEngine {
             startCaptureTimer()
             replayPendingCaptureResults()
         case "capture.pause":
+            policyGeneration &+= 1
             state = .paused
             let reason = payload["reason"] as? String
             emitStatus(status: "paused", reason: reason)
@@ -187,6 +191,7 @@ final class CaptureEngine {
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
+            policyGeneration &+= 1
             state = .ready
             let reason = payload["reason"] as? String
             emitStatus(status: "ready", reason: reason)
@@ -274,12 +279,14 @@ final class CaptureEngine {
         )
         let observedAt = CaptureEngine.iso8601(Date())
         let previousFingerprint = lastAcceptedFrameFingerprint
+        let startedPolicyGeneration = policyGeneration
 
         captureQueue.async { [weak self] in
             self?.performCapture(
                 captureId: captureId,
                 observedAt: observedAt,
                 configuredPolicy: configuredPolicy,
+                startedPolicyGeneration: startedPolicyGeneration,
                 previousFingerprint: previousFingerprint
             )
         }
@@ -291,6 +298,7 @@ final class CaptureEngine {
         captureId: String,
         observedAt: String,
         configuredPolicy: ConfiguredPolicy,
+        startedPolicyGeneration: UInt64,
         previousFingerprint: CaptureFrameFingerprint?
     ) {
         var preparedCapture: PreparedCapture?
@@ -300,7 +308,8 @@ final class CaptureEngine {
                 if let preparedCapture {
                     self.finalizePreparedCapture(
                         preparedCapture,
-                        startedPolicyHash: configuredPolicy.hash
+                        startedPolicyHash: configuredPolicy.hash,
+                        startedPolicyGeneration: startedPolicyGeneration
                     )
                 }
                 self.captureInFlight = false
@@ -478,7 +487,8 @@ final class CaptureEngine {
     /// capture id or staging path before stale work has been discarded.
     private func finalizePreparedCapture(
         _ prepared: PreparedCapture,
-        startedPolicyHash: String
+        startedPolicyHash: String,
+        startedPolicyGeneration: UInt64
     ) {
         guard let assetRoot else {
             emitCaptureError(
@@ -493,6 +503,8 @@ final class CaptureEngine {
             let outcome = try CaptureCommitCoordinator.finalize(
                 startedPolicyHash: startedPolicyHash,
                 currentPolicyHash: configuredPolicy?.hash,
+                startedPolicyGeneration: startedPolicyGeneration,
+                currentPolicyGeneration: policyGeneration,
                 receipt: prepared.receipt,
                 imageData: prepared.imageData,
                 assetRoot: assetRoot,
@@ -541,6 +553,7 @@ final class CaptureEngine {
             do {
                 receipt = try CaptureReceiptStore.read(assetRoot: assetRoot, captureId: captureId)
             } catch {
+                CaptureReceiptStore.removeCapture(assetRoot: assetRoot, captureId: captureId)
                 emitCaptureError(
                     captureId: captureId,
                     code: "asset_write_failed",
@@ -552,6 +565,7 @@ final class CaptureEngine {
                 continue
             }
             guard let payload = try? CaptureReceiptStore.recover(receipt, assetRoot: assetRoot) else {
+                CaptureReceiptStore.removeCapture(assetRoot: assetRoot, captureId: captureId)
                 emitCaptureError(
                     captureId: captureId,
                     code: "asset_write_failed",
@@ -708,16 +722,19 @@ final class CaptureEngine {
             }
 
             var rules: [CaptureSourcePolicyRule] = []
+            var canonicalRules: [CapturePolicyCanonicalRule] = []
             for rawRule in rawRules {
                 guard
                     let id = rawRule["id"] as? String,
                     !id.isEmpty,
+                    CapturePolicyCanonicalRule.isSupportedText(id),
                     let kind = rawRule["kind"] as? String,
                     Self.isKind(kind),
                     let scope = rawRule["scope"] as? String,
                     Self.isScope(scope),
                     let pattern = rawRule["pattern"] as? String,
                     !pattern.isEmpty,
+                    CapturePolicyCanonicalRule.isSupportedText(pattern),
                     let actionRaw = rawRule["action"] as? String,
                     let action = CaptureSourcePolicyAction(rawValue: actionRaw),
                     let enabled = rawRule["enabled"] as? Bool
@@ -734,6 +751,26 @@ final class CaptureEngine {
                         enabled: enabled
                     )
                 )
+                canonicalRules.append(
+                    CapturePolicyCanonicalRule(
+                        action: actionRaw,
+                        enabled: enabled,
+                        id: id,
+                        kind: kind,
+                        pattern: pattern,
+                        scope: scope
+                    )
+                )
+            }
+
+            let canonical = CapturePolicyCanonicalSnapshot(
+                defaultAction: defaultActionRaw,
+                paused: paused,
+                rules: canonicalRules,
+                version: version
+            )
+            guard let computedHash = try? canonical.policyHash(), computedHash == hash else {
+                return nil
             }
 
             let identity = payload["captureIdentity"] as? NSDictionary

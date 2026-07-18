@@ -233,7 +233,12 @@ enum ScreenshotCapturer {
             fallbackWindows: cgInfos,
             frontmostProcessId: frontmostPid
         ),
-            let window = content.windows.first(where: { Int($0.windowID) == selectedId })
+            let verifiedId = ActiveWindowSelector.verifyFinalWindowId(
+                selectedWindowId: selectedId,
+                finalWindows: sckInfos,
+                frontmostProcessId: frontmostPid
+            ),
+            let window = content.windows.first(where: { Int($0.windowID) == verifiedId })
         {
             return window
         }

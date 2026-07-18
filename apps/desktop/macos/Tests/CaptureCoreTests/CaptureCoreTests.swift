@@ -135,6 +135,52 @@ final class CaptureReceiptTests: XCTestCase {
 
         XCTAssertEqual(CaptureReceiptStore.listCaptureIds(assetRoot: root), ["cap-a"])
     }
+
+    func testReceiptReadRejectsMissingApplicationIdentityAndCleanupRemovesCaptureDirectory() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recapsy-invalid-receipt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let captureId = "cap-invalid-identity"
+        let image = Data("screen-bytes".utf8)
+        let hash = CaptureAsset.contentHash(for: image)
+        let payload = CaptureResultPayload(
+            captureId: captureId,
+            observedAt: "2026-07-18T00:00:00.000Z",
+            manifest: CaptureAssetPayload(
+                role: "manifest",
+                ref: "\(captureId)/manifest.json",
+                hash: hash,
+                mimeType: "application/json",
+                sizeBytes: 0
+            ),
+            assets: [],
+            context: CaptureContextPayload(
+                observedAt: "2026-07-18T00:00:00.000Z",
+                policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
+            )
+        )
+        let receipt = CaptureReceipt(
+            workspaceId: "workspace-1",
+            deviceId: "device-1",
+            payload: payload,
+            screenshotHash: hash,
+            screenshotSizeBytes: image.count
+        )
+        try CaptureReceiptStore.write(receipt, assetRoot: root, captureId: captureId)
+
+        XCTAssertThrowsError(
+            try CaptureReceiptStore.read(assetRoot: root, captureId: captureId)
+        ) { error in
+            XCTAssertTrue(error is CaptureReceiptError)
+        }
+        CaptureReceiptStore.removeCapture(assetRoot: root, captureId: captureId)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: captureId).path
+            )
+        )
+    }
 }
 
 final class ProtocolEncodingTests: XCTestCase {
@@ -499,6 +545,37 @@ final class ActiveWindowSelectorTests: XCTestCase {
                 fallbackWindows: fallback,
                 frontmostProcessId: 42
             )
+        )
+    }
+
+    func testFinalSelectionRejectsOwnerPidMismatchAfterFallback() {
+        XCTAssertNil(
+            ActiveWindowSelector.verifyFinalWindowId(
+                selectedWindowId: 3,
+                finalWindows: [window(id: 3, pid: 999)],
+                frontmostProcessId: 42
+            )
+        )
+    }
+
+    func testFinalSelectionRejectsDuplicateWindowIds() {
+        XCTAssertNil(
+            ActiveWindowSelector.verifyFinalWindowId(
+                selectedWindowId: 3,
+                finalWindows: [window(id: 3, pid: 42), window(id: 3, pid: 42)],
+                frontmostProcessId: 42
+            )
+        )
+    }
+
+    func testFinalSelectionAcceptsOneMatchingForegroundWindow() {
+        XCTAssertEqual(
+            ActiveWindowSelector.verifyFinalWindowId(
+                selectedWindowId: 3,
+                finalWindows: [window(id: 2, pid: 999), window(id: 3, pid: 42)],
+                frontmostProcessId: 42
+            ),
+            3
         )
     }
 }

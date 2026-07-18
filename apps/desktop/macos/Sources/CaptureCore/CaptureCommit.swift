@@ -12,6 +12,8 @@ public enum CaptureCommitCoordinator {
     public static func finalize(
         startedPolicyHash: String,
         currentPolicyHash: String?,
+        startedPolicyGeneration: UInt64 = 0,
+        currentPolicyGeneration: UInt64 = 0,
         receipt: CaptureReceipt,
         imageData: Data,
         assetRoot: URL,
@@ -21,7 +23,10 @@ public enum CaptureCommitCoordinator {
             throw CaptureReceiptError.invalidReceipt
         }
 
-        guard currentPolicyHash == startedPolicyHash else {
+        guard
+            currentPolicyHash == startedPolicyHash,
+            currentPolicyGeneration == startedPolicyGeneration
+        else {
             return .skipped(.policyDenied)
         }
         guard

@@ -77,7 +77,12 @@ public enum CaptureReceiptStore {
             receipt.schemaVersion == CaptureReceipt.currentSchemaVersion,
             receipt.payload.captureId == captureId,
             !receipt.workspaceId.isEmpty,
-            !receipt.deviceId.isEmpty
+            !receipt.deviceId.isEmpty,
+            let app = receipt.payload.context.app,
+            CaptureApplicationPayload.fromRuntimeMetadata(
+                name: app.name,
+                bundleId: app.bundleId
+            ) == app
         else {
             throw CaptureReceiptError.invalidReceipt
         }
@@ -119,6 +124,12 @@ public enum CaptureReceiptStore {
 
     public static func removeReceipt(assetRoot: URL, captureId: String) {
         try? FileManager.default.removeItem(at: receiptURL(assetRoot: assetRoot, captureId: captureId))
+    }
+
+    public static func removeCapture(assetRoot: URL, captureId: String) {
+        try? FileManager.default.removeItem(
+            at: CaptureAsset.captureDirectoryURL(assetRoot: assetRoot, captureId: captureId)
+        )
     }
 
     public static func listCaptureIds(assetRoot: URL) -> [String] {

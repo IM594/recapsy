@@ -44,10 +44,9 @@ public struct CaptureWindowInfo: Equatable {
 ///   3. among the preferred pool pick the largest by area, breaking ties on the
 ///      lower window id so the choice is deterministic and testable.
 ///
-/// When the frontmost app owns no capturable window, callers fall back to
-/// `selectTopmostCapturableWindowId` over a front-to-back ordered list
-/// (CGWindowList order) so a host that remains NSWorkspace-frontmost without a
-/// visible window does not permanently starve capture.
+/// When the primary enumeration lacks ownership metadata, callers may use a
+/// second enumeration only to nominate an id. The final ScreenCaptureKit
+/// window must still pass `verifyFinalWindowId` before any pixels are read.
 public enum ActiveWindowSelector {
     public static let minimumWindowEdge: Double = 100
 
@@ -95,6 +94,27 @@ public enum ActiveWindowSelector {
     ) -> Int? {
         selectWindowId(windows: primaryWindows, frontmostProcessId: frontmostProcessId)
             ?? selectWindowId(windows: fallbackWindows, frontmostProcessId: frontmostProcessId)
+    }
+
+    /// Re-authorize a candidate against the final ScreenCaptureKit window set.
+    /// A fallback enumeration can nominate an id, but cannot establish owner
+    /// identity. Exactly one final window must match and must independently
+    /// belong to the foreground process.
+    public static func verifyFinalWindowId(
+        selectedWindowId: Int,
+        finalWindows: [CaptureWindowInfo],
+        frontmostProcessId: Int
+    ) -> Int? {
+        let matches = finalWindows.filter { $0.windowId == selectedWindowId }
+        guard
+            matches.count == 1,
+            let window = matches.first,
+            window.ownerProcessId == frontmostProcessId,
+            isCapturable(window)
+        else {
+            return nil
+        }
+        return window.windowId
     }
 
     /// First capturable window in a front-to-back ordered list.

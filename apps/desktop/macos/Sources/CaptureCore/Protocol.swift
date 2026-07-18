@@ -210,8 +210,8 @@ public struct CaptureApplicationPayload: Codable, Equatable {
     }
 
     /// Converts the narrow app-level metadata exposed by macOS into the helper
-    /// protocol shape. Missing or unsafe values are omitted rather than causing
-    /// a whole capture envelope to fail validation in the Electron process.
+    /// protocol shape. Missing or unsafe values return nil so capture is denied
+    /// before ScreenCaptureKit reads pixels or emits a result envelope.
     public static func fromRuntimeMetadata(name: String?, bundleId: String?) -> CaptureApplicationPayload? {
         guard
             let safeName = normalizedName(name),
