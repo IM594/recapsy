@@ -109,6 +109,19 @@ class InMemoryOperationalStore {
   async createCaptureOutboxEntry(
     entry: CaptureOutboxEntryCreateInput,
   ): Promise<OperationalStoreResult<OutboxJob>> {
+    const idempotencyConflict = [...this.outboxJobs.values()].find(
+      (job) => job.workspaceId === entry.workspaceId && job.idempotencyKey === entry.idempotencyKey,
+    );
+
+    if (idempotencyConflict) {
+      return existingCaptureOutboxEntryMatches(idempotencyConflict, entry, this.assetRefs)
+        ? success(cloneOutboxJob(idempotencyConflict))
+        : failure({
+            code: 'idempotency_key_conflict',
+            message: 'Outbox idempotency key already exists for this workspace.',
+          });
+    }
+
     const activeJobCount = [...this.outboxJobs.values()].filter(
       (job) => !isTerminalOutboxState(job.state),
     ).length;
@@ -121,19 +134,6 @@ class InMemoryOperationalStore {
         code: 'capacity_exceeded',
         message: 'Outbox active job capacity has been reached.',
       });
-    }
-
-    const idempotencyConflict = [...this.outboxJobs.values()].find(
-      (job) => job.workspaceId === entry.workspaceId && job.idempotencyKey === entry.idempotencyKey,
-    );
-
-    if (idempotencyConflict) {
-      return existingCaptureOutboxEntryMatches(idempotencyConflict, entry, this.assetRefs)
-        ? success(cloneOutboxJob(idempotencyConflict))
-        : failure({
-            code: 'idempotency_key_conflict',
-            message: 'Outbox idempotency key already exists for this workspace.',
-          });
     }
 
     if (this.outboxJobs.has(entry.id)) {
@@ -499,10 +499,10 @@ class InMemoryOperationalStore {
     return settings ? cloneSettingsCache(settings) : null;
   }
 
-  async getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot> {
-    const jobs = [...this.outboxJobs.values()].filter((job) => job.workspaceId === workspaceId);
+  async getBackpressureSnapshot(_workspaceId: string): Promise<OperationalStoreSnapshot> {
+    const jobs = [...this.outboxJobs.values()];
     const assetBytes = [...this.assetRefs.values()]
-      .filter((asset) => asset.workspaceId === workspaceId && asset.cleanupState !== 'cleaned')
+      .filter((asset) => asset.cleanupState !== 'cleaned')
       .reduce((total, asset) => total + asset.sizeBytes, 0);
 
     return {

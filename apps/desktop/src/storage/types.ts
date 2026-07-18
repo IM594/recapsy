@@ -310,6 +310,7 @@ export type OperationalStoreResult<T> =
       error: OperationalStoreError;
     };
 
+/** Device-wide pressure from local resources shared by every workspace. */
 export type OperationalStoreSnapshot = {
   queuedJobs: number;
   assetBytes: number;

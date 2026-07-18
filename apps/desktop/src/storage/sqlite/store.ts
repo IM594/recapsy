@@ -248,7 +248,7 @@ class SqliteOperationalStore {
     return this.cache.getSettingsCache(workspaceId);
   }
 
-  async getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot> {
+  async getBackpressureSnapshot(_workspaceId: string): Promise<OperationalStoreSnapshot> {
     const jobRow = this.options.database
       .prepare<{ queued_jobs: number; retrying_jobs: number }>(
         `SELECT
@@ -256,17 +256,16 @@ class SqliteOperationalStore {
              AS queued_jobs,
            SUM(CASE WHEN state = 'pending' AND next_retry_at IS NOT NULL THEN 1 ELSE 0 END)
              AS retrying_jobs
-         FROM outbox_jobs
-         WHERE workspace_id = $workspaceId`,
+         FROM outbox_jobs`,
       )
-      .get({ $workspaceId: workspaceId });
+      .get();
     const assetRow = this.options.database
       .prepare<{ asset_bytes: number | null }>(
         `SELECT SUM(size_bytes) AS asset_bytes
          FROM asset_cache_refs
-         WHERE workspace_id = $workspaceId AND cleanup_state != 'cleaned'`,
+         WHERE cleanup_state != 'cleaned'`,
       )
-      .get({ $workspaceId: workspaceId });
+      .get();
 
     return {
       assetBytes: assetRow?.asset_bytes ?? 0,
