@@ -21,6 +21,7 @@ enum ScreenshotError: Error {
     case noActiveWindow
     case policyDenied
     case blankFrame
+    case lowInformationFrame
     case duplicateFrame
     case captureFailed
     case encodeFailed
@@ -72,6 +73,8 @@ enum ScreenshotCapturer {
             throw ScreenshotError.policyDenied
         case .blank:
             throw ScreenshotError.blankFrame
+        case .lowInformation:
+            throw ScreenshotError.lowInformationFrame
         case .duplicate:
             throw ScreenshotError.duplicateFrame
         case .image(let cgImage, let application, let fingerprint, let policyDecision):
@@ -106,6 +109,7 @@ enum ScreenshotCapturer {
         case noWindow
         case policyDenied
         case blank
+        case lowInformation
         case duplicate
         case failed
     }
@@ -193,6 +197,8 @@ enum ScreenshotCapturer {
                 switch frameDecision {
                 case .skip(.blank):
                     outcome = .blank
+                case .skip(.lowInformation):
+                    outcome = .lowInformation
                 case .skip(.duplicate):
                     outcome = .duplicate
                 case .accept(let fingerprint):

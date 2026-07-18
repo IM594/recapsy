@@ -33,6 +33,11 @@ let package = Package(
         .target(
             name: "CaptureCore"
         ),
+        .target(
+            name: "FrameCorpusTooling",
+            dependencies: ["CaptureCore"],
+            path: "Tests/FixtureTools/FrameCorpusTooling"
+        ),
         // No `pkgConfig`/path here on purpose: pkg-config would inject a dynamic
         // `-lwebp`, which pulls libwebp.dylib and defeats the self-contained,
         // statically-linked capture binary we want. `build-capture-bundle.sh`
@@ -53,9 +58,14 @@ let package = Package(
         .executableTarget(
             name: "CaptureLauncher"
         ),
+        .executableTarget(
+            name: "FrameCorpusCapture",
+            dependencies: ["CaptureCore", "FrameCorpusTooling"],
+            path: "Tests/FixtureTools/FrameCorpusCapture"
+        ),
         .testTarget(
             name: "CaptureCoreTests",
-            dependencies: ["CaptureCore"],
+            dependencies: ["CaptureCore", "FrameCorpusTooling"],
             resources: [
                 .process("Fixtures"),
             ]

@@ -1,5 +1,6 @@
-import XCTest
+import CoreGraphics
 import Foundation
+import XCTest
 @testable import CaptureCore
 
 final class AssetPathsTests: XCTestCase {
@@ -241,6 +242,25 @@ final class ProtocolEncodingTests: XCTestCase {
         XCTAssertEqual(payload["reason"] as? String, "policy_denied")
         XCTAssertFalse(payload.keys.contains("assets"))
         XCTAssertFalse(payload.keys.contains("context"))
+    }
+
+    func testLowInformationCaptureSkippedReasonUsesStableWireValue() throws {
+        let envelope = HelperEnvelope(
+            messageId: "cap-msg-low-information-1",
+            correlationId: nil,
+            sentAt: "2026-07-18T00:00:00.000Z",
+            type: "capture.skipped",
+            payload: CaptureSkippedPayload(
+                captureId: "cap-low-information-1",
+                reason: .lowInformation,
+                observedAt: "2026-07-18T00:00:00.000Z"
+            )
+        )
+
+        let payload = try XCTUnwrap(
+            try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any]
+        )
+        XCTAssertEqual(payload["reason"] as? String, "low_information")
     }
 
     func testCaptureResultKeepsRelativeRefSlashUnescaped() throws {
@@ -643,6 +663,41 @@ final class CaptureFrameEconomyTests: XCTestCase {
         XCTAssertEqual(evaluate(Array(repeating: 3, count: 48)), .skip(.blank))
     }
 
+    func testNonBlankFrameWithOnlyOneIsolatedSampleIsLowInformation() {
+        var luminance = Array(repeating: UInt8(245), count: 48)
+        luminance[19] = 25
+
+        XCTAssertEqual(
+            CaptureFrameSampler.information(in: luminance, width: 8, height: 6),
+            .lowInformation
+        )
+        XCTAssertEqual(evaluate(luminance), .skip(.lowInformation))
+    }
+
+    func testSparseButStructuredVisibleChangeIsAdmitted() throws {
+        var luminance = Array(repeating: UInt8(245), count: 48)
+        for index in [9, 10, 11] {
+            luminance[index] = 25
+        }
+
+        XCTAssertEqual(
+            CaptureFrameSampler.information(in: luminance, width: 8, height: 6),
+            .informative
+        )
+        XCTAssertNoThrow(try acceptedFingerprint(evaluate(luminance)))
+    }
+
+    func testBlankClassificationTakesPrecedenceOverLowInformation() {
+        var luminance = Array(repeating: UInt8(245), count: 48)
+        luminance[19] = 239
+
+        XCTAssertEqual(
+            CaptureFrameSampler.information(in: luminance, width: 8, height: 6),
+            .blank
+        )
+        XCTAssertEqual(evaluate(luminance), .skip(.blank))
+    }
+
     func testQuantizedNearDuplicateInSameWindowIsSkipped() throws {
         let initial = nonUniformFrame()
         let fingerprint = try acceptedFingerprint(evaluate(initial))
@@ -685,5 +740,54 @@ final class CaptureFrameEconomyTests: XCTestCase {
         var textChanged = initial
         textChanged[28] = 25
         XCTAssertNoThrow(try acceptedFingerprint(evaluate(textChanged, previous: fingerprint)))
+    }
+}
+
+final class CaptureFrameSamplerTests: XCTestCase {
+    func testCGImageSamplingClassifiesAnIsolatedPixelAsLowInformation() throws {
+        let width = 8
+        let height = 6
+        var rgba = Array(repeating: UInt8(0), count: width * height * 4)
+        for index in 0..<(width * height) {
+            rgba[index * 4] = 245
+            rgba[index * 4 + 1] = 245
+            rgba[index * 4 + 2] = 245
+            rgba[index * 4 + 3] = 255
+        }
+        let isolatedPixel = 19 * 4
+        rgba[isolatedPixel] = 25
+        rgba[isolatedPixel + 1] = 25
+        rgba[isolatedPixel + 2] = 25
+
+        let provider = try XCTUnwrap(CGDataProvider(data: Data(rgba) as CFData))
+        let image = try XCTUnwrap(CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGBitmapInfo(
+                rawValue: CGImageAlphaInfo.noneSkipLast.rawValue
+            ),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ))
+        let luminance = try XCTUnwrap(CaptureFrameSampler.sampledLuminance(
+            from: image,
+            width: width,
+            height: height
+        ))
+
+        XCTAssertEqual(
+            CaptureFrameSampler.information(
+                in: luminance,
+                width: width,
+                height: height
+            ),
+            .lowInformation
+        )
     }
 }

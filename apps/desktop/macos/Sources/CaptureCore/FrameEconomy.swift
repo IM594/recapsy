@@ -28,6 +28,7 @@ public struct CaptureFrameFingerprint: Equatable {
 
 public enum CaptureFrameSkipReason: String, Equatable {
     case blank
+    case lowInformation = "low_information"
     case duplicate
 }
 
@@ -36,17 +37,16 @@ public enum CaptureFrameEconomyDecision: Equatable {
     case skip(CaptureFrameSkipReason)
 }
 
-/// Frame filtering is deliberately conservative. A frame is "blank" only if
-/// every sampled luminance value lies inside a six-level band. Near-duplicate
-/// detection compares a SHA-256 digest of 16-level quantized samples, which
+/// Frame filtering is deliberately conservative. Blank and low-information
+/// classification is performed on the in-memory luminance sample before
+/// near-duplicate detection. The digest uses 16-level quantized samples, which
 /// ignores tiny display jitter but changes whenever a visible sampled glyph
-/// crosses a quantization boundary. The current product policy accepts a
-/// false negative (extra OCR work) over a false positive (lost visible text).
+/// crosses a quantization boundary. The current product policy accepts a false
+/// negative (extra OCR work) over a false positive (lost visible text).
 public enum CaptureFrameEconomy {
     public static let sampleWidth = 48
     public static let sampleHeight = 27
 
-    private static let uniformLuminanceSpread: UInt8 = 6
     private static let quantizationStep: UInt8 = 16
 
     public static func evaluate(
@@ -59,11 +59,17 @@ public enum CaptureFrameEconomy {
         precondition(width > 0 && height > 0)
         precondition(luminance.count == width * height)
 
-        guard let darkest = luminance.min(), let brightest = luminance.max() else {
+        switch CaptureFrameSampler.information(
+            in: luminance,
+            width: width,
+            height: height
+        ) {
+        case .blank:
             return .skip(.blank)
-        }
-        if brightest &- darkest <= uniformLuminanceSpread {
-            return .skip(.blank)
+        case .lowInformation:
+            return .skip(.lowInformation)
+        case .informative:
+            break
         }
 
         let fingerprint = CaptureFrameFingerprint(

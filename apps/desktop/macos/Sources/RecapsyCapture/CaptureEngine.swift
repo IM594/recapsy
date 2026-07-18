@@ -363,6 +363,16 @@ final class CaptureEngine {
                 )
             )
             return
+        } catch ScreenshotError.lowInformationFrame {
+            emit(
+                type: "capture.skipped",
+                payload: CaptureSkippedPayload(
+                    captureId: captureId,
+                    reason: .lowInformation,
+                    observedAt: observedAt
+                )
+            )
+            return
         } catch ScreenshotError.duplicateFrame {
             emit(
                 type: "capture.skipped",

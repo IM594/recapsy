@@ -4,6 +4,15 @@ import ImageIO
 import XCTest
 
 final class CaptureFrameEconomyCorpusTests: XCTestCase {
+    private struct FixtureManifest: Decodable {
+        struct Provenance: Decodable {
+            let kind: String
+            let containsRealUserData: Bool
+        }
+
+        let provenance: Provenance
+    }
+
     private enum FixtureError: Error {
         case missing(String)
         case undecodable(String)
@@ -15,6 +24,20 @@ final class CaptureFrameEconomyCorpusTests: XCTestCase {
         bundleId: "one.recapsy.fixture",
         windowId: 101
     )
+
+    func testBundledCorpusProvenanceRemainsSyntheticAndPrivacySafe() throws {
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "manifest",
+            withExtension: "json"
+        ))
+        let manifest = try JSONDecoder().decode(
+            FixtureManifest.self,
+            from: Data(contentsOf: url)
+        )
+
+        XCTAssertEqual(manifest.provenance.kind, "synthetic-ui-screenshot")
+        XCTAssertFalse(manifest.provenance.containsRealUserData)
+    }
 
     func testEncodedBlankScreenshotCorpusIsSkipped() throws {
         for name in ["blank-surface", "blank-six-level-band"] {

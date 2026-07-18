@@ -92,6 +92,28 @@ describe('helper protocol direction validation', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('accepts low_information as a capture skip reason and rejects near-miss values', () => {
+    expect(
+      validateHelperToMainEnvelope(
+        envelope('capture.skipped', {
+          captureId: 'cap_low_information',
+          observedAt: sentAt,
+          reason: 'low_information',
+        }),
+      ).ok,
+    ).toBe(true);
+
+    expect(
+      validateHelperToMainEnvelope(
+        envelope('capture.skipped', {
+          captureId: 'cap_low_information',
+          observedAt: sentAt,
+          reason: 'low-information',
+        }),
+      ),
+    ).toMatchObject({ error: { code: 'schema_mismatch' }, ok: false });
+  });
+
   it('distinguishes unknown message types from known types in the wrong direction', () => {
     expect(
       validateHelperToMainEnvelope({ ...baseEnvelope('capture.raw_debug'), payload: {} }),

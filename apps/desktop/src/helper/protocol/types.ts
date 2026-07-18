@@ -76,6 +76,15 @@ export type CaptureResultPayload = {
   context: SafeCaptureContextPayload;
 };
 
+export type CaptureSkippedReason =
+  | 'paused'
+  | 'policy_denied'
+  | 'duplicate'
+  | 'blank'
+  | 'low_information'
+  | 'secure_input'
+  | 'private_context';
+
 export type HelperToMainPayloadByType = {
   'helper.hello': {
     helperVersion: string;
@@ -98,7 +107,7 @@ export type HelperToMainPayloadByType = {
   'capture.result': CaptureResultPayload;
   'capture.skipped': {
     captureId: string;
-    reason: 'paused' | 'policy_denied' | 'duplicate' | 'blank' | 'secure_input' | 'private_context';
+    reason: CaptureSkippedReason;
     observedAt: string;
   };
   'capture.error': {

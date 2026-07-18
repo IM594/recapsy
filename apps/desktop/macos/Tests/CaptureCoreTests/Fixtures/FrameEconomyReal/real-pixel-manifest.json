@@ -1,0 +1,45 @@
+{
+  "fixtures": [
+    {
+      "expected": "low-information",
+      "file": "low-information-horizontal-gradient.png",
+      "pixelHeight": 540,
+      "pixelWidth": 960,
+      "purpose": "Live AppKit rendering of a smooth horizontal surface",
+      "sha256": "1cbad663781761bbda2b38af5bbec428187483430c260dd63a3bd85f248bd6c5"
+    },
+    {
+      "expected": "low-information",
+      "file": "low-information-vertical-gradient.png",
+      "pixelHeight": 540,
+      "pixelWidth": 960,
+      "purpose": "Live AppKit rendering of a smooth vertical surface",
+      "sha256": "f33456fc266e9e63973c91b80abd37be064b7029be1b9feaf7968df15a090277"
+    },
+    {
+      "expected": "accept",
+      "file": "accepted-fictional-notes.png",
+      "pixelHeight": 540,
+      "pixelWidth": 960,
+      "purpose": "Live AppKit rendering of fictional note content",
+      "sha256": "07a64b775736f9f94ace6f6ca8b521bee00002b8c694ab53a79839fb03ac724b"
+    },
+    {
+      "expected": "accept",
+      "file": "accepted-fictional-tasks.png",
+      "pixelHeight": 540,
+      "pixelWidth": 960,
+      "purpose": "Live AppKit rendering of fictional task content",
+      "sha256": "0e8c6facbcec4468bdba996890d9fe9102bf73844fe1c0cdac7b2a261161bf01"
+    }
+  ],
+  "provenance": {
+    "captureMethod": "appkit-content-view-cache-display",
+    "containsRealUserData": false,
+    "generator": "FrameCorpusCapture/1",
+    "kind": "real-pixel-screenshot",
+    "privacyReview": "approved-no-user-data",
+    "sourceEnvironment": "purpose-built-test-window"
+  },
+  "version": 1
+}

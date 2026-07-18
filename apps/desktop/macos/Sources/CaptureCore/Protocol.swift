@@ -157,6 +157,7 @@ public enum CaptureSkippedReason: String, Encodable {
     case policyDenied = "policy_denied"
     case duplicate
     case blank
+    case lowInformation = "low_information"
     case secureInput = "secure_input"
     case privateContext = "private_context"
 }

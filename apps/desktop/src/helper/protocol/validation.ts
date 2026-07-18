@@ -259,6 +259,7 @@ function isCaptureSkippedPayload(payload: unknown): boolean {
       'policy_denied',
       'duplicate',
       'blank',
+      'low_information',
       'secure_input',
       'private_context',
     ]) &&

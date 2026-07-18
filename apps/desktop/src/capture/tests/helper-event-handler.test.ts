@@ -28,6 +28,44 @@ const backpressure: BackpressureConfig = {
 };
 
 describe('capture helper event handler', () => {
+  it('preserves low_information in the observable skipped-capture status', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+
+    await handler.handleProtocolResult(
+      decodeHelperEnvelopeLine(
+        JSON.stringify({
+          correlationId: null,
+          messageId: 'message_low_information',
+          payload: {
+            captureId: 'capture_low_information',
+            observedAt,
+            reason: 'low_information',
+          },
+          protocolVersion: HELPER_PROTOCOL_VERSION,
+          sentAt: observedAt,
+          type: 'capture.skipped',
+        }),
+        validateHelperToMainEnvelope,
+      ),
+    );
+
+    expect(handler.getStatus().lastSkippedCapture).toEqual({
+      captureId: 'capture_low_information',
+      observedAt,
+      reason: 'low_information',
+    });
+    expect(client.commands).toEqual([]);
+  });
+
   it('acks capture.result only after asset refs and outbox jobs are durably recorded', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
