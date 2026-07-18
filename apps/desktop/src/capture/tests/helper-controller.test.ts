@@ -13,6 +13,7 @@ import {
   createCaptureHelperController,
 } from '../helper-controller';
 import { createCaptureHelperEventHandler } from '../helper-event-handler';
+import { type CaptureLifecycle, createCaptureLifecycle } from '../lifecycle';
 import { type CapturePolicyActivation, CapturePolicyActivationError } from '../policy';
 import type { HelperStateStore } from '../store';
 
@@ -27,6 +28,130 @@ const backpressure: BackpressureConfig = {
 };
 
 describe('capture helper controller', () => {
+  it('recovers from an unavailable policy without recursively awaiting helper resume', async () => {
+    const harness = createPolicyRecoveryHarness();
+
+    await harness.lifecycle.start();
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
+      pauseReasons: ['policy'],
+      status: 'paused',
+    });
+
+    const refresh = harness.controller.refreshPolicy();
+    let settled = false;
+    void refresh.then(() => {
+      settled = true;
+    });
+    await flushUntil(() => settled);
+
+    expect(settled).toBe(true);
+    await refresh;
+    expect(harness.client.calls).toEqual(['start', 'configureCapture', 'beginCapture']);
+    expect(harness.client.beginCaptureReasons).toEqual(['runtime_started']);
+    expect(harness.client.configuredPolicyVersions).toEqual(['policy_recovered']);
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
+      captureHelper: { state: 'running', policyVersion: 'policy_recovered' },
+      status: 'running',
+    });
+    expect(harness.lifecycle.getSnapshot().pauseReasons).toBeUndefined();
+  });
+
+  it('keeps recovery paused when permission, storage, or user causes remain active', async () => {
+    for (const cause of ['permission', 'storage', 'user'] as const) {
+      const harness = createPolicyRecoveryHarness([cause]);
+
+      await harness.lifecycle.start();
+      await harness.controller.refreshPolicy();
+
+      expect(harness.client.calls).toEqual(['start', 'configureCapture']);
+      expect(harness.client.beginCaptureReasons).toEqual([]);
+      expect(harness.client.configuredPolicyVersions).toEqual(['policy_recovered']);
+      expect(harness.lifecycle.getSnapshot()).toMatchObject({
+        captureHelper: { state: 'paused', policyVersion: 'policy_recovered' },
+        pauseReasons: [cause],
+        status: 'paused',
+      });
+    }
+  });
+
+  it('does not let a pending helper resume restore running state after lifecycle stop', async () => {
+    const client = new PendingResumeCaptureHelperClient();
+    const lifecycleRef: { current?: CaptureLifecycle } = {};
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      onPolicyPauseChange: async (active) => {
+        await lifecycleRef.current?.setPolicyPause(active);
+      },
+      policyActivation: activePolicyActivation(),
+      store: createMemoryStore(),
+    });
+    const lifecycle = createCaptureLifecycle({ helper: controller });
+    lifecycleRef.current = lifecycle;
+
+    await lifecycle.start();
+    await lifecycle.setAutomaticPause(true);
+    const resume = lifecycle.setAutomaticPause(false);
+    while (!client.resumePending) await Promise.resolve();
+
+    const stop = lifecycle.stop();
+    await stop;
+    client.completeResume();
+    await resume;
+
+    expect(client.calls).toEqual([
+      'start',
+      'configureCapture',
+      'beginCapture',
+      'pauseCapture',
+      'resumeCapture',
+      'stop',
+    ]);
+    expect(controller.getStatus()).toMatchObject({ state: 'stopped' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'stopped' });
+  });
+
+  it('does not let a pending pause from an old lifecycle overwrite a restarted generation', async () => {
+    const client = new PendingPauseCaptureHelperClient();
+    const lifecycleRef: { current?: CaptureLifecycle } = {};
+    const controller = createCaptureHelperController({
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      onPolicyPauseChange: async (active) => {
+        await lifecycleRef.current?.setPolicyPause(active);
+      },
+      policyActivation: activePolicyActivation(),
+      store: createMemoryStore(),
+    });
+    const lifecycle = createCaptureLifecycle({ helper: controller });
+    lifecycleRef.current = lifecycle;
+
+    await lifecycle.start();
+    const pause = lifecycle.setAutomaticPause(true);
+    while (!client.pausePending) await Promise.resolve();
+
+    await lifecycle.stop();
+    await lifecycle.start();
+    client.completePause();
+    await pause;
+
+    expect(client.calls).toEqual([
+      'start',
+      'configureCapture',
+      'beginCapture',
+      'pauseCapture',
+      'stop',
+      'start',
+      'configureCapture',
+      'beginCapture',
+    ]);
+    expect(controller.getStatus()).toMatchObject({ state: 'running' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'running' });
+    expect(lifecycle.getSnapshot().pauseReasons).toBeUndefined();
+  });
+
   it('keeps the helper idle and creates no capture work when policy activation is unavailable', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperClient();
@@ -116,10 +241,16 @@ describe('capture helper controller', () => {
 
     await controller.start();
     timers.fire();
-    await flush();
+    await flushUntil(() => controller.getStatus().policyVersion === 'policy_2');
 
     expect(activations).toBe(2);
-    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture', 'configureCapture']);
+    expect(client.calls).toEqual([
+      'start',
+      'configureCapture',
+      'beginCapture',
+      'configureCapture',
+      'pauseCapture',
+    ]);
     expect(policyPauses).toEqual([false, true]);
     expect(controller.getStatus()).toMatchObject({
       policyVersion: 'policy_2',
@@ -580,6 +711,44 @@ class RecordingCaptureHelperClient implements CaptureHelperClient {
   }
 }
 
+class PendingResumeCaptureHelperClient extends RecordingCaptureHelperClient {
+  resumePending = false;
+  private resumeResolver: (() => void) | undefined;
+
+  override async resumeCapture(): Promise<void> {
+    this.calls.push('resumeCapture');
+    this.resumePending = true;
+    await new Promise<void>((resolve) => {
+      this.resumeResolver = resolve;
+    });
+    this.resumePending = false;
+  }
+
+  completeResume(): void {
+    this.resumeResolver?.();
+    this.resumeResolver = undefined;
+  }
+}
+
+class PendingPauseCaptureHelperClient extends RecordingCaptureHelperClient {
+  pausePending = false;
+  private pauseResolver: (() => void) | undefined;
+
+  override async pauseCapture(): Promise<void> {
+    this.calls.push('pauseCapture');
+    this.pausePending = true;
+    await new Promise<void>((resolve) => {
+      this.pauseResolver = resolve;
+    });
+    this.pausePending = false;
+  }
+
+  completePause(): void {
+    this.pauseResolver?.();
+    this.pauseResolver = undefined;
+  }
+}
+
 function policyConfiguration(version: string, policyHash: string) {
   return {
     maxConcurrentOcr: 2,
@@ -698,6 +867,38 @@ function activePolicyActivation(): CapturePolicyActivation {
   };
 }
 
+function createPolicyRecoveryHarness(
+  initialPauseCauses: readonly ('permission' | 'storage' | 'user')[] = [],
+) {
+  const client = new RecordingCaptureHelperClient();
+  let activationCount = 0;
+  const lifecycleRef: { current?: CaptureLifecycle } = {};
+  const controller = createCaptureHelperController({
+    client,
+    deviceId: 'device_1',
+    isCaptureAdmissionPaused: () =>
+      Boolean(lifecycleRef.current?.getSnapshot().pauseReasons?.length),
+    now: () => now,
+    onPolicyPauseChange: async (active) => {
+      await lifecycleRef.current?.setPolicyPause(active);
+    },
+    policyActivation: {
+      async activate() {
+        activationCount += 1;
+        if (activationCount === 1) {
+          throw new CapturePolicyActivationError('policy_unavailable');
+        }
+        return policyConfiguration('policy_recovered', `sha256:${'d'.repeat(64)}`);
+      },
+    },
+    store: createMemoryStore(),
+  });
+  const lifecycle = createCaptureLifecycle({ helper: controller, initialPauseCauses });
+  lifecycleRef.current = lifecycle;
+
+  return { client, controller, lifecycle };
+}
+
 class FakeTimers {
   private callback: (() => void) | undefined;
 
@@ -721,4 +922,10 @@ async function flush(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
+}
+
+async function flushUntil(predicate: () => boolean): Promise<void> {
+  for (let index = 0; index < 32 && !predicate(); index += 1) {
+    await Promise.resolve();
+  }
 }

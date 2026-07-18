@@ -132,11 +132,15 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   }
 
   async pauseCapture(): Promise<void> {
-    if (this.status.state !== 'running') {
+    const policyLifecycleGeneration = this.policyLifecycleGeneration;
+    if (this.status.state !== 'running' || !this.canActivatePolicy(policyLifecycleGeneration)) {
       return;
     }
 
     await this.options.client.pauseCapture();
+    if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+      return;
+    }
     this.status = {
       ...policyStatus(this.status),
       state: 'paused',
@@ -146,16 +150,25 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   }
 
   async resumeCapture(): Promise<void> {
-    if (this.status.state !== 'paused') {
+    const policyLifecycleGeneration = this.policyLifecycleGeneration;
+    if (this.status.state !== 'paused' || !this.canActivatePolicy(policyLifecycleGeneration)) {
       return;
     }
 
     if (!this.policyReady) {
-      await this.activatePolicyAndStart('user_resumed');
+      await this.activatePolicyAndStart('user_resumed', policyLifecycleGeneration);
       return;
     }
 
-    await this.options.client.resumeCapture();
+    if (this.captureStarted) {
+      await this.options.client.resumeCapture();
+    } else {
+      await this.options.client.beginCapture('user_resumed');
+    }
+    if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+      return;
+    }
+    this.captureStarted = true;
     this.status = {
       ...policyStatus(this.status),
       state: 'running',
@@ -210,6 +223,12 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       }
       this.policyReady = true;
       if (configuration.policy.paused || this.options.isCaptureAdmissionPaused?.()) {
+        if (configuration.policy.paused && this.captureStarted && this.status.state === 'running') {
+          await this.options.client.pauseCapture();
+          if (!this.canActivatePolicy(policyLifecycleGeneration)) {
+            return;
+          }
+        }
         this.status = {
           policyHash: configuration.policy.policyHash,
           policyVersion: configuration.policy.version,

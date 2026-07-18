@@ -126,6 +126,25 @@ describe('capture lifecycle', () => {
     expect(harness.helper.calls).toEqual(['start', 'pauseCapture']);
   });
 
+  it('projects policy pauses without issuing helper pause or resume commands', async () => {
+    const harness = createLifecycleHarness();
+    await harness.lifecycle.start();
+
+    await harness.lifecycle.setPolicyPause(true);
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
+      pauseReason: 'policy',
+      status: 'paused',
+    });
+
+    await harness.lifecycle.setPolicyPause(false);
+
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
+      status: 'running',
+    });
+    expect(harness.lifecycle.getSnapshot().pauseReasons).toBeUndefined();
+    expect(harness.helper.calls).toEqual(['start']);
+  });
+
   it('does not resume an automatically paused helper after a user pause takes ownership', async () => {
     const harness = createLifecycleHarness();
     await harness.lifecycle.start();

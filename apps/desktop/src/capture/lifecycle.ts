@@ -53,6 +53,7 @@ export function createCaptureLifecycle(options: CaptureLifecycleOptions): Captur
 
 class LifecycleController implements CaptureLifecycle {
   private captureHelperStatus: CaptureHelperStatus | undefined;
+  private lifecycleGeneration = 0;
   private menuBarActive = false;
   private readonly pauseCauses: Set<CapturePauseCause>;
   private status: CaptureLifecycleStatus = 'stopped';
@@ -86,14 +87,18 @@ class LifecycleController implements CaptureLifecycle {
       return;
     }
 
+    const lifecycleGeneration = ++this.lifecycleGeneration;
     this.status = 'starting';
 
     try {
       await this.startupRecovery?.recover();
+      if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
       await this.assetReconciliation?.reconcile();
+      if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
       try {
         await this.helper.start();
       } catch (error) {
+        if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
         this.captureHelperStatus = {
           lastSafeError: {
             code: 'helper_start_failed',
@@ -104,6 +109,7 @@ class LifecycleController implements CaptureLifecycle {
         };
         throw error;
       }
+      if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
       this.captureHelperStatus = this.helper.getStatus?.();
       if (this.captureHelperStatus?.state === 'paused' && this.pauseCauses.size === 0) {
         this.pauseCauses.add('policy');
@@ -111,6 +117,7 @@ class LifecycleController implements CaptureLifecycle {
       this.status = this.pauseCauses.size > 0 ? 'paused' : 'running';
       this.menuBarActive = false;
     } catch (error) {
+      if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
       this.status = 'stopped';
       throw error;
     }
@@ -137,7 +144,7 @@ class LifecycleController implements CaptureLifecycle {
   }
 
   async setPolicyPause(active: boolean): Promise<void> {
-    await this.setPauseCause('policy', active);
+    await this.setPauseCause('policy', active, false);
   }
 
   async handleLastWindowClosed(): Promise<void> {
@@ -155,6 +162,7 @@ class LifecycleController implements CaptureLifecycle {
       return;
     }
 
+    const lifecycleGeneration = ++this.lifecycleGeneration;
     this.status = 'stopping';
     this.menuBarActive = false;
     this.pauseCauses.clear();
@@ -162,11 +170,17 @@ class LifecycleController implements CaptureLifecycle {
     try {
       await this.helper.shutdown();
     } finally {
-      this.status = 'stopped';
+      if (this.isLifecycleCurrent(lifecycleGeneration)) {
+        this.status = 'stopped';
+      }
     }
   }
 
-  private async setPauseCause(cause: CapturePauseCause, active: boolean): Promise<void> {
+  private async setPauseCause(
+    cause: CapturePauseCause,
+    active: boolean,
+    commandHelper = true,
+  ): Promise<void> {
     if (this.status === 'stopping' || this.status === 'stopped') {
       if (active) this.pauseCauses.add(cause);
       else this.pauseCauses.delete(cause);
@@ -178,16 +192,31 @@ class LifecycleController implements CaptureLifecycle {
     else this.pauseCauses.delete(cause);
     const isPaused = this.pauseCauses.size > 0;
 
+    if (!commandHelper) {
+      if (this.status === 'running' || this.status === 'paused') {
+        this.status = isPaused ? 'paused' : 'running';
+      }
+      return;
+    }
+
+    const lifecycleGeneration = this.lifecycleGeneration;
+
     if (!wasPaused && isPaused && this.status === 'running') {
       await this.helper.pauseCapture();
+      if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
       this.status = 'paused';
       return;
     }
 
     if (wasPaused && !isPaused && this.status === 'paused') {
       await this.helper.resumeCapture();
+      if (!this.isLifecycleCurrent(lifecycleGeneration)) return;
       this.status = 'running';
     }
+  }
+
+  private isLifecycleCurrent(lifecycleGeneration: number): boolean {
+    return lifecycleGeneration === this.lifecycleGeneration;
   }
 }
 
