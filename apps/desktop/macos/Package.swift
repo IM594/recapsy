@@ -4,9 +4,9 @@ import PackageDescription
 // macOS screen-capture process for Recapsy desktop (ADR 0009).
 //
 // Artifacts:
-//   - CaptureCore     : pure, dependency-free logic (relative keys, asset path
-//                       joins, NDJSON envelope encoding, hashing, active-window
-//                       selection) — unit tested, never touches libwebp.
+//   - CaptureCore     : system-framework-only logic (relative keys, asset path
+//                       joins, NDJSON encoding, hashing, active-window selection,
+//                       in-memory frame sampling) — unit tested, no libwebp.
 //   - CWebP           : system-library shim exposing libwebp's C encoder API.
 //                       Header/library paths are supplied at build time by
 //                       `build-capture-bundle.sh` (via `brew --prefix webp`),
@@ -55,7 +55,10 @@ let package = Package(
         ),
         .testTarget(
             name: "CaptureCoreTests",
-            dependencies: ["CaptureCore"]
+            dependencies: ["CaptureCore"],
+            resources: [
+                .process("Fixtures"),
+            ]
         ),
     ]
 )

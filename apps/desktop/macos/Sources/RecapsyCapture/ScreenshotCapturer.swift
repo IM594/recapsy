@@ -176,7 +176,7 @@ enum ScreenshotCapturer {
                     contentFilter: filter,
                     configuration: config
                 )
-                guard let luminance = sampledLuminance(from: image) else {
+                guard let luminance = CaptureFrameSampler.sampledLuminance(from: image) else {
                     outcome = .failed
                     return
                 }
@@ -210,51 +210,6 @@ enum ScreenshotCapturer {
             return .failed
         }
         return outcome
-    }
-
-    /// Downsamples directly from the in-memory CGImage before WebP encoding.
-    /// The temporary RGBA buffer is discarded before this method returns; only
-    /// the one-way digest produced by CaptureFrameEconomy survives a frame.
-    private static func sampledLuminance(from image: CGImage) -> [UInt8]? {
-        let width = CaptureFrameEconomy.sampleWidth
-        let height = CaptureFrameEconomy.sampleHeight
-        let bytesPerRow = width * 4
-        var rgba = Array(repeating: UInt8(0), count: bytesPerRow * height)
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-
-        let didDraw = rgba.withUnsafeMutableBytes { buffer -> Bool in
-            guard let baseAddress = buffer.baseAddress,
-                  let context = CGContext(
-                      data: baseAddress,
-                      width: width,
-                      height: height,
-                      bitsPerComponent: 8,
-                      bytesPerRow: bytesPerRow,
-                      space: colorSpace,
-                      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
-                  )
-            else {
-                return false
-            }
-            context.interpolationQuality = .low
-            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        guard didDraw else {
-            return nil
-        }
-
-        var luminance: [UInt8] = []
-        luminance.reserveCapacity(width * height)
-        var offset = 0
-        while offset < rgba.count {
-            let red = UInt16(rgba[offset])
-            let green = UInt16(rgba[offset + 1])
-            let blue = UInt16(rgba[offset + 2])
-            luminance.append(UInt8((54 * red + 183 * green + 19 * blue + 128) >> 8))
-            offset += 4
-        }
-        return luminance
     }
 
     /// Resolve a verified `SCWindow` for this tick. A CGWindowList fallback may
