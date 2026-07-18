@@ -542,7 +542,8 @@ describe('operational store backpressure', () => {
       {
         maxAssetBytes: 4096,
         maxQueuedJobs: 5,
-        maxRetryAttempts: 3,
+        resumeAssetBytes: 2048,
+        resumeQueuedJobs: 2,
       },
     );
 
@@ -553,7 +554,7 @@ describe('operational store backpressure', () => {
     });
   });
 
-  it('pauses capture at hard queue, asset byte, or retry attempt limits', () => {
+  it('pauses capture at hard queue or asset byte limits', () => {
     const decision = evaluateOperationalStoreBackpressure(
       {
         assetBytes: 4096,
@@ -563,14 +564,15 @@ describe('operational store backpressure', () => {
       {
         maxAssetBytes: 4096,
         maxQueuedJobs: 5,
-        maxRetryAttempts: 3,
+        resumeAssetBytes: 2048,
+        resumeQueuedJobs: 2,
       },
     );
 
     expect(decision).toEqual({
       action: 'pause',
       hardLimit: true,
-      reasons: ['max_queued_jobs_reached', 'max_asset_bytes_reached', 'max_retry_attempts_reached'],
+      reasons: ['max_queued_jobs_reached', 'max_asset_bytes_reached'],
     });
   });
 });

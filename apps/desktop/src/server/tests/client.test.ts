@@ -313,6 +313,9 @@ describe('desktop server API client', () => {
             ttlSeconds: 1800,
             version: 'policy_1',
           },
+          deliveryPolicy: {
+            maxConcurrentOcr: 2,
+          },
           generatedAt: now,
           storagePolicy: {
             allowLongTermRemoteOriginal: false,

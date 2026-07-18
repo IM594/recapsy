@@ -50,6 +50,12 @@ export type HelperCapturePolicy = {
   rules: HelperCapturePolicyRule[];
 };
 
+/** Scope used by the native receipt journal during crash recovery. */
+export type HelperCaptureIdentity = {
+  workspaceId: string;
+  deviceId: string;
+};
+
 export type SafeCaptureContextPayload = {
   observedAt: string;
   app?: { name: string; bundleId: string };
@@ -117,7 +123,11 @@ export type HelperToMainPayloadByType = {
 };
 
 export type MainToHelperPayloadByType = {
-  'helper.configure': { captureIntervalMs?: number; policy: HelperCapturePolicy };
+  'helper.configure': {
+    captureIdentity?: HelperCaptureIdentity;
+    captureIntervalMs?: number;
+    policy: HelperCapturePolicy;
+  };
   'permission.refresh': Record<string, never>;
   'permission.request_screen_capture': Record<string, never>;
   'capture.start': { reason: 'runtime_started' | 'user_resumed' };

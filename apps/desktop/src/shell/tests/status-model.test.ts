@@ -20,6 +20,20 @@ describe('desktop shell status model', () => {
       }),
     ).toBe('Recapsy · running · Screen recording granted · 2 sync pending');
 
+    expect(
+      formatTrayTooltip({
+        accessibility: 'granted',
+        capturePaused: true,
+        capturePauseReason: 'backpressure',
+        captureState: 'paused',
+        screenRecording: 'granted',
+        syncBlocked: 0,
+        syncFailed: 0,
+        syncPending: 9,
+        syncRetrying: 0,
+      }),
+    ).toBe('Recapsy · Catching up · Screen recording granted · 9 sync pending');
+
     expect(formatPermissionLabel('not_determined')).toBe('Not determined');
     expect(
       isCaptureBlockedByPermissions({

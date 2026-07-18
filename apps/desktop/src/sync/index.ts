@@ -20,6 +20,13 @@ export { recoverSyncQueue } from './recovery';
 export type { SyncRecoveryOptions, SyncRecoverySummary } from './recovery';
 export { createSyncLoop } from './loop';
 export type { SyncLoop, SyncLoopOptions } from './loop';
+export { createSyncWorkerCapacity } from './capacity';
+export type {
+  SyncWorkerCapacity,
+  SyncWorkerCapacityChange,
+  SyncWorkerCapacityOptions,
+  SyncWorkerCapacityStatus,
+} from './capacity';
 export { createSyncRuntime } from './runtime';
 export type { SyncRuntime, SyncRuntimeOptions } from './runtime';
 export { createSyncIpcHandlers } from './handlers';

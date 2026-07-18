@@ -63,6 +63,8 @@ describe('capture policy activation', () => {
       ]),
     );
     expect(configuration.policy.policyHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(configuration.maxConcurrentOcr).toBe(3);
+    expect(cached?.maxConcurrentOcr).toBe(3);
   });
 
   it('uses only an unexpired cache when policy refresh is unavailable', async () => {
@@ -118,6 +120,51 @@ describe('capture policy activation', () => {
 
     await expect(activation.activate()).rejects.toBeInstanceOf(CapturePolicyActivationError);
     await expect(activation.activate()).rejects.toMatchObject({ code: 'policy_unavailable' });
+  });
+
+  it('applies a fresh stricter policy even when the offline cache cannot be persisted', async () => {
+    const backingStore = createMemoryStore();
+    await backingStore.setPolicyCache({
+      deviceId,
+      fetchedAt,
+      policy: remotePolicy().capturePolicy.policy,
+      policySnapshotId: 'old_snapshot',
+      policyVersion: 'old_policy',
+      ttlSeconds: 3600,
+      workspaceId,
+    });
+    const store = Object.create(backingStore) as typeof backingStore;
+    store.setPolicyCache = async () => {
+      throw new Error('SQLite unavailable');
+    };
+    const activation = createCapturePolicyActivation({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy({
+            rules: [
+              {
+                action: 'block_capture',
+                enabled: true,
+                id: 'new-block',
+                kind: 'bundle_id',
+                pattern: 'com.example.sensitive',
+                scope: 'workspace_default',
+              },
+            ],
+          });
+        },
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    await expect(activation.activate()).resolves.toMatchObject({
+      policy: {
+        rules: expect.arrayContaining([expect.objectContaining({ id: 'new-block' })]),
+      },
+    });
   });
 
   it('reduces matching policy actions monotonically, so an allow rule cannot loosen a hard block', () => {
@@ -183,6 +230,7 @@ function remotePolicy(
       ttlSeconds: 3600,
       version: 'capture-policy-1',
     },
+    deliveryPolicy: { maxConcurrentOcr: 3 },
     deviceId,
     generatedAt: fetchedAt,
     storagePolicy: {

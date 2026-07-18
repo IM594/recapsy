@@ -10,6 +10,7 @@ import {
 } from '../helper/index';
 import {
   type BackpressureConfig,
+  type BackpressureReason,
   type HelperPermissionState,
   type HelperRuntimeState,
   type SafeOperationalError,
@@ -48,6 +49,11 @@ export type CaptureHelperEventHandlerOptions = {
   client: CaptureHelperCommandClient;
   deviceId: string;
   now(): string;
+  onBackpressurePause?(reasons: readonly BackpressureReason[]): Promise<void>;
+  onPermissionChange?(permissions: {
+    accessibility: HelperPermissionState;
+    screenRecording: HelperPermissionState;
+  }): Promise<void>;
   store: CaptureIntakeStore & HelperStateStore;
   workspaceId: string;
 };
@@ -143,9 +149,13 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
 
     if (backpressure.action === 'pause') {
       await this.sendNack(envelope, 'backpressure', 'Capture queue is applying backpressure.');
-      await this.sendCommand(envelope, 'capture.pause', {
-        reason: 'backpressure',
-      });
+      if (this.options.onBackpressurePause) {
+        await this.options.onBackpressurePause(backpressure.reasons);
+      } else {
+        await this.sendCommand(envelope, 'capture.pause', {
+          reason: 'backpressure',
+        });
+      }
       return;
     }
 
@@ -255,6 +265,10 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
       },
       permissionStatusSequence: (this.status.permissionStatusSequence ?? 0) + 1,
     };
+    await this.options.onPermissionChange?.({
+      accessibility: envelope.payload.accessibility,
+      screenRecording: envelope.payload.screenCapture,
+    });
     this.notifyPermissionStatusListeners();
     await this.persistHelperState();
   }

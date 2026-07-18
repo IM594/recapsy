@@ -311,9 +311,22 @@ function isHelperExitingPayload(payload: unknown): boolean {
 function isHelperConfigurePayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
-    hasOnlyKeys(payload, ['captureIntervalMs', 'policy']) &&
+    hasOnlyKeys(payload, ['captureIdentity', 'captureIntervalMs', 'policy']) &&
+    optionalCaptureIdentity(payload.captureIdentity) &&
     optionalInteger(payload.captureIntervalMs) &&
     isHelperCapturePolicy(payload.policy)
+  );
+}
+
+function optionalCaptureIdentity(payload: unknown): boolean {
+  return (
+    payload === undefined ||
+    (isRecord(payload) &&
+      hasOnlyKeys(payload, ['workspaceId', 'deviceId']) &&
+      isString(payload.workspaceId) &&
+      payload.workspaceId.length > 0 &&
+      isString(payload.deviceId) &&
+      payload.deviceId.length > 0)
   );
 }
 

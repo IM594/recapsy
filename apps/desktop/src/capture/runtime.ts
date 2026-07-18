@@ -7,6 +7,7 @@ import {
   type BackpressureConfig,
   reconcileAssetRefs,
 } from '../storage/index';
+import { type CaptureAdmissionController, createCaptureAdmissionController } from './admission';
 import { createCaptureHelperController } from './helper-controller';
 import {
   type CaptureHelperCommandClient,
@@ -23,9 +24,10 @@ import type { CaptureIntakeStore, HelperStateStore } from './store';
 import type { CapturePolicyCacheStore } from './store';
 
 const DEFAULT_BACKPRESSURE: BackpressureConfig = {
-  maxAssetBytes: 750 * 1024 * 1024,
-  maxQueuedJobs: 1000,
-  maxRetryAttempts: 15,
+  maxAssetBytes: 256 * 1024 * 1024,
+  maxQueuedJobs: 24,
+  resumeAssetBytes: 128 * 1024 * 1024,
+  resumeQueuedJobs: 8,
 };
 
 const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
@@ -46,6 +48,7 @@ export type CaptureRuntimeOptions = {
   deviceId: string;
   now(): string;
   onHelperEnvelope?(envelope: HelperEnvelope<HelperToMainType>): void;
+  onPolicyActivated?(input: { maxConcurrentOcr: number }): void;
   policyApi: {
     getCapturePolicies(input: {
       deviceId: string;
@@ -58,17 +61,30 @@ export type CaptureRuntimeOptions = {
 };
 
 export type CaptureRuntime = {
+  admission: CaptureAdmissionController;
   eventHandler: CaptureHelperEventHandler;
   lifecycle: CaptureLifecycle;
   commandClient: CaptureHelperCommandClient;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
+  const lifecycleRef: { current?: CaptureLifecycle } = {};
   const rawEventHandler = createCaptureHelperEventHandler({
     backpressure: options.backpressure ?? DEFAULT_BACKPRESSURE,
     client: options.client,
     deviceId: options.deviceId,
     now: options.now,
+    onBackpressurePause: async (reasons) => {
+      if (lifecycleRef.current) {
+        await lifecycleRef.current.setAutomaticPause(reasons.includes('max_queued_jobs_reached'));
+        await lifecycleRef.current.setStoragePause(reasons.includes('max_asset_bytes_reached'));
+        return;
+      }
+      await options.client.pauseCapture();
+    },
+    onPermissionChange: async (permissions) => {
+      await lifecycleRef.current?.setPermissionPause(permissions.screenRecording !== 'granted');
+    },
     store: options.store,
     workspaceId: options.workspaceId,
   });
@@ -77,11 +93,21 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     client: options.client,
     deviceId: options.deviceId,
     eventHandler,
+    isCaptureAdmissionPaused: () => {
+      return (lifecycleRef.current?.getSnapshot().pauseReasons?.length ?? 0) > 0;
+    },
     now: options.now,
+    workspaceId: options.workspaceId,
+    onPolicyPauseChange: async (active) => {
+      await lifecycleRef.current?.setPolicyPause(active);
+    },
     policyActivation: createCapturePolicyActivation({
       api: options.policyApi,
       deviceId: options.deviceId,
       now: options.now,
+      onActivated: (configuration) => {
+        options.onPolicyActivated?.({ maxConcurrentOcr: configuration.maxConcurrentOcr });
+      },
       store: options.store,
       workspaceId: options.workspaceId,
     }),
@@ -99,10 +125,18 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
       },
     },
     helper,
+    initialPauseCauses: ['permission'],
     startupRecovery: options.startupRecovery,
   });
+  lifecycleRef.current = lifecycle;
+  const admission = createCaptureAdmissionController({
+    backpressure: options.backpressure ?? DEFAULT_BACKPRESSURE,
+    lifecycle,
+    store: options.store,
+    workspaceId: options.workspaceId,
+  });
 
-  return { commandClient: options.client, eventHandler, lifecycle };
+  return { admission, commandClient: options.client, eventHandler, lifecycle };
 }
 
 function decorateEventHandler(

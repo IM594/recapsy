@@ -237,7 +237,11 @@ class DesktopShellController implements DesktopShell {
             await this.refresh();
           });
         },
-        enabled: status.captureState === 'paused' && status.capturePaused && !blocked,
+        enabled:
+          status.captureState === 'paused' &&
+          status.capturePaused &&
+          status.capturePauseReason !== 'backpressure' &&
+          !blocked,
         kind: 'action',
         label: 'Resume Capture',
       },

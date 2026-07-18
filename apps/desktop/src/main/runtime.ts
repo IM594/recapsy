@@ -5,6 +5,7 @@ import {
   createSessionStartup,
 } from '../auth/index';
 import {
+  type CaptureAdmissionController,
   type CaptureHelperClient,
   type CaptureHelperCommandClient,
   type CaptureHelperEventHandler,
@@ -14,6 +15,7 @@ import {
   createCaptureIpcHandlers,
   createCaptureRuntime,
 } from '../capture/index';
+import { createDiagnosticsIpcHandlers } from '../diagnostics/index';
 import type { HelperEnvelope, HelperToMainType } from '../helper/index';
 import {
   type ElectronIpcMainLike,
@@ -62,10 +64,12 @@ export type DesktopStore = StoreLifecycle &
   SyncQueueStore;
 
 export type DesktopShellFactoryContext = {
+  admission: CaptureAdmissionController;
   commandClient: CaptureHelperCommandClient;
   eventHandler: CaptureHelperEventHandler;
   lifecycle: CaptureLifecycle;
   store: DesktopStore;
+  syncRuntime: SyncLoop & { getCapacityStatus(): import('../sync/index').SyncWorkerCapacityStatus };
   workspaceId: string;
 };
 
@@ -82,6 +86,7 @@ export type ElectronMainRuntimeOptions = {
   readAssetBytes?: SyncAssetReader;
   syncIdleDelayMs?: number;
   syncActiveDelayMs?: number;
+  syncLocalMaxWorkers?: number;
   syncMaxAttempts?: number;
   syncRetryBackoff?: RetryBackoffConfig;
   createSyncLoop?(loopOptions: SyncLoopOptions): SyncLoop;
@@ -128,6 +133,7 @@ export function createElectronMainRuntime(
     options.app.dock?.hide();
   }
 
+  let admission: CaptureAdmissionController | undefined;
   const ready: Promise<ElectronMainRuntimeReadyState> = options.app.whenReady().then(async () => {
     const sessionStartup = createSessionStartup({
       authClient: options.authClient,
@@ -139,17 +145,20 @@ export function createElectronMainRuntime(
     const store = options.createStore();
     await store.initialize();
 
+    let serverMaxConcurrentOcr = 1;
     const syncRuntime = createSyncRuntime({
       activeDelayMs: options.syncActiveDelayMs,
       createLoop: options.createSyncLoop,
       createServerApi: options.createServerApi,
       idleDelayMs: options.syncIdleDelayMs,
       maxAttempts: options.syncMaxAttempts,
+      localMaxWorkers: options.syncLocalMaxWorkers,
       now,
       onError: options.onSyncError,
       onResult: options.onSyncResult,
       readAssetBytes: options.readAssetBytes,
       retryBackoff: options.syncRetryBackoff,
+      resolveServerMaxConcurrentOcr: () => serverMaxConcurrentOcr,
       store,
       workspaceId,
     });
@@ -159,21 +168,33 @@ export function createElectronMainRuntime(
       deviceId: options.deviceId,
       now,
       onHelperEnvelope: options.onHelperEnvelope,
+      onPolicyActivated: ({ maxConcurrentOcr }) => {
+        serverMaxConcurrentOcr = maxConcurrentOcr;
+        syncRuntime.updateServerMaxConcurrentOcr(maxConcurrentOcr);
+      },
       policyApi: options.createServerApi(),
       startupRecovery: syncRuntime,
       store,
       workspaceId,
     });
+    admission = captureRuntime.admission;
 
     const shell = options.createShell
       ? await options.createShell({
           commandClient: captureRuntime.commandClient,
           eventHandler: captureRuntime.eventHandler,
           lifecycle: captureRuntime.lifecycle,
+          admission: captureRuntime.admission,
           store,
+          syncRuntime,
           workspaceId,
         })
       : undefined;
+
+    // Admission is evaluated before helper startup. A persisted high watermark
+    // must prevent the native timer from producing a frame before the first
+    // lifecycle transition is known.
+    await captureRuntime.admission.reconcile();
 
     try {
       await captureRuntime.lifecycle.start();
@@ -187,6 +208,7 @@ export function createElectronMainRuntime(
         throw error;
       }
     }
+    await captureRuntime.admission.start();
     syncRuntime.start();
     // Shell construction starts its own initial refresh before capture startup
     // settles. Refresh once more so a classified startup failure is immediately
@@ -200,6 +222,7 @@ export function createElectronMainRuntime(
 
       registerIpcHandlers(options.ipcMain, {
         ...createCaptureIpcHandlers({
+          admission: captureRuntime.admission,
           eventHandler: captureRuntime.eventHandler,
           lifecycle: captureRuntime.lifecycle,
           store,
@@ -211,7 +234,13 @@ export function createElectronMainRuntime(
             getLastObservedAt: () => captureRuntime.eventHandler.getStatus().lastObservedAt,
           },
         }),
-        ...createSyncIpcHandlers({ store, workspaceId }),
+        ...createSyncIpcHandlers({
+          getWorkerCapacity: () => syncRuntime.getCapacityStatus(),
+          now,
+          store,
+          workspaceId,
+        }),
+        ...createDiagnosticsIpcHandlers({ now, store, workspaceId }),
         ...createPermissionIpcHandlers({
           client: captureRuntime.commandClient,
           eventHandler: captureRuntime.eventHandler,
@@ -259,6 +288,7 @@ export function createElectronMainRuntime(
           return Promise.allSettled([
             Promise.resolve().then(() => shell?.dispose()),
             Promise.resolve().then(() => lifecycle.requestQuit()),
+            Promise.resolve().then(() => admission?.stop()),
             Promise.resolve().then(() => syncLoop.stop()),
           ]);
         })

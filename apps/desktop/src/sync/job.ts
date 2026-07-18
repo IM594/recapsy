@@ -228,7 +228,7 @@ async function executeSyncJob(
       { ...activeJob, serverCaptureId: capture.captureId },
       storedResult,
     );
-    return submitted;
+    return { ...submitted, providerOutcome: 'succeeded' };
   } catch (error) {
     if (error instanceof OutboxLeaseLostError) {
       return { code: 'lease_lost', jobId: activeJob.id, processed: 0, status: 'skipped' };
@@ -315,9 +315,12 @@ async function handleSyncError(
 
   await recordSafeError(options, job, classified);
   return {
-    code: classified.code === 'offline' ? 'offline' : undefined,
+    ...(classified.code === 'offline' || classified.code === 'provider_rate_limited'
+      ? { code: classified.code }
+      : {}),
     jobId: job.id,
     processed: 1,
+    ...(classified.code === 'provider_rate_limited' ? { providerOutcome: 'rate_limited' } : {}),
     status: classified.retryable ? 'retry_wait' : 'failed',
   };
 }

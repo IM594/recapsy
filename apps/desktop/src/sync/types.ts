@@ -128,7 +128,9 @@ export type SyncRunResult = {
     | 'backpressure_active'
     | 'offline'
     | 'server_unavailable'
+    | 'provider_rate_limited'
     | 'lease_lost';
+  providerOutcome?: 'not_attempted' | 'succeeded' | 'rate_limited';
 };
 
 export type SyncCancelResult = {
@@ -154,10 +156,19 @@ export type SyncPresentationErrorCode =
 
 export type SyncQueueSummary = {
   pending: number;
+  processing: number;
   syncing: number;
   retrying: number;
   blocked: number;
   failed: number;
+  inputPerMinute: number;
+  completedPerMinute: number;
+  oldestActiveAgeSeconds?: number;
+  workerCapacity?: {
+    activeWorkers: number;
+    localMaxWorkers: number;
+    serverMaxConcurrentOcr: number;
+  };
   backpressure?: {
     active: boolean;
     reasons: string[];

@@ -21,7 +21,8 @@ const deviceId = 'device_1';
 const backpressure: BackpressureConfig = {
   maxAssetBytes: 1024 * 1024,
   maxQueuedJobs: 10,
-  maxRetryAttempts: 5,
+  resumeAssetBytes: 512 * 1024,
+  resumeQueuedJobs: 5,
 };
 
 describe('capture helper event handler', () => {
@@ -90,7 +91,8 @@ describe('capture helper event handler', () => {
       backpressure: {
         maxAssetBytes: 1024 * 1024,
         maxQueuedJobs: 0,
-        maxRetryAttempts: 5,
+        resumeAssetBytes: 512 * 1024,
+        resumeQueuedJobs: 0,
       },
       client,
       deviceId,
@@ -111,6 +113,33 @@ describe('capture helper event handler', () => {
     });
     expect(await store.getAssetCacheRef('asset_capture_1')).toBeNull();
     expect(await store.getOutboxJob('capture_1')).toBeNull();
+  });
+
+  it('delegates a backpressure pause to lifecycle admission instead of issuing a second helper pause', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const admissionPauses: boolean[] = [];
+    const handler = createCaptureHelperEventHandler({
+      backpressure: {
+        maxAssetBytes: 1024 * 1024,
+        maxQueuedJobs: 0,
+        resumeAssetBytes: 512 * 1024,
+        resumeQueuedJobs: 0,
+      },
+      client,
+      deviceId,
+      now: () => observedAt,
+      onBackpressurePause: async () => {
+        admissionPauses.push(true);
+      },
+      store,
+      workspaceId,
+    });
+
+    await handler.handleEnvelope(captureResultEnvelope());
+
+    expect(admissionPauses).toEqual([true]);
+    expect(client.commandTypes()).toEqual(['capture.nack']);
   });
 
   it('nacks storage failures with a safe typed error and without leaking sensitive details', async () => {

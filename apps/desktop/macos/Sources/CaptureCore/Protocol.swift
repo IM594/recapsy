@@ -173,7 +173,7 @@ public struct CaptureSkippedPayload: Encodable {
     }
 }
 
-public struct CaptureAssetPayload: Encodable {
+public struct CaptureAssetPayload: Codable {
     public let role: String
     public let ref: String
     public let hash: String
@@ -189,7 +189,7 @@ public struct CaptureAssetPayload: Encodable {
     }
 }
 
-public struct CapturePolicyPayload: Encodable {
+public struct CapturePolicyPayload: Codable {
     public let version: String
     public let decision: String
 
@@ -199,7 +199,7 @@ public struct CapturePolicyPayload: Encodable {
     }
 }
 
-public struct CaptureApplicationPayload: Encodable, Equatable {
+public struct CaptureApplicationPayload: Codable, Equatable {
     public let name: String
     public let bundleId: String
 
@@ -270,7 +270,7 @@ public struct CaptureApplicationPayload: Encodable, Equatable {
     }
 }
 
-public struct CaptureContextPayload: Encodable {
+public struct CaptureContextPayload: Codable {
     public let app: CaptureApplicationPayload?
     public let observedAt: String
     public let policy: CapturePolicyPayload
@@ -286,7 +286,7 @@ public struct CaptureContextPayload: Encodable {
     }
 }
 
-public struct CaptureResultPayload: Encodable {
+public struct CaptureResultPayload: Codable {
     public let captureId: String
     public let observedAt: String
     public let manifest: CaptureAssetPayload

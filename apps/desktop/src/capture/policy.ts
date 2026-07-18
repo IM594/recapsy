@@ -28,7 +28,9 @@ type CompiledCapturePolicyRule = HelperCapturePolicyRule;
 export type CompiledCapturePolicy = HelperCapturePolicy;
 
 export type CapturePolicyActivationConfiguration = {
+  maxConcurrentOcr: number;
   policy: CompiledCapturePolicy;
+  refreshAfterMs?: number;
 };
 
 export type CapturePolicyActivation = {
@@ -56,6 +58,7 @@ export type CapturePolicyActivationOptions = {
   >;
   deviceId: string;
   now(): string;
+  onActivated?(configuration: CapturePolicyActivationConfiguration): void;
   store: CapturePolicyCacheStore;
   workspaceId: string;
 };
@@ -87,7 +90,13 @@ export function createCapturePolicyActivation(
         throw new CapturePolicyActivationError('policy_requires_unavailable_context');
       }
 
-      return { policy: compiled };
+      const configuration = {
+        maxConcurrentOcr: normalizeMaxConcurrentOcr(fetched.maxConcurrentOcr),
+        policy: compiled,
+        refreshAfterMs: policyRefreshAfterMs(fetched.fetchedAt, fetched.ttlSeconds, options.now()),
+      };
+      options.onActivated?.(configuration);
+      return configuration;
     },
   };
 }
@@ -118,39 +127,66 @@ export function compileCapturePolicy(input: {
 async function fetchOrReadCachedPolicy(
   options: CapturePolicyActivationOptions,
 ): Promise<PolicyCacheEntry> {
+  let response: CapturePoliciesResult;
   try {
-    const response = await options.api.getCapturePolicies({
+    response = await options.api.getCapturePolicies({
       deviceId: options.deviceId,
       workspaceId: options.workspaceId,
     });
-    if (
-      response.workspaceId !== options.workspaceId ||
-      response.deviceId !== options.deviceId ||
-      response.capturePolicy.version.length === 0
-    ) {
-      throw new CapturePolicyActivationError('policy_unavailable');
-    }
-
-    const entry: PolicyCacheEntry = {
-      deviceId: options.deviceId,
-      fetchedAt: options.now(),
-      policy: clonePolicy(response.capturePolicy.policy),
-      policySnapshotId: response.capturePolicy.id,
-      policyVersion: response.capturePolicy.version,
-      ttlSeconds: response.capturePolicy.ttlSeconds,
-      workspaceId: options.workspaceId,
-    };
-    await options.store.setPolicyCache(entry);
-    return entry;
   } catch {
-    const cached = await options.store.getPolicyCache(options.workspaceId, options.deviceId, {
-      now: options.now(),
-    });
-    if (!cached || cached.expired) {
-      throw new CapturePolicyActivationError('policy_unavailable');
-    }
-    return cached;
+    return await readUnexpiredCachedPolicy(options);
   }
+
+  if (
+    response.workspaceId !== options.workspaceId ||
+    response.deviceId !== options.deviceId ||
+    response.capturePolicy.version.length === 0
+  ) {
+    return await readUnexpiredCachedPolicy(options);
+  }
+
+  const entry: PolicyCacheEntry = {
+    deviceId: options.deviceId,
+    fetchedAt: options.now(),
+    policy: clonePolicy(response.capturePolicy.policy),
+    policySnapshotId: response.capturePolicy.id,
+    policyVersion: response.capturePolicy.version,
+    ttlSeconds: response.capturePolicy.ttlSeconds,
+    maxConcurrentOcr: response.deliveryPolicy.maxConcurrentOcr,
+    workspaceId: options.workspaceId,
+  };
+
+  try {
+    await options.store.setPolicyCache(entry);
+  } catch {
+    // A current, validated server policy is safer than a stale cache. The
+    // cache is only an offline fallback, never a prerequisite for applying a
+    // stricter policy that has already been received.
+  }
+
+  return entry;
+}
+
+async function readUnexpiredCachedPolicy(
+  options: CapturePolicyActivationOptions,
+): Promise<PolicyCacheEntry> {
+  const cached = await options.store.getPolicyCache(options.workspaceId, options.deviceId, {
+    now: options.now(),
+  });
+  if (!cached || cached.expired) {
+    throw new CapturePolicyActivationError('policy_unavailable');
+  }
+  return cached;
+}
+
+function normalizeMaxConcurrentOcr(value: number | undefined): number {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 1;
+}
+
+function policyRefreshAfterMs(fetchedAt: string, ttlSeconds: number, now: string): number {
+  const expiresAt = Date.parse(fetchedAt) + Math.max(1, ttlSeconds) * 1000;
+  const remainingMs = expiresAt - Date.parse(now);
+  return Math.max(1_000, Math.min(60 * 60 * 1000, Math.floor(remainingMs / 2)));
 }
 
 function requiresUnavailableContext(rule: CompiledCapturePolicyRule): boolean {

@@ -25,6 +25,60 @@ describe('capture lifecycle', () => {
     expect(harness.helper.calls).toEqual(['start']);
   });
 
+  it('never reports running when the helper is policy-paused at startup', async () => {
+    const calls: string[] = [];
+    const lifecycle = createCaptureLifecycle({
+      helper: {
+        async pauseCapture() {
+          calls.push('pauseCapture');
+        },
+        async resumeCapture() {
+          calls.push('resumeCapture');
+        },
+        async shutdown() {
+          calls.push('shutdown');
+        },
+        async start() {
+          calls.push('start');
+        },
+        getStatus() {
+          return {
+            lastSafeError: {
+              code: 'policy_unavailable',
+              message: 'Capture policy is unavailable.',
+              retryable: true,
+            },
+            state: 'paused',
+          };
+        },
+      },
+    });
+
+    await lifecycle.start();
+
+    expect(lifecycle.getSnapshot()).toMatchObject({
+      pauseReason: 'policy',
+      pauseReasons: ['policy'],
+      status: 'paused',
+    });
+    expect(calls).toEqual(['start']);
+  });
+
+  it('keeps a startup admission gate closed until every pause cause clears', async () => {
+    const helper = createRecordingHelper([]);
+    const lifecycle = createCaptureLifecycle({
+      helper,
+      initialPauseCauses: ['backpressure', 'permission'],
+    });
+
+    await lifecycle.start();
+    await lifecycle.setAutomaticPause(false);
+    await lifecycle.setPermissionPause(false);
+
+    expect(helper.calls).toEqual(['start', 'resumeCapture']);
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'running' });
+  });
+
   it('keeps capture running in the menu bar when the last window closes', async () => {
     const harness = createLifecycleHarness();
     await harness.lifecycle.start();
@@ -55,6 +109,38 @@ describe('capture lifecycle', () => {
       status: 'running',
       menuBarActive: false,
     });
+    expect(harness.helper.calls).toEqual(['start', 'pauseCapture', 'resumeCapture']);
+  });
+
+  it('keeps an automatic pause active when the user asks to resume', async () => {
+    const harness = createLifecycleHarness();
+    await harness.lifecycle.start();
+
+    await harness.lifecycle.setAutomaticPause(true);
+    await harness.lifecycle.resume();
+
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
+      pauseReason: 'backpressure',
+      status: 'paused',
+    });
+    expect(harness.helper.calls).toEqual(['start', 'pauseCapture']);
+  });
+
+  it('does not resume an automatically paused helper after a user pause takes ownership', async () => {
+    const harness = createLifecycleHarness();
+    await harness.lifecycle.start();
+
+    await harness.lifecycle.setAutomaticPause(true);
+    await harness.lifecycle.pause();
+    await harness.lifecycle.setAutomaticPause(false);
+
+    expect(harness.lifecycle.getSnapshot()).toMatchObject({
+      pauseReason: 'user',
+      status: 'paused',
+    });
+    expect(harness.helper.calls).toEqual(['start', 'pauseCapture']);
+
+    await harness.lifecycle.resume();
     expect(harness.helper.calls).toEqual(['start', 'pauseCapture', 'resumeCapture']);
   });
 

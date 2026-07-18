@@ -22,6 +22,7 @@ function buildRuntimeStatusDto(options: StatusHandlerOptions): RuntimeStatusDto 
 
   return {
     capturePaused: snapshot.status === 'paused',
+    ...(snapshot.pauseReason ? { capturePauseReason: snapshot.pauseReason } : {}),
     helper: {
       status: toHelperRuntimeStatus(snapshot.captureHelper?.state),
       ...(lastObservedAt ? { lastHeartbeatAt: lastObservedAt } : {}),

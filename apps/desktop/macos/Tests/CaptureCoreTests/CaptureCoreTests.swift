@@ -53,6 +53,89 @@ final class AssetPathsTests: XCTestCase {
     }
 }
 
+final class CaptureReceiptTests: XCTestCase {
+    func testReceiptPromotesStagedScreenshotAndReplaysPayload() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recapsy-receipt-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let captureId = "cap-receipt-1"
+        let image = Data("screen-bytes".utf8)
+        let hash = CaptureAsset.contentHash(for: image)
+        let payload = CaptureResultPayload(
+            captureId: captureId,
+            observedAt: "2026-07-18T00:00:00.000Z",
+            manifest: CaptureAssetPayload(
+                role: "manifest",
+                ref: "\(captureId)/manifest.json",
+                hash: hash,
+                mimeType: "application/json",
+                sizeBytes: 0
+            ),
+            assets: [CaptureAssetPayload(
+                role: "screenshot",
+                ref: CaptureAsset.screenshotRelativeKey(captureId: captureId),
+                hash: hash,
+                mimeType: CaptureAsset.screenshotMimeType,
+                sizeBytes: image.count
+            )],
+            context: CaptureContextPayload(
+                app: CaptureApplicationPayload(name: "Fixture App", bundleId: "one.recapsy.fixture"),
+                observedAt: "2026-07-18T00:00:00.000Z",
+                policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
+            )
+        )
+        let receipt = CaptureReceipt(
+            workspaceId: "workspace-1",
+            deviceId: "device-1",
+            payload: payload,
+            screenshotHash: hash,
+            screenshotSizeBytes: image.count
+        )
+
+        let staged = CaptureReceiptStore.stagedScreenshotFileURL(assetRoot: root, captureId: captureId)
+        try FileManager.default.createDirectory(
+            at: CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: captureId),
+            withIntermediateDirectories: true
+        )
+        try image.write(to: staged, options: .atomic)
+        try CaptureReceiptStore.write(receipt, assetRoot: root, captureId: captureId)
+
+        let recovered = try CaptureReceiptStore.recover(receipt, assetRoot: root)
+        XCTAssertEqual(recovered.captureId, captureId)
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: CaptureAsset.screenshotFileURL(assetRoot: root, captureId: captureId).path
+            )
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
+
+        CaptureReceiptStore.removeReceipt(assetRoot: root, captureId: captureId)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: CaptureReceiptStore.receiptURL(assetRoot: root, captureId: captureId).path
+            )
+        )
+    }
+
+    func testReceiptListingIsScopedToDirectoriesWithReceipts() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recapsy-receipt-list-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let withReceipt = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: "cap-a")
+        let withoutReceipt = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: "cap-b")
+        try FileManager.default.createDirectory(at: withReceipt, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: withoutReceipt, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(
+            to: withReceipt.appendingPathComponent(CaptureReceiptStore.receiptFileName),
+            options: .atomic
+        )
+
+        XCTAssertEqual(CaptureReceiptStore.listCaptureIds(assetRoot: root), ["cap-a"])
+    }
+}
+
 final class ProtocolEncodingTests: XCTestCase {
     private func decode(_ line: String) throws -> [String: Any] {
         XCTAssertTrue(line.hasSuffix("\n"), "NDJSON line must end with a newline")
@@ -516,6 +599,10 @@ final class CaptureSourcePolicyTests: XCTestCase {
 }
 
 final class CaptureFrameEconomyTests: XCTestCase {
+    private enum FixtureError: Error {
+        case notAccepted
+    }
+
     private let sameContext = CaptureFrameContext(
         bundleId: "com.apple.Safari",
         windowId: 101
@@ -537,27 +624,73 @@ final class CaptureFrameEconomyTests: XCTestCase {
 
     private func acceptedFingerprint(_ decision: CaptureFrameEconomyDecision) throws -> CaptureFrameFingerprint {
         guard case let .accept(fingerprint) = decision else {
-            throw XCTSkip("Expected the fixture to be admitted.")
+            XCTFail("Expected the fixture to be admitted, got \(decision).")
+            throw FixtureError.notAccepted
         }
         return fingerprint
     }
 
-    func testUniformWhiteAndDarkFramesAreSkippedBeforeEncoding() {
-        XCTAssertEqual(evaluate(Array(repeating: 255, count: 48)), .skip(.blank))
-        XCTAssertEqual(evaluate(Array(repeating: 3, count: 48)), .skip(.blank))
+    private struct CalibrationFixture {
+        let name: String
+        let luminance: [UInt8]
+        let shouldAdmit: Bool
+    }
+
+    /// Downsampled luminance corpus representing the screen classes that drive
+    /// the admission decision: blank pages, loading/flat UI, light documents,
+    /// dark terminals, and small visible text changes. Keeping the corpus in
+    /// source makes the threshold reviewable and deterministic in CI; each
+    /// fixture is a 48-pixel sample taken before WebP encoding, matching the
+    /// production sampler's contract.
+    private let calibrationCorpus: [CalibrationFixture] = [
+        CalibrationFixture(name: "white-page", luminance: Array(repeating: 255, count: 48), shouldAdmit: false),
+        CalibrationFixture(name: "dark-page", luminance: Array(repeating: 3, count: 48), shouldAdmit: false),
+        CalibrationFixture(name: "flat-loading", luminance: Array(repeating: 128, count: 48), shouldAdmit: false),
+        CalibrationFixture(name: "light-document", luminance: CaptureFrameEconomyTests.glyph(base: 245, ink: 25, indices: [10, 11, 18, 19, 26, 27]), shouldAdmit: true),
+        CalibrationFixture(name: "dark-terminal", luminance: CaptureFrameEconomyTests.glyph(base: 24, ink: 220, indices: [4, 5, 12, 13, 20, 21, 28, 29]), shouldAdmit: true),
+        CalibrationFixture(name: "editor-with-toolbar", luminance: CaptureFrameEconomyTests.glyph(base: 214, ink: 62, indices: [0, 1, 2, 8, 9, 10, 25, 26, 33, 34, 41, 42]), shouldAdmit: true),
+    ]
+
+    private static func glyph(base: UInt8, ink: UInt8, indices: [Int]) -> [UInt8] {
+        var luminance = Array(repeating: base, count: 48)
+        for index in indices {
+            luminance[index] = ink
+        }
+        return luminance
+    }
+
+    private func visibleGlyphFixture() -> [UInt8] {
+        calibrationCorpus.first(where: { $0.name == "light-document" })?.luminance
+            ?? Self.glyph(base: 245, ink: 25, indices: [10, 11, 18, 19, 26, 27])
+    }
+
+    func testCalibrationCorpusClassifiesBlankAndValuableScreenClasses() {
+        for fixture in calibrationCorpus {
+            let decision = evaluate(fixture.luminance)
+            if fixture.shouldAdmit {
+                guard case .accept = decision else {
+                    XCTFail("Expected \(fixture.name) to be admitted, got \(decision).")
+                    continue
+                }
+            } else {
+                XCTAssertEqual(decision, .skip(.blank), fixture.name)
+            }
+        }
     }
 
     func testQuantizedNearDuplicateInSameWindowIsSkipped() throws {
-        let initial = Array(repeating: UInt8(192), count: 48)
+        let initial = visibleGlyphFixture()
         let fingerprint = try acceptedFingerprint(evaluate(initial))
 
         var displayJitter = initial
-        displayJitter[17] = 195
+        // 245 and 246 fall in the same 16-level quantization bucket. This is
+        // display/compositor jitter, not a visible content change.
+        displayJitter[17] = 246
         XCTAssertEqual(evaluate(displayJitter, previous: fingerprint), .skip(.duplicate))
     }
 
     func testWindowOrApplicationChangeAdmitsTheFirstFrame() throws {
-        let frame = Array(repeating: UInt8(192), count: 48)
+        let frame = visibleGlyphFixture()
         let fingerprint = try acceptedFingerprint(evaluate(frame))
 
         XCTAssertNoThrow(
@@ -581,11 +714,7 @@ final class CaptureFrameEconomyTests: XCTestCase {
     }
 
     func testVisibleTextChangeIsNeverClassifiedAsDuplicateByCalibrationFixture() throws {
-        var initial = Array(repeating: UInt8(245), count: 48)
-        // A dark 2x3 glyph-like mark represents visible text on a light page.
-        for index in [10, 11, 18, 19, 26, 27] {
-            initial[index] = 25
-        }
+        let initial = visibleGlyphFixture()
         let fingerprint = try acceptedFingerprint(evaluate(initial))
 
         var textChanged = initial

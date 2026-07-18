@@ -7,6 +7,7 @@ import type {
   OcrJobSummaryDto,
   PermissionStatusDto,
   PrivacySettingsOpenResultDto,
+  RetentionPreviewDto,
   RuntimeStatusDto,
   SafeSessionSummary,
   SearchQueryRequestDto,
@@ -230,6 +231,13 @@ export const IPC_CHANNEL_REGISTRY = [
     namespace: 'diagnostics',
     request: validateEmptyRequest,
   }),
+  defineChannel<{ olderThanDays: number }, RetentionPreviewDto>({
+    channel: 'diagnostics.previewRetention',
+    description: 'Returns a read-only local retention preview without file paths.',
+    methodName: 'diagnosticsPreviewRetention',
+    namespace: 'diagnostics',
+    request: validateRetentionPreviewRequest,
+  }),
   defineChannel<EmptyRequest, PermissionStatusDto>({
     channel: 'permissions.getStatus',
     description: 'Returns native screen-recording and accessibility permission state.',
@@ -438,6 +446,29 @@ function validateOptionalLimitRequest(max: number) {
       value: limit === undefined ? {} : { limit },
     };
   };
+}
+
+function validateRetentionPreviewRequest(
+  payload: unknown,
+): RequestValidationResult<{ olderThanDays: number }> {
+  if (!isRecord(payload)) {
+    return { issues: ['request must be an object'], ok: false };
+  }
+
+  const issues = [
+    ...validateKnownKeys(payload, ['olderThanDays'], 'retention preview'),
+    ...(typeof payload.olderThanDays === 'number' &&
+    Number.isInteger(payload.olderThanDays) &&
+    payload.olderThanDays >= 1 &&
+    payload.olderThanDays <= 36_500
+      ? []
+      : ['olderThanDays must be a whole number between 1 and 36500']),
+  ];
+  if (issues.length > 0) {
+    return { issues, ok: false };
+  }
+
+  return { ok: true, value: { olderThanDays: payload.olderThanDays as number } };
 }
 
 function validateTimelineQueryRequest(

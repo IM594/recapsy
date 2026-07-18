@@ -88,6 +88,11 @@ export const CapturePoliciesResponseSchema = z
     workspaceId: IdSchema,
     deviceId: z.string().min(1).max(256).nullable().optional(),
     capturePolicy: CapturePolicySnapshotSchema,
+    deliveryPolicy: z
+      .object({
+        maxConcurrentOcr: z.number().int().positive().max(32),
+      })
+      .strict(),
     storagePolicy: StoragePolicySchema,
     axAllowlist: z
       .object({

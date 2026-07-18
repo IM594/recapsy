@@ -5,6 +5,7 @@ export {
 } from './memory';
 export { toRendererSafeAssetRef } from './asset-dto';
 export { reconcileAssetRefs } from './reconciliation';
+export { planLocalRetentionDryRun } from './retention';
 export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
@@ -12,6 +13,11 @@ export type {
   AssetReconciliationOptions,
   AssetReconciliationSummary,
 } from './reconciliation';
+export type {
+  LocalRetentionDryRun,
+  LocalRetentionDryRunOptions,
+  LocalRetentionDryRunStore,
+} from './retention';
 export type {
   SqliteDatabase,
   SqliteParameters,

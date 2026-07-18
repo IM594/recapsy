@@ -467,12 +467,23 @@ describe('helper process client', () => {
     });
 
     await completeStartup(client, child);
-    const configured = client.configureCapture(capturePolicy());
+    const configured = client.configureCapture(capturePolicy(), {
+      deviceId: 'device_1',
+      workspaceId: 'workspace_1',
+    });
     const command = decodeHelperEnvelopeLine(
       child.stdin.written[0] ?? '',
       validateMainToHelperEnvelope,
     );
-    expect(command).toMatchObject({ envelope: { type: 'helper.configure' }, ok: true });
+    expect(command).toMatchObject({
+      envelope: {
+        payload: {
+          captureIdentity: { deviceId: 'device_1', workspaceId: 'workspace_1' },
+        },
+        type: 'helper.configure',
+      },
+      ok: true,
+    });
     if (!command.ok) return;
 
     child.stdout.emit(

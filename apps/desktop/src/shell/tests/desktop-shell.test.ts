@@ -291,6 +291,17 @@ describe('desktop shell', () => {
       pauseEnabled: false,
       resumeEnabled: true,
     },
+    {
+      name: 'automatic catch-up pause with Screen Recording permission',
+      value: status({
+        capturePaused: true,
+        capturePauseReason: 'backpressure',
+        captureState: 'paused',
+        screenRecording: 'granted',
+      }),
+      pauseEnabled: false,
+      resumeEnabled: false,
+    },
   ])('gates capture menu actions for $name', async ({ value, pauseEnabled, resumeEnabled }) => {
     const harness = createShellHarness({ status: value });
     await harness.shell.refresh();

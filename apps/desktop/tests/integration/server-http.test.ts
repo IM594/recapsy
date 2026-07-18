@@ -89,6 +89,7 @@ describe('desktop server sync over real HTTP', () => {
     expect(result).toEqual({
       jobId: 'job_1',
       processed: 1,
+      providerOutcome: 'succeeded',
       status: 'synced',
     });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
@@ -137,6 +138,7 @@ describe('desktop server sync over real HTTP', () => {
     expect(result).toEqual({
       jobId: 'job_1',
       processed: 1,
+      providerOutcome: 'succeeded',
       status: 'synced',
     });
     expect(await store.getOutboxJob('job_1')).toMatchObject({

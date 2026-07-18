@@ -20,6 +20,7 @@ export type {
   OcrJobSummaryDto,
   PermissionStatusDto,
   PrivacySettingsOpenResultDto,
+  RetentionPreviewDto,
   RendererSafeDtoResult,
   RuntimeStatusDto,
   SafeSessionSummary,

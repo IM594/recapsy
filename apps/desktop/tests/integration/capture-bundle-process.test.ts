@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type ChildProcess, execFileSync, spawn as nodeSpawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   constants,
   closeSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   openSync,
   readFileSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -135,7 +138,10 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
       await waitForEnvelope(envelopes, 'helper.hello');
       const heartbeatsBeforeStart = countEnvelopes(envelopes, 'helper.heartbeat');
 
-      await client.configureCapture(capturePolicy());
+      await client.configureCapture(capturePolicy(), {
+        deviceId: 'device_1',
+        workspaceId: 'workspace_1',
+      });
       const policyApplied = await waitForEnvelope(envelopes, 'helper.policy_applied');
       expect(policyApplied.payload).toEqual({
         policyHash: capturePolicy().policyHash,
@@ -188,6 +194,89 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
       await client.stop();
     },
     15000,
+  );
+
+  bundleIt(
+    'replays a durable receipt after helper restart and removes only the receipt on ACK',
+    async () => {
+      const captureId = 'cap-recovered-1';
+      const { assetRoot, client, envelopes } = startBundleClient();
+      const bytes = Buffer.from('recovered-screen-bytes');
+      const hash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+      const captureDirectory = path.join(assetRoot, captureId);
+      const screenshotPath = path.join(captureDirectory, 'screenshot.webp');
+      const receiptPath = path.join(captureDirectory, 'capture.receipt.json');
+      const payload = {
+        assets: [
+          {
+            hash,
+            mimeType: 'image/webp',
+            ref: `${captureId}/screenshot.webp`,
+            role: 'screenshot',
+            sizeBytes: bytes.length,
+          },
+        ],
+        captureId,
+        context: {
+          app: { bundleId: 'one.recapsy.fixture', name: 'Fixture App' },
+          observedAt: '2026-07-18T00:00:00.000Z',
+          policy: { decision: 'allow', version: 'policy-1' },
+        },
+        manifest: {
+          hash,
+          mimeType: 'application/json',
+          ref: `${captureId}/manifest.json`,
+          role: 'manifest',
+          sizeBytes: 0,
+        },
+        observedAt: '2026-07-18T00:00:00.000Z',
+      };
+      mkdirSync(captureDirectory, { recursive: true });
+      writeFileSync(screenshotPath, bytes);
+      writeFileSync(
+        receiptPath,
+        JSON.stringify({
+          deviceId: 'device_1',
+          payload,
+          schemaVersion: 1,
+          screenshotHash: hash,
+          screenshotSizeBytes: bytes.length,
+          workspaceId: 'workspace_1',
+        }),
+      );
+      expect(existsSync(receiptPath)).toBe(true);
+
+      await waitForEnvelope(envelopes, 'helper.hello');
+      await client.configureCapture(capturePolicy(), {
+        deviceId: 'device_1',
+        workspaceId: 'workspace_1',
+      });
+      const recoveredOrError = await waitForAnyEnvelopeOrNull(
+        envelopes,
+        ['capture.result', 'capture.error'],
+        1000,
+      );
+      if (!recoveredOrError || recoveredOrError.type !== 'capture.result') {
+        throw new Error(
+          `Receipt recovery envelopes: ${envelopes.map((item) => item.type).join(',')}`,
+        );
+      }
+      const recovered = recoveredOrError;
+      expect(recovered.payload.captureId).toBe(captureId);
+      expect(readFileSync(screenshotPath)).toEqual(bytes);
+
+      await client.sendCommand({
+        correlationId: recovered.messageId,
+        messageId: 'test-recovery-ack-1',
+        payload: { captureId },
+        protocolVersion: HELPER_PROTOCOL_VERSION,
+        sentAt: new Date().toISOString(),
+        type: 'capture.ack',
+      });
+      await waitForCondition(() => !existsSync(receiptPath), 1000);
+      expect(existsSync(screenshotPath)).toBe(true);
+      await client.stop();
+    },
   );
 
   bundleIt('stop() exits the launcher and capture process with no zombie', async () => {
@@ -277,6 +366,7 @@ function startBundleClient(
   onEvent?: (event: CaptureHelperEvent) => Promise<void>,
   options: { keepStdinOpen?: boolean; shutdownTimeoutMs?: number } = {},
 ): {
+  assetRoot: string;
   child: ChildProcess;
   client: ReturnType<typeof createHelperProcessClient>;
   envelopes: HelperEnvelope<HelperToMainType>[];
@@ -325,7 +415,7 @@ function startBundleClient(
     throw new Error('capture bundle subprocess was not spawned synchronously');
   }
 
-  return { child: capturedChild, client, envelopes };
+  return { assetRoot, child: capturedChild, client, envelopes };
 }
 
 function waitForEnvelope<TType extends HelperToMainType>(

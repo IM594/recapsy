@@ -234,6 +234,7 @@ export type PolicyCacheEntry = {
   policy: CaptureDefaultPolicy;
   fetchedAt: string;
   ttlSeconds: number;
+  maxConcurrentOcr?: number;
 };
 
 export type PolicyCacheRead = PolicyCacheEntry & {
@@ -302,13 +303,11 @@ export type OperationalStoreSnapshot = {
 export type BackpressureConfig = {
   maxQueuedJobs: number;
   maxAssetBytes: number;
-  maxRetryAttempts: number;
+  resumeQueuedJobs: number;
+  resumeAssetBytes: number;
 };
 
-export type BackpressureReason =
-  | 'max_queued_jobs_reached'
-  | 'max_asset_bytes_reached'
-  | 'max_retry_attempts_reached';
+export type BackpressureReason = 'max_queued_jobs_reached' | 'max_asset_bytes_reached';
 
 export type BackpressureDecision = {
   action: 'allow' | 'pause';

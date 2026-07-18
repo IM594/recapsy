@@ -60,6 +60,8 @@
       <h2>Capture</h2>
       <div class="row"><span>State</span><strong id="capture-state">—</strong></div>
       <div class="row"><span>Paused</span><strong id="capture-paused">—</strong></div>
+      <div class="row"><span>Admission</span><strong id="capture-admission">—</strong></div>
+      <div class="row"><span>Policy</span><strong id="capture-policy">—</strong></div>
       <div class="row"><span>Last error</span><strong id="capture-error">None</strong></div>
       <div class="actions">
         <button id="pause" type="button">Pause</button>
@@ -82,10 +84,21 @@
 
     <section>
       <h2>Sync</h2>
-      <div class="row"><span>Pending</span><strong id="sync-pending">—</strong></div>
-      <div class="row"><span>Retrying</span><strong id="sync-retrying">—</strong></div>
+      <div class="row"><span>Input / min</span><strong id="sync-input-rate">—</strong></div>
+      <div class="row"><span>Completed / min</span><strong id="sync-completed-rate">—</strong></div>
+      <div class="row"><span>Processing</span><strong id="sync-processing">—</strong></div>
+      <div class="row"><span>Pending (total)</span><strong id="sync-pending">—</strong></div>
+      <div class="row"><span>Waiting to retry (included)</span><strong id="sync-retrying">—</strong></div>
       <div class="row"><span>Failed</span><strong id="sync-failed">—</strong></div>
       <div class="row"><span>Blocked</span><strong id="sync-blocked">—</strong></div>
+      <div class="row"><span>Oldest active</span><strong id="sync-oldest">—</strong></div>
+      <div class="row"><span>Workers</span><strong id="sync-workers">—</strong></div>
+      <div class="row"><span>Last sync error</span><strong id="sync-error">None</strong></div>
+    </section>
+
+    <section>
+      <h2>Local storage</h2>
+      <div class="row"><span>30-day review</span><strong id="retention-preview">—</strong></div>
     </section>
 
     <p id="status" class="muted" role="status"></p>
@@ -96,7 +109,9 @@
       const statusEl = document.getElementById('status');
       const errorEl = document.getElementById('error');
       const guideEl = document.getElementById('permission-guide');
+      const pauseButton = document.getElementById('pause');
       const requestScreenButton = document.getElementById('request-screen');
+      const resumeButton = document.getElementById('resume');
       let screenRecordingRequestInFlight = false;
       let screenRecordingRequired = true;
 
@@ -111,16 +126,71 @@
         return 'Unknown';
       }
 
+      function formatBytes(value) {
+        if (value < 1024) return `${value} B`;
+        if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+        return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+      }
+
+      function formatAge(seconds) {
+        if (typeof seconds !== 'number') return 'None';
+        if (seconds < 60) return `${seconds}s`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+        return `${Math.floor(seconds / 3600)}h`;
+      }
+
+      function formatPolicy(policy) {
+        if (!policy) return 'Not applied';
+        return `${policy.version} · ${policy.hash.slice(0, 15)}…`;
+      }
+
       function renderShellStatus(status) {
         setText('capture-state', status.captureState);
-        setText('capture-paused', status.capturePaused ? 'Yes' : 'No');
+        setText(
+          'capture-paused',
+          status.capturePauseReason === 'storage'
+            ? 'Storage protection'
+            : status.capturePauseReason === 'backpressure'
+              ? 'Catching up'
+            : status.capturePaused
+              ? 'Paused'
+              : 'Active',
+        );
+        setText(
+          'capture-admission',
+          status.capturePauseReason === 'storage'
+            ? `Storage protection (${(status.captureAdmission && status.captureAdmission.reasons.join(', ')) || 'local storage limit'})`
+            : status.captureAdmission && status.captureAdmission.active
+            ? `Catching up (${status.captureAdmission.reasons.join(', ')})`
+            : 'Accepting frames',
+        );
+        setText('capture-policy', formatPolicy(status.capturePolicy));
         setText('capture-error', status.lastErrorMessage || 'None');
         setText('perm-screen', permissionLabel(status.screenRecording));
         setText('perm-ax', permissionLabel(status.accessibility));
+        setText('sync-input-rate', String(status.syncInputPerMinute ?? 0));
+        setText('sync-completed-rate', String(status.syncCompletedPerMinute ?? 0));
+        setText('sync-processing', String(status.syncProcessing ?? 0));
         setText('sync-pending', String(status.syncPending));
         setText('sync-retrying', String(status.syncRetrying ?? 0));
         setText('sync-failed', String(status.syncFailed));
         setText('sync-blocked', String(status.syncBlocked ?? 0));
+        setText('sync-oldest', formatAge(status.syncOldestActiveAgeSeconds));
+        setText(
+          'sync-workers',
+          status.syncWorkerCapacity
+            ? `${status.syncWorkerCapacity.activeWorkers} active · server ${status.syncWorkerCapacity.serverMaxConcurrentOcr} · local ${status.syncWorkerCapacity.localMaxWorkers}`
+            : 'Waiting for policy',
+        );
+        setText('sync-error', status.syncLastErrorMessage || 'None');
+        if (status.retentionPreview) {
+          setText(
+            'retention-preview',
+            `${status.retentionPreview.eligibleAssets} items · ${formatBytes(status.retentionPreview.reclaimableBytes)}`,
+          );
+        }
+        pauseButton.disabled = status.capturePaused;
+        resumeButton.disabled = !status.capturePaused || status.capturePauseReason === 'backpressure';
 
         const needsScreen = status.screenRecording !== 'granted';
         const needsAx = status.accessibility !== 'granted';
@@ -147,21 +217,32 @@
       async function refreshAll() {
         errorEl.textContent = '';
         statusEl.textContent = 'Refreshing…';
-        const [capture, sync, permissions] = await Promise.all([
+        const [capture, sync, permissions, retentionPreview] = await Promise.all([
           unwrap(api.captureGetStatus()),
           unwrap(api.syncGetSummary()),
           unwrap(api.permissionsGetStatus()),
+          unwrap(api.diagnosticsPreviewRetention({ olderThanDays: 30 })),
         ]);
         renderShellStatus({
           captureState: capture.state,
           capturePaused: capture.paused,
+          capturePauseReason: capture.pauseReason,
+          captureAdmission: capture.admission,
+          capturePolicy: capture.policy,
           lastErrorMessage: capture.lastError && capture.lastError.message,
           screenRecording: permissions.screenRecording,
           accessibility: permissions.accessibility,
           syncPending: sync.pending,
+          syncProcessing: sync.processing,
           syncRetrying: sync.retrying,
           syncFailed: sync.failed,
           syncBlocked: sync.blocked,
+          syncInputPerMinute: sync.inputPerMinute,
+          syncCompletedPerMinute: sync.completedPerMinute,
+          syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds,
+          syncWorkerCapacity: sync.workerCapacity,
+          syncLastErrorMessage: sync.lastError && sync.lastError.message,
+          retentionPreview,
         });
         statusEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
       }

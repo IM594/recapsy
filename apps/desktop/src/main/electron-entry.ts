@@ -310,21 +310,46 @@ const { ready } = createElectronMainRuntime({
           const snapshot = context.lifecycle.getSnapshot();
           const captureStatus = context.eventHandler.getStatus();
           const permissions = readCapturePermissions(context.eventHandler);
-          const sync = await createSyncQueueSummary(context.store, context.workspaceId);
+          const sync = await createSyncQueueSummary(context.store, context.workspaceId, {
+            now: new Date().toISOString(),
+            workerCapacity: context.syncRuntime.getCapacityStatus(),
+          });
           const lastError = snapshot.captureHelper?.lastSafeError ?? captureStatus.lastSafeError;
+          const admission = context.admission.getStatus();
+          const helperStatus = snapshot.captureHelper;
 
           return {
             accessibility: permissions.accessibility,
             captureFailureCount: captureStatus.captureFailureCount ?? 0,
             capturePaused: snapshot.status === 'paused',
+            ...(snapshot.pauseReason ? { capturePauseReason: snapshot.pauseReason } : {}),
+            captureAdmission: {
+              active: admission.active,
+              reasons: [...admission.reasons],
+            },
+            ...(helperStatus?.policyHash && helperStatus.policyVersion
+              ? {
+                  capturePolicy: {
+                    hash: helperStatus.policyHash,
+                    version: helperStatus.policyVersion,
+                  },
+                }
+              : {}),
             captureState: snapshot.status,
             ...(lastError ? { lastErrorCode: lastError.code } : {}),
             ...(lastError ? { lastErrorMessage: lastError.message } : {}),
             screenRecording: permissions.screenRecording,
             syncBlocked: sync.blocked,
+            syncCompletedPerMinute: sync.completedPerMinute,
             syncFailed: sync.failed,
+            syncInputPerMinute: sync.inputPerMinute,
+            ...(sync.oldestActiveAgeSeconds !== undefined
+              ? { syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds }
+              : {}),
             syncPending: sync.pending,
+            syncProcessing: sync.processing,
             syncRetrying: sync.retrying,
+            ...(sync.workerCapacity ? { syncWorkerCapacity: sync.workerCapacity } : {}),
           };
         },
       },

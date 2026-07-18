@@ -71,6 +71,7 @@ describe('desktop ipc contracts', () => {
     expect(methodNames.length).toBeGreaterThan(0);
     expect(methodNames).toContain('timelineQuery');
     expect(methodNames).toContain('diagnosticsGetSafeLogs');
+    expect(methodNames).toContain('diagnosticsPreviewRetention');
 
     for (const forbiddenMethod of FORBIDDEN_PRELOAD_METHODS) {
       expect(methodNames).not.toContain(forbiddenMethod);
@@ -148,6 +149,16 @@ describe('desktop ipc contracts', () => {
           enabled: false,
         },
       },
+    });
+  });
+
+  it('accepts a bounded retention-preview request without exposing local paths', () => {
+    expect(validateIpcRequest('diagnostics.previewRetention', { olderThanDays: 30 })).toEqual({
+      ok: true,
+      value: { olderThanDays: 30 },
+    });
+    expect(validateIpcRequest('diagnostics.previewRetention', { olderThanDays: 0 })).toMatchObject({
+      ok: false,
     });
   });
 

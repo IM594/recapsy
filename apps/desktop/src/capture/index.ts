@@ -1,4 +1,12 @@
 export { createCaptureHelperController } from './helper-controller';
+export { createCaptureAdmissionController } from './admission';
+export type {
+  CaptureAdmissionController,
+  CaptureAdmissionControllerOptions,
+  CaptureAdmissionLifecycle,
+  CaptureAdmissionStatus,
+  CaptureAdmissionStore,
+} from './admission';
 export type {
   CaptureHelperAssetRef,
   CaptureHelperClient,

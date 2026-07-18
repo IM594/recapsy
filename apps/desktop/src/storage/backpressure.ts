@@ -19,10 +19,6 @@ export function evaluateOperationalStoreBackpressure(
     reasons.push('max_asset_bytes_reached');
   }
 
-  if (snapshot.maxAttempt >= config.maxRetryAttempts) {
-    reasons.push('max_retry_attempts_reached');
-  }
-
   return {
     action: reasons.length > 0 ? 'pause' : 'allow',
     hardLimit: reasons.length > 0,

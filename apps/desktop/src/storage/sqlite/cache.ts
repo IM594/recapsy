@@ -57,7 +57,8 @@ export class SqliteCachePersistence {
           policy_version,
           policy_json,
           fetched_at,
-          ttl_seconds
+          ttl_seconds,
+          max_concurrent_ocr
         ) VALUES (
           $workspaceId,
           $deviceId,
@@ -65,14 +66,16 @@ export class SqliteCachePersistence {
           $policyVersion,
           $policyJson,
           $fetchedAt,
-          $ttlSeconds
+          $ttlSeconds,
+          $maxConcurrentOcr
         )
         ON CONFLICT(workspace_id, device_id) DO UPDATE SET
           policy_snapshot_id = excluded.policy_snapshot_id,
           policy_version = excluded.policy_version,
           policy_json = excluded.policy_json,
           fetched_at = excluded.fetched_at,
-          ttl_seconds = excluded.ttl_seconds`,
+          ttl_seconds = excluded.ttl_seconds,
+          max_concurrent_ocr = excluded.max_concurrent_ocr`,
       )
       .run({
         $deviceId: cloned.deviceId,
@@ -81,6 +84,7 @@ export class SqliteCachePersistence {
         $policySnapshotId: cloned.policySnapshotId,
         $policyVersion: cloned.policyVersion,
         $ttlSeconds: cloned.ttlSeconds,
+        $maxConcurrentOcr: cloned.maxConcurrentOcr ?? 1,
         $workspaceId: cloned.workspaceId,
       });
 
@@ -214,6 +218,7 @@ type PolicyCacheRow = SqliteRow & {
   policy_json: string;
   fetched_at: string;
   ttl_seconds: number;
+  max_concurrent_ocr: number;
 };
 
 type SyncCursorRow = SqliteRow & {
@@ -240,6 +245,7 @@ function policyCacheFromRow(row: PolicyCacheRow): PolicyCacheEntry {
     policySnapshotId: row.policy_snapshot_id,
     policyVersion: row.policy_version,
     ttlSeconds: row.ttl_seconds,
+    maxConcurrentOcr: row.max_concurrent_ocr,
     workspaceId: row.workspace_id,
   });
 }

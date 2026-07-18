@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -15,6 +15,7 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
   migrateOutboxJobsToV2(database);
   ensureOutboxLeaseColumns(database);
   migratePolicyCacheToWorkspaceDevice(database);
+  ensurePolicyCacheDeliveryCapacityColumn(database);
 
   database.run(
     `INSERT OR IGNORE INTO schema_migrations (version, applied_at)
@@ -90,6 +91,23 @@ function migratePolicyCacheToWorkspaceDevice(database: SqliteDatabase): void {
   } catch (error) {
     if (transactionOpen) database.run('ROLLBACK');
     throw error;
+  }
+}
+
+function ensurePolicyCacheDeliveryCapacityColumn(database: SqliteDatabase): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }>('PRAGMA table_info(policy_cache)')
+      .all()
+      .map((column) => column.name),
+  );
+
+  if (!columns.has('max_concurrent_ocr')) {
+    database.run(
+      `ALTER TABLE policy_cache
+       ADD COLUMN max_concurrent_ocr INTEGER NOT NULL DEFAULT 1
+       CHECK (max_concurrent_ocr BETWEEN 1 AND 32)`,
+    );
   }
 }
 
@@ -245,6 +263,7 @@ function buildPolicyCacheTable(tableName: string, ifNotExists: boolean): string 
     policy_json TEXT NOT NULL CHECK (json_valid(policy_json)),
     fetched_at TEXT NOT NULL,
     ttl_seconds INTEGER NOT NULL CHECK (ttl_seconds >= 0),
+    max_concurrent_ocr INTEGER NOT NULL DEFAULT 1 CHECK (max_concurrent_ocr BETWEEN 1 AND 32),
     PRIMARY KEY(workspace_id, device_id)
   )`;
 }

@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import { HelperNdjsonLineParser, encodeHelperEnvelope } from './protocol/codec';
 import {
   HELPER_PROTOCOL_VERSION,
+  type HelperCaptureIdentity,
   type HelperCapturePolicy,
   type HelperEnvelope,
   type HelperProtocolError,
@@ -152,7 +153,7 @@ export function createHelperProcessClient(
   options: HelperProcessClientOptions,
 ): CaptureHelperClient &
   CaptureHelperCommandClient & {
-    configureCapture(policy: HelperCapturePolicy): Promise<void>;
+    configureCapture(policy: HelperCapturePolicy, identity?: HelperCaptureIdentity): Promise<void>;
   } {
   return new HelperProcessClient(options);
 }
@@ -250,7 +251,10 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
     }
   }
 
-  async configureCapture(policy: HelperCapturePolicy): Promise<void> {
+  async configureCapture(
+    policy: HelperCapturePolicy,
+    identity?: HelperCaptureIdentity,
+  ): Promise<void> {
     const child = this.child;
     if (!child || !child.stdin) {
       throw new HelperPolicyActivationError('helper_unavailable');
@@ -268,7 +272,15 @@ class HelperProcessClient implements CaptureHelperClient, CaptureHelperCommandCl
         resolve,
         timeout,
       });
-      this.writeCommand(child, 'helper.configure', { policy }, correlationId);
+      this.writeCommand(
+        child,
+        'helper.configure',
+        {
+          ...(identity ? { captureIdentity: identity } : {}),
+          policy,
+        },
+        correlationId,
+      );
     });
   }
 

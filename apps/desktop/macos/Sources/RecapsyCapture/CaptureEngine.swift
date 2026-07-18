@@ -59,6 +59,10 @@ final class CaptureEngine {
     private var heartbeatSequence = 0
     private var captureCounter = 0
     private var configuredPolicy: ConfiguredPolicy?
+    /// A written screenshot remains helper-owned until main acknowledges its
+    /// capture id. The receipt file is the durable source of truth; this map
+    /// only avoids rescanning the asset root for the current process.
+    private var pendingCaptureAssets: [String: URL] = [:]
     // Accessed exclusively from the serial capture queue. The fingerprint is
     // committed only after the corresponding WebP has been atomically written.
     private var lastAcceptedFrameFingerprint: CaptureFrameFingerprint?
@@ -123,7 +127,11 @@ final class CaptureEngine {
     private func dispatchCommand(type: String, payload: [String: Any], correlationId: String?) {
         switch type {
         case "helper.configure":
-            guard let policy = ConfiguredPolicy.fromPayload(payload["policy"] as? [String: Any]) else {
+            var policyPayload = payload["policy"] as? [String: Any] ?? [:]
+            if let identity = payload["captureIdentity"] {
+                policyPayload["captureIdentity"] = identity
+            }
+            guard let policy = ConfiguredPolicy.fromPayload(policyPayload) else {
                 configuredPolicy = nil
                 state = .paused
                 stopCaptureTimer()
@@ -139,13 +147,19 @@ final class CaptureEngine {
                 payload: PolicyAppliedPayload(policyHash: policy.hash, policyVersion: policy.version),
                 correlationId: correlationId
             )
+            recoverPendingReceipts(for: policy)
         case "permission.refresh":
             emitPermissionStatus()
         case "permission.request_screen_capture":
             _ = ScreenshotCapturer.requestScreenCaptureAccessIfNeeded()
             emitPermissionStatus()
         case "capture.start":
-            guard let policy = configuredPolicy, !policy.sourcePolicy.paused else {
+            guard
+                let policy = configuredPolicy,
+                !policy.sourcePolicy.paused,
+                policy.workspaceId != nil,
+                policy.deviceId != nil
+            else {
                 state = .paused
                 stopCaptureTimer()
                 emitStatus(status: "paused", reason: "policy_unavailable")
@@ -154,13 +168,19 @@ final class CaptureEngine {
             state = .ready
             emitStatus(status: "ready")
             startCaptureTimer()
+            replayPendingCaptureResults()
         case "capture.pause":
             state = .paused
             let reason = payload["reason"] as? String
             emitStatus(status: "paused", reason: reason)
             stopCaptureTimer()
         case "capture.resume":
-            guard let policy = configuredPolicy, !policy.sourcePolicy.paused else {
+            guard
+                let policy = configuredPolicy,
+                !policy.sourcePolicy.paused,
+                policy.workspaceId != nil,
+                policy.deviceId != nil
+            else {
                 state = .paused
                 stopCaptureTimer()
                 emitStatus(status: "paused", reason: "policy_unavailable")
@@ -170,11 +190,23 @@ final class CaptureEngine {
             let reason = payload["reason"] as? String
             emitStatus(status: "ready", reason: reason)
             startCaptureTimer()
-        case "capture.flush", "capture.ack", "capture.nack":
-            // 1B keeps no unacknowledged capture buffer, so there is nothing to
-            // flush or reconcile. A later increment with on-disk manifests would
-            // act here.
-            break
+            replayPendingCaptureResults()
+        case "capture.ack":
+            if let captureId = payload["captureId"] as? String {
+                pendingCaptureAssets.removeValue(forKey: captureId)
+                if let assetRoot {
+                    CaptureReceiptStore.removeReceipt(assetRoot: assetRoot, captureId: captureId)
+                }
+            }
+        case "capture.nack":
+            if let captureId = payload["captureId"] as? String {
+                let code = payload["code"] as? String
+                if code != "backpressure" && code != "storage_unavailable" {
+                    removePendingCapture(captureId: captureId)
+                }
+            }
+        case "capture.flush":
+            replayPendingCaptureResults()
         case "helper.shutdown":
             state = .stopping
             stopCaptureTimer()
@@ -356,12 +388,16 @@ final class CaptureEngine {
 
         let fileURL = CaptureAsset.screenshotFileURL(assetRoot: assetRoot, captureId: captureId)
         let directory = CaptureAsset.captureDirectoryURL(assetRoot: assetRoot, captureId: captureId)
+        let stagedURL = CaptureReceiptStore.stagedScreenshotFileURL(
+            assetRoot: assetRoot,
+            captureId: captureId
+        )
         do {
             try FileManager.default.createDirectory(
                 at: directory,
                 withIntermediateDirectories: true
             )
-            try encoded.imageData.write(to: fileURL, options: .atomic)
+            try encoded.imageData.write(to: stagedURL, options: .atomic)
         } catch {
             emitCaptureError(
                 captureId: captureId,
@@ -370,8 +406,6 @@ final class CaptureEngine {
             )
             return
         }
-        lastAcceptedFrameFingerprint = encoded.frameFingerprint
-
         let relativeKey = CaptureAsset.screenshotRelativeKey(captureId: captureId)
         let hash = CaptureAsset.contentHash(for: encoded.imageData)
 
@@ -408,7 +442,125 @@ final class CaptureEngine {
             assets: [asset],
             context: context
         )
+
+        // The receipt is committed while the image is still staged. Recovery
+        // can therefore either promote the staged image or replay the final
+        // image after a crash at any point before ACK.
+        guard
+            let workspaceId = configuredPolicy.workspaceId,
+            let deviceId = configuredPolicy.deviceId
+        else {
+            try? FileManager.default.removeItem(at: directory)
+            emitCaptureError(
+                captureId: captureId,
+                code: "asset_write_failed",
+                message: "Capture identity is unavailable."
+            )
+            return
+        }
+        do {
+            try CaptureReceiptStore.write(
+                CaptureReceipt(
+                    workspaceId: workspaceId,
+                    deviceId: deviceId,
+                    payload: payload,
+                    screenshotHash: hash,
+                    screenshotSizeBytes: encoded.imageData.count
+                ),
+                assetRoot: assetRoot,
+                captureId: captureId
+            )
+            try FileManager.default.moveItem(at: stagedURL, to: fileURL)
+        } catch {
+            try? FileManager.default.removeItem(at: directory)
+            emitCaptureError(
+                captureId: captureId,
+                code: "asset_write_failed",
+                message: "Capture receipt could not be committed."
+            )
+            return
+        }
+
+        lastAcceptedFrameFingerprint = encoded.frameFingerprint
+
+        // Register ownership before emitting the result. stdin command handling
+        // runs on stateQueue, so a fast NACK can never observe an untracked
+        // written directory.
+        stateQueue.sync {
+            pendingCaptureAssets[captureId] = directory
+        }
         emit(type: "capture.result", payload: payload)
+    }
+
+    /// Replays receipts only after Electron has supplied a verified identity.
+    /// A receipt from another workspace/device is left untouched for the
+    /// matching profile rather than being attached to the current session.
+    private func recoverPendingReceipts(for policy: ConfiguredPolicy) {
+        guard let assetRoot else {
+            return
+        }
+        guard let workspaceId = policy.workspaceId, let deviceId = policy.deviceId else {
+            return
+        }
+
+        let receiptIds = CaptureReceiptStore.listCaptureIds(assetRoot: assetRoot)
+        for captureId in receiptIds {
+            let receipt: CaptureReceipt
+            do {
+                receipt = try CaptureReceiptStore.read(assetRoot: assetRoot, captureId: captureId)
+            } catch {
+                emitCaptureError(
+                    captureId: captureId,
+                    code: "asset_write_failed",
+                    message: "Pending capture receipt is invalid."
+                )
+                continue
+            }
+            guard receipt.workspaceId == workspaceId, receipt.deviceId == deviceId else {
+                continue
+            }
+            guard let payload = try? CaptureReceiptStore.recover(receipt, assetRoot: assetRoot) else {
+                emitCaptureError(
+                    captureId: captureId,
+                    code: "asset_write_failed",
+                    message: "Pending capture could not be recovered."
+                )
+                continue
+            }
+            pendingCaptureAssets[captureId] = CaptureAsset.captureDirectoryURL(
+                assetRoot: assetRoot,
+                captureId: captureId
+            )
+            emit(type: "capture.result", payload: payload)
+        }
+    }
+
+    private func replayPendingCaptureResults() {
+        guard let assetRoot else {
+            return
+        }
+        for captureId in pendingCaptureAssets.keys.sorted() {
+            guard let receipt = try? CaptureReceiptStore.read(assetRoot: assetRoot, captureId: captureId),
+                  let payload = try? CaptureReceiptStore.recover(receipt, assetRoot: assetRoot)
+            else {
+                continue
+            }
+            emit(type: "capture.result", payload: payload)
+        }
+    }
+
+    private func removePendingCapture(captureId: String) {
+        let directory = pendingCaptureAssets.removeValue(forKey: captureId)
+        guard let assetRoot else {
+            return
+        }
+        CaptureReceiptStore.removeReceipt(assetRoot: assetRoot, captureId: captureId)
+        guard let directory else {
+            return
+        }
+        captureQueue.async {
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 
     // MARK: - Emission (state queue)
@@ -496,6 +648,8 @@ final class CaptureEngine {
     private struct ConfiguredPolicy {
         let hash: String
         let version: String
+        let workspaceId: String?
+        let deviceId: String?
         let sourcePolicy: CaptureSourcePolicy
 
         static func fromPayload(_ payload: [String: Any]?) -> ConfiguredPolicy? {
@@ -542,9 +696,15 @@ final class CaptureEngine {
                 )
             }
 
+            let identity = payload["captureIdentity"] as? NSDictionary
+            let workspaceId = identity?["workspaceId"] as? String
+            let deviceId = identity?["deviceId"] as? String
+
             return ConfiguredPolicy(
                 hash: hash,
                 version: version,
+                workspaceId: workspaceId?.isEmpty == false ? workspaceId : nil,
+                deviceId: deviceId?.isEmpty == false ? deviceId : nil,
                 sourcePolicy: CaptureSourcePolicy(
                     version: version,
                     paused: paused,

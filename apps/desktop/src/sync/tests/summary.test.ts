@@ -40,19 +40,23 @@ describe('sync queue summary', () => {
       },
     } satisfies SyncSummaryStore;
 
-    const summary = await createSyncQueueSummary(store, 'workspace-1');
+    const summary = await createSyncQueueSummary(store, 'workspace-1', { now });
 
     expect(reads).toEqual([{ workspaceId: 'workspace-1' }]);
     expect(summary).toEqual({
       blocked: 1,
+      completedPerMinute: 1,
       failed: 1,
+      inputPerMinute: 9,
       lastError: {
         code: 'provider_unavailable',
         details: { safeCode: 'provider_timeout' },
         message: 'OCR provider timed out.',
       },
       nextRetryAt: '2026-07-06T00:01:00.000Z',
+      oldestActiveAgeSeconds: 0,
       pending: 3,
+      processing: 2,
       retrying: 2,
       syncing: 2,
     });
@@ -106,14 +110,42 @@ describe('sync queue summary', () => {
     expect(reads).toEqual([{ workspaceId: 'workspace-empty' }]);
     expect(summary).toEqual({
       blocked: 0,
+      completedPerMinute: 0,
       failed: 0,
+      inputPerMinute: 0,
       pending: 0,
+      processing: 0,
       retrying: 0,
       syncing: 0,
     });
     expect(summary).not.toHaveProperty('backpressure');
     expect(summary).not.toHaveProperty('lastError');
     expect(summary).not.toHaveProperty('nextRetryAt');
+  });
+
+  it('derives recent throughput and the age of the oldest unfinished job from the same snapshot', async () => {
+    const store = {
+      async listOutboxJobs(_filter: { workspaceId: string }) {
+        return [
+          outboxJob('fresh-pending', 'pending', { createdAt: '2026-07-05T23:59:50.000Z' }),
+          outboxJob('old-syncing', 'syncing', { createdAt: '2026-07-05T23:58:00.000Z' }),
+          outboxJob('recent-synced', 'synced', { updatedAt: '2026-07-05T23:59:40.000Z' }),
+          outboxJob('old-synced', 'synced', {
+            createdAt: '2026-07-05T23:58:00.000Z',
+            updatedAt: '2026-07-05T23:58:00.000Z',
+          }),
+        ];
+      },
+    } satisfies SyncSummaryStore;
+
+    const summary = await createSyncQueueSummary(store, 'workspace-1', { now });
+
+    expect(summary).toMatchObject({
+      completedPerMinute: 1,
+      inputPerMinute: 2,
+      oldestActiveAgeSeconds: 120,
+      processing: 1,
+    });
   });
 });
 

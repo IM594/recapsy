@@ -20,7 +20,8 @@ const now = '2026-07-07T08:00:00.000Z';
 const backpressure: BackpressureConfig = {
   maxAssetBytes: 1024 * 1024,
   maxQueuedJobs: 10,
-  maxRetryAttempts: 5,
+  resumeAssetBytes: 512 * 1024,
+  resumeQueuedJobs: 5,
 };
 
 describe('capture helper controller', () => {
@@ -75,6 +76,52 @@ describe('capture helper controller', () => {
       connectionKind: 'managed_helper',
       restartCount: 0,
       updatedAt: now,
+    });
+  });
+
+  it('refreshes the policy through a verified helper configuration and pauses when the policy changes to paused', async () => {
+    const client = new RecordingCaptureHelperClient();
+    const timers = new FakeTimers();
+    const policyPauses: boolean[] = [];
+    let activations = 0;
+    const controller = createCaptureHelperController({
+      clearTimeoutFn: timers.clear,
+      client,
+      deviceId: 'device_1',
+      now: () => now,
+      onPolicyPauseChange: async (active) => {
+        policyPauses.push(active);
+      },
+      policyActivation: {
+        async activate() {
+          activations += 1;
+          return {
+            maxConcurrentOcr: 2,
+            policy: {
+              defaultAction: 'allow',
+              paused: activations > 1,
+              policyHash: `sha256:${String(activations).repeat(64)}`,
+              rules: [],
+              version: `policy_${activations}`,
+            },
+            refreshAfterMs: 60_000,
+          };
+        },
+      },
+      setTimeoutFn: timers.set,
+      store: createMemoryStore(),
+    });
+
+    await controller.start();
+    timers.fire();
+    await flush();
+
+    expect(activations).toBe(2);
+    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture', 'configureCapture']);
+    expect(policyPauses).toEqual([false, true]);
+    expect(controller.getStatus()).toMatchObject({
+      policyVersion: 'policy_2',
+      state: 'paused',
     });
   });
 
@@ -516,6 +563,7 @@ function activePolicyActivation(): CapturePolicyActivation {
   return {
     async activate() {
       return {
+        maxConcurrentOcr: 2,
         policy: {
           defaultAction: 'allow',
           paused: false,
@@ -526,4 +574,29 @@ function activePolicyActivation(): CapturePolicyActivation {
       };
     },
   };
+}
+
+class FakeTimers {
+  private callback: (() => void) | undefined;
+
+  set = (callback: () => void, _delayMs: number): number => {
+    this.callback = callback;
+    return 1;
+  };
+
+  clear = (_handle: unknown): void => {
+    this.callback = undefined;
+  };
+
+  fire(): void {
+    const callback = this.callback;
+    this.callback = undefined;
+    callback?.();
+  }
+}
+
+async function flush(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }

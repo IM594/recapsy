@@ -9,11 +9,13 @@ import {
   createRendererSafeSuccess,
 } from '../ipc/index';
 import type { OutboxJob, SafeOperationalError } from '../storage/index';
+import type { CaptureAdmissionController } from './admission';
 import type { CaptureHelperEventHandler } from './helper-event-handler';
 import type { CaptureLifecycle } from './lifecycle';
 import type { CaptureHistoryReader } from './store';
 
 export type CaptureIpcHandlerOptions = {
+  admission?: CaptureAdmissionController;
   eventHandler: CaptureHelperEventHandler;
   lifecycle: CaptureLifecycle;
   store: CaptureHistoryReader;
@@ -45,12 +47,30 @@ function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatus
     screenRecording: 'unknown',
   };
   const lastSafeError = helperStatus?.lastSafeError ?? eventStatus.lastSafeError;
+  const admission = options.admission?.getStatus();
 
   return {
     paused: snapshot.status === 'paused',
+    ...(snapshot.pauseReason ? { pauseReason: snapshot.pauseReason } : {}),
     permissions,
     recentEventCount: 0,
     state: toCaptureStatusState(helperStatus?.state),
+    ...(admission
+      ? {
+          admission: {
+            active: admission.active,
+            reasons: [...admission.reasons],
+          },
+        }
+      : {}),
+    ...(helperStatus?.policyHash && helperStatus.policyVersion
+      ? {
+          policy: {
+            hash: helperStatus.policyHash,
+            version: helperStatus.policyVersion,
+          },
+        }
+      : {}),
     ...(lastSafeError ? { lastError: toIpcError(lastSafeError) } : {}),
   };
 }

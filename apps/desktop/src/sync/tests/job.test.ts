@@ -77,6 +77,7 @@ describe('desktop sync job executor', () => {
     expect(result).toEqual({
       jobId: 'job_1',
       processed: 1,
+      providerOutcome: 'succeeded',
       status: 'synced',
     });
     expect(calls).toHaveLength(3);
@@ -388,6 +389,7 @@ describe('desktop sync job executor', () => {
     expect(result).toEqual({
       jobId: 'job_1',
       processed: 1,
+      providerOutcome: 'succeeded',
       status: 'synced',
     });
     expect(proxyCalls).toBe(1);

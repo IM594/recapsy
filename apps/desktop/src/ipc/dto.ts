@@ -11,6 +11,7 @@ export type RuntimeStatusDto = {
   status: 'starting' | 'running' | 'paused' | 'stopping' | 'stopped';
   menuBarActive: boolean;
   capturePaused: boolean;
+  capturePauseReason?: 'user' | 'backpressure' | 'storage' | 'policy' | 'permission';
   network: 'online' | 'offline' | 'unknown';
   helper: {
     status: 'not_started' | 'starting' | 'ready' | 'degraded' | 'stopped';
@@ -42,11 +43,20 @@ export type WorkspaceCapabilitiesDto = {
 export type CaptureStatusDto = {
   state: 'idle' | 'capturing' | 'paused' | 'blocked' | 'degraded';
   paused: boolean;
+  pauseReason?: 'user' | 'backpressure' | 'storage' | 'policy' | 'permission';
   permissions: {
     screenRecording: 'granted' | 'denied' | 'not_determined' | 'unknown';
     accessibility: 'granted' | 'denied' | 'not_determined' | 'unknown';
   };
   recentEventCount: number;
+  admission?: {
+    active: boolean;
+    reasons: string[];
+  };
+  policy?: {
+    hash: string;
+    version: string;
+  };
   lastError?: IpcError;
 };
 
@@ -74,10 +84,19 @@ export type CaptureEventSummaryDto = {
 
 export type SyncQueueSummaryDto = {
   pending: number;
+  processing: number;
   syncing: number;
   retrying: number;
   blocked: number;
   failed: number;
+  inputPerMinute: number;
+  completedPerMinute: number;
+  oldestActiveAgeSeconds?: number;
+  workerCapacity?: {
+    activeWorkers: number;
+    localMaxWorkers: number;
+    serverMaxConcurrentOcr: number;
+  };
   backpressure?: {
     active: boolean;
     reasons: string[];
@@ -169,6 +188,15 @@ export type DiagnosticsBundleDto = {
   containsImages: false;
   containsOcrText: false;
   redacted: true;
+};
+
+export type RetentionPreviewDto = {
+  cutoffAt: string;
+  eligibleAssets: number;
+  evaluatedAssets: number;
+  olderThanDays: number;
+  protectedAssets: number;
+  reclaimableBytes: number;
 };
 
 export type RendererSafeDtoResult =

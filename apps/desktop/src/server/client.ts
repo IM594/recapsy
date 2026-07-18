@@ -326,6 +326,7 @@ function toCapabilitiesResult(body: unknown): ServerCapabilitiesResult {
 
 function toCapturePoliciesResult(body: unknown): CapturePoliciesResult {
   const capturePolicy = readObject(body, 'capturePolicy');
+  const deliveryPolicy = readObject(body, 'deliveryPolicy');
   const policy = readObject(capturePolicy, 'policy');
   const storagePolicy = readObject(body, 'storagePolicy');
   const rules = readArray(policy, 'rules').map(readCapturePolicyRule);
@@ -353,6 +354,9 @@ function toCapturePoliciesResult(body: unknown): CapturePoliciesResult {
       version: readString(capturePolicy, 'version'),
     },
     deviceId: readOptionalString(body, 'deviceId') ?? null,
+    deliveryPolicy: {
+      maxConcurrentOcr: readPositiveInteger(deliveryPolicy, 'maxConcurrentOcr', 32),
+    },
     generatedAt: readString(body, 'generatedAt'),
     storagePolicy: {
       allowLongTermRemoteOriginal: readBoolean(storagePolicy, 'allowLongTermRemoteOriginal'),
@@ -758,6 +762,14 @@ function readNumber(value: unknown, key: string): number {
   }
 
   return entry;
+}
+
+function readPositiveInteger(value: unknown, key: string, max: number): number {
+  const number = readNumber(value, key);
+  if (!Number.isInteger(number) || number < 1 || number > max) {
+    throw invalidResponse();
+  }
+  return number;
 }
 
 function readBoolean(value: unknown, key: string): boolean {

@@ -30,11 +30,16 @@ export type {
 export type CaptureHelperControllerOptions = {
   client: CaptureHelperClient;
   deviceId: string;
+  clearTimeoutFn?(handle: unknown): void;
   eventHandler?: {
     handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   };
+  isCaptureAdmissionPaused?(): boolean;
   now(): string;
+  workspaceId?: string;
+  onPolicyPauseChange?(active: boolean): Promise<void>;
   policyActivation?: CapturePolicyActivation;
+  setTimeoutFn?(callback: () => void, delayMs: number): unknown;
   store: HelperStateStore;
 };
 
@@ -49,6 +54,10 @@ export function createCaptureHelperController(
   return new StoreBackedCaptureHelperController(options);
 }
 
+const DEFAULT_POLICY_REFRESH_FAILURE_MS = 60_000;
+const MIN_POLICY_REFRESH_MS = 1_000;
+const MAX_POLICY_REFRESH_MS = 60 * 60 * 1000;
+
 class StoreBackedCaptureHelperController implements CaptureHelperController {
   private status: CaptureHelperStatus = {
     state: 'idle',
@@ -56,6 +65,8 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
   private started = false;
   private stopped = false;
   private policyReady = false;
+  private captureStarted = false;
+  private policyRefreshTimer: unknown;
 
   constructor(private readonly options: CaptureHelperControllerOptions) {}
 
@@ -98,6 +109,8 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
 
     this.started = true;
     this.stopped = false;
+    this.captureStarted = false;
+    this.policyReady = false;
     await this.activatePolicyAndStart('runtime_started');
   }
 
@@ -108,6 +121,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
 
     await this.options.client.pauseCapture();
     this.status = {
+      ...policyStatus(this.status),
       state: 'paused',
       updatedAt: this.options.now(),
     };
@@ -126,6 +140,7 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
 
     await this.options.client.resumeCapture();
     this.status = {
+      ...policyStatus(this.status),
       state: 'running',
       updatedAt: this.options.now(),
     };
@@ -141,24 +156,87 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       if (!this.options.client.configureCapture) {
         throw new HelperPolicyActivationError('helper_unavailable');
       }
-      await this.options.client.configureCapture(configuration.policy);
+      const captureIdentity = this.options.workspaceId
+        ? {
+            deviceId: this.options.deviceId,
+            workspaceId: this.options.workspaceId,
+          }
+        : undefined;
+      await this.options.client.configureCapture(configuration.policy, captureIdentity);
       this.policyReady = true;
+      await this.options.onPolicyPauseChange?.(configuration.policy.paused);
+      if (configuration.policy.paused || this.options.isCaptureAdmissionPaused?.()) {
+        this.status = {
+          policyHash: configuration.policy.policyHash,
+          policyVersion: configuration.policy.version,
+          state: 'paused',
+          updatedAt: this.options.now(),
+        };
+        await this.persistHelperState();
+        this.schedulePolicyRefresh(configuration.refreshAfterMs);
+        return;
+      }
       this.status = {
+        policyHash: configuration.policy.policyHash,
+        policyVersion: configuration.policy.version,
         state: 'running',
         updatedAt: this.options.now(),
       };
       await this.persistHelperState();
-      await this.options.client.beginCapture(reason);
+      if (this.captureStarted) {
+        await this.options.client.resumeCapture();
+      } else {
+        await this.options.client.beginCapture(reason);
+        this.captureStarted = true;
+      }
+      this.schedulePolicyRefresh(configuration.refreshAfterMs);
     } catch (error) {
       this.policyReady = false;
       const safeError = policyActivationSafeError(error);
+      await this.options.onPolicyPauseChange?.(true);
+      if (this.captureStarted) {
+        await this.options.client.pauseCapture();
+      }
       this.status = {
         lastSafeError: safeError,
         state: 'paused',
         updatedAt: this.options.now(),
       };
       await this.persistHelperState();
+      this.schedulePolicyRefresh();
     }
+  }
+
+  private schedulePolicyRefresh(delayMs = DEFAULT_POLICY_REFRESH_FAILURE_MS): void {
+    if (!this.started || this.stopped) {
+      return;
+    }
+
+    this.clearPolicyRefreshTimer();
+    const setTimeoutFn =
+      this.options.setTimeoutFn ??
+      ((callback: () => void, timeoutMs: number) => setTimeout(callback, timeoutMs));
+    this.policyRefreshTimer = setTimeoutFn(() => {
+      this.policyRefreshTimer = undefined;
+      void this.refreshPolicy();
+    }, normalizePolicyRefreshDelay(delayMs));
+  }
+
+  private clearPolicyRefreshTimer(): void {
+    if (this.policyRefreshTimer === undefined) {
+      return;
+    }
+    const clearTimeoutFn =
+      this.options.clearTimeoutFn ?? ((handle: unknown) => clearTimeout(handle as NodeJS.Timeout));
+    clearTimeoutFn(this.policyRefreshTimer);
+    this.policyRefreshTimer = undefined;
+  }
+
+  private async refreshPolicy(): Promise<void> {
+    if (!this.started || this.stopped) {
+      return;
+    }
+    await this.activatePolicyAndStart('runtime_started');
   }
 
   async shutdown(): Promise<void> {
@@ -166,7 +244,9 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
       return;
     }
 
+    this.clearPolicyRefreshTimer();
     this.status = {
+      ...policyStatus(this.status),
       state: 'stopping',
       updatedAt: this.options.now(),
     };
@@ -174,7 +254,9 @@ class StoreBackedCaptureHelperController implements CaptureHelperController {
     await this.options.client.stop();
     this.stopped = true;
     this.started = false;
+    this.captureStarted = false;
     this.status = {
+      ...policyStatus(this.status),
       state: 'stopped',
       updatedAt: this.options.now(),
     };
@@ -293,6 +375,22 @@ function cloneStatus(status: CaptureHelperStatus): CaptureHelperStatus {
     ...status,
     ...(status.lastSafeError ? { lastSafeError: { ...status.lastSafeError } } : {}),
   };
+}
+
+function policyStatus(
+  status: CaptureHelperStatus,
+): Pick<CaptureHelperStatus, 'policyHash' | 'policyVersion'> {
+  return {
+    ...(status.policyHash ? { policyHash: status.policyHash } : {}),
+    ...(status.policyVersion ? { policyVersion: status.policyVersion } : {}),
+  };
+}
+
+function normalizePolicyRefreshDelay(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return DEFAULT_POLICY_REFRESH_FAILURE_MS;
+  }
+  return Math.min(MAX_POLICY_REFRESH_MS, Math.max(MIN_POLICY_REFRESH_MS, Math.floor(value)));
 }
 
 function envelopeFromInternalEvent(

@@ -68,7 +68,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 4,
+      version: 5,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -242,7 +242,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(4);
+    ).toBe(5);
 
     const rowById = (id: string) =>
       database
@@ -343,6 +343,7 @@ describe('SQLite operational store', () => {
       policySnapshotId: 'snapshot_primary',
       policyVersion: 'policy_primary',
       ttlSeconds: 120,
+      maxConcurrentOcr: 3,
       workspaceId: 'workspace_1',
     });
     await first.setSyncCursor({
@@ -389,6 +390,7 @@ describe('SQLite operational store', () => {
     });
     expect(await reopened.getPolicyCache('workspace_1', 'device_1', { now })).toMatchObject({
       expired: false,
+      maxConcurrentOcr: 3,
       policyVersion: 'policy_primary',
     });
     expect(await reopened.getSyncCursor('workspace_1', 'timeline')).toMatchObject({
@@ -1155,7 +1157,8 @@ describe('SQLite operational store', () => {
     const backpressure = evaluateOperationalStoreBackpressure(snapshot, {
       maxAssetBytes: 4096,
       maxQueuedJobs: 2,
-      maxRetryAttempts: 3,
+      resumeAssetBytes: 2048,
+      resumeQueuedJobs: 1,
     });
     const summary = await createSyncQueueSummary(store, 'workspace_1', { backpressure });
 

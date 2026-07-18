@@ -76,17 +76,19 @@ export function createSyncLoop(options: SyncLoopOptions): SyncLoop {
     options.clearTimeoutFn ?? ((handle: unknown) => clearTimeout(handle as NodeJS.Timeout));
 
   let running = false;
-  let timerHandle: unknown;
-  let inFlight: Promise<void> | undefined;
+  const timerHandles = new Set<unknown>();
+  const inFlight = new Set<Promise<void>>();
 
   function scheduleNext(delayMs: number): void {
     if (!running) {
       return;
     }
 
-    timerHandle = scheduleTimeout(() => {
-      inFlight = tick();
+    const handle = scheduleTimeout(() => {
+      timerHandles.delete(handle);
+      startTick();
     }, delayMs);
+    timerHandles.add(handle);
   }
 
   async function tick(): Promise<void> {
@@ -109,6 +111,18 @@ export function createSyncLoop(options: SyncLoopOptions): SyncLoop {
     }
   }
 
+  function startTick(): void {
+    if (!running) {
+      return;
+    }
+
+    const run = tick();
+    inFlight.add(run);
+    void run.finally(() => {
+      inFlight.delete(run);
+    });
+  }
+
   return {
     start() {
       if (running) {
@@ -116,17 +130,17 @@ export function createSyncLoop(options: SyncLoopOptions): SyncLoop {
       }
 
       running = true;
-      inFlight = tick();
+      startTick();
     },
     async stop() {
       running = false;
 
-      if (timerHandle !== undefined) {
-        cancelTimeout(timerHandle);
-        timerHandle = undefined;
+      for (const handle of timerHandles) {
+        cancelTimeout(handle);
       }
+      timerHandles.clear();
 
-      await inFlight;
+      await Promise.allSettled([...inFlight]);
     },
   };
 }

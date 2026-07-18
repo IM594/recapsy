@@ -5,6 +5,7 @@ import type {
   SafeOperationalError,
 } from '../storage/index';
 import type {
+  HelperCaptureIdentity,
   HelperCapturePolicy,
   HelperEnvelope,
   HelperToMainType,
@@ -24,6 +25,8 @@ export type CaptureHelperState =
 export type CaptureHelperStatus = {
   state: CaptureHelperState;
   lastSafeError?: SafeOperationalError;
+  policyHash?: string;
+  policyVersion?: string;
   updatedAt?: string;
 };
 
@@ -79,7 +82,7 @@ export type CaptureHelperStartOptions = {
 export type CaptureHelperClient = {
   start(options?: CaptureHelperStartOptions): Promise<void>;
   stop(): Promise<void>;
-  configureCapture?(policy: HelperCapturePolicy): Promise<void>;
+  configureCapture?(policy: HelperCapturePolicy, identity?: HelperCaptureIdentity): Promise<void>;
   beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void>;
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;

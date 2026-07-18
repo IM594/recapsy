@@ -195,6 +195,17 @@ describe('electron main runtime wiring', () => {
     app.triggerReady();
     await handle.ready;
 
+    await helperClient.emit({
+      correlationId: null,
+      messageId: 'perm_granted_for_pause',
+      payload: { accessibility: 'granted', observedAt: now, screenCapture: 'granted' },
+      protocolVersion: 'recapsy.capture-helper',
+      sentAt: now,
+      type: 'permission.status',
+    });
+    helperClient.pauseCalls = 0;
+    helperClient.resumeCalls = 0;
+
     const pauseResponse = await ipcMain.invoke('capture.pause', undefined);
     const resumeResponse = await ipcMain.invoke('capture.resume', undefined);
 
@@ -476,7 +487,7 @@ describe('electron main runtime wiring', () => {
     }
   });
 
-  it('starts the sync loop once ready and stops it as part of the graceful quit sequence', async () => {
+  it('starts the policy-bounded sync worker pool and stops every worker as part of graceful quit', async () => {
     const { app, ipcMain, helperClient, store, syncLoop } = harness();
     const handle = createElectronMainRuntime(
       baseOptions({ app, helperClient, ipcMain, store, syncLoop }),
@@ -484,13 +495,13 @@ describe('electron main runtime wiring', () => {
     app.triggerReady();
     await handle.ready;
 
-    expect(syncLoop.startCalls).toBe(1);
+    expect(syncLoop.startCalls).toBe(2);
     expect(syncLoop.stopCalls).toBe(0);
 
     app.emitBeforeQuit(new FakeQuitEvent());
     await flushMicrotasks();
 
-    expect(syncLoop.stopCalls).toBe(1);
+    expect(syncLoop.stopCalls).toBe(2);
   });
 
   it('keeps the tray shell available when the capture helper fails during startup', async () => {
@@ -560,7 +571,7 @@ describe('electron main runtime wiring', () => {
     await flushMicrotasks();
     expect(shell.disposeCalls).toBe(1);
     expect(helperClient.stopCalls).toBe(1);
-    expect(syncLoop.stopCalls).toBe(1);
+    expect(syncLoop.stopCalls).toBe(2);
   });
 
   it('continues runtime shutdown when synchronous shell disposal fails', async () => {
@@ -585,7 +596,7 @@ describe('electron main runtime wiring', () => {
 
     expect(failingShell.disposeCalls).toBe(1);
     expect(helperClient.stopCalls).toBe(1);
-    expect(syncLoop.stopCalls).toBe(1);
+    expect(syncLoop.stopCalls).toBe(2);
     expect(app.exitCalls).toEqual([0]);
   });
 
@@ -657,7 +668,10 @@ describe('electron main runtime wiring', () => {
     const { app, ipcMain, helperClient, store } = harness();
     let capturedOptions: SyncLoopOptions | undefined;
     const fakeLoop = new FakeSyncLoop();
-    const onSyncResult = (_result: SyncRunResult): void => {};
+    const observedResults: SyncRunResult[] = [];
+    const onSyncResult = (result: SyncRunResult): void => {
+      observedResults.push(result);
+    };
     const onSyncError = (_error: unknown): void => {};
 
     const handle = createElectronMainRuntime({
@@ -672,7 +686,8 @@ describe('electron main runtime wiring', () => {
     app.triggerReady();
     await handle.ready;
 
-    expect(capturedOptions?.onResult).toBe(onSyncResult);
+    capturedOptions?.onResult?.({ processed: 0, status: 'idle' });
+    expect(observedResults).toEqual([{ processed: 0, status: 'idle' }]);
     expect(capturedOptions?.onError).toBe(onSyncError);
   });
 });
@@ -784,6 +799,7 @@ function notImplementedServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCa
           ttlSeconds: 3600,
           version: 'policy_runtime',
         },
+        deliveryPolicy: { maxConcurrentOcr: 2 },
         deviceId: input.deviceId ?? null,
         generatedAt: now,
         storagePolicy: {

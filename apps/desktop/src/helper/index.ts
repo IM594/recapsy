@@ -22,6 +22,7 @@ export type {
   CaptureAssetPayload,
   CaptureAssetRole,
   CaptureResultPayload,
+  HelperCaptureIdentity,
   HelperCapturePolicy,
   HelperCapturePolicyAction,
   HelperCapturePolicyRule,

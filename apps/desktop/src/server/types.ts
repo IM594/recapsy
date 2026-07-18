@@ -253,6 +253,9 @@ export type CapturePoliciesResult = {
     policy: CaptureDefaultPolicy;
     rules: CapturePolicyRule[];
   };
+  deliveryPolicy: {
+    maxConcurrentOcr: number;
+  };
   storagePolicy: {
     authoritativeOriginalLocation: 'local_device';
     allowLongTermRemoteOriginal: boolean;
