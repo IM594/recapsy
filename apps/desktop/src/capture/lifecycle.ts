@@ -53,6 +53,7 @@ export function createCaptureLifecycle(options: CaptureLifecycleOptions): Captur
 
 class LifecycleController implements CaptureLifecycle {
   private captureHelperStatus: CaptureHelperStatus | undefined;
+  private desiredRunning = false;
   private lifecycleGeneration = 0;
   private menuBarActive = false;
   private readonly pauseCauses: Set<CapturePauseCause>;
@@ -85,12 +86,13 @@ class LifecycleController implements CaptureLifecycle {
   }
 
   start(): Promise<void> {
+    this.desiredRunning = true;
     if (this.startInFlight) {
       return this.startInFlight;
     }
 
-    const stop = this.stopInFlight ?? (this.status === 'stopping' ? this.stop() : undefined);
-    const run = stop ? stop.then(() => this.startInternal()) : this.startInternal();
+    const stop = this.stopInFlight ?? (this.status === 'stopping' ? this.beginStop() : undefined);
+    const run = stop ? stop.then(() => this.startIfDesired()) : this.startIfDesired();
     const tracked = run.finally(() => {
       if (this.startInFlight === tracked) {
         this.startInFlight = undefined;
@@ -98,6 +100,10 @@ class LifecycleController implements CaptureLifecycle {
     });
     this.startInFlight = tracked;
     return tracked;
+  }
+
+  private startIfDesired(): Promise<void> {
+    return this.desiredRunning ? this.startInternal() : Promise.resolve();
   }
 
   private async startInternal(): Promise<void> {
@@ -176,10 +182,15 @@ class LifecycleController implements CaptureLifecycle {
   }
 
   stop(): Promise<void> {
+    this.desiredRunning = false;
     if (this.stopInFlight) {
       return this.stopInFlight;
     }
 
+    return this.beginStop();
+  }
+
+  private beginStop(): Promise<void> {
     this.startInFlight = undefined;
     const run = this.stopInternal();
     const tracked = run.finally(() => {

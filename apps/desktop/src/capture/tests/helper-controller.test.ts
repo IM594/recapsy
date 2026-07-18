@@ -28,6 +28,55 @@ const backpressure: BackpressureConfig = {
 };
 
 describe('capture helper controller', () => {
+  it('lets a later stop cancel a restart queued behind the same in-flight stop', async () => {
+    const client = new PendingStopCaptureHelperClient();
+    const { controller, lifecycle } = createActiveLifecycleHarness(client);
+    await lifecycle.start();
+
+    const firstStop = lifecycle.stop();
+    while (!client.stopPending) await Promise.resolve();
+    const queuedRestart = lifecycle.start();
+    const latestStop = lifecycle.stop();
+
+    expect(latestStop).toBe(firstStop);
+    client.completeStop();
+    await Promise.all([firstStop, queuedRestart, latestStop]);
+
+    expect(client.calls).toEqual(['start', 'configureCapture', 'beginCapture', 'stop']);
+    expect(controller.getStatus()).toMatchObject({ state: 'stopped' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'stopped' });
+  });
+
+  it('executes one restart when start is the latest intent behind an in-flight stop', async () => {
+    const client = new PendingStopCaptureHelperClient();
+    const { controller, lifecycle } = createActiveLifecycleHarness(client);
+    await lifecycle.start();
+
+    const firstStop = lifecycle.stop();
+    while (!client.stopPending) await Promise.resolve();
+    const firstRestart = lifecycle.start();
+    const secondStop = lifecycle.stop();
+    const latestRestart = lifecycle.start();
+
+    expect(secondStop).toBe(firstStop);
+    expect(latestRestart).toBe(firstRestart);
+    client.completeStop();
+    await Promise.all([firstStop, firstRestart, secondStop, latestRestart]);
+
+    expect(client.calls).toEqual([
+      'start',
+      'configureCapture',
+      'beginCapture',
+      'stop',
+      'start',
+      'configureCapture',
+      'beginCapture',
+    ]);
+    expect(client.calls.filter((call) => call === 'start')).toHaveLength(2);
+    expect(controller.getStatus()).toMatchObject({ state: 'running' });
+    expect(lifecycle.getSnapshot()).toMatchObject({ status: 'running' });
+  });
+
   it('retries a failed helper stop before executing a requested restart', async () => {
     const client = new FailingStopCaptureHelperClient(1);
     const { controller, lifecycle } = createActiveLifecycleHarness(client);
