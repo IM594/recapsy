@@ -6,6 +6,36 @@ public enum FrameCorpusExpectedDecision: String, Codable, Equatable {
     case accept
 }
 
+public struct FrameCorpusWindowIdentityCandidate: Equatable {
+    public let windowID: UInt32
+    public let ownerProcessID: Int32
+    public let isOnScreen: Bool
+
+    public init(windowID: UInt32, ownerProcessID: Int32, isOnScreen: Bool) {
+        self.windowID = windowID
+        self.ownerProcessID = ownerProcessID
+        self.isOnScreen = isOnScreen
+    }
+}
+
+public enum FrameCorpusWindowIdentity {
+    public static func selectUniqueOwnedWindowID(
+        candidates: [FrameCorpusWindowIdentityCandidate],
+        targetWindowID: UInt32,
+        processID: Int32
+    ) -> UInt32? {
+        let matches = candidates.filter { candidate in
+            candidate.windowID == targetWindowID &&
+                candidate.ownerProcessID == processID &&
+                candidate.isOnScreen
+        }
+        guard matches.count == 1 else {
+            return nil
+        }
+        return matches[0].windowID
+    }
+}
+
 public enum FrameCorpusScene: String, Equatable {
     case horizontalGradient
     case verticalGradient
@@ -35,25 +65,25 @@ public struct FrameCorpusFixtureSpecification: Equatable {
         FrameCorpusFixtureSpecification(
             file: "low-information-horizontal-gradient.png",
             expected: .lowInformation,
-            purpose: "Live AppKit rendering of a smooth horizontal surface",
+            purpose: "ScreenCaptureKit capture of a smooth horizontal surface",
             scene: .horizontalGradient
         ),
         FrameCorpusFixtureSpecification(
             file: "low-information-vertical-gradient.png",
             expected: .lowInformation,
-            purpose: "Live AppKit rendering of a smooth vertical surface",
+            purpose: "ScreenCaptureKit capture of a smooth vertical surface",
             scene: .verticalGradient
         ),
         FrameCorpusFixtureSpecification(
             file: "accepted-fictional-notes.png",
             expected: .accept,
-            purpose: "Live AppKit rendering of fictional note content",
+            purpose: "ScreenCaptureKit capture of fictional note content",
             scene: .fictionalNotes
         ),
         FrameCorpusFixtureSpecification(
             file: "accepted-fictional-tasks.png",
             expected: .accept,
-            purpose: "Live AppKit rendering of fictional task content",
+            purpose: "ScreenCaptureKit capture of fictional task content",
             scene: .fictionalTasks
         ),
     ]
@@ -150,6 +180,7 @@ public enum FrameCorpusToolingError: Error, Equatable {
     case checksumMismatch(String)
     case destinationAlreadyExists(String)
     case duplicateFixtureFile(String)
+    case duplicateFixturePixels
     case emptyFixtureData(String)
     case invalidFixtureFile(String)
     case invalidPixelDimensions(String)
@@ -205,15 +236,18 @@ public enum FrameCorpusManifestFactory {
                 pixelHeight: fixture.pixelHeight
             )
         }
+        guard Set(manifestFixtures.map(\.sha256)).count == manifestFixtures.count else {
+            throw FrameCorpusToolingError.duplicateFixturePixels
+        }
 
         return FrameCorpusManifest(
             version: 1,
             provenance: FrameCorpusManifest.Provenance(
                 kind: "real-pixel-screenshot",
                 containsRealUserData: false,
-                captureMethod: "appkit-content-view-cache-display",
-                generator: "FrameCorpusCapture/1",
-                sourceEnvironment: "purpose-built-test-window",
+                captureMethod: "screen-capture-kit-desktop-independent-window",
+                generator: "FrameCorpusCapture/2",
+                sourceEnvironment: "purpose-built-test-window-via-windowserver",
                 privacyReview: "pending-manual-review"
             ),
             fixtures: manifestFixtures
@@ -247,9 +281,11 @@ public enum FrameCorpusReview {
         guard manifest.version == 1,
               manifest.provenance.kind == "real-pixel-screenshot",
               !manifest.provenance.containsRealUserData,
-              manifest.provenance.captureMethod == "appkit-content-view-cache-display",
-              manifest.provenance.generator == "FrameCorpusCapture/1",
-              manifest.provenance.sourceEnvironment == "purpose-built-test-window"
+              manifest.provenance.captureMethod ==
+              "screen-capture-kit-desktop-independent-window",
+              manifest.provenance.generator == "FrameCorpusCapture/2",
+              manifest.provenance.sourceEnvironment ==
+              "purpose-built-test-window-via-windowserver"
         else {
             throw FrameCorpusToolingError.invalidProvenance
         }
@@ -262,7 +298,8 @@ public enum FrameCorpusReview {
             throw FrameCorpusToolingError.unexpectedFixtureData
         }
         guard manifest.fixtures.count == FrameCorpusFixtureSpecification.all.count,
-              expectedFiles == Set(FrameCorpusFixtureSpecification.all.map(\.file))
+              expectedFiles == Set(FrameCorpusFixtureSpecification.all.map(\.file)),
+              Set(manifest.fixtures.map(\.sha256)).count == manifest.fixtures.count
         else {
             throw FrameCorpusToolingError.fixtureSpecificationMismatch
         }

@@ -3,6 +3,7 @@ import CaptureCore
 import Darwin
 import Foundation
 import FrameCorpusTooling
+import ScreenCaptureKit
 
 private enum CommandError: Error, CustomStringConvertible {
     case captureDecisionMismatch(String, String)
@@ -11,6 +12,7 @@ private enum CommandError: Error, CustomStringConvertible {
     case imageCreationFailed(String)
     case invalidArguments
     case outputMustBeAbsolute
+    case ownedWindowUnavailable
 
     var description: String {
         switch self {
@@ -27,6 +29,8 @@ private enum CommandError: Error, CustomStringConvertible {
                 "`approve --corpus PATH --confirm-no-user-data`."
         case .outputMustBeAbsolute:
             return "Corpus path must be absolute."
+        case .ownedWindowUnavailable:
+            return "The purpose-built window does not have one verified ScreenCaptureKit identity."
         }
     }
 }
@@ -65,11 +69,11 @@ private struct RenderedFixture {
 @main
 private struct FrameCorpusCaptureCommand {
     @MainActor
-    static func main() {
+    static func main() async {
         do {
             switch try Command.parse(Array(CommandLine.arguments.dropFirst())) {
             case let .capture(outputDirectory):
-                try capture(outputDirectory: outputDirectory)
+                try await capture(outputDirectory: outputDirectory)
             case let .approve(corpusDirectory):
                 try approve(corpusDirectory: corpusDirectory)
             }
@@ -80,7 +84,7 @@ private struct FrameCorpusCaptureCommand {
     }
 
     @MainActor
-    private static func capture(outputDirectory: URL) throws {
+    private static func capture(outputDirectory: URL) async throws {
         try FrameCorpusOutputGuard.requireOutsideRepository(
             outputDirectory,
             repositoryDirectory: repositoryDirectory
@@ -101,26 +105,26 @@ private struct FrameCorpusCaptureCommand {
             defer: false
         )
         window.isReleasedWhenClosed = false
-        window.title = "Recapsy Purpose-Built Frame Corpus Window"
+        window.hasShadow = false
         window.contentView = view
         window.makeKeyAndOrderFront(nil)
+        application.activate(ignoringOtherApps: true)
         drainRunLoop()
         defer { window.close() }
 
-        let rendered = try FrameCorpusFixtureSpecification.all.map { specification in
+        var rendered: [RenderedFixture] = []
+        for specification in FrameCorpusFixtureSpecification.all {
             view.scene = specification.scene
             view.needsDisplay = true
             view.displayIfNeeded()
             drainRunLoop()
 
-            guard view.window === window, window.contentView === view,
-                  let representation = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-            else {
+            guard view.window === window, window.contentView === view else {
                 throw CommandError.imageCreationFailed(specification.file)
             }
-            view.cacheDisplay(in: view.bounds, to: representation)
-            guard let data = representation.representation(using: .png, properties: [:]),
-                  let image = representation.cgImage
+            let image = try await captureOwnedWindow(window)
+            let representation = NSBitmapImageRep(cgImage: image)
+            guard let data = representation.representation(using: .png, properties: [:])
             else {
                 throw CommandError.imageCreationFailed(specification.file)
             }
@@ -129,14 +133,14 @@ private struct FrameCorpusCaptureCommand {
                 expected: specification.expected,
                 file: specification.file
             )
-            return RenderedFixture(input: FrameCorpusFixtureInput(
+            rendered.append(RenderedFixture(input: FrameCorpusFixtureInput(
                 file: specification.file,
                 data: data,
                 pixelWidth: image.width,
                 pixelHeight: image.height,
                 expected: specification.expected,
                 purpose: specification.purpose
-            ))
+            )))
         }
 
         let pendingManifest = try FrameCorpusManifestFactory.makePending(
@@ -157,6 +161,55 @@ private struct FrameCorpusCaptureCommand {
             to: outputDirectory.appendingPathComponent("manifest.pending-review.json")
         )
         print("Captured pending-review corpus at \(outputDirectory.path)")
+    }
+
+    @MainActor
+    private static func captureOwnedWindow(_ applicationWindow: NSWindow) async throws -> CGImage {
+        let processID = getpid()
+        guard applicationWindow.windowNumber > 0 else {
+            throw CommandError.ownedWindowUnavailable
+        }
+        let targetWindowID = CGWindowID(applicationWindow.windowNumber)
+        let content = try await SCShareableContent.excludingDesktopWindows(
+            true,
+            onScreenWindowsOnly: true
+        )
+        guard FrameCorpusWindowIdentity.selectUniqueOwnedWindowID(
+            candidates: content.windows.map { candidate in
+                FrameCorpusWindowIdentityCandidate(
+                    windowID: candidate.windowID,
+                    ownerProcessID: candidate.owningApplication?.processID ?? -1,
+                    isOnScreen: candidate.isOnScreen
+                )
+            },
+            targetWindowID: targetWindowID,
+            processID: processID
+        ) == targetWindowID else {
+            throw CommandError.ownedWindowUnavailable
+        }
+        let matchingWindows = content.windows.filter { candidate in
+            candidate.windowID == targetWindowID &&
+                candidate.owningApplication?.processID == processID &&
+                candidate.isOnScreen
+        }
+        guard matchingWindows.count == 1, let window = matchingWindows.first else {
+            throw CommandError.ownedWindowUnavailable
+        }
+
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let configuration = SCStreamConfiguration()
+        configuration.width = Int(filter.contentRect.width * CGFloat(filter.pointPixelScale))
+        configuration.height = Int(filter.contentRect.height * CGFloat(filter.pointPixelScale))
+        configuration.showsCursor = false
+        configuration.captureResolution = .best
+        configuration.ignoreShadowsSingleWindow = true
+        guard configuration.width > 0, configuration.height > 0 else {
+            throw CommandError.ownedWindowUnavailable
+        }
+        return try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: configuration
+        )
     }
 
     private static func approve(corpusDirectory: URL) throws {

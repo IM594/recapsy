@@ -12,7 +12,7 @@ final class FrameCorpusToolingTests: XCTestCase {
         XCTAssertTrue(specifications.allSatisfy { $0.file.hasSuffix(".png") })
     }
 
-    func testPendingManifestUsesHonestRendererProvenanceAndChecksums() throws {
+    func testPendingManifestUsesHonestWindowServerProvenanceAndChecksums() throws {
         let manifest = try FrameCorpusManifestFactory.makePending(
             fixtures: fixtureInputs()
         )
@@ -20,9 +20,15 @@ final class FrameCorpusToolingTests: XCTestCase {
         XCTAssertEqual(manifest.version, 1)
         XCTAssertEqual(manifest.provenance.kind, "real-pixel-screenshot")
         XCTAssertFalse(manifest.provenance.containsRealUserData)
-        XCTAssertEqual(manifest.provenance.captureMethod, "appkit-content-view-cache-display")
-        XCTAssertEqual(manifest.provenance.generator, "FrameCorpusCapture/1")
-        XCTAssertEqual(manifest.provenance.sourceEnvironment, "purpose-built-test-window")
+        XCTAssertEqual(
+            manifest.provenance.captureMethod,
+            "screen-capture-kit-desktop-independent-window"
+        )
+        XCTAssertEqual(manifest.provenance.generator, "FrameCorpusCapture/2")
+        XCTAssertEqual(
+            manifest.provenance.sourceEnvironment,
+            "purpose-built-test-window-via-windowserver"
+        )
         XCTAssertEqual(manifest.provenance.privacyReview, "pending-manual-review")
         XCTAssertEqual(
             manifest.fixtures.map(\.sha256),
@@ -47,6 +53,26 @@ final class FrameCorpusToolingTests: XCTestCase {
             try FrameCorpusManifestFactory.makePending(fixtures: [fixtureInputs()[0]])
         ) { error in
             XCTAssertEqual(error as? FrameCorpusToolingError, .missingDecisionCoverage)
+        }
+    }
+
+    func testPendingManifestRejectsDuplicateWindowServerFrames() {
+        let inputs = fixtureInputs()
+        let duplicated = inputs.enumerated().map { index, input in
+            FrameCorpusFixtureInput(
+                file: input.file,
+                data: index == 1 ? inputs[0].data : input.data,
+                pixelWidth: input.pixelWidth,
+                pixelHeight: input.pixelHeight,
+                expected: input.expected,
+                purpose: input.purpose
+            )
+        }
+
+        XCTAssertThrowsError(
+            try FrameCorpusManifestFactory.makePending(fixtures: duplicated)
+        ) { error in
+            XCTAssertEqual(error as? FrameCorpusToolingError, .duplicateFixturePixels)
         }
     }
 
@@ -92,26 +118,98 @@ final class FrameCorpusToolingTests: XCTestCase {
         )
     }
 
-    func testCaptureSourceCannotEnumerateOrReadOtherWindows() throws {
+    func testCaptureSourceUsesOnlyTheUniqueOwnedScreenCaptureKitWindow() throws {
         let sourceURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .appendingPathComponent("FixtureTools/FrameCorpusCapture/main.swift")
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
+        for required in [
+            "import ScreenCaptureKit",
+            "SCShareableContent.excludingDesktopWindows",
+            "SCContentFilter(desktopIndependentWindow:",
+            "SCScreenshotManager.captureImage",
+            "FrameCorpusWindowIdentity.selectUniqueOwnedWindowID",
+            "owningApplication?.processID == processID",
+            "candidate.windowID == targetWindowID",
+            "matchingWindows.count == 1",
+        ] {
+            XCTAssertTrue(source.contains(required), required)
+        }
         for forbidden in [
-            "ScreenCaptureKit",
-            "SCScreenshotManager",
-            "SCShareableContent",
             "CGWindowList",
             "CGDisplayCreateImage",
             "NSWorkspace",
             "NSApplication.shared.windows",
+            "SCContentFilter(display:",
+            "excludingWindows:",
+            ".title",
+            ".applicationName",
+            ".bundleIdentifier",
+            "bitmapImageRepForCachingDisplay",
+            "cacheDisplay(in:",
         ] {
             XCTAssertFalse(source.contains(forbidden), forbidden)
         }
-        XCTAssertTrue(source.contains("bitmapImageRepForCachingDisplay"))
-        XCTAssertTrue(source.contains("cacheDisplay(in: view.bounds, to: representation)"))
+    }
+
+    func testWindowIdentityRequiresOneOnScreenWindowOwnedByThisProcess() {
+        let targetWindowID: UInt32 = 42
+        let processID: Int32 = 7
+
+        XCTAssertEqual(
+            FrameCorpusWindowIdentity.selectUniqueOwnedWindowID(
+                candidates: [
+                    FrameCorpusWindowIdentityCandidate(
+                        windowID: targetWindowID,
+                        ownerProcessID: processID,
+                        isOnScreen: true
+                    ),
+                    FrameCorpusWindowIdentityCandidate(
+                        windowID: 99,
+                        ownerProcessID: processID,
+                        isOnScreen: true
+                    ),
+                ],
+                targetWindowID: targetWindowID,
+                processID: processID
+            ),
+            targetWindowID
+        )
+
+        for candidates in [
+            [FrameCorpusWindowIdentityCandidate(
+                windowID: targetWindowID,
+                ownerProcessID: 8,
+                isOnScreen: true
+            )],
+            [FrameCorpusWindowIdentityCandidate(
+                windowID: targetWindowID,
+                ownerProcessID: processID,
+                isOnScreen: false
+            )],
+            [
+                FrameCorpusWindowIdentityCandidate(
+                    windowID: targetWindowID,
+                    ownerProcessID: processID,
+                    isOnScreen: true
+                ),
+                FrameCorpusWindowIdentityCandidate(
+                    windowID: targetWindowID,
+                    ownerProcessID: processID,
+                    isOnScreen: true
+                ),
+            ],
+        ] {
+            XCTAssertNil(
+                FrameCorpusWindowIdentity.selectUniqueOwnedWindowID(
+                    candidates: candidates,
+                    targetWindowID: targetWindowID,
+                    processID: processID
+                )
+            )
+        }
     }
 
     func testApprovalChangesOnlyThePrivacyReviewState() throws {

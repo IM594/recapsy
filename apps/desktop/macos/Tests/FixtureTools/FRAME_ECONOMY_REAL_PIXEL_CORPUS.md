@@ -2,11 +2,11 @@
 
 ## 适用边界
 
-`FrameCorpusCapture` 用一个 purpose-built、borderless `NSWindow` 渲染四个固定场景，并只对该窗口的 `contentView` 调用 AppKit `bitmapImageRepForCachingDisplay` / `cacheDisplay`。产物是实际 AppKit 字体、颜色和视图渲染管线生成的 PNG 像素，不是旧 synthetic canvas generator 直接填充的像素数组。
+`FrameCorpusCapture` 用一个 purpose-built、borderless `NSWindow` 渲染四个固定场景，再通过 ScreenCaptureKit 和 WindowServer 捕获该窗口。产物覆盖真实窗口合成、颜色和缩放路径，不是 AppKit `cacheDisplay`，也不是旧 synthetic canvas generator 直接填充的像素数组。
 
-工具不导入或调用 ScreenCaptureKit、`CGWindowList*`、`CGDisplayCreateImage`、`NSWorkspace`、`NSApplication.shared.windows`，也不读取窗口标题、剪贴板、文件、环境变量、用户名、时间或其他应用状态。它没有枚举、选择或截取其他窗口的代码路径。四个场景的全部文字均硬编码为虚构的示例内容。
+ScreenCaptureKit 会返回可共享窗口元数据；工具只比较候选的 `windowID` 和 owner PID，要求它们分别等于测试 `NSWindow.windowNumber` 和 `getpid()`，并且匹配结果必须恰好为一个。像素捕获只使用 `SCContentFilter(desktopIndependentWindow:)` 指向该唯一窗口。工具不读取窗口标题、应用名、bundle ID、剪贴板、文件、环境变量、用户名、时间或其他应用状态，也没有 display capture、其他窗口 fallback、`CGWindowList*`、`CGDisplayCreateImage`、`NSWorkspace` 或 `NSApplication.shared.windows` 路径。
 
-这个边界必须诚实保留：产物验证 AppKit renderer pixels 和 Frame Economy 的 CGImage 采样行为，不验证 WindowServer 或 ScreenCaptureKit 的真实桌面捕获行为。如果后续完成标准要求后两者，不得把本语料改名冒充；应另立经隐私审查的受控捕获任务。
+四个场景的全部文字均硬编码为虚构示例。语料证明 purpose-built window 经 WindowServer / ScreenCaptureKit 到 `CGImage` 和 Frame Economy 采样器的行为，但不捕获用户真实桌面内容；完成阈值校准不需要、也不应收集用户数据。
 
 ## 固定产物
 
@@ -20,7 +20,9 @@ accepted-fictional-tasks.png
 manifest.pending-review.json
 ```
 
-pending manifest 固定声明 `kind=real-pixel-screenshot`、`containsRealUserData=false`、`captureMethod=appkit-content-view-cache-display`、`generator=FrameCorpusCapture/1`、`sourceEnvironment=purpose-built-test-window` 和 `privacyReview=pending-manual-review`，并记录每张 PNG 的 SHA-256、像素尺寸、预期决策和用途。
+pending manifest 固定声明 `kind=real-pixel-screenshot`、`containsRealUserData=false`、`captureMethod=screen-capture-kit-desktop-independent-window`、`generator=FrameCorpusCapture/2`、`sourceEnvironment=purpose-built-test-window-via-windowserver` 和 `privacyReview=pending-manual-review`，并记录每张 PNG 的 SHA-256、像素尺寸、预期决策和用途。
+
+capture 和 approve 都要求固定四张 PNG 的 SHA-256 互不相同。这个约束与每个场景的预期 Frame Economy 决策一起阻止 WindowServer 仍返回上一场景时把重复帧误标成新 fixture；人工审查仍必须确认每张图片对应 manifest 声明的场景。
 
 人工批准前不会生成 `manifest.json`，因此 `CaptureFrameEconomyRealPixelCalibrationTests` 不会把 pending corpus 当成已审查证据。
 
@@ -40,7 +42,7 @@ swift run --package-path apps/desktop/macos FrameCorpusCapture \
   capture --output "$CORPUS_DIR"
 ```
 
-capture 会短暂显示唯一的 purpose-built window。它不请求屏幕录制权限，因为像素来自该窗口自己的 AppKit content view。
+capture 会激活并短暂显示唯一的 purpose-built window。工具不调用系统授权请求 API；负责运行该工具的进程必须已经拥有屏幕录制权限，否则 ScreenCaptureKit 调用会失败，不会回退到其他捕获方式。
 
 随后人工检查目录和全部像素：
 

@@ -1,18 +1,20 @@
 import CaptureCore
 import CryptoKit
 import Foundation
+import FrameCorpusTooling
 import ImageIO
 import XCTest
 
-/// Calibration against reviewed AppKit renderer pixels captured from the
-/// purpose-built test window. Only the approved manifest and pixels are
-/// bundled; pending-review artifacts remain outside the repository.
+/// Calibration against reviewed WindowServer pixels captured through
+/// ScreenCaptureKit from the purpose-built test window. Only the approved
+/// manifest and pixels are bundled; pending-review artifacts remain external.
 final class CaptureFrameEconomyRealPixelCalibrationTests: XCTestCase {
     private struct Manifest: Decodable {
         struct Provenance: Decodable {
             let kind: String
             let containsRealUserData: Bool
             let captureMethod: String
+            let generator: String
             let sourceEnvironment: String
             let privacyReview: String
         }
@@ -21,6 +23,9 @@ final class CaptureFrameEconomyRealPixelCalibrationTests: XCTestCase {
             let file: String
             let sha256: String
             let expected: String
+            let purpose: String
+            let pixelWidth: Int
+            let pixelHeight: Int
         }
 
         let version: Int
@@ -52,14 +57,22 @@ final class CaptureFrameEconomyRealPixelCalibrationTests: XCTestCase {
         XCTAssertEqual(manifest.version, 1)
         XCTAssertEqual(manifest.provenance.kind, "real-pixel-screenshot")
         XCTAssertFalse(manifest.provenance.containsRealUserData)
-        XCTAssertFalse(manifest.provenance.captureMethod.isEmpty)
+        XCTAssertEqual(
+            manifest.provenance.captureMethod,
+            "screen-capture-kit-desktop-independent-window"
+        )
+        XCTAssertEqual(manifest.provenance.generator, "FrameCorpusCapture/2")
         XCTAssertEqual(
             manifest.provenance.sourceEnvironment,
-            "purpose-built-test-window"
+            "purpose-built-test-window-via-windowserver"
         )
         XCTAssertEqual(manifest.provenance.privacyReview, "approved-no-user-data")
-        XCTAssertTrue(manifest.fixtures.contains { $0.expected == "low-information" })
-        XCTAssertTrue(manifest.fixtures.contains { $0.expected == "accept" })
+        let specificationByFile = Dictionary(
+            uniqueKeysWithValues: FrameCorpusFixtureSpecification.all.map { ($0.file, $0) }
+        )
+        XCTAssertEqual(manifest.fixtures.count, specificationByFile.count)
+        XCTAssertEqual(Set(manifest.fixtures.map(\.file)), Set(specificationByFile.keys))
+        XCTAssertEqual(Set(manifest.fixtures.map(\.sha256)).count, manifest.fixtures.count)
 
         for fixture in manifest.fixtures {
             XCTAssertEqual(
@@ -79,6 +92,11 @@ final class CaptureFrameEconomyRealPixelCalibrationTests: XCTestCase {
             else {
                 throw CalibrationError.undecodable(fixture.file)
             }
+            let specification = try XCTUnwrap(specificationByFile[fixture.file])
+            XCTAssertEqual(fixture.expected, specification.expected.rawValue, fixture.file)
+            XCTAssertEqual(fixture.purpose, specification.purpose, fixture.file)
+            XCTAssertEqual(image.width, fixture.pixelWidth, fixture.file)
+            XCTAssertEqual(image.height, fixture.pixelHeight, fixture.file)
             guard let luminance = CaptureFrameSampler.sampledLuminance(from: image) else {
                 throw CalibrationError.samplingFailed(fixture.file)
             }
