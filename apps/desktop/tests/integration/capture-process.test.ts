@@ -45,6 +45,10 @@ describe('capture helper subprocess (real cross-process transport)', () => {
     expect(captureResult.payload.captureId).toMatch(/^dev_capture_/);
     expect(captureResult.payload.manifest.role).toBe('manifest');
     expect(captureResult.payload.assets.length).toBeGreaterThan(0);
+    expect(captureResult.payload.context.app).toEqual({
+      bundleId: 'one.recapsy.desktop.dev-helper',
+      name: 'Recapsy Dev Helper',
+    });
     expect(captureResult.payload.context.policy.decision).toBe('allow');
 
     await client.stop();

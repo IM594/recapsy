@@ -7,6 +7,7 @@ describe('mock helper controller', () => {
 
     await helper.start();
     const result = helper.simulateCapture({
+      application: { bundleId: 'com.apple.Safari', name: 'Safari' },
       captureId: 'cap_ack',
       assetRef: 'asset:cap_ack:image',
       manifestRef: 'manifest:cap_ack',
@@ -38,6 +39,7 @@ describe('mock helper controller', () => {
 
     await helper.pauseCapture();
     const pausedCapture = helper.simulateCapture({
+      application: { bundleId: 'com.apple.Safari', name: 'Safari' },
       captureId: 'cap_paused',
       assetRef: 'asset:cap_paused:image',
       manifestRef: 'manifest:cap_paused',
@@ -61,6 +63,7 @@ describe('mock helper controller', () => {
 
     await helper.resumeCapture();
     const resumedCapture = helper.simulateCapture({
+      application: { bundleId: 'com.apple.Safari', name: 'Safari' },
       captureId: 'cap_resumed',
       assetRef: 'asset:cap_resumed:image',
       manifestRef: 'manifest:cap_resumed',
@@ -125,6 +128,7 @@ describe('mock helper controller', () => {
     await helper.start();
 
     const result = helper.simulateCapture({
+      application: { bundleId: 'com.apple.Notes', name: 'Notes' },
       captureId: 'cap_safe',
       assetRef: '/Users/alice/Pictures/private.png',
       manifestRef: '/private/tmp/private-manifest.json',
@@ -133,8 +137,6 @@ describe('mock helper controller', () => {
       sizeBytes: 8192,
       observedAt: '2026-07-06T00:00:00.000Z',
       unsafeContext: {
-        appName: 'Notes',
-        bundleId: 'com.apple.Notes',
         windowTitle: 'Planning',
         url: 'https://example.test/private?token=query-secret',
         documentPath: '/Users/alice/Documents/plan.md',

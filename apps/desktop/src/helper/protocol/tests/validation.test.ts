@@ -92,6 +92,31 @@ describe('helper protocol direction validation', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('rejects capture results without a complete final application identity', () => {
+    const payload = captureResultPayload();
+
+    for (const app of [
+      undefined,
+      { name: 'Safari' },
+      { bundleId: 'com.apple.Safari' },
+      { bundleId: 'com.apple.Safari', name: ' ' },
+      { bundleId: 'com/apple/Safari', name: 'Safari' },
+    ]) {
+      const result = validateHelperToMainEnvelope({
+        ...baseEnvelope('capture.result'),
+        payload: {
+          ...payload,
+          context: {
+            ...payload.context,
+            app,
+          },
+        },
+      });
+
+      expect(result).toMatchObject({ error: { code: 'schema_mismatch' }, ok: false });
+    }
+  });
+
   it('accepts low_information as a capture skip reason and rejects near-miss values', () => {
     expect(
       validateHelperToMainEnvelope(
@@ -198,6 +223,7 @@ function captureResultPayload() {
     ],
     captureId: 'cap_1',
     context: {
+      app: { bundleId: 'com.apple.Safari', name: 'Safari' },
       observedAt: sentAt,
       policy: { decision: 'allow', version: 'policy-v1' },
     },

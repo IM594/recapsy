@@ -155,6 +155,10 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
 
   private async handleCaptureResult(envelope: HelperEnvelope<'capture.result'>): Promise<void> {
     const captureId = envelope.payload.captureId;
+    if (!hasFinalApplicationIdentity(envelope.payload.context.app)) {
+      await this.sendNack(envelope, 'policy_denied', 'Capture source identity is unavailable.');
+      return;
+    }
     const backpressure = await evaluateCaptureBackpressure(this.options);
 
     if (backpressure.action === 'pause') {
@@ -401,6 +405,18 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
       type,
     } as HelperEnvelope<TType>);
   }
+}
+
+function hasFinalApplicationIdentity(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const app = value as { bundleId?: unknown; name?: unknown };
+  return (
+    typeof app.bundleId === 'string' &&
+    app.bundleId.length <= 256 &&
+    /^[A-Za-z0-9.-]+$/.test(app.bundleId) &&
+    typeof app.name === 'string' &&
+    app.name.trim().length > 0
+  );
 }
 
 async function evaluateCaptureBackpressure(options: CaptureHelperEventHandlerOptions) {

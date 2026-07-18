@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { AxAllowlistResponseSchema } from '../../index.js';
+import { AxAllowlistResponseSchema, CapturePolicyRuleSchema } from '../../index.js';
 
 const now = '2026-07-06T00:00:00.000Z';
 const workspaceId = '22222222-2222-4222-8222-222222222222';
@@ -29,5 +29,22 @@ describe('Ax allowlist contracts', () => {
         allowedApps: ['com.apple.Safari'],
       }).success,
     ).toBe(false);
+  });
+});
+
+describe('capture policy text', () => {
+  it('rejects NUL characters used to construct ambiguous canonical sort keys', () => {
+    const rule = {
+      action: 'block_capture' as const,
+      enabled: true,
+      id: 'rule\u0000one',
+      kind: 'bundle_id' as const,
+      pattern: 'com.example.safe',
+      scope: 'workspace_default' as const,
+    };
+    const patternRule = { ...rule, id: 'rule-one', pattern: 'com.example\u0000safe' };
+
+    expect(CapturePolicyRuleSchema.safeParse(rule).success).toBe(false);
+    expect(CapturePolicyRuleSchema.safeParse(patternRule).success).toBe(false);
   });
 });

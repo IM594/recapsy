@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import type { CaptureDefaultPolicy, CapturePolicyRule } from '@recapsy/contracts';
 import type { HelperCapturePolicy, HelperCapturePolicyRule } from '../helper/index';
@@ -44,7 +45,10 @@ type CapturePolicyCacheStore = {
     deviceId: string,
     options: { now: string },
   ): Promise<PolicyCacheRead | null>;
-  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry>;
+  setPolicyCache(
+    entry: PolicyCacheEntry,
+    shouldCommit?: () => boolean,
+  ): Promise<PolicyCacheEntry | null>;
   listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]>;
 };
 
@@ -71,6 +75,7 @@ export class CapturePolicyActivationError extends Error {
   constructor(
     readonly code:
       | 'policy_invalid_scope'
+      | 'policy_invalid_fields'
       | 'policy_unavailable'
       | 'policy_requires_unavailable_context'
       | 'policy_stale',
@@ -78,11 +83,13 @@ export class CapturePolicyActivationError extends Error {
     super(
       code === 'policy_invalid_scope'
         ? 'Capture policy contains a rule with an invalid ownership scope.'
-        : code === 'policy_requires_unavailable_context'
-          ? 'Capture policy requires unavailable local context.'
-          : code === 'policy_stale'
-            ? 'Capture policy refresh was superseded by a newer snapshot.'
-            : 'Capture policy is unavailable.',
+        : code === 'policy_invalid_fields'
+          ? 'Capture policy contains unsupported control characters.'
+          : code === 'policy_requires_unavailable_context'
+            ? 'Capture policy requires unavailable local context.'
+            : code === 'policy_stale'
+              ? 'Capture policy refresh was superseded by a newer snapshot.'
+              : 'Capture policy is unavailable.',
     );
   }
 }
@@ -103,7 +110,7 @@ export function createCapturePolicyActivation(
       }
 
       try {
-        await options.store.setPolicyCache(entry);
+        await options.store.setPolicyCache(entry, isCurrent);
       } catch {
         // A current, validated server policy is safer than a stale cache. The
         // cache is only an offline fallback, never a prerequisite for applying
@@ -162,6 +169,13 @@ export function compileCapturePolicy(input: {
   policy: CaptureDefaultPolicy;
   version: string;
 }): CompiledCapturePolicy {
+  if (
+    [...input.policy.rules, ...(input.localRules ?? [])].some(
+      (rule) => rule.id.includes('\u0000') || rule.pattern.includes('\u0000'),
+    )
+  ) {
+    throw new CapturePolicyActivationError('policy_invalid_fields');
+  }
   const rules: CompiledCapturePolicyRule[] = [
     ...input.policy.rules.map((rule) => toCompiledRule(rule)),
     ...(input.localRules ?? []).map((rule) => toCompiledRule(rule)),
@@ -173,13 +187,23 @@ export function compileCapturePolicy(input: {
     rules,
     version: input.version,
   };
+  const canonicalJson = canonicalCapturePolicyJson(canonical);
 
   return {
     ...canonical,
-    policyHash: `sha256:${createHash('sha256')
-      .update(JSON.stringify(canonical), 'utf8')
-      .digest('hex')}`,
+    policyHash: `sha256:${createHash('sha256').update(canonicalJson, 'utf8').digest('hex')}`,
   };
+}
+
+export function canonicalCapturePolicyJson(
+  policy: Pick<HelperCapturePolicy, 'defaultAction' | 'paused' | 'rules' | 'version'>,
+): string {
+  return JSON.stringify({
+    defaultAction: policy.defaultAction,
+    paused: policy.paused,
+    rules: policy.rules.map((rule) => ({ ...rule })).sort(compareRules),
+    version: policy.version,
+  });
 }
 
 async function fetchOrReadCachedPolicy(
@@ -203,15 +227,24 @@ async function fetchOrReadCachedPolicy(
   ) {
     return await readUnexpiredCachedPolicy(options);
   }
+  const fetchedAt = options.now();
+  const remainingTtlSeconds = onlineSnapshotRemainingTtlSeconds(
+    response.capturePolicy.expiresAt,
+    fetchedAt,
+    response.capturePolicy.ttlSeconds,
+  );
+  if (remainingTtlSeconds === null) {
+    return await readUnexpiredCachedPolicy(options);
+  }
   assertWorkspacePolicyOwnership(response.capturePolicy.policy);
 
   const entry: PolicyCacheEntry = {
     deviceId: options.deviceId,
-    fetchedAt: options.now(),
+    fetchedAt,
     policy: clonePolicy(response.capturePolicy.policy),
     policySnapshotId: response.capturePolicy.id,
     policyVersion: response.capturePolicy.version,
-    ttlSeconds: response.capturePolicy.ttlSeconds,
+    ttlSeconds: remainingTtlSeconds,
     maxConcurrentOcr: response.deliveryPolicy.maxConcurrentOcr,
     workspaceId: options.workspaceId,
   };
@@ -219,6 +252,18 @@ async function fetchOrReadCachedPolicy(
   await persistPolicyCache(entry);
 
   return entry;
+}
+
+function onlineSnapshotRemainingTtlSeconds(
+  expiresAt: string,
+  now: string,
+  declaredTtlSeconds: number,
+): number | null {
+  const remainingSeconds = Math.floor((Date.parse(expiresAt) - Date.parse(now)) / 1000);
+  if (!Number.isFinite(remainingSeconds) || remainingSeconds < 1) {
+    return null;
+  }
+  return Math.min(declaredTtlSeconds, remainingSeconds);
 }
 
 async function readUnexpiredCachedPolicy(
@@ -258,7 +303,10 @@ function requiresUnavailableContext(rule: CompiledCapturePolicyRule): boolean {
 }
 
 function compareRules(left: CompiledCapturePolicyRule, right: CompiledCapturePolicyRule): number {
-  return stableRuleKey(left).localeCompare(stableRuleKey(right));
+  return Buffer.compare(
+    Buffer.from(stableRuleKey(left), 'utf8'),
+    Buffer.from(stableRuleKey(right), 'utf8'),
+  );
 }
 
 function stableRuleKey(rule: CompiledCapturePolicyRule): string {

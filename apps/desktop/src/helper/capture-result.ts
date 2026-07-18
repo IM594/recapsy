@@ -1,8 +1,6 @@
 import type { CaptureResultPayload, SafeCaptureContextPayload } from './protocol/types';
 
 export type UnsafeCaptureContextInput = {
-  appName?: string;
-  bundleId?: string;
   windowTitle?: string;
   url?: string;
   documentPath?: string;
@@ -12,6 +10,7 @@ export type UnsafeCaptureContextInput = {
 };
 
 export type CaptureResultInput = {
+  application: { name: string; bundleId: string };
   captureId: string;
   assetRef: string;
   manifestRef: string;
@@ -49,6 +48,7 @@ export function createSafeCaptureResultPayload(input: CaptureResultInput): Captu
 
 function createSafeContext(input: CaptureResultInput): SafeCaptureContextPayload {
   const context: SafeCaptureContextPayload = {
+    app: { ...input.application },
     observedAt: input.observedAt,
     policy: {
       version: 'mock-policy',
@@ -59,13 +59,6 @@ function createSafeContext(input: CaptureResultInput): SafeCaptureContextPayload
 
   if (!unsafe) {
     return context;
-  }
-
-  if (unsafe.appName && unsafe.bundleId) {
-    context.app = {
-      name: unsafe.appName,
-      bundleId: unsafe.bundleId,
-    };
   }
 
   if (unsafe.windowTitle) {

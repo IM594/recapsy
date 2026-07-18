@@ -18,6 +18,7 @@ function captureResultEnvelope(): HelperEnvelope<'capture.result'> {
       ],
       captureId: 'capture_1',
       context: {
+        app: { bundleId: 'com.apple.Safari', name: 'Safari' },
         observedAt: '2026-07-15T00:00:00.000Z',
         policy: { decision: 'allow', version: 'policy_1' },
       },

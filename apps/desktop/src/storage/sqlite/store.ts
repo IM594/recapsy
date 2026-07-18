@@ -215,8 +215,11 @@ class SqliteOperationalStore {
     return this.cache.getHelperState();
   }
 
-  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
-    return this.cache.setPolicyCache(entry);
+  setPolicyCache(
+    entry: PolicyCacheEntry,
+    shouldCommit?: () => boolean,
+  ): Promise<PolicyCacheEntry | null> {
+    return this.cache.setPolicyCache(entry, shouldCommit);
   }
 
   getPolicyCache(

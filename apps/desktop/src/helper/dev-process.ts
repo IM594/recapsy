@@ -191,6 +191,10 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
       const captureId = `dev_capture_${captureSequence}`;
       const observedAt = now();
       const payload = createSafeCaptureResultPayload({
+        application: {
+          bundleId: 'one.recapsy.desktop.dev-helper',
+          name: 'Recapsy Dev Helper',
+        },
         assetRef: `dev_asset_${captureSequence}`,
         captureId,
         hash: `dev_hash_${captureSequence}`,

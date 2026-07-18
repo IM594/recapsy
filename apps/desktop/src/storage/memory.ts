@@ -443,7 +443,13 @@ class InMemoryOperationalStore {
     return this.helperState ? cloneHelperState(this.helperState) : null;
   }
 
-  async setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
+  async setPolicyCache(
+    entry: PolicyCacheEntry,
+    shouldCommit?: () => boolean,
+  ): Promise<PolicyCacheEntry | null> {
+    if (shouldCommit && !shouldCommit()) {
+      return null;
+    }
     const cloned = clonePolicyCache(entry);
     this.policyCache.set(policyCacheKey(entry.workspaceId, entry.deviceId), cloned);
     return clonePolicyCache(cloned);

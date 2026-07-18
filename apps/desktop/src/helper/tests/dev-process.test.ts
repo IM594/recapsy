@@ -166,6 +166,10 @@ describe('dev helper runtime', () => {
     const envelope = runtime.synthesizeCapture();
 
     expect(envelope.type).toBe('capture.result');
+    expect(envelope.payload.context.app).toEqual({
+      bundleId: 'one.recapsy.desktop.dev-helper',
+      name: 'Recapsy Dev Helper',
+    });
     expect(envelope.payload.context.policy.version).toBe('policy_v7');
     const roundTripped = decodeHelperEnvelopeLine(
       encodeHelperEnvelope(envelope),

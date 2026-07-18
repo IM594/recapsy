@@ -30,7 +30,10 @@ export type CapturePolicyCacheStore = {
     deviceId: string,
     options: { now: string },
   ): Promise<PolicyCacheRead | null>;
-  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry>;
+  setPolicyCache(
+    entry: PolicyCacheEntry,
+    shouldCommit?: () => boolean,
+  ): Promise<PolicyCacheEntry | null>;
   listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]>;
   upsertLocalCapturePolicyRule(rule: LocalCapturePolicyRule): Promise<LocalCapturePolicyRule>;
 };

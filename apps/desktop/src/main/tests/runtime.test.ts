@@ -331,7 +331,11 @@ describe('electron main runtime wiring', () => {
           { hash: 'h1', mimeType: 'image/png', ref: 'asset_1', role: 'screenshot', sizeBytes: 10 },
         ],
         captureId: 'cap_1',
-        context: { observedAt: now, policy: { decision: 'allow', version: 'v1' } },
+        context: {
+          app: { bundleId: 'com.apple.Safari', name: 'Safari' },
+          observedAt: now,
+          policy: { decision: 'allow', version: 'v1' },
+        },
         manifest: {
           hash: 'h1',
           mimeType: 'application/json',

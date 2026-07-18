@@ -19,13 +19,16 @@ export const CapturePolicyRuleScopeSchema = z.enum(['local_user', 'workspace_def
 export const StorageDeleteBehaviorSchema = z.enum(['delete_reference', 'delete_source_when_owned']);
 export const StorageQuotaScopeSchema = z.enum(['workspace']);
 export const AxAllowlistStatusSchema = z.enum(['disabled']);
+const CapturePolicyTextSchema = z
+  .string()
+  .refine((value) => !value.includes('\u0000'), 'Policy text cannot contain NUL characters.');
 
 export const CapturePolicyRuleSchema = z
   .object({
-    id: z.string().min(1).max(128),
+    id: CapturePolicyTextSchema.min(1).max(128),
     kind: CapturePolicyRuleKindSchema,
     scope: CapturePolicyRuleScopeSchema,
-    pattern: z.string().min(1).max(1024),
+    pattern: CapturePolicyTextSchema.min(1).max(1024),
     action: CapturePolicyActionSchema,
     enabled: z.boolean().default(true),
     reason: z.string().min(1).max(512).nullable().optional(),

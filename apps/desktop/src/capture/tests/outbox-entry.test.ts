@@ -161,6 +161,7 @@ function capturePayload(overrides: Partial<CaptureResultPayload> = {}): CaptureR
     assets: [screenshotAsset(), thumbnailAsset(), manifestAsset()],
     captureId: 'capture_1',
     context: {
+      app: { bundleId: 'com.apple.Safari', name: 'Safari' },
       observedAt,
       policy: { decision: 'allow', version: 'policy_1' },
     },

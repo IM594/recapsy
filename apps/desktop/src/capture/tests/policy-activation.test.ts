@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import type { CapturePoliciesResult } from '../../server/index';
 import { type PolicyCacheEntry, createMemoryStore } from '../../storage/index';
 import {
   CapturePolicyActivationError,
+  canonicalCapturePolicyJson,
   compileCapturePolicy,
   createCapturePolicyActivation,
 } from '../policy';
@@ -12,6 +15,57 @@ const deviceId = 'device_1';
 const fetchedAt = '2026-07-18T00:00:00.000Z';
 
 describe('capture policy activation', () => {
+  it('matches the shared UTF-8 canonical policy fixture', () => {
+    const fixture = JSON.parse(
+      readFileSync(
+        path.resolve(
+          import.meta.dir,
+          '../../../macos/Tests/CaptureCoreTests/Fixtures/PolicyCanonical/policy-canonical.json',
+        ),
+        'utf8',
+      ),
+    ) as PolicyCanonicalFixture;
+    const compiled = compileCapturePolicy({
+      localRules: fixture.input.localRules.map((rule) => ({
+        ...rule,
+        createdAt: fetchedAt,
+        updatedAt: fetchedAt,
+      })),
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: fixture.input.defaultAction,
+        paused: fixture.input.paused,
+        rules: fixture.input.workspaceRules,
+      },
+      version: fixture.input.version,
+    });
+
+    expect(compiled.rules.map((rule) => rule.id)).toEqual(fixture.expected.orderedRuleIds);
+    expect(canonicalCapturePolicyJson(compiled)).toBe(fixture.expected.canonicalJson);
+    expect(compiled.policyHash).toBe(fixture.expected.policyHash);
+  });
+
+  it('fails closed before canonical sorting when policy text contains NUL', () => {
+    expect(() =>
+      compileCapturePolicy({
+        localRules: [],
+        policy: remotePolicy({
+          rules: [
+            {
+              action: 'block_capture',
+              enabled: true,
+              id: 'ambiguous\u0000rule',
+              kind: 'bundle_id',
+              pattern: 'com.example.safe',
+              scope: 'workspace_default',
+            },
+          ],
+        }).capturePolicy.policy,
+        version: 'policy-nul',
+      }),
+    ).toThrowError(new CapturePolicyActivationError('policy_invalid_fields'));
+  });
+
   it('persists the complete workspace/device snapshot and includes non-relaxable local rules', async () => {
     const store = createMemoryStore();
     await store.upsertLocalCapturePolicyRule({
@@ -220,6 +274,86 @@ describe('capture policy activation', () => {
     });
   });
 
+  it('rejects an already-expired online snapshot and preserves the known-good cache', async () => {
+    const store = createMemoryStore();
+    await store.setPolicyCache({
+      deviceId,
+      fetchedAt,
+      policy: remotePolicy({
+        rules: [
+          {
+            action: 'block_capture',
+            enabled: true,
+            id: 'known-good-rule',
+            kind: 'bundle_id',
+            pattern: 'com.example.known-good',
+            scope: 'workspace_default',
+          },
+        ],
+      }).capturePolicy.policy,
+      policySnapshotId: 'known-good-snapshot',
+      policyVersion: 'known-good-policy',
+      ttlSeconds: 3600,
+      workspaceId,
+    });
+    const expiredOnline = remotePolicy();
+    expiredOnline.capturePolicy.id = 'expired-online-snapshot';
+    expiredOnline.capturePolicy.expiresAt = '2026-07-18T00:00:20.000Z';
+    const activation = createCapturePolicyActivation({
+      api: {
+        async getCapturePolicies() {
+          return expiredOnline;
+        },
+      },
+      deviceId,
+      now: () => '2026-07-18T00:00:30.000Z',
+      store,
+      workspaceId,
+    });
+
+    await expect(activation.activate()).resolves.toMatchObject({
+      policy: {
+        rules: expect.arrayContaining([expect.objectContaining({ id: 'known-good-rule' })]),
+        version: 'known-good-policy',
+      },
+    });
+    expect(
+      await store.getPolicyCache(workspaceId, deviceId, {
+        now: '2026-07-18T00:00:30.000Z',
+      }),
+    ).toMatchObject({
+      policySnapshotId: 'known-good-snapshot',
+      policyVersion: 'known-good-policy',
+    });
+  });
+
+  it('caps the local cache lifetime at the online snapshot absolute expiry', async () => {
+    const store = createMemoryStore();
+    const online = remotePolicy();
+    online.capturePolicy.expiresAt = '2026-07-18T00:00:45.000Z';
+    online.capturePolicy.ttlSeconds = 3600;
+    const activation = createCapturePolicyActivation({
+      api: {
+        async getCapturePolicies() {
+          return online;
+        },
+      },
+      deviceId,
+      now: () => '2026-07-18T00:00:30.000Z',
+      store,
+      workspaceId,
+    });
+
+    await activation.activate();
+
+    await expect(
+      store.getPolicyCache(workspaceId, deviceId, { now: '2026-07-18T00:00:44.000Z' }),
+    ).resolves.toMatchObject({ expired: false, ttlSeconds: 15 });
+    await expect(
+      store.getPolicyCache(workspaceId, deviceId, { now: '2026-07-18T00:00:46.000Z' }),
+    ).resolves.toMatchObject({ expired: true, ttlSeconds: 15 });
+  });
+
   it('fails closed when refresh fails and the only device-specific cache is expired', async () => {
     const store = createMemoryStore();
     await store.setPolicyCache({
@@ -381,14 +515,18 @@ describe('capture policy activation', () => {
     const writes: Array<{
       complete(): Promise<void>;
       entry: PolicyCacheEntry;
+      shouldCommit?: () => boolean;
     }> = [];
-    store.setPolicyCache = (entry) =>
+    store.setPolicyCache = (entry, shouldCommit) =>
       new Promise((resolve) => {
         writes.push({
           async complete() {
-            resolve(await backingStore.setPolicyCache(entry));
+            resolve(
+              shouldCommit && !shouldCommit() ? null : await backingStore.setPolicyCache(entry),
+            );
           },
           entry,
+          shouldCommit,
         });
       });
     const activation = createCapturePolicyActivation({
@@ -433,6 +571,7 @@ describe('capture policy activation', () => {
 
     await writes[0]?.complete();
     await expect(older).rejects.toMatchObject({ code: 'policy_stale' });
+    expect(await backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toBeNull();
     while (writes.length < 2) await Promise.resolve();
     await writes[1]?.complete();
     await newer;
@@ -477,6 +616,35 @@ describe('capture policy activation', () => {
     expect(await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toBeNull();
   });
 });
+
+type PolicyCanonicalFixture = {
+  input: {
+    defaultAction: 'allow';
+    localRules: Array<{
+      action: 'block_capture';
+      enabled: boolean;
+      id: string;
+      kind: 'bundle_id';
+      pattern: string;
+      scope: 'local_user';
+    }>;
+    paused: boolean;
+    version: string;
+    workspaceRules: Array<{
+      action: 'block_capture';
+      enabled: boolean;
+      id: string;
+      kind: 'bundle_id';
+      pattern: string;
+      scope: 'workspace_default';
+    }>;
+  };
+  expected: {
+    canonicalJson: string;
+    orderedRuleIds: string[];
+    policyHash: string;
+  };
+};
 
 function remotePolicy(
   overrides: Partial<CapturePoliciesResult['capturePolicy']['policy']> = {},

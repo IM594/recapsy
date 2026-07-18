@@ -124,6 +124,33 @@ describe('capture helper event handler', () => {
     expect((await store.getOutboxJob('capture_1'))?.serverCaptureId).toBeUndefined();
   });
 
+  it('fails closed without writing asset or outbox state when final app identity is missing', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      backpressure,
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+    const envelope = captureResultEnvelope();
+    const context = { ...envelope.payload.context } as Record<string, unknown>;
+    context.app = undefined;
+
+    await handler.handleEnvelope({
+      ...envelope,
+      payload: { ...envelope.payload, context },
+    } as HelperEnvelope<'capture.result'>);
+
+    expect(client.commands).toMatchObject([
+      { payload: { captureId: 'capture_1', code: 'policy_denied' }, type: 'capture.nack' },
+    ]);
+    expect(await store.getAssetCacheRef('asset_capture_1')).toBeNull();
+    expect(await store.getOutboxJob('capture_1')).toBeNull();
+  });
+
   it('serializes concurrent capture.result intake so only the hard queue limit is accepted', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');

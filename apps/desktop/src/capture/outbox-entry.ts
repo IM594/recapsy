@@ -23,6 +23,9 @@ export function projectCaptureOutboxEntry({
   deviceId,
   workspaceId,
 }: ProjectCaptureOutboxEntryInput): CaptureOutboxEntryCreateInput | null {
+  if (!payload.context.app?.name.trim() || !/^[A-Za-z0-9.-]+$/.test(payload.context.app.bundleId)) {
+    return null;
+  }
   const selectedAsset = selectPrimaryAsset(payload);
   if (!selectedAsset) return null;
 
@@ -90,8 +93,8 @@ function assetRefsFromResult(payload: CaptureResultPayload, workspaceId: string)
 
 function capturePayloadFromResult(payload: CaptureResultPayload): CaptureOutboxPayloadInput {
   return {
-    appName: payload.context.app?.name ?? 'Unknown App',
-    bundleId: payload.context.app?.bundleId,
+    appName: payload.context.app.name,
+    bundleId: payload.context.app.bundleId,
     capturedAt: payload.observedAt,
     captureType: 'screen',
     documentPathCandidate: documentPathCandidate(payload.context),

@@ -58,7 +58,7 @@ export type HelperCaptureIdentity = {
 
 export type SafeCaptureContextPayload = {
   observedAt: string;
-  app?: { name: string; bundleId: string };
+  app: { name: string; bundleId: string };
   window?: { title: string };
   website?: { origin: string; host: string };
   document?: { name: string };

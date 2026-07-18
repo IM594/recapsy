@@ -47,7 +47,13 @@ export class SqliteCachePersistence {
     return row ? cloneHelperState(parseJson<HelperRuntimeState>(row.state_json)) : null;
   }
 
-  async setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
+  async setPolicyCache(
+    entry: PolicyCacheEntry,
+    shouldCommit?: () => boolean,
+  ): Promise<PolicyCacheEntry | null> {
+    if (shouldCommit && !shouldCommit()) {
+      return null;
+    }
     const cloned = clonePolicyCache(entry);
     this.database
       .prepare(
