@@ -59,14 +59,7 @@ final class CaptureEngine {
     private var heartbeatSequence = 0
     private var captureCounter = 0
     private var configuredPolicy: ConfiguredPolicy?
-    private var policyGeneration: UInt64 = 0
-    /// A written screenshot remains helper-owned until main acknowledges its
-    /// capture id. The receipt file is the durable source of truth; this map
-    /// only avoids rescanning the asset root for the current process.
-    private var pendingCaptureAssets: [String: URL] = [:]
-    // Accessed exclusively from stateQueue. Each tick snapshots it before
-    // dispatching capture work, and a new value is committed only after the
-    // policy generation fence admits the corresponding asset.
+    private var captureSession: CaptureSessionIdentity?
     private var lastAcceptedFrameFingerprint: CaptureFrameFingerprint?
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
@@ -134,15 +127,17 @@ final class CaptureEngine {
                 policyPayload["captureIdentity"] = identity
             }
             guard let policy = ConfiguredPolicy.fromPayload(policyPayload) else {
-                policyGeneration &+= 1
                 configuredPolicy = nil
+                captureSession = nil
                 state = .paused
                 stopCaptureTimer()
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
-            policyGeneration &+= 1
             configuredPolicy = policy
+            captureSession = CaptureSessionIdentity(
+                policy: CapturePolicyIdentity(hash: policy.hash, version: policy.version)
+            )
             if let interval = payload["captureIntervalMs"] as? Int, interval > 0 {
                 captureIntervalMs = interval
             }
@@ -153,10 +148,10 @@ final class CaptureEngine {
             )
             recoverPendingReceipts(for: policy)
         case "permission.refresh":
-            emitPermissionStatus()
+            emitPermissionStatus(correlationId: correlationId)
         case "permission.request_screen_capture":
             _ = ScreenshotCapturer.requestScreenCaptureAccessIfNeeded()
-            emitPermissionStatus()
+            emitPermissionStatus(correlationId: correlationId)
         case "capture.start":
             guard
                 let policy = configuredPolicy,
@@ -174,7 +169,7 @@ final class CaptureEngine {
             startCaptureTimer()
             replayPendingCaptureResults()
         case "capture.pause":
-            policyGeneration &+= 1
+            captureSession = nil
             state = .paused
             let reason = payload["reason"] as? String
             emitStatus(status: "paused", reason: reason)
@@ -191,25 +186,37 @@ final class CaptureEngine {
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
-            policyGeneration &+= 1
+            captureSession = CaptureSessionIdentity(
+                policy: CapturePolicyIdentity(hash: policy.hash, version: policy.version)
+            )
             state = .ready
             let reason = payload["reason"] as? String
             emitStatus(status: "ready", reason: reason)
             startCaptureTimer()
             replayPendingCaptureResults()
         case "capture.ack":
-            if let captureId = payload["captureId"] as? String {
-                pendingCaptureAssets.removeValue(forKey: captureId)
-                if let assetRoot {
-                    CaptureReceiptStore.removeReceipt(assetRoot: assetRoot, captureId: captureId)
-                }
+            guard
+                let captureId = payload["captureId"] as? String,
+                CaptureAsset.isSafeCaptureId(captureId),
+                let assetRoot
+            else {
+                return
+            }
+            do {
+                _ = try CaptureArtifactStore.acknowledge(assetRoot: assetRoot, captureId: captureId)
+            } catch {
+                emitCaptureError(captureId: captureId, code: "asset_write_failed", message: "Capture receipt could not be removed.")
             }
         case "capture.nack":
-            if let captureId = payload["captureId"] as? String {
-                let code = payload["code"] as? String
-                if code != "backpressure" && code != "storage_unavailable" {
-                    removePendingCapture(captureId: captureId)
-                }
+            guard
+                let captureId = payload["captureId"] as? String,
+                CaptureAsset.isSafeCaptureId(captureId)
+            else {
+                return
+            }
+            let code = payload["code"] as? String
+            if code != "backpressure" && code != "storage_unavailable" {
+                discardCaptureArtifact(captureId: captureId)
             }
         case "capture.flush":
             replayPendingCaptureResults()
@@ -268,7 +275,7 @@ final class CaptureEngine {
     // MARK: - Capture orchestration (state queue)
 
     private func onCaptureTick() {
-        guard state == .ready, let configuredPolicy, !captureInFlight else {
+        guard state == .ready, let configuredPolicy, let captureSession, !captureInFlight else {
             return
         }
         captureInFlight = true
@@ -279,14 +286,13 @@ final class CaptureEngine {
         )
         let observedAt = CaptureEngine.iso8601(Date())
         let previousFingerprint = lastAcceptedFrameFingerprint
-        let startedPolicyGeneration = policyGeneration
 
         captureQueue.async { [weak self] in
             self?.performCapture(
                 captureId: captureId,
                 observedAt: observedAt,
                 configuredPolicy: configuredPolicy,
-                startedPolicyGeneration: startedPolicyGeneration,
+                startedSession: captureSession,
                 previousFingerprint: previousFingerprint
             )
         }
@@ -298,7 +304,7 @@ final class CaptureEngine {
         captureId: String,
         observedAt: String,
         configuredPolicy: ConfiguredPolicy,
-        startedPolicyGeneration: UInt64,
+        startedSession: CaptureSessionIdentity,
         previousFingerprint: CaptureFrameFingerprint?
     ) {
         var preparedCapture: PreparedCapture?
@@ -308,8 +314,7 @@ final class CaptureEngine {
                 if let preparedCapture {
                     self.finalizePreparedCapture(
                         preparedCapture,
-                        startedPolicyHash: configuredPolicy.hash,
-                        startedPolicyGeneration: startedPolicyGeneration
+                        startedSession: startedSession
                     )
                 }
                 self.captureInFlight = false
@@ -420,40 +425,6 @@ final class CaptureEngine {
         let relativeKey = CaptureAsset.screenshotRelativeKey(captureId: captureId)
         let hash = CaptureAsset.contentHash(for: encoded.imageData)
 
-        let asset = CaptureAssetPayload(
-            role: "screenshot",
-            ref: relativeKey,
-            hash: hash,
-            mimeType: CaptureAsset.screenshotMimeType,
-            sizeBytes: encoded.imageData.count
-        )
-        // Manifest is a synthetic relative ref only: the main-process sync layer
-        // drops the `manifest` role (never reads its bytes), so 1B does not
-        // write a manifest file. The ref is still relative (never absolute /
-        // file://) to satisfy the opaque-ref contract.
-        let manifest = CaptureAssetPayload(
-            role: "manifest",
-            ref: "\(captureId)/manifest.json",
-            hash: hash,
-            mimeType: "application/json",
-            sizeBytes: 0
-        )
-        let context = CaptureContextPayload(
-            app: encoded.application,
-            observedAt: observedAt,
-            policy: CapturePolicyPayload(
-                version: configuredPolicy.version,
-                decision: encoded.policyDecision.rawValue
-            )
-        )
-        let payload = CaptureResultPayload(
-            captureId: captureId,
-            observedAt: observedAt,
-            manifest: manifest,
-            assets: [asset],
-            context: context
-        )
-
         guard
             let workspaceId = configuredPolicy.workspaceId,
             let deviceId = configuredPolicy.deviceId
@@ -471,9 +442,20 @@ final class CaptureEngine {
             receipt: CaptureReceipt(
                 workspaceId: workspaceId,
                 deviceId: deviceId,
-                payload: payload,
-                screenshotHash: hash,
-                screenshotSizeBytes: encoded.imageData.count
+                captureId: captureId,
+                observedAt: observedAt,
+                policy: CapturePolicyIdentity(
+                    hash: configuredPolicy.hash,
+                    version: configuredPolicy.version
+                ),
+                source: encoded.source,
+                screenshot: CaptureScreenshotRecord(
+                    ref: relativeKey,
+                    hash: hash,
+                    mimeType: CaptureAsset.screenshotMimeType,
+                    sizeBytes: encoded.imageData.count
+                ),
+                decision: encoded.policyDecision.rawValue
             ),
             imageData: encoded.imageData,
             frameFingerprint: encoded.frameFingerprint
@@ -487,8 +469,7 @@ final class CaptureEngine {
     /// capture id or staging path before stale work has been discarded.
     private func finalizePreparedCapture(
         _ prepared: PreparedCapture,
-        startedPolicyHash: String,
-        startedPolicyGeneration: UInt64
+        startedSession: CaptureSessionIdentity
     ) {
         guard let assetRoot else {
             emitCaptureError(
@@ -501,21 +482,16 @@ final class CaptureEngine {
 
         do {
             let outcome = try CaptureCommitCoordinator.finalize(
-                startedPolicyHash: startedPolicyHash,
-                currentPolicyHash: configuredPolicy?.hash,
-                startedPolicyGeneration: startedPolicyGeneration,
-                currentPolicyGeneration: policyGeneration,
+                startedSession: startedSession,
+                currentSession: captureSession,
                 receipt: prepared.receipt,
                 imageData: prepared.imageData,
                 assetRoot: assetRoot,
                 captureId: prepared.captureId
             )
             switch outcome {
-            case let .committed(payload, directory):
+            case let .committed(payload, _):
                 lastAcceptedFrameFingerprint = prepared.frameFingerprint
-                // Register ownership before emitting the result. A fast NACK
-                // therefore cannot observe an untracked committed directory.
-                pendingCaptureAssets[prepared.captureId] = directory
                 emit(type: "capture.result", payload: payload)
             case let .skipped(reason):
                 emit(
@@ -537,8 +513,10 @@ final class CaptureEngine {
     }
 
     /// Replays receipts only after Electron has supplied a verified identity.
-    /// A receipt from another workspace/device is left untouched for the
-    /// matching profile rather than being attached to the current session.
+    /// Orphaned helper artifacts and receipts owned by another identity or
+    /// policy receive a terminal disposition so they cannot leak or be replayed
+    /// on every later configuration. A final asset without a receipt was
+    /// acknowledged by Electron and belongs to its outbox.
     private func recoverPendingReceipts(for policy: ConfiguredPolicy) {
         guard let assetRoot else {
             return
@@ -546,14 +524,36 @@ final class CaptureEngine {
         guard let workspaceId = policy.workspaceId, let deviceId = policy.deviceId else {
             return
         }
+        let expectedPolicy = CapturePolicyIdentity(hash: policy.hash, version: policy.version)
 
-        let receiptIds = CaptureReceiptStore.listCaptureIds(assetRoot: assetRoot)
-        for captureId in receiptIds {
+        let artifacts: [CaptureArtifact]
+        do {
+            artifacts = try CaptureArtifactStore.listArtifacts(assetRoot: assetRoot)
+        } catch {
+            emitCaptureError(captureId: nil, code: "asset_write_failed", message: "Pending capture storage could not be scanned.")
+            return
+        }
+        for artifact in artifacts {
+            let captureId = artifact.captureId
+            if artifact.kind == .accepted {
+                continue
+            }
+            if artifact.kind == .orphan {
+                do {
+                    try CaptureArtifactStore.removeOrphan(assetRoot: assetRoot, captureId: captureId)
+                } catch {
+                    emitCaptureError(
+                        captureId: captureId,
+                        code: "asset_write_failed",
+                        message: "Orphaned capture could not be discarded."
+                    )
+                }
+                continue
+            }
             let receipt: CaptureReceipt
             do {
-                receipt = try CaptureReceiptStore.read(assetRoot: assetRoot, captureId: captureId)
+                receipt = try CaptureArtifactStore.read(assetRoot: assetRoot, captureId: captureId)
             } catch {
-                CaptureReceiptStore.removeCapture(assetRoot: assetRoot, captureId: captureId)
                 emitCaptureError(
                     captureId: captureId,
                     code: "asset_write_failed",
@@ -561,11 +561,28 @@ final class CaptureEngine {
                 )
                 continue
             }
-            guard receipt.workspaceId == workspaceId, receipt.deviceId == deviceId else {
+            let disposition = CaptureArtifactStore.disposition(
+                for: receipt,
+                workspaceId: workspaceId,
+                deviceId: deviceId,
+                policy: expectedPolicy
+            )
+            if disposition != .replay {
+                discardPendingReceipt(
+                    receipt,
+                    disposition: disposition,
+                    assetRoot: assetRoot
+                )
                 continue
             }
-            guard let payload = try? CaptureReceiptStore.recover(receipt, assetRoot: assetRoot) else {
-                CaptureReceiptStore.removeCapture(assetRoot: assetRoot, captureId: captureId)
+            let payload: CaptureResultPayload
+            do {
+                payload = try CaptureArtifactStore.recover(
+                    receipt,
+                    assetRoot: assetRoot,
+                    expectedPolicy: expectedPolicy
+                )
+            } catch {
                 emitCaptureError(
                     captureId: captureId,
                     code: "asset_write_failed",
@@ -573,39 +590,56 @@ final class CaptureEngine {
                 )
                 continue
             }
-            pendingCaptureAssets[captureId] = CaptureAsset.captureDirectoryURL(
-                assetRoot: assetRoot,
-                captureId: captureId
-            )
             emit(type: "capture.result", payload: payload)
         }
     }
 
     private func replayPendingCaptureResults() {
-        guard let assetRoot else {
+        guard let configuredPolicy else { return }
+        recoverPendingReceipts(for: configuredPolicy)
+    }
+
+    private func discardPendingReceipt(
+        _ receipt: CaptureReceipt,
+        disposition: CaptureReceiptDisposition,
+        assetRoot: URL
+    ) {
+        guard disposition != .replay else {
             return
         }
-        for captureId in pendingCaptureAssets.keys.sorted() {
-            guard let receipt = try? CaptureReceiptStore.read(assetRoot: assetRoot, captureId: captureId),
-                  let payload = try? CaptureReceiptStore.recover(receipt, assetRoot: assetRoot)
-            else {
-                continue
-            }
-            emit(type: "capture.result", payload: payload)
+        do {
+            try CaptureArtifactStore.discard(receipt, assetRoot: assetRoot)
+        } catch {
+            let message = disposition == .discardOwnerMismatch
+                ? "Foreign capture receipt could not be discarded."
+                : "Stale capture receipt could not be discarded."
+            emitCaptureError(
+                captureId: receipt.captureId,
+                code: "asset_write_failed",
+                message: message
+            )
+            return
+        }
+        if disposition == .discardPolicyMismatch {
+            emit(
+                type: "capture.skipped",
+                payload: CaptureSkippedPayload(
+                    captureId: receipt.captureId,
+                    reason: .policyDenied,
+                    observedAt: receipt.observedAt
+                )
+            )
         }
     }
 
-    private func removePendingCapture(captureId: String) {
-        let directory = pendingCaptureAssets.removeValue(forKey: captureId)
+    private func discardCaptureArtifact(captureId: String) {
         guard let assetRoot else {
             return
         }
-        CaptureReceiptStore.removeReceipt(assetRoot: assetRoot, captureId: captureId)
-        guard let directory else {
-            return
-        }
-        captureQueue.async {
-            try? FileManager.default.removeItem(at: directory)
+        do {
+            _ = try CaptureArtifactStore.reject(assetRoot: assetRoot, captureId: captureId)
+        } catch {
+            emitCaptureError(captureId: captureId, code: "asset_write_failed", message: "Capture artifact could not be removed.")
         }
     }
 
@@ -624,7 +658,7 @@ final class CaptureEngine {
         emit(type: "helper.status", payload: StatusPayload(status: status, reason: reason))
     }
 
-    private func emitPermissionStatus() {
+    private func emitPermissionStatus(correlationId: String? = nil) {
         let screenCapture = ScreenshotCapturer.isScreenCaptureGranted ? "granted" : "not_determined"
         // Probe only — never call AXIsProcessTrustedWithOptions with prompt.
         // Disclaimed capture processes are not auto-added to Accessibility; the
@@ -635,7 +669,7 @@ final class CaptureEngine {
             accessibility: accessibility,
             observedAt: CaptureEngine.iso8601(Date())
         )
-        emit(type: "permission.status", payload: payload)
+        emit(type: "permission.status", payload: payload, correlationId: correlationId)
     }
 
     private func emitHeartbeat() {

@@ -63,46 +63,38 @@ final class CaptureReceiptTests: XCTestCase {
         let captureId = "cap-receipt-1"
         let image = Data("screen-bytes".utf8)
         let hash = CaptureAsset.contentHash(for: image)
-        let payload = CaptureResultPayload(
+        let receipt = CaptureReceipt(
+            workspaceId: "workspace-1",
+            deviceId: "device-1",
             captureId: captureId,
             observedAt: "2026-07-18T00:00:00.000Z",
-            manifest: CaptureAssetPayload(
-                role: "manifest",
-                ref: "\(captureId)/manifest.json",
-                hash: hash,
-                mimeType: "application/json",
-                sizeBytes: 0
+            policy: CapturePolicyIdentity(
+                hash: "sha256:" + String(repeating: "a", count: 64),
+                version: "policy-1"
             ),
-            assets: [CaptureAssetPayload(
-                role: "screenshot",
+            source: CaptureWindowIdentity(
+                application: CaptureApplicationPayload(name: "Fixture App", bundleId: "one.recapsy.fixture"),
+                windowId: 42,
+                ownerProcessId: 4242
+            ),
+            screenshot: CaptureScreenshotRecord(
                 ref: CaptureAsset.screenshotRelativeKey(captureId: captureId),
                 hash: hash,
                 mimeType: CaptureAsset.screenshotMimeType,
                 sizeBytes: image.count
-            )],
-            context: CaptureContextPayload(
-                app: CaptureApplicationPayload(name: "Fixture App", bundleId: "one.recapsy.fixture"),
-                observedAt: "2026-07-18T00:00:00.000Z",
-                policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
-            )
-        )
-        let receipt = CaptureReceipt(
-            workspaceId: "workspace-1",
-            deviceId: "device-1",
-            payload: payload,
-            screenshotHash: hash,
-            screenshotSizeBytes: image.count
+            ),
+            decision: "allow"
         )
 
-        let staged = CaptureReceiptStore.stagedScreenshotFileURL(assetRoot: root, captureId: captureId)
+        let staged = CaptureArtifactStore.stagedScreenshotFileURL(assetRoot: root, captureId: captureId)
         try FileManager.default.createDirectory(
             at: CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: captureId),
             withIntermediateDirectories: true
         )
         try image.write(to: staged, options: .atomic)
-        try CaptureReceiptStore.write(receipt, assetRoot: root, captureId: captureId)
+        try CaptureArtifactStore.write(receipt, assetRoot: root, captureId: captureId)
 
-        let recovered = try CaptureReceiptStore.recover(receipt, assetRoot: root)
+        let recovered = try CaptureArtifactStore.recover(receipt, assetRoot: root)
         XCTAssertEqual(recovered.captureId, captureId)
         XCTAssertTrue(
             FileManager.default.fileExists(
@@ -111,32 +103,83 @@ final class CaptureReceiptTests: XCTestCase {
         )
         XCTAssertFalse(FileManager.default.fileExists(atPath: staged.path))
 
-        CaptureReceiptStore.removeReceipt(assetRoot: root, captureId: captureId)
+        try CaptureArtifactStore.removeReceipt(assetRoot: root, captureId: captureId)
         XCTAssertFalse(
             FileManager.default.fileExists(
-                atPath: CaptureReceiptStore.receiptURL(assetRoot: root, captureId: captureId).path
+                atPath: CaptureArtifactStore.receiptURL(assetRoot: root, captureId: captureId).path
             )
         )
     }
 
-    func testReceiptListingIsScopedToDirectoriesWithReceipts() throws {
+    func testArtifactListingSeparatesReceiptsAcceptedAssetsAndOrphans() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("recapsy-receipt-list-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
         let withReceipt = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: "cap-a")
-        let withoutReceipt = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: "cap-b")
+        let accepted = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: "cap-b")
+        let orphan = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: "cap-c")
         try FileManager.default.createDirectory(at: withReceipt, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(at: withoutReceipt, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: accepted, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
         try Data("{}".utf8).write(
-            to: withReceipt.appendingPathComponent(CaptureReceiptStore.receiptFileName),
+            to: withReceipt.appendingPathComponent(CaptureArtifactStore.receiptFileName),
+            options: .atomic
+        )
+        try Data("final-screen".utf8).write(
+            to: accepted.appendingPathComponent(CaptureAsset.screenshotFileName),
             options: .atomic
         )
 
-        XCTAssertEqual(CaptureReceiptStore.listCaptureIds(assetRoot: root), ["cap-a"])
+        XCTAssertEqual(
+            try CaptureArtifactStore.listArtifacts(assetRoot: root),
+            [
+                CaptureArtifact(captureId: "cap-a", kind: .receipt),
+                CaptureArtifact(captureId: "cap-b", kind: .accepted),
+                CaptureArtifact(captureId: "cap-c", kind: .orphan),
+            ]
+        )
     }
 
-    func testReceiptReadRejectsMissingApplicationIdentityAndCleanupRemovesCaptureDirectory() throws {
+    func testOrphanRemovalOnlyRemovesKnownHelperFiles() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recapsy-orphan-removal-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let orphanId = "cap-orphan"
+        let orphanDirectory = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: orphanId)
+        try FileManager.default.createDirectory(at: orphanDirectory, withIntermediateDirectories: true)
+        try Data("partial-screen".utf8).write(
+            to: CaptureArtifactStore.stagedScreenshotFileURL(assetRoot: root, captureId: orphanId),
+            options: .atomic
+        )
+
+        try CaptureArtifactStore.removeOrphan(assetRoot: root, captureId: orphanId)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphanDirectory.path))
+
+        let unownedId = "cap-unowned-orphan"
+        let unownedDirectory = CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: unownedId)
+        let evidence = unownedDirectory.appendingPathComponent("evidence.bin")
+        try FileManager.default.createDirectory(at: unownedDirectory, withIntermediateDirectories: true)
+        try Data("unowned".utf8).write(to: evidence, options: .atomic)
+
+        XCTAssertThrowsError(
+            try CaptureArtifactStore.removeOrphan(assetRoot: root, captureId: unownedId)
+        ) { error in
+            XCTAssertEqual(error as? CaptureReceiptError, .invalidReceipt)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: evidence.path))
+    }
+
+    func testMissingAssetRootHasNoPendingReceipts() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("recapsy-missing-root-\(UUID().uuidString)", isDirectory: true)
+
+        XCTAssertEqual(try CaptureArtifactStore.listArtifacts(assetRoot: root), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testMalformedReceiptCannotAuthorizeCaptureDirectoryRemoval() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("recapsy-invalid-receipt-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -144,38 +187,48 @@ final class CaptureReceiptTests: XCTestCase {
         let captureId = "cap-invalid-identity"
         let image = Data("screen-bytes".utf8)
         let hash = CaptureAsset.contentHash(for: image)
-        let payload = CaptureResultPayload(
-            captureId: captureId,
-            observedAt: "2026-07-18T00:00:00.000Z",
-            manifest: CaptureAssetPayload(
-                role: "manifest",
-                ref: "\(captureId)/manifest.json",
-                hash: hash,
-                mimeType: "application/json",
-                sizeBytes: 0
-            ),
-            assets: [],
-            context: CaptureContextPayload(
-                observedAt: "2026-07-18T00:00:00.000Z",
-                policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
-            )
-        )
         let receipt = CaptureReceipt(
             workspaceId: "workspace-1",
             deviceId: "device-1",
-            payload: payload,
-            screenshotHash: hash,
-            screenshotSizeBytes: image.count
+            captureId: captureId,
+            observedAt: "2026-07-18T00:00:00.000Z",
+            policy: CapturePolicyIdentity(
+                hash: "sha256:" + String(repeating: "a", count: 64),
+                version: "policy-1"
+            ),
+            source: CaptureWindowIdentity(
+                application: CaptureApplicationPayload(name: "Fixture App", bundleId: "one.recapsy.fixture"),
+                windowId: 42,
+                ownerProcessId: 4242
+            ),
+            screenshot: CaptureScreenshotRecord(
+                ref: CaptureAsset.screenshotRelativeKey(captureId: captureId),
+                hash: hash,
+                mimeType: CaptureAsset.screenshotMimeType,
+                sizeBytes: image.count
+            ),
+            decision: "allow"
         )
-        try CaptureReceiptStore.write(receipt, assetRoot: root, captureId: captureId)
+        try FileManager.default.createDirectory(
+            at: CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: captureId),
+            withIntermediateDirectories: true
+        )
+        try CaptureArtifactStore.write(receipt, assetRoot: root, captureId: captureId)
+
+        try Data("{}".utf8).write(
+            to: CaptureArtifactStore.receiptURL(assetRoot: root, captureId: captureId),
+            options: .atomic
+        )
 
         XCTAssertThrowsError(
-            try CaptureReceiptStore.read(assetRoot: root, captureId: captureId)
+            try CaptureArtifactStore.read(assetRoot: root, captureId: captureId)
         ) { error in
             XCTAssertTrue(error is CaptureReceiptError)
         }
-        CaptureReceiptStore.removeCapture(assetRoot: root, captureId: captureId)
-        XCTAssertFalse(
+        XCTAssertThrowsError(
+            try CaptureArtifactStore.removeCapture(assetRoot: root, captureId: captureId)
+        )
+        XCTAssertTrue(
             FileManager.default.fileExists(
                 atPath: CaptureAsset.captureDirectoryURL(assetRoot: root, captureId: captureId).path
             )
@@ -317,18 +370,10 @@ final class ProtocolEncodingTests: XCTestCase {
             mimeType: "image/webp",
             sizeBytes: 204800
         )
-        let manifest = CaptureAssetPayload(
-            role: "manifest",
-            ref: "cap-100-1/manifest.json",
-            hash: "sha256:abc",
-            mimeType: "application/json",
-            sizeBytes: 0
-        )
         let payload = CaptureResultPayload(
             captureId: "cap-100-1",
             observedAt: "2026-07-09T00:00:00.000Z",
-            manifest: manifest,
-            assets: [asset],
+            screenshot: asset,
             context: CaptureContextPayload(
                 observedAt: "2026-07-09T00:00:00.000Z",
                 policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
@@ -359,6 +404,22 @@ final class ProtocolEncodingTests: XCTestCase {
         let policy = try XCTUnwrap(context["policy"] as? [String: Any])
         XCTAssertEqual(policy["decision"] as? String, "allow")
         XCTAssertEqual(policy["version"] as? String, "policy-1")
+    }
+
+    func testCaptureResultDecoderRejectsAnythingButOneScreenshot() throws {
+        let json = """
+        {
+          "captureId": "cap-100-1",
+          "observedAt": "2026-07-09T00:00:00.000Z",
+          "assets": [],
+          "context": {
+            "observedAt": "2026-07-09T00:00:00.000Z",
+            "policy": { "version": "policy-1", "decision": "allow" }
+          }
+        }
+        """.data(using: .utf8)!
+
+        XCTAssertThrowsError(try JSONDecoder().decode(CaptureResultPayload.self, from: json))
     }
 
     func testCaptureResultIncludesSafeCapturedApplicationIdentity() throws {

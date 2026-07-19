@@ -8,7 +8,7 @@ import CWebP
 /// Outcome of one screenshot attempt: the encoded WebP bytes, ready to write.
 struct EncodedScreenshot {
     let imageData: Data
-    let application: CaptureApplicationPayload
+    let source: CaptureWindowIdentity
     let frameFingerprint: CaptureFrameFingerprint
     let policyDecision: CaptureSourcePolicyAction
 }
@@ -77,13 +77,13 @@ enum ScreenshotCapturer {
             throw ScreenshotError.lowInformationFrame
         case .duplicate:
             throw ScreenshotError.duplicateFrame
-        case .image(let cgImage, let application, let fingerprint, let policyDecision):
+        case .image(let cgImage, let source, let fingerprint, let policyDecision):
             guard let encoded = encodeWebP(cgImage: cgImage) else {
                 throw ScreenshotError.encodeFailed
             }
             return EncodedScreenshot(
                 imageData: encoded,
-                application: application,
+                source: source,
                 frameFingerprint: fingerprint,
                 policyDecision: policyDecision
             )
@@ -105,7 +105,7 @@ enum ScreenshotCapturer {
     }
 
     private enum CaptureOutcome {
-        case image(CGImage, CaptureApplicationPayload, CaptureFrameFingerprint, CaptureSourcePolicyAction)
+        case image(CGImage, CaptureWindowIdentity, CaptureFrameFingerprint, CaptureSourcePolicyAction)
         case noWindow
         case policyDenied
         case blank
@@ -156,6 +156,15 @@ enum ScreenshotCapturer {
                     outcome = .policyDenied
                     return
                 }
+                guard let ownerProcessId = window.owningApplication?.processID, ownerProcessId > 0 else {
+                    outcome = .policyDenied
+                    return
+                }
+                let source = CaptureWindowIdentity(
+                    application: application,
+                    windowId: Int(window.windowID),
+                    ownerProcessId: Int(ownerProcessId)
+                )
                 let policyDecision = CaptureSourcePolicyEvaluator.decide(
                     policy: policy,
                     source: CaptureSourceIdentity(
@@ -202,7 +211,7 @@ enum ScreenshotCapturer {
                 case .skip(.duplicate):
                     outcome = .duplicate
                 case .accept(let fingerprint):
-                    outcome = .image(image, application, fingerprint, policyDecision.action)
+                    outcome = .image(image, source, fingerprint, policyDecision.action)
                 }
             } catch {
                 // Swallowed intentionally: the caller reports a generic

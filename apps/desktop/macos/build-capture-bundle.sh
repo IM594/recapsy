@@ -21,16 +21,11 @@ BUILD_DIR="${SCRIPT_DIR}/build"
 APP_DIR="${BUILD_DIR}/Recapsy.app"
 MACOS_DIR="${APP_DIR}/Contents/MacOS"
 
-# libwebp is resolved dynamically from Homebrew — never hard-coded, so the build
-# works on any machine that has run `brew install webp`. The capture executable
-# imports the `CWebP` module (Sources/CWebP/shim.h -> <webp/encode.h>); we pass
-# the include path so the shim resolves and statically link libwebp.a +
-# libsharpyuv.a (libwebp's encoder pulls SharpYuv symbols from that companion
-# archive) so the assembled binary carries no runtime libwebp dylib dependency.
-if ! WEBP_PREFIX="$(brew --prefix webp 2>/dev/null)" || [[ ! -d "${WEBP_PREFIX}" ]]; then
-	echo "error: libwebp not found. Run 'brew install webp' first." >&2
-	exit 1
-fi
+# The arm64 helper must run on 2018 Macs running macOS 14. Homebrew bottles are
+# built for the host OS, so they cannot establish that contract. The pinned
+# source build verifies every archive object targets macOS 14 before returning
+# this prefix.
+WEBP_PREFIX="$(bash "${SCRIPT_DIR}/build-libwebp-static.sh")"
 WEBP_INCLUDE="${WEBP_PREFIX}/include"
 WEBP_LIB="${WEBP_PREFIX}/lib"
 for archive in "${WEBP_LIB}/libwebp.a" "${WEBP_LIB}/libsharpyuv.a"; do
@@ -50,7 +45,7 @@ WEBP_BUILD_FLAGS=(
 # identity name.
 SIGN_IDENTITY="${RECAPSY_CAPTURE_SIGN_IDENTITY:-Recapsy Developer}"
 
-echo "==> swift build -c ${BUILD_CONFIG} (libwebp: ${WEBP_PREFIX})"
+echo "==> swift build -c ${BUILD_CONFIG} (arm64 libwebp: ${WEBP_PREFIX})"
 swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" "${WEBP_BUILD_FLAGS[@]}"
 
 BIN_DIR="$(swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" "${WEBP_BUILD_FLAGS[@]}" --show-bin-path)"
@@ -71,6 +66,8 @@ mkdir -p "${MACOS_DIR}"
 cp "${CAPTURE_BIN}" "${MACOS_DIR}/Recapsy"
 cp "${LAUNCHER_BIN}" "${MACOS_DIR}/CaptureLauncher"
 cp "${SCRIPT_DIR}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
+mkdir -p "${APP_DIR}/Contents/Resources/ThirdPartyNotices"
+cp "${WEBP_PREFIX}/share/doc/libwebp/COPYING" "${APP_DIR}/Contents/Resources/ThirdPartyNotices/libwebp.txt"
 
 # Fail loudly if the plist is malformed or the frozen id drifted.
 plutil -lint "${APP_DIR}/Contents/Info.plist" >/dev/null

@@ -11,6 +11,10 @@ public enum CaptureAsset {
 
     public static let screenshotMimeType = "image/webp"
 
+    public static func isSafeCaptureId(_ value: String) -> Bool {
+        value.range(of: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$", options: .regularExpression) != nil
+    }
+
     /// Relative access key carried in `capture.result` `asset.ref`. This is the
     /// *only* form allowed across the process boundary — never an absolute path
     /// or `file://` (the protocol layer rejects those). The sync loop joins this

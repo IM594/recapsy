@@ -8,9 +8,8 @@ import PackageDescription
 //                       joins, NDJSON encoding, hashing, active-window selection,
 //                       in-memory frame sampling) — unit tested, no libwebp.
 //   - CWebP           : system-library shim exposing libwebp's C encoder API.
-//                       Header/library paths are supplied at build time by
-//                       `build-capture-bundle.sh` (via `brew --prefix webp`),
-//                       never hard-coded here — see `Sources/CWebP/shim.h`.
+//                       Header/library paths are supplied at build time by the
+//                       pinned macOS-14 source build — see `Sources/CWebP/shim.h`.
 //   - RecapsyCapture  : the capture executable. Physically renamed to `Recapsy`
 //                       when assembled into `Recapsy.app` so the screen-recording
 //                       privacy panel shows the product name (ADR 0009 约束③).
@@ -21,8 +20,7 @@ import PackageDescription
 //
 // `swift test` builds only CaptureCore + its tests, so it needs no libwebp and
 // runs standalone. `swift build` of RecapsyCapture requires the libwebp include
-// path; run it through `build-capture-bundle.sh` (or pass the same
-// `-Xcc -I$(brew --prefix webp)/include` flag) — a bare `swift build` without
+// path; run it through `build-capture-bundle.sh` — a bare `swift build` without
 // that flag cannot resolve `<webp/encode.h>` and is expected to fail.
 let package = Package(
     name: "RecapsyCapture",
@@ -41,7 +39,7 @@ let package = Package(
         // No `pkgConfig`/path here on purpose: pkg-config would inject a dynamic
         // `-lwebp`, which pulls libwebp.dylib and defeats the self-contained,
         // statically-linked capture binary we want. `build-capture-bundle.sh`
-        // resolves libwebp from `brew --prefix webp` and passes the header search
+        // resolves a pinned libwebp source build and passes the header search
         // path (`-Xcc -I…/include`) plus the static archives
         // (`-Xlinker …/libwebp.a -Xlinker …/libsharpyuv.a`) to `swift build`.
         // Because this target has no default header/library path, a bare

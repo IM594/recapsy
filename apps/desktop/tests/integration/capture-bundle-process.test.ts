@@ -16,12 +16,9 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { compileCapturePolicy, createCapturePolicyController } from '../../src/capture/index';
 import {
-  type CaptureHelperEvent,
-  compileCapturePolicy,
-  createCapturePolicyActivation,
-} from '../../src/capture/index';
-import {
+  type CaptureHelperTransportEvent,
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
   type HelperToMainType,
@@ -58,6 +55,7 @@ const captureBinaryPath = path.join(captureBundle.path, 'Contents', 'MacOS', 'Re
 const launcherSourcePath = fileURLToPath(
   new URL('../../macos/Sources/CaptureLauncher/main.c', import.meta.url),
 );
+const webpProvenancePath = path.join(desktopRoot, 'macos', 'build', 'libwebp-arm64.json');
 
 const bundleBuilt = validateCaptureBundleAvailability(captureBundle);
 // When the bundle has not been built yet (`pnpm run build:capture`), skip rather
@@ -97,6 +95,24 @@ afterEach(async () => {
 });
 
 describe('capture bundle subprocess (real signed Swift bundle via disclaim launcher)', () => {
+  bundleIt('links pinned arm64 libwebp archives built for macOS 14', () => {
+    expect(existsSync(webpProvenancePath)).toBe(true);
+    const provenance = JSON.parse(
+      readFileSync(webpProvenancePath, 'utf8'),
+    ) as LibwebpBuildProvenance;
+
+    expect(provenance).toMatchObject({
+      architecture: 'arm64',
+      deploymentTarget: '14.0',
+      sourceSha256: 'e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564',
+      version: '1.6.0',
+    });
+    for (const archivePath of [provenance.libsharpyuvArchive, provenance.libwebpArchive]) {
+      expect(readArchitectures(archivePath)).toEqual(['arm64']);
+      expect(readMinimumMacOSVersions(archivePath)).toEqual(['14.0']);
+    }
+  });
+
   it('uses the explicitly configured capture bundle for both spawned executables', () => {
     if (captureBundle.selection !== 'configured') {
       return;
@@ -177,8 +193,8 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
   bundleIt(
     'composes policy GET, SQLite cache, compiler, real helper ACK, and capture start',
     async () => {
-      const workspaceId = 'workspace_composition_1';
-      const deviceId = 'device_composition_1';
+      const workspaceId = '00000000-0000-4000-8000-000000000001';
+      const deviceId = '00000000-0000-4000-8000-000000000002';
       const now = '2026-07-18T00:00:00.000Z';
       const { assetRoot, client, envelopes } = startBundleClient();
       const store = createSqliteStore({
@@ -204,15 +220,16 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
             };
           },
         });
-        const activation = createCapturePolicyActivation({
+        const policy = createCapturePolicyController({
           api,
+          configure: (capturePolicy, identity) => client.configureCapture(capturePolicy, identity),
           deviceId,
           now: () => now,
           store,
           workspaceId,
         });
 
-        const configuration = await activation.activate();
+        const configuration = await policy.activate();
         const cached = await store.getPolicyCache(workspaceId, deviceId, { now });
         expect(requests).toEqual([
           {
@@ -223,12 +240,11 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
         ]);
         expect(cached).toMatchObject({
           expired: false,
-          policySnapshotId: 'composition-policy-snapshot',
+          policySnapshotId: '00000000-0000-4000-8000-000000000003',
           policyVersion: 'composition-policy-v1',
         });
         expect(configuration.policy.policyHash).toMatch(/^sha256:[a-f0-9]{64}$/);
 
-        await client.configureCapture(configuration.policy, { deviceId, workspaceId });
         await waitForEnvelope(
           envelopes,
           'helper.policy_applied',
@@ -322,41 +338,28 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
       const captureDirectory = path.join(assetRoot, captureId);
       const screenshotPath = path.join(captureDirectory, 'screenshot.webp');
       const receiptPath = path.join(captureDirectory, 'capture.receipt.json');
-      const payload = {
-        assets: [
-          {
-            hash,
-            mimeType: 'image/webp',
-            ref: `${captureId}/screenshot.webp`,
-            role: 'screenshot',
-            sizeBytes: bytes.length,
-          },
-        ],
-        captureId,
-        context: {
-          app: { bundleId: 'one.recapsy.fixture', name: 'Fixture App' },
-          observedAt: '2026-07-18T00:00:00.000Z',
-          policy: { decision: 'allow', version: 'policy-1' },
-        },
-        manifest: {
-          hash,
-          mimeType: 'application/json',
-          ref: `${captureId}/manifest.json`,
-          role: 'manifest',
-          sizeBytes: 0,
-        },
-        observedAt: '2026-07-18T00:00:00.000Z',
-      };
       mkdirSync(captureDirectory, { recursive: true });
       writeFileSync(screenshotPath, bytes);
       writeFileSync(
         receiptPath,
         JSON.stringify({
+          captureId,
+          decision: 'allow',
           deviceId: 'device_1',
-          payload,
-          schemaVersion: 1,
-          screenshotHash: hash,
-          screenshotSizeBytes: bytes.length,
+          observedAt: '2026-07-18T00:00:00.000Z',
+          policy: { hash: capturePolicy().policyHash, version: 'bundle-policy-1' },
+          schemaVersion: 2,
+          screenshot: {
+            hash,
+            mimeType: 'image/webp',
+            ref: `${captureId}/screenshot.webp`,
+            sizeBytes: bytes.length,
+          },
+          source: {
+            application: { bundleId: 'one.recapsy.fixture', name: 'Fixture App' },
+            ownerProcessId: 4242,
+            windowId: 42,
+          },
           workspaceId: 'workspace_1',
         }),
       );
@@ -396,23 +399,20 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
   );
 
   bundleIt('stop() exits the launcher and capture process with no zombie', async () => {
-    const events: CaptureHelperEvent[] = [];
-    const { client, envelopes, child } = startBundleClient(async (event) => {
-      events.push(event);
-    });
+    const { client, envelopes, child, events } = startBundleClient();
     await waitForEnvelope(envelopes, 'helper.hello');
 
     await client.stop();
     await waitForCondition(() => !isProcessAlive(child.pid), 4000);
 
     expect(isProcessAlive(child.pid)).toBe(false);
-    expect(events).toHaveLength(0);
+    expect(events.filter((event) => event.type === 'process_exit')).toHaveLength(0);
   });
 
   bundleIt(
     'forwards SIGTERM to the supervised capture process',
     async () => {
-      const { child, envelopes } = startBundleClient(undefined, { keepStdinOpen: true });
+      const { child, envelopes } = startBundleClient({ keepStdinOpen: true });
       const hello = await waitForEnvelope(envelopes, 'helper.hello');
       const captureProcessId = requireCaptureProcessId(hello.payload.pid);
       activeCaptureProcessIds.add(captureProcessId);
@@ -429,7 +429,7 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
   bundleIt(
     'forwards SIGINT to the supervised capture process',
     async () => {
-      const { child, envelopes } = startBundleClient(undefined, { keepStdinOpen: true });
+      const { child, envelopes } = startBundleClient({ keepStdinOpen: true });
       const hello = await waitForEnvelope(envelopes, 'helper.hello');
       const captureProcessId = requireCaptureProcessId(hello.payload.pid);
       activeCaptureProcessIds.add(captureProcessId);
@@ -446,7 +446,7 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
   bundleIt(
     'force-stop kills the dedicated launcher process group with no capture orphan',
     async () => {
-      const { child, client, envelopes } = startBundleClient(undefined, {
+      const { child, client, envelopes } = startBundleClient({
         keepStdinOpen: true,
         shutdownTimeoutMs: 20,
       });
@@ -478,14 +478,12 @@ describe('capture launcher supervision invariants', () => {
   });
 });
 
-function startBundleClient(
-  onEvent?: (event: CaptureHelperEvent) => Promise<void>,
-  options: { keepStdinOpen?: boolean; shutdownTimeoutMs?: number } = {},
-): {
+function startBundleClient(options: { keepStdinOpen?: boolean; shutdownTimeoutMs?: number } = {}): {
   assetRoot: string;
   child: ChildProcess;
   client: ReturnType<typeof createHelperProcessClient>;
   envelopes: HelperEnvelope<HelperToMainType>[];
+  events: CaptureHelperTransportEvent[];
 } {
   const assetRoot = mkdtempSync(path.join(tmpdir(), 'recapsy-capture-assets-'));
   tempRoots.push(assetRoot);
@@ -516,11 +514,12 @@ function startBundleClient(
   });
 
   const envelopes: HelperEnvelope<HelperToMainType>[] = [];
+  const events: CaptureHelperTransportEvent[] = [];
   const startPromise = client.start({
-    onEnvelope: async (envelope) => {
-      envelopes.push(envelope);
+    async handle(event) {
+      if (event.type === 'envelope') envelopes.push(event.envelope);
+      else events.push(event);
     },
-    onEvent,
   });
 
   void startPromise.catch((error: unknown) => {
@@ -531,7 +530,7 @@ function startBundleClient(
     throw new Error('capture bundle subprocess was not spawned synchronously');
   }
 
-  return { assetRoot, child: capturedChild, client, envelopes };
+  return { assetRoot, child: capturedChild, client, envelopes, events };
 }
 
 function waitForEnvelope<TType extends HelperToMainType>(
@@ -649,14 +648,14 @@ function capturePoliciesHttpResponse(workspaceId: string, deviceId: string, gene
     axAllowlist: {
       axTextUploadEnabled: false,
       enabled: false,
-      generatedAt,
       reason: 'ax_text_upload_disabled',
       status: 'disabled',
-      workspaceId,
     },
     capturePolicy: {
+      deviceId,
       expiresAt: '2026-07-18T06:00:00.000Z',
-      id: 'composition-policy-snapshot',
+      generatedAt,
+      id: '00000000-0000-4000-8000-000000000003',
       policy: {
         axTextUploadEnabled: false,
         defaultAction: 'allow',
@@ -674,6 +673,7 @@ function capturePoliciesHttpResponse(workspaceId: string, deviceId: string, gene
       },
       ttlSeconds: 21_600,
       version: 'composition-policy-v1',
+      workspaceId,
     },
     deliveryPolicy: { maxConcurrentOcr: 2 },
     deviceId,
@@ -681,6 +681,10 @@ function capturePoliciesHttpResponse(workspaceId: string, deviceId: string, gene
     storagePolicy: {
       allowLongTermRemoteOriginal: false,
       authoritativeOriginalLocation: 'local_device',
+      createdAt: generatedAt,
+      id: '00000000-0000-4000-8000-000000000004',
+      updatedAt: generatedAt,
+      workspaceId,
     },
     workspaceId,
   };
@@ -689,6 +693,15 @@ function capturePoliciesHttpResponse(workspaceId: string, deviceId: string, gene
 type CaptureBundleSelection = {
   path: string;
   selection: 'configured' | 'default';
+};
+
+type LibwebpBuildProvenance = {
+  architecture: string;
+  deploymentTarget: string;
+  libsharpyuvArchive: string;
+  libwebpArchive: string;
+  sourceSha256: string;
+  version: string;
 };
 
 function resolveCaptureBundlePath(configuredPath: string | undefined): CaptureBundleSelection {
@@ -728,4 +741,21 @@ function validateCaptureBundleAvailability(selection: CaptureBundleSelection): b
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const relativePath = path.relative(rootPath, candidatePath);
   return relativePath !== '' && !relativePath.startsWith(`..${path.sep}`) && relativePath !== '..';
+}
+
+function readArchitectures(filePath: string): string[] {
+  return execFileSync('/usr/bin/lipo', ['-archs', filePath], { encoding: 'utf8' })
+    .trim()
+    .split(/\s+/);
+}
+
+function readMinimumMacOSVersions(archivePath: string): string[] {
+  const output = execFileSync('/usr/bin/otool', ['-l', archivePath], { encoding: 'utf8' });
+  return [
+    ...new Set(
+      [...output.matchAll(/minos (\d+\.\d+(?:\.\d+)?)/g)].flatMap((match) =>
+        match[1] ? [match[1]] : [],
+      ),
+    ),
+  ];
 }

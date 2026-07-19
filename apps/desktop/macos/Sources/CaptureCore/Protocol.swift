@@ -174,7 +174,7 @@ public struct CaptureSkippedPayload: Encodable {
     }
 }
 
-public struct CaptureAssetPayload: Codable {
+public struct CaptureAssetPayload: Codable, Equatable {
     public let role: String
     public let ref: String
     public let hash: String
@@ -290,22 +290,50 @@ public struct CaptureContextPayload: Codable {
 public struct CaptureResultPayload: Codable {
     public let captureId: String
     public let observedAt: String
-    public let manifest: CaptureAssetPayload
-    public let assets: [CaptureAssetPayload]
+    public let screenshot: CaptureAssetPayload
     public let context: CaptureContextPayload
+
+    private enum CodingKeys: String, CodingKey {
+        case captureId
+        case observedAt
+        case assets
+        case context
+    }
 
     public init(
         captureId: String,
         observedAt: String,
-        manifest: CaptureAssetPayload,
-        assets: [CaptureAssetPayload],
+        screenshot: CaptureAssetPayload,
         context: CaptureContextPayload
     ) {
         self.captureId = captureId
         self.observedAt = observedAt
-        self.manifest = manifest
-        self.assets = assets
+        self.screenshot = screenshot
         self.context = context
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        let assets = try values.decode([CaptureAssetPayload].self, forKey: .assets)
+        guard assets.count == 1, let screenshot = assets.first, screenshot.role == "screenshot" else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .assets,
+                in: values,
+                debugDescription: "Capture result must contain one screenshot asset."
+            )
+        }
+        self.captureId = try values.decode(String.self, forKey: .captureId)
+        self.observedAt = try values.decode(String.self, forKey: .observedAt)
+        self.screenshot = screenshot
+        self.context = try values.decode(CaptureContextPayload.self, forKey: .context)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(captureId, forKey: .captureId)
+        try values.encode(observedAt, forKey: .observedAt)
+        try values.encode([screenshot], forKey: .assets)
+        try values.encode(context, forKey: .context)
     }
 }
 

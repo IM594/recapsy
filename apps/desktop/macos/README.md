@@ -9,21 +9,25 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 | 目标 | 类型 | 职责 |
 | --- | --- | --- |
 | `CaptureCore` | Swift library | 纯逻辑:相对键生成、资产落盘路径拼接、活跃窗口选择规则、NDJSON envelope 编码、SHA-256 内容哈希、capture id 生成。全部有单测,且完全不依赖 libwebp / ScreenCaptureKit。 |
-| `CWebP` | system library shim | 把 libwebp 的 C 编码 API(`webp/encode.h`)以 `CWebP` 模块暴露给 Swift。头/库路径**不写死**,由 `build-capture-bundle.sh` 经 `brew --prefix webp` 动态传入。 |
+| `CWebP` | system library shim | 把 libwebp 的 C 编码 API(`webp/encode.h`)以 `CWebP` 模块暴露给 Swift。头/库路径**不写死**,由 `build-libwebp-static.sh` 构建的固定源码产物传入。 |
 | `RecapsyCapture` | Swift executable | 采集体:取前台 app → `SCShareableContent` 选主窗口 → `SCContentFilter(desktopIndependentWindow:)` 只截该活跃窗口 → CGImage 转 RGBA → libwebp `WebPEncodeRGBA` 有损编码(压后约 100–800KB)→ 写资产根 → NDJSON stdio 主循环。组装进 bundle 时**重命名为 `Recapsy`**(隐私面板显示名,ADR 约束③)。 |
 | `CaptureLauncher` | C executable | 极小 disclaim supervisor：`posix_spawn` + `responsibility_spawnattrs_setdisclaim`，转发 `SIGTERM` / `SIGINT`，严格 `waitpid` 并镜像采集体退出码；Electron 超时强退时终止 launcher 与采集体共享的专用进程组。 |
 
 前台 app 无可截窗口时(如 Finder 桌面、无窗口应用),采集体**静默跳过本次 tick**:不发 `capture.result`、不发 `capture.error`(仅 stderr 记一行),下个 interval 再试。
 
-## 依赖(dev)
+## 构建依赖与兼容性
 
-采集体用 libwebp 编码 WebP,dev 环境需先安装:
+当前 helper 只构建为 `arm64`，最低系统版本为 macOS 14 Sonoma。它面向 Apple Silicon 的 macOS 14+ 开发与打包环境；Intel 与 universal 发行是独立的后续任务，当前不得将这个 arm64 产物宣传为可在 2018 Intel Mac 上运行。
+
+采集体用 libwebp 编码 WebP。构建需要 Xcode Command Line Tools、系统 `curl` 及 CMake；CMake 可通过以下命令安装：
 
 ```bash
-brew install webp
+brew install cmake
 ```
 
-`build-capture-bundle.sh` 用 `brew --prefix webp` 动态解析头/库路径并**静态链接** `libwebp.a` + `libsharpyuv.a`(libwebp 的编码器会引用 SharpYuv 符号),使产物二进制自足、运行时不依赖 libwebp dylib(`otool -L` 无 libwebp 条目)。路径绝不写死进 `Package.swift` 或脚本。
+首次构建会从 WebP 官方 HTTPS 源下载固定的 `libwebp 1.6.0` 源码，校验 SHA-256 `e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564`，并以 `arm64`、`MACOSX_DEPLOYMENT_TARGET=14.0` 编译静态 `libwebp.a` 与 `libsharpyuv.a`。构建器会逐个检查归档内 Mach-O 对象的最低版本与架构，失败即中止。源码、CMake 中间产物和归档都位于 gitignored 的 `macos/build/third-party/`；`macos/build/libwebp-arm64.json` 是测试读取的可追溯 provenance。
+
+采集 helper 静态链接这两个归档，因此运行时不依赖 libwebp dylib（`otool -L` 无 libwebp 条目）。libwebp 的 BSD 许可证会随 bundle 安装在 `Contents/Resources/ThirdPartyNotices/libwebp.txt`。
 
 ## 构建与签名
 
@@ -32,7 +36,7 @@ brew install webp
 pnpm run build:capture
 ```
 
-该脚本 `swift build -c release`(带上述 libwebp include / 静态归档 flag),组装并**用 `Recapsy Developer` 自签名证书**签整个 bundle,产物落在 gitignored 的 `apps/desktop/macos/build/Recapsy.app`(绝不落系统临时目录 —— macOS 拒绝为 `/tmp` 下的 bundle 持久化授权,ADR 约束①)。签名身份可用环境变量 `RECAPSY_CAPTURE_SIGN_IDENTITY` 覆盖。
+该脚本先构建并验证上述 arm64/macOS 14 libwebp 归档，再以对应 include / 静态归档 flag 执行 `swift build -c release`，组装并**用 `Recapsy Developer` 自签名证书**签整个 bundle。产物落在 gitignored 的 `apps/desktop/macos/build/Recapsy.app`（绝不落系统临时目录 —— macOS 拒绝为 `/tmp` 下的 bundle 持久化授权，ADR 0009 约束①）。签名身份可用环境变量 `RECAPSY_CAPTURE_SIGN_IDENTITY` 覆盖。
 
 产物路径:
 
@@ -79,19 +83,18 @@ Gatekeeper 或正式发行完成。
 ## 自动化测试(不依赖屏幕录制授权)
 
 ```bash
-# Swift 纯逻辑单测(相对键、活跃窗口选择、协议编码、哈希)——不碰 libwebp。
-# 因 SwiftPM 的 `swift test` 会编译整个包(含依赖 libwebp 的采集体),这里
-# target-scoped 只构建测试目标再跑,即使未装 libwebp 也能独立跑绿:
-cd macos
-swift build --target CaptureCoreTests
-swift test --skip-build
-# 注:裸 `swift test` 会连带编译采集体,需要上文的 libwebp include/静态归档
-# flag(否则找不到 <webp/encode.h> / 链接失败)——那条路径由 build 脚本覆盖。
+# 完整 macOS 门禁：先运行不下载也不链接 libwebp 的纯 Swift CaptureCore 测试，
+# 再构建真实 helper、封装 Electron 应用并检查最终布局。
+pnpm run test:macos
+
+# 只构建 arm64 helper，并验证固定源码、静态 archive 与签名。
+pnpm run build:capture
 
 # 真实 spawn 已签名 bundle(经 disclaim 启动器)+ 协议握手
-cd ..
 pnpm run test:capture-bundle-process
 ```
+
+`test:capture-bundle-process` 会读取 `macos/build/libwebp-arm64.json`，确认两个静态 archive 都是 arm64、每个对象的最低 macOS 版本均为 14.0，并在真实签名 helper 上执行协议、策略 ACK、恢复和进程监督测试。`pnpm run test:macos` 进一步封装 Electron 应用并验证 nested code、签名与最终目录布局。
 
 `test:capture-bundle-process` 接受三种诚实结果:授权且有活跃窗口 → `capture.result`(WebP 资产);无授权 → `capture.error`;前台无可截窗口 → 无 capture 信封(采集体静默跳过),此时断言心跳仍在推进以证明主循环存活未挂死。
 
