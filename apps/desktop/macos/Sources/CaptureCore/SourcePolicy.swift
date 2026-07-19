@@ -3,7 +3,7 @@ import Foundation
 /// The only source attributes available before ScreenCaptureKit copies pixels.
 /// They come from the final selected `SCWindow`, never from a separate
 /// frontmost-app lookup, so policy and the actual capture target cannot drift.
-public struct CaptureSourceIdentity: Equatable {
+public struct CaptureSourceIdentity: Equatable, Sendable {
     public let applicationName: String
     public let bundleId: String
 
@@ -13,14 +13,14 @@ public struct CaptureSourceIdentity: Equatable {
     }
 }
 
-public enum CaptureSourcePolicyAction: String, Equatable {
+public enum CaptureSourcePolicyAction: String, Equatable, Sendable {
     case allow = "allow"
     case blockCapture = "block_capture"
     case redactContext = "redact_context"
     case blockOcr = "block_ocr"
 }
 
-public struct CaptureSourcePolicyRule: Equatable {
+public struct CaptureSourcePolicyRule: Equatable, Sendable {
     public let id: String
     public let kind: String
     public let scope: String
@@ -45,7 +45,7 @@ public struct CaptureSourcePolicyRule: Equatable {
     }
 }
 
-public struct CaptureSourcePolicy: Equatable {
+public struct CaptureSourcePolicy: Equatable, Sendable {
     public let version: String
     public let paused: Bool
     public let defaultAction: CaptureSourcePolicyAction
@@ -64,7 +64,7 @@ public struct CaptureSourcePolicy: Equatable {
     }
 }
 
-public struct CaptureSourcePolicyDecision: Equatable {
+public struct CaptureSourcePolicyDecision: Equatable, Sendable {
     public let action: CaptureSourcePolicyAction
     public let matchedRuleIds: [String]
 

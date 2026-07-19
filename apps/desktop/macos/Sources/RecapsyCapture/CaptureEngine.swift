@@ -60,7 +60,7 @@ final class CaptureEngine {
     private var captureCounter = 0
     private var configuredPolicy: ConfiguredPolicy?
     private var captureSession: CaptureSessionIdentity?
-    private var lastAcceptedFrameFingerprint: CaptureFrameFingerprint?
+    private var frameHistory = CaptureFrameHistory()
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
     // Edge-tracks the "no capturable active window" condition so a long stretch
@@ -138,6 +138,7 @@ final class CaptureEngine {
             captureSession = CaptureSessionIdentity(
                 policy: CapturePolicyIdentity(hash: policy.hash, version: policy.version)
             )
+            frameHistory.resetForNewSession()
             if let interval = payload["captureIntervalMs"] as? Int, interval > 0 {
                 captureIntervalMs = interval
             }
@@ -170,6 +171,7 @@ final class CaptureEngine {
             replayPendingCaptureResults()
         case "capture.pause":
             captureSession = nil
+            frameHistory.resetForNewSession()
             state = .paused
             let reason = payload["reason"] as? String
             emitStatus(status: "paused", reason: reason)
@@ -189,6 +191,7 @@ final class CaptureEngine {
             captureSession = CaptureSessionIdentity(
                 policy: CapturePolicyIdentity(hash: policy.hash, version: policy.version)
             )
+            frameHistory.resetForNewSession()
             state = .ready
             let reason = payload["reason"] as? String
             emitStatus(status: "ready", reason: reason)
@@ -285,7 +288,7 @@ final class CaptureEngine {
             counter: captureCounter
         )
         let observedAt = CaptureEngine.iso8601(Date())
-        let previousFingerprint = lastAcceptedFrameFingerprint
+        let previousFingerprint = frameHistory.previousAccepted
 
         captureQueue.async { [weak self] in
             self?.performCapture(
@@ -332,10 +335,23 @@ final class CaptureEngine {
 
         let encoded: EncodedScreenshot
         do {
-            encoded = try ScreenshotCapturer.capture(
+            let attempt = try ScreenshotCapturer.beginCapture(
                 policy: configuredPolicy.sourcePolicy,
                 previousFingerprint: previousFingerprint
             )
+            guard let result = attempt.wait(
+                until: Date().addingTimeInterval(ScreenshotCapturer.captureTimeout)
+            ) else {
+                attempt.cancel()
+                emitCaptureError(
+                    captureId: captureId,
+                    code: "capture_failed",
+                    message: "Screenshot capture timed out."
+                )
+                attempt.waitUntilFinished()
+                return
+            }
+            encoded = try result.get()
         } catch ScreenshotError.permissionMissing {
             emitPermissionStatus()
             emitCaptureError(
@@ -491,7 +507,7 @@ final class CaptureEngine {
             )
             switch outcome {
             case let .committed(payload, _):
-                lastAcceptedFrameFingerprint = prepared.frameFingerprint
+                frameHistory.recordAccepted(prepared.frameFingerprint)
                 emit(type: "capture.result", payload: payload)
             case let .skipped(reason):
                 emit(
@@ -843,13 +859,9 @@ final class CaptureEngine {
 
     // MARK: - Time
 
-    private static let isoFormatter: ISO8601DateFormatter = {
+    static func iso8601(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    static func iso8601(_ date: Date) -> String {
-        return isoFormatter.string(from: date)
+        return formatter.string(from: date)
     }
 }

@@ -4,7 +4,7 @@ import Foundation
 /// The safe, non-pixel identity for a capture target. A frame fingerprint is
 /// only comparable inside one verified application window, so switching an
 /// app or document window always admits the first frame.
-public struct CaptureFrameContext: Equatable {
+public struct CaptureFrameContext: Equatable, Sendable {
     public let bundleId: String
     public let windowId: Int
 
@@ -16,7 +16,7 @@ public struct CaptureFrameContext: Equatable {
 
 /// A one-way digest of a heavily quantized low-resolution luminance sample.
 /// It intentionally stores no screenshot bytes or reconstructable thumbnail.
-public struct CaptureFrameFingerprint: Equatable {
+public struct CaptureFrameFingerprint: Equatable, Sendable {
     public let context: CaptureFrameContext
     public let digest: String
 
@@ -26,13 +26,13 @@ public struct CaptureFrameFingerprint: Equatable {
     }
 }
 
-public enum CaptureFrameSkipReason: String, Equatable {
+public enum CaptureFrameSkipReason: String, Equatable, Sendable {
     case blank
     case lowInformation = "low_information"
     case duplicate
 }
 
-public enum CaptureFrameEconomyDecision: Equatable {
+public enum CaptureFrameEconomyDecision: Equatable, Sendable {
     case accept(CaptureFrameFingerprint)
     case skip(CaptureFrameSkipReason)
 }

@@ -13,7 +13,7 @@ struct EncodedScreenshot {
     let policyDecision: CaptureSourcePolicyAction
 }
 
-enum ScreenshotError: Error {
+enum ScreenshotError: Error, Sendable {
     case permissionMissing
     /// The foreground app has no capturable window this tick (e.g. Finder
     /// desktop with nothing open). Not an error surface — the caller skips the
@@ -27,11 +27,37 @@ enum ScreenshotError: Error {
     case encodeFailed
 }
 
+/// Owns one asynchronous ScreenCaptureKit attempt. The worker can report a
+/// timeout and request cancellation, but it must keep waiting for this attempt
+/// to finish before beginning another one.
+final class ScreenshotCaptureAttempt {
+    private let resultGate = CaptureAsyncResultGate<Result<EncodedScreenshot, ScreenshotError>>()
+    private let task: Task<Void, Never>
+
+    init(operation: @escaping @Sendable () async -> Result<EncodedScreenshot, ScreenshotError>) {
+        let resultGate = resultGate
+        task = Task {
+            resultGate.complete(await operation())
+        }
+    }
+
+    func wait(until deadline: Date) -> Result<EncodedScreenshot, ScreenshotError>? {
+        resultGate.wait(until: deadline)
+    }
+
+    func cancel() {
+        task.cancel()
+    }
+
+    func waitUntilFinished() {
+        _ = resultGate.waitUntilFinished()
+    }
+}
+
 /// Captures a single image of the *current active window* via ScreenCaptureKit
 /// and encodes it to a WebP whose size lands in the product's ~100–800KB target
-/// band. The ScreenCaptureKit call is async; this bridges it to a synchronous
-/// result with a semaphore + timeout, matching the pattern proven in the old
-/// capture plugin, and is always invoked off the main queue by `CaptureEngine`.
+/// band. ScreenCaptureKit work is owned by `ScreenshotCaptureAttempt`, which
+/// prevents a timed-out attempt from overlapping a later timer tick.
 enum ScreenshotCapturer {
     /// Lossy WebP qualities tried in order (0–100). The first encoding at or
     /// below the upper size bound wins; if none fit, the smallest (last) is
@@ -39,12 +65,12 @@ enum ScreenshotCapturer {
     /// the band is a product target, not a hard invariant.
     private static let webpQualities: [Float] = [80, 65, 50, 35, 25]
     private static let maxTargetBytes = 800 * 1024
-    private static let captureTimeout: DispatchTimeInterval = .seconds(5)
+    static let captureTimeout: TimeInterval = 5
 
-    static func capture(
+    static func beginCapture(
         policy: CaptureSourcePolicy,
         previousFingerprint: CaptureFrameFingerprint?
-    ) throws -> EncodedScreenshot {
+    ) throws -> ScreenshotCaptureAttempt {
         guard ScreenCaptureAuthorization.probe({ CGPreflightScreenCaptureAccess() }) else {
             // Capture is a background operation. A missing permission is
             // reported to the shell, but must never summon a macOS prompt from
@@ -59,33 +85,11 @@ enum ScreenshotCapturer {
             throw ScreenshotError.noActiveWindow
         }
 
-        let outcome = captureActiveWindowImage(
-            frontmostPid: Int(frontmostPid),
-            policy: policy,
-            previousFingerprint: previousFingerprint
-        )
-        switch outcome {
-        case .noWindow:
-            throw ScreenshotError.noActiveWindow
-        case .failed:
-            throw ScreenshotError.captureFailed
-        case .policyDenied:
-            throw ScreenshotError.policyDenied
-        case .blank:
-            throw ScreenshotError.blankFrame
-        case .lowInformation:
-            throw ScreenshotError.lowInformationFrame
-        case .duplicate:
-            throw ScreenshotError.duplicateFrame
-        case .image(let cgImage, let source, let fingerprint, let policyDecision):
-            guard let encoded = encodeWebP(cgImage: cgImage) else {
-                throw ScreenshotError.encodeFailed
-            }
-            return EncodedScreenshot(
-                imageData: encoded,
-                source: source,
-                frameFingerprint: fingerprint,
-                policyDecision: policyDecision
+        return ScreenshotCaptureAttempt {
+            await captureActiveWindow(
+                frontmostPid: Int(frontmostPid),
+                policy: policy,
+                previousFingerprint: previousFingerprint
             )
         }
     }
@@ -104,127 +108,112 @@ enum ScreenshotCapturer {
         )
     }
 
-    private enum CaptureOutcome {
-        case image(CGImage, CaptureWindowIdentity, CaptureFrameFingerprint, CaptureSourcePolicyAction)
-        case noWindow
-        case policyDenied
-        case blank
-        case lowInformation
-        case duplicate
-        case failed
-    }
-
-    private static func captureActiveWindowImage(
+    private static func captureActiveWindow(
         frontmostPid: Int,
         policy: CaptureSourcePolicy,
         previousFingerprint: CaptureFrameFingerprint?
-    ) -> CaptureOutcome {
-        let semaphore = DispatchSemaphore(value: 0)
-        var outcome: CaptureOutcome = .failed
-
-        Task.detached {
-            defer { semaphore.signal() }
-            do {
+    ) async -> Result<EncodedScreenshot, ScreenshotError> {
+        do {
+            try Task.checkCancellation()
                 // Prefer on-screen-only first; if selection still fails, retry
                 // with the broader SCK enumeration before giving up.
-                var content = try await SCShareableContent.excludingDesktopWindows(
+            var content = try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: true
+            )
+            try Task.checkCancellation()
+            var window = selectShareableWindow(
+                content: content,
+                frontmostPid: frontmostPid
+            )
+            if window == nil {
+                content = try await SCShareableContent.excludingDesktopWindows(
                     false,
-                    onScreenWindowsOnly: true
+                    onScreenWindowsOnly: false
                 )
-                var window = selectShareableWindow(
+                try Task.checkCancellation()
+                window = selectShareableWindow(
                     content: content,
                     frontmostPid: frontmostPid
                 )
-                if window == nil {
-                    content = try await SCShareableContent.excludingDesktopWindows(
-                        false,
-                        onScreenWindowsOnly: false
-                    )
-                    window = selectShareableWindow(
-                        content: content,
-                        frontmostPid: frontmostPid
-                    )
-                }
-                guard let window else {
-                    outcome = .noWindow
-                    return
-                }
-                guard let application = CaptureApplicationPayload.fromRuntimeMetadata(
-                    name: window.owningApplication?.applicationName,
-                    bundleId: window.owningApplication?.bundleIdentifier
-                ) else {
-                    outcome = .policyDenied
-                    return
-                }
-                guard let ownerProcessId = window.owningApplication?.processID, ownerProcessId > 0 else {
-                    outcome = .policyDenied
-                    return
-                }
-                let source = CaptureWindowIdentity(
-                    application: application,
-                    windowId: Int(window.windowID),
-                    ownerProcessId: Int(ownerProcessId)
-                )
-                let policyDecision = CaptureSourcePolicyEvaluator.decide(
-                    policy: policy,
-                    source: CaptureSourceIdentity(
-                        applicationName: application.name,
-                        bundleId: application.bundleId
-                    )
-                )
-                guard policyDecision.action != .blockCapture else {
-                    outcome = .policyDenied
-                    return
-                }
-
-                let filter = SCContentFilter(desktopIndependentWindow: window)
-                let config = SCStreamConfiguration()
-                let scale = filter.pointPixelScale
-                config.width = Int(filter.contentRect.width * CGFloat(scale))
-                config.height = Int(filter.contentRect.height * CGFloat(scale))
-                config.showsCursor = false
-                config.captureResolution = .best
-
-                let image = try await SCScreenshotManager.captureImage(
-                    contentFilter: filter,
-                    configuration: config
-                )
-                guard let luminance = CaptureFrameSampler.sampledLuminance(from: image) else {
-                    outcome = .failed
-                    return
-                }
-                let frameDecision = CaptureFrameEconomy.evaluate(
-                    luminance: luminance,
-                    width: CaptureFrameEconomy.sampleWidth,
-                    height: CaptureFrameEconomy.sampleHeight,
-                    context: CaptureFrameContext(
-                        bundleId: application.bundleId,
-                        windowId: Int(window.windowID)
-                    ),
-                    previous: previousFingerprint
-                )
-                switch frameDecision {
-                case .skip(.blank):
-                    outcome = .blank
-                case .skip(.lowInformation):
-                    outcome = .lowInformation
-                case .skip(.duplicate):
-                    outcome = .duplicate
-                case .accept(let fingerprint):
-                    outcome = .image(image, source, fingerprint, policyDecision.action)
-                }
-            } catch {
-                // Swallowed intentionally: the caller reports a generic
-                // capture_failed; the underlying error may carry no useful,
-                // privacy-safe detail across the process boundary.
-                outcome = .failed
             }
-        }
+            guard let window else {
+                return .failure(.noActiveWindow)
+            }
+            guard let application = CaptureApplicationPayload.fromRuntimeMetadata(
+                name: window.owningApplication?.applicationName,
+                bundleId: window.owningApplication?.bundleIdentifier
+            ) else {
+                return .failure(.policyDenied)
+            }
+            guard let ownerProcessId = window.owningApplication?.processID, ownerProcessId > 0 else {
+                return .failure(.policyDenied)
+            }
+            let source = CaptureWindowIdentity(
+                application: application,
+                windowId: Int(window.windowID),
+                ownerProcessId: Int(ownerProcessId)
+            )
+            let policyDecision = CaptureSourcePolicyEvaluator.decide(
+                policy: policy,
+                source: CaptureSourceIdentity(
+                    applicationName: application.name,
+                    bundleId: application.bundleId
+                )
+            )
+            guard policyDecision.action != .blockCapture else {
+                return .failure(.policyDenied)
+            }
 
-        if semaphore.wait(timeout: .now() + captureTimeout) == .timedOut {
-            return .failed
+            let filter = SCContentFilter(desktopIndependentWindow: window)
+            let config = SCStreamConfiguration()
+            let scale = filter.pointPixelScale
+            config.width = Int(filter.contentRect.width * CGFloat(scale))
+            config.height = Int(filter.contentRect.height * CGFloat(scale))
+            config.showsCursor = false
+            config.captureResolution = .best
+
+            let image = try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: config
+            )
+            try Task.checkCancellation()
+            guard let luminance = CaptureFrameSampler.sampledLuminance(from: image) else {
+                return .failure(.captureFailed)
+            }
+            let frameDecision = CaptureFrameEconomy.evaluate(
+                luminance: luminance,
+                width: CaptureFrameEconomy.sampleWidth,
+                height: CaptureFrameEconomy.sampleHeight,
+                context: CaptureFrameContext(
+                    bundleId: application.bundleId,
+                    windowId: Int(window.windowID)
+                ),
+                previous: previousFingerprint
+            )
+            switch frameDecision {
+            case .skip(.blank):
+                return .failure(.blankFrame)
+            case .skip(.lowInformation):
+                return .failure(.lowInformationFrame)
+            case .skip(.duplicate):
+                return .failure(.duplicateFrame)
+            case .accept(let fingerprint):
+                guard let encoded = encodeWebP(cgImage: image) else {
+                    return .failure(.encodeFailed)
+                }
+                return .success(EncodedScreenshot(
+                    imageData: encoded,
+                    source: source,
+                    frameFingerprint: fingerprint,
+                    policyDecision: policyDecision.action
+                ))
+            }
+        } catch {
+            // The underlying error may contain no privacy-safe detail for the
+            // process boundary. Cancellation is likewise a generic failure.
+            return .failure(.captureFailed)
         }
-        return outcome
     }
 
     /// Resolve a verified `SCWindow` for this tick. A CGWindowList fallback may
