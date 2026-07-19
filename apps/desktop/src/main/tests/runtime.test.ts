@@ -352,6 +352,9 @@ describe('electron main runtime wiring', () => {
       ok: true,
     });
 
+    const status = await ipcMain.invoke('capture.getStatus', undefined);
+    expect(status).toMatchObject({ data: { recentEventCount: 1 }, ok: true });
+
     // The controller/handler must have acked the capture back to the helper
     // over the same command channel real captures use.
     expect(helperClient.sentCommands.some((command) => command.type === 'capture.ack')).toBe(true);
@@ -704,6 +707,40 @@ describe('electron main runtime wiring', () => {
     // The wrapper must still delegate to the real (well-tested) handler —
     // this envelope should be reflected in capture.getStatus exactly as it
     // would be without onHelperEnvelope wired up.
+    const response = await ipcMain.invoke('capture.getStatus', undefined);
+    expect(response).toMatchObject({
+      data: { permissions: { accessibility: 'granted', screenRecording: 'granted' } },
+      ok: true,
+    });
+  });
+
+  it('keeps processing helper events when the optional observation hook throws', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const handle = createElectronMainRuntime(
+      baseOptions({
+        app,
+        helperClient,
+        ipcMain,
+        onHelperEnvelope: () => {
+          throw new Error('diagnostic sink failed');
+        },
+        store,
+      }),
+    );
+    app.triggerReady();
+    await handle.ready;
+
+    await expect(
+      helperClient.emit({
+        correlationId: null,
+        messageId: 'perm_hook_failure',
+        payload: { accessibility: 'granted', observedAt: now, screenCapture: 'granted' },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: now,
+        type: 'permission.status',
+      }),
+    ).resolves.toBeUndefined();
+
     const response = await ipcMain.invoke('capture.getStatus', undefined);
     expect(response).toMatchObject({
       data: { permissions: { accessibility: 'granted', screenRecording: 'granted' } },

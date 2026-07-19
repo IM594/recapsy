@@ -449,6 +449,46 @@ describe('capture control', () => {
     expect(control.getSnapshot().status).toBe('stopped');
   });
 
+  it('waits for helper shutdown when quit arrives while helper startup is pending', async () => {
+    const calls: string[] = [];
+    const helperStart = Promise.withResolvers<void>();
+    const control = createCaptureControl({
+      helper: {
+        async beginCapture(): Promise<void> {
+          calls.push('beginCapture');
+        },
+        async pauseCapture(): Promise<void> {},
+        async resumeCapture(): Promise<void> {},
+        async start(): Promise<void> {
+          calls.push('start');
+          await helperStart.promise;
+        },
+        async stop(): Promise<void> {
+          calls.push('shutdown');
+        },
+      },
+      policy: createRecordingPolicy(calls),
+    });
+
+    const starting = control.start();
+    while (!calls.includes('start')) await Promise.resolve();
+
+    let quitSettled = false;
+    const quitting = control.requestQuit().then(() => {
+      quitSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(quitSettled).toBe(false);
+    expect(calls).toEqual(['start']);
+
+    helperStart.resolve();
+    await Promise.all([starting, quitting]);
+
+    expect(calls).toEqual(['start', 'shutdown']);
+    expect(control.getSnapshot().status).toBe('stopped');
+  });
+
   it('stops without waiting for an unresolved policy activation', async () => {
     const calls: string[] = [];
     const policy = Promise.withResolvers<CapturePolicyConfiguration>();

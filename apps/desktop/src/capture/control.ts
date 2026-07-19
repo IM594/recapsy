@@ -272,7 +272,10 @@ class CaptureControlActor implements CaptureControl {
         this.state = { kind: 'stopped' };
         return Promise.resolve();
       case 'startingHelper':
-        return Promise.resolve();
+        // The active transition owns helper.start() and stops it once startup
+        // completes. Quitting must wait for that shutdown rather than exiting
+        // while the helper process is still being spawned.
+        return this.transitionDrain;
       case 'activatingPolicy':
       case 'readyPaused':
       case 'running':

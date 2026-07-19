@@ -323,7 +323,6 @@ function toCaptureCreateBody(input: CaptureCreateInput): Record<string, unknown>
     ...(input.documentPathCandidate ? { documentPathCandidate: input.documentPathCandidate } : {}),
     ...(input.localEventId ? { localEventId: input.localEventId } : {}),
     ...(input.urlCandidate ? { urlCandidate: input.urlCandidate } : {}),
-    ...(input.userId ? { userId: input.userId } : {}),
     ...(input.windowTitleCandidate ? { windowTitleCandidate: input.windowTitleCandidate } : {}),
   };
   const parsed = CaptureCreateRequestSchema.safeParse(body);

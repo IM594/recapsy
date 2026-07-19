@@ -87,11 +87,9 @@ export type CaptureCreateInput = {
     assetRefId: string;
     hash: string;
     mimeType: string;
-    role: 'capture_original' | 'capture_thumbnail' | 'ocr_input' | 'derived_asset';
     sizeBytes: number;
   };
   localEventId?: string;
-  userId?: string;
   bundleId?: string;
   windowTitleCandidate?: {
     kind: 'safe' | 'redacted' | 'omitted';

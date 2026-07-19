@@ -96,6 +96,24 @@ describe('desktop server API client', () => {
     expect(JSON.stringify(calls)).not.toContain('provider-token');
   });
 
+  it('sends only the fixed OCR input asset shape owned by the client', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async () =>
+      createJsonResponse(createCaptureCreateResponse()),
+    );
+
+    await client.createCapture(createCaptureCreateInput());
+
+    expect(calls[0]?.body).toMatchObject({
+      localAssets: [
+        {
+          role: 'ocr_input_image',
+        },
+      ],
+    });
+    expect(calls[0]?.body).not.toHaveProperty('userId');
+  });
+
   it('rejects retired temporary-upload commands in capture creation responses', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const retiredNextAction = ['create', 'temporary', 'upload'].join('_');
@@ -719,7 +737,6 @@ function createLocalAsset() {
     assetRefId: 'asset_ref_1',
     hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     mimeType: 'image/png',
-    role: 'ocr_input' as const,
     sizeBytes: 12,
   };
 }

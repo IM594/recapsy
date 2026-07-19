@@ -23,16 +23,17 @@ export type CaptureIpcHandlerOptions = {
 
 export function createCaptureIpcHandlers(options: CaptureIpcHandlerOptions): IpcHandlerMap {
   return {
-    'capture.getStatus': async () => createRendererSafeSuccess(buildCaptureStatusDto(options)),
+    'capture.getStatus': async () =>
+      createRendererSafeSuccess(await buildCaptureStatusDto(options)),
     'capture.getRecentEvents': async (payload) =>
       createRendererSafeSuccess(await buildRecentEventsDto(options, payload as { limit?: number })),
     'capture.pause': async () => {
       await options.control.pause();
-      return createRendererSafeSuccess(buildCaptureStatusDto(options));
+      return createRendererSafeSuccess(await buildCaptureStatusDto(options));
     },
     'capture.resume': async () => {
       await options.control.resume();
-      return createRendererSafeSuccess(buildCaptureStatusDto(options));
+      return createRendererSafeSuccess(await buildCaptureStatusDto(options));
     },
     'capture.listLocalRules': async () =>
       createRendererSafeSuccess(await buildLocalRulesDto(options.policy)),
@@ -59,10 +60,11 @@ async function buildLocalRulesDto(
   };
 }
 
-function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatusDto {
+async function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): Promise<CaptureStatusDto> {
   const snapshot = options.control.getSnapshot();
   const helperStatus = snapshot.captureHelper;
   const pauseReason = snapshot.pauseReasons?.[0];
+  const recentEvents = await options.store.listOutboxJobs({ workspaceId: options.workspaceId });
 
   return {
     admission: {
@@ -72,7 +74,7 @@ function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatus
     paused: snapshot.status === 'paused',
     ...(pauseReason ? { pauseReason } : {}),
     permissions: snapshot.permissions,
-    recentEventCount: 0,
+    recentEventCount: recentEvents.length,
     state: toCaptureStatusState(helperStatus?.state),
     ...(helperStatus?.policyHash && helperStatus.policyVersion
       ? {

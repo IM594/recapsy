@@ -172,7 +172,11 @@ function decorateEventHandler(
   return {
     subscribeToObservation: (listener) => eventHandler.subscribeToObservation(listener),
     async handleEnvelope(envelope) {
-      onHelperEnvelope(envelope);
+      try {
+        onHelperEnvelope(envelope);
+      } catch {
+        // Diagnostics must never make a healthy helper transport fail closed.
+      }
       await eventHandler.handleEnvelope(envelope);
     },
     handleProtocolResult: (result) => eventHandler.handleProtocolResult(result),
