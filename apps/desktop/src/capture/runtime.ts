@@ -76,7 +76,6 @@ export type CaptureRuntimeOptions = {
 
 export type CaptureRuntime = {
   admission: CaptureAdmissionController;
-  eventHandler: CaptureHelperEventHandler;
   control: CaptureControl;
   commandClient: CaptureHelperCommandClient;
   policy: CapturePolicyController;
@@ -158,7 +157,7 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
       await admission.reportStorageFailure();
     }
   });
-  return { admission, commandClient: options.client, control, eventHandler, policy };
+  return { admission, commandClient: options.client, control, policy };
 }
 
 function decorateEventHandler(

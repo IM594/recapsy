@@ -1063,6 +1063,10 @@ describe('desktop architecture boundaries', () => {
     expect(runtimeSource).toContain('createCaptureRuntime');
     expect(runtimeSource).toContain('createCaptureIpcHandlers');
     expect(captureRuntimeSource).toContain('export function createCaptureRuntime');
+    const captureRuntimeType = captureRuntimeSource.match(
+      /export type CaptureRuntime = \{([\s\S]*?)\};/,
+    )?.[1];
+    expect(captureRuntimeType).not.toContain('eventHandler');
     expect(captureHandlersSource).toContain('export function createCaptureIpcHandlers');
   });
 
