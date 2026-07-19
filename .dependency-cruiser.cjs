@@ -1,5 +1,8 @@
 /** @type {import('dependency-cruiser').IConfiguration} */
 
+const { existsSync, readdirSync } = require('node:fs');
+const { join } = require('node:path');
+
 const TEST_SOURCE_PATH =
   '(?:^|/)(?:__tests__|test|tests)/|[.](?:test|spec)[.](?:js|jsx|mjs|cjs|ts|tsx|mts|cts)$';
 
@@ -18,16 +21,19 @@ const SERVER_CAPABILITIES = [
 ];
 
 const DESKTOP_SOURCE_ROOT = 'apps/desktop/src';
-const DESKTOP_CAPABILITIES = [
-  'auth',
-  'capture',
-  'helper',
-  'ipc',
-  'server',
-  'status',
-  'storage',
-  'sync',
-];
+const DESKTOP_CAPABILITIES = capabilityDirectories(DESKTOP_SOURCE_ROOT);
+
+function capabilityDirectories(sourceRoot) {
+  const absoluteSourceRoot = join(__dirname, sourceRoot);
+
+  return readdirSync(absoluteSourceRoot, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() && existsSync(join(absoluteSourceRoot, entry.name, 'index.ts')),
+    )
+    .map((entry) => entry.name)
+    .sort();
+}
 
 function capabilityEntrypointRules(rulePrefix, sourceRoot, capabilities, exceptions = {}) {
   return capabilities.map((targetCapability) => {

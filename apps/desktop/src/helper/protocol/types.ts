@@ -21,7 +21,7 @@ export type HelperProtocolResult<T> =
   | { ok: true; envelope: T }
   | { ok: false; error: HelperProtocolError };
 
-export type CaptureAssetRole = 'screenshot' | 'thumbnail' | 'manifest';
+export type CaptureAssetRole = 'screenshot';
 
 export type CaptureAssetPayload = {
   role: CaptureAssetRole;
@@ -71,8 +71,7 @@ export type SafeCaptureContextPayload = {
 export type CaptureResultPayload = {
   captureId: string;
   observedAt: string;
-  manifest: CaptureAssetPayload;
-  assets: CaptureAssetPayload[];
+  assets: [CaptureAssetPayload];
   context: SafeCaptureContextPayload;
 };
 

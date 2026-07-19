@@ -4,64 +4,46 @@ import {
   type HelperEnvelope,
   type HelperProtocolError,
   type HelperProtocolResult,
-  type HelperToMainPayloadByType,
   type HelperToMainType,
   type MainToHelperPayloadByType,
   type MainToHelperType,
 } from '../helper/index';
-import {
-  type BackpressureConfig,
-  type BackpressureReason,
-  type HelperPermissionState,
-  type HelperRuntimeState,
-  type SafeOperationalError,
-  evaluateOperationalStoreBackpressure,
-} from '../storage/index';
+import type { CaptureHelperObservation } from './control';
 import { projectCaptureOutboxEntry } from './outbox-entry';
-import type { CaptureIntakeStore, HelperStateStore } from './store';
+import type { CaptureIntakeStore } from './store';
 
 export type { CaptureHelperCommandClient } from '../helper/index';
 
-export type CaptureHelperEventStatus = {
-  captureFailureCount?: number;
-  lastObservedAt?: string;
-  lastSafeError?: SafeOperationalError;
-  lastSkippedCapture?: {
-    captureId: string;
-    reason: HelperToMainPayloadByType['capture.skipped']['reason'];
-    observedAt: string;
-  };
-  permissions?: {
-    accessibility: HelperPermissionState;
-    screenRecording: HelperPermissionState;
-  };
-  permissionStatusSequence?: number;
-};
-
 export type CaptureHelperEventHandler = {
-  getStatus(): CaptureHelperEventStatus;
   handleEnvelope(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
   handleProtocolResult(result: HelperProtocolResult<HelperEnvelope>): Promise<void>;
-  subscribeToPermissionStatus(listener: (status: CaptureHelperEventStatus) => void): () => void;
+  subscribeToObservation(
+    listener: (observation: CaptureHandlerObservation) => Promise<void> | void,
+  ): () => void;
 };
 
+export type CaptureHandlerObservation =
+  | CaptureHelperObservation
+  | {
+      target: 'asset' | 'intake';
+      type: 'storage_failure';
+    };
+
 export type CaptureHelperEventHandlerOptions = {
-  backpressure: BackpressureConfig;
-  client: CaptureHelperCommandClient;
+  client: Pick<CaptureHelperCommandClient, 'sendCommand'>;
   deviceId: string;
   now(): string;
-  onBackpressurePause?(reasons: readonly BackpressureReason[]): Promise<void>;
-  onPermissionChange?(permissions: {
-    accessibility: HelperPermissionState;
-    screenRecording: HelperPermissionState;
-  }): Promise<void>;
-  onStorageFailure?(): Promise<void>;
-  onStorageWriteFailure?(): Promise<void>;
-  store: CaptureIntakeStore & HelperStateStore;
+  store: CaptureIntakeStore;
   workspaceId: string;
 };
 
 type CaptureNackCode = MainToHelperPayloadByType['capture.nack']['code'];
+
+class CaptureObservationDeliveryError extends Error {
+  constructor() {
+    super('Capture control observation could not be delivered.');
+  }
+}
 
 export function createCaptureHelperEventHandler(
   options: CaptureHelperEventHandlerOptions,
@@ -71,29 +53,18 @@ export function createCaptureHelperEventHandler(
 
 class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler {
   private messageSequence = 0;
-  private captureResultTail = Promise.resolve();
-  private readonly permissionStatusListeners = new Set<
-    (status: CaptureHelperEventStatus) => void
+  private readonly observationListeners = new Set<
+    (observation: CaptureHandlerObservation) => Promise<void> | void
   >();
-  private status: CaptureHelperEventStatus = {};
 
   constructor(private readonly options: CaptureHelperEventHandlerOptions) {}
 
-  getStatus(): CaptureHelperEventStatus {
-    return {
-      ...this.status,
-      ...(this.status.lastSafeError ? { lastSafeError: { ...this.status.lastSafeError } } : {}),
-      ...(this.status.lastSkippedCapture
-        ? { lastSkippedCapture: { ...this.status.lastSkippedCapture } }
-        : {}),
-      ...(this.status.permissions ? { permissions: { ...this.status.permissions } } : {}),
-    };
-  }
-
-  subscribeToPermissionStatus(listener: (status: CaptureHelperEventStatus) => void): () => void {
-    this.permissionStatusListeners.add(listener);
+  subscribeToObservation(
+    listener: (observation: CaptureHandlerObservation) => Promise<void> | void,
+  ): () => void {
+    this.observationListeners.add(listener);
     return () => {
-      this.permissionStatusListeners.delete(listener);
+      this.observationListeners.delete(listener);
     };
   }
 
@@ -101,10 +72,9 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
     try {
       switch (envelope.type) {
         case 'capture.result':
-          await this.enqueueCaptureResult(narrowHelperEnvelope(envelope, 'capture.result'));
+          await this.handleCaptureResult(narrowHelperEnvelope(envelope, 'capture.result'));
           return;
         case 'capture.skipped':
-          await this.recordSkippedCapture(narrowHelperEnvelope(envelope, 'capture.skipped'));
           return;
         case 'capture.error':
           await this.recordCaptureError(narrowHelperEnvelope(envelope, 'capture.error'));
@@ -118,21 +88,13 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         case 'helper.heartbeat':
         case 'helper.hello':
         case 'helper.status':
-          this.status = {
-            ...this.status,
-            lastObservedAt: envelope.sentAt,
-          };
+          await this.notifyObservation({ observedAt: envelope.sentAt, type: 'heartbeat' });
           return;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof CaptureObservationDeliveryError) throw error;
       await this.recordUnexpectedEventFailure(envelope);
     }
-  }
-
-  private enqueueCaptureResult(envelope: HelperEnvelope<'capture.result'>): Promise<void> {
-    const result = this.captureResultTail.then(() => this.handleCaptureResult(envelope));
-    this.captureResultTail = result.catch(() => undefined);
-    return result;
   }
 
   async handleProtocolResult(result: HelperProtocolResult<HelperEnvelope>): Promise<void> {
@@ -155,210 +117,103 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
 
   private async handleCaptureResult(envelope: HelperEnvelope<'capture.result'>): Promise<void> {
     const captureId = envelope.payload.captureId;
-    if (!hasFinalApplicationIdentity(envelope.payload.context.app)) {
-      await this.sendNack(envelope, 'policy_denied', 'Capture source identity is unavailable.');
-      return;
-    }
-    const backpressure = await evaluateCaptureBackpressure(this.options);
+    const entry = projectCaptureOutboxEntry({
+      deviceId: this.options.deviceId,
+      payload: envelope.payload,
+      workspaceId: this.options.workspaceId,
+    });
 
-    if (backpressure.action === 'pause') {
-      await this.sendNack(envelope, 'backpressure', 'Capture queue is applying backpressure.');
-      if (this.options.onBackpressurePause) {
-        await this.options.onBackpressurePause(backpressure.reasons);
-      } else {
-        await this.sendCommand(envelope, 'capture.pause', {
-          reason: 'backpressure',
-        });
-      }
-      return;
-    }
-
+    let result: Awaited<ReturnType<CaptureIntakeStore['createCaptureOutboxEntry']>>;
     try {
-      const entry = projectCaptureOutboxEntry({
-        deviceId: this.options.deviceId,
-        payload: envelope.payload,
-        workspaceId: this.options.workspaceId,
+      result = await this.options.store.createCaptureOutboxEntry(entry);
+    } catch {
+      await this.notifyObservation({ target: 'intake', type: 'storage_failure' });
+      await this.notifyObservation({
+        code: 'storage_unavailable',
+        observedAt: envelope.sentAt,
+        type: 'capture_error',
       });
+      await this.sendNack(envelope, 'storage_unavailable', safeNackMessage('storage_unavailable'));
+      return;
+    }
 
-      if (!entry) {
-        await this.sendNack(envelope, 'asset_unavailable', 'Capture asset is unavailable.');
-        return;
+    if (!result.ok) {
+      if (result.error.code === 'storage_corruption') {
+        await this.notifyObservation({ target: 'intake', type: 'storage_failure' });
       }
+      await this.notifyObservation({
+        code: result.error.code,
+        observedAt: envelope.sentAt,
+        type: 'capture_error',
+      });
+      await this.sendNack(
+        envelope,
+        mapStoreErrorToNackCode(result.error.code),
+        safeNackMessage(result.error.code),
+      );
+      return;
+    }
 
-      const result = await this.options.store.createCaptureOutboxEntry(entry);
-
-      if (!result.ok) {
-        if (result.error.code === 'storage_corruption') {
-          await this.notifyStorageFailure();
-        }
-        await this.sendNack(
-          envelope,
-          mapStoreErrorToNackCode(result.error.code),
-          safeNackMessage(result.error.code),
-        );
-        this.status = {
-          ...this.status,
-          lastObservedAt: envelope.sentAt,
-          lastSafeError: {
-            code: result.error.code,
-            message: safeNackMessage(result.error.code),
-            retryable: result.error.code === 'capacity_exceeded',
-          },
-        };
-        return;
-      }
-
-      this.status = {
-        ...this.status,
-        captureFailureCount: 0,
-        lastObservedAt: envelope.sentAt,
-        lastSafeError: undefined,
-      };
+    await this.notifyObservation({ observedAt: envelope.sentAt, type: 'capture_result' });
+    try {
       await this.sendCommand(envelope, 'capture.ack', {
         captureId,
       });
     } catch {
-      await this.notifyStorageFailure();
-      const safeError = safeOperationalError(
-        'storage_unavailable',
-        safeNackMessage('storage_unavailable'),
-        true,
-      );
-      this.status = {
-        ...this.status,
-        lastObservedAt: envelope.sentAt,
-        lastSafeError: safeError,
-      };
-      await this.sendNack(envelope, 'storage_unavailable', safeError.message);
+      await this.notifyObservation({
+        code: 'helper_unavailable',
+        observedAt: envelope.sentAt,
+        type: 'capture_error',
+      });
     }
-  }
-
-  private async recordSkippedCapture(envelope: HelperEnvelope<'capture.skipped'>): Promise<void> {
-    this.status = {
-      ...this.status,
-      lastObservedAt: envelope.sentAt,
-      lastSkippedCapture: {
-        captureId: envelope.payload.captureId,
-        observedAt: envelope.payload.observedAt,
-        reason: envelope.payload.reason,
-      },
-    };
   }
 
   private async recordCaptureError(envelope: HelperEnvelope<'capture.error'>): Promise<void> {
-    const safeError = safeCaptureError(envelope.payload.code);
-    this.status = {
-      ...this.status,
-      captureFailureCount:
-        envelope.payload.code === 'capture_failed' ? (this.status.captureFailureCount ?? 0) + 1 : 0,
-      lastObservedAt: envelope.sentAt,
-      lastSafeError: safeError,
-    };
+    await this.notifyObservation({
+      code: envelope.payload.code,
+      observedAt: envelope.sentAt,
+      type: 'capture_error',
+    });
     if (envelope.payload.code === 'asset_write_failed') {
-      await this.notifyStorageWriteFailure();
+      await this.notifyObservation({ target: 'asset', type: 'storage_failure' });
     }
-    await this.persistHelperState();
   }
 
   private async recordHelperExit(envelope: HelperEnvelope<'helper.exiting'>): Promise<void> {
-    const safeError = safeOperationalError(
-      'helper_unexpected_exit',
-      'Capture helper stopped unexpectedly.',
-      true,
-    );
-    this.status = {
-      ...this.status,
-      lastObservedAt: envelope.sentAt,
-      lastSafeError: safeError,
-    };
-    await this.persistHelperState();
+    await this.notifyObservation({
+      observedAt: envelope.sentAt,
+      reason: envelope.payload.reason,
+      type: 'helper_exit',
+    });
   }
 
   private async recordPermissionStatus(
     envelope: HelperEnvelope<'permission.status'>,
   ): Promise<void> {
-    this.status = {
-      ...this.status,
-      lastObservedAt: envelope.sentAt,
+    await this.notifyObservation({
+      observedAt: envelope.sentAt,
       permissions: {
         accessibility: envelope.payload.accessibility,
         screenRecording: envelope.payload.screenCapture,
       },
-      permissionStatusSequence: (this.status.permissionStatusSequence ?? 0) + 1,
-    };
-    await this.options.onPermissionChange?.({
-      accessibility: envelope.payload.accessibility,
-      screenRecording: envelope.payload.screenCapture,
+      type: 'permission',
     });
-    this.notifyPermissionStatusListeners();
-    await this.persistHelperState();
   }
 
-  private notifyPermissionStatusListeners(): void {
-    const status = this.getStatus();
-    for (const listener of this.permissionStatusListeners) {
-      try {
-        listener(status);
-      } catch {
-        // Permission observers are read-only consumers and cannot disrupt
-        // capture-event persistence or later observers.
-      }
-    }
-  }
-
-  private async notifyStorageFailure(): Promise<void> {
+  private async notifyObservation(observation: CaptureHandlerObservation): Promise<void> {
     try {
-      await this.options.onStorageFailure?.();
+      await Promise.all([...this.observationListeners].map((listener) => listener(observation)));
     } catch {
-      // Admission already records the failure before applying lifecycle state;
-      // event persistence and the safe NACK must still complete if pause IO fails.
-    }
-  }
-
-  private async notifyStorageWriteFailure(): Promise<void> {
-    try {
-      await this.options.onStorageWriteFailure?.();
-    } catch {
-      // Keep the native write failure observable even if lifecycle pause fails.
+      throw new CaptureObservationDeliveryError();
     }
   }
 
   private async recordUnexpectedEventFailure(envelope: HelperEnvelope): Promise<void> {
-    const safeError = safeOperationalError('unknown', 'Capture event could not be accepted.', true);
-    this.status = {
-      ...this.status,
-      lastObservedAt: envelope.sentAt,
-      lastSafeError: safeError,
-    };
+    await this.notifyObservation({ observedAt: envelope.sentAt, type: 'protocol_error' });
 
     if (isCaptureEnvelope(envelope)) {
-      await this.sendNack(envelope, 'unknown', safeError.message);
+      await this.sendNack(envelope, 'unknown', 'Capture event could not be accepted.');
     }
-  }
-
-  /**
-   * `helper_state` is a single-row table also written by
-   * `CaptureHelperController` for controller-driven transitions (start,
-   * pause, resume, shutdown). `setHelperState` replaces the whole row, so
-   * this reads the current row first and only overwrites the fields this
-   * handler actually owns (`lastSafeError`, `permissions`), carrying the rest
-   * forward instead of resetting them to defaults.
-   */
-  private async persistHelperState(): Promise<void> {
-    const existing = await this.options.store.getHelperState();
-    const helperState: HelperRuntimeState = {
-      connectionKind: existing?.connectionKind ?? 'managed_helper',
-      lastSafeError: this.status.lastSafeError ? { ...this.status.lastSafeError } : undefined,
-      permissions: this.status.permissions ??
-        existing?.permissions ?? {
-          accessibility: 'unknown',
-          screenRecording: 'unknown',
-        },
-      restartCount: existing?.restartCount ?? 0,
-      updatedAt: this.options.now(),
-    };
-
-    await this.options.store.setHelperState(helperState);
   }
 
   private async sendNack(
@@ -407,25 +262,6 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
   }
 }
 
-function hasFinalApplicationIdentity(value: unknown): boolean {
-  if (!value || typeof value !== 'object') return false;
-  const app = value as { bundleId?: unknown; name?: unknown };
-  return (
-    typeof app.bundleId === 'string' &&
-    app.bundleId.length <= 256 &&
-    /^[A-Za-z0-9.-]+$/.test(app.bundleId) &&
-    typeof app.name === 'string' &&
-    app.name.trim().length > 0
-  );
-}
-
-async function evaluateCaptureBackpressure(options: CaptureHelperEventHandlerOptions) {
-  return evaluateOperationalStoreBackpressure(
-    await options.store.getBackpressureSnapshot(options.workspaceId),
-    options.backpressure,
-  );
-}
-
 function mapStoreErrorToNackCode(code: string): CaptureNackCode {
   if (code === 'capacity_exceeded') {
     return 'backpressure';
@@ -456,50 +292,6 @@ function safeNackMessage(code: string): string {
   }
 
   return 'Capture could not be queued locally.';
-}
-
-function safeCaptureError(code: string): SafeOperationalError {
-  switch (code) {
-    case 'asset_write_failed':
-      return {
-        code,
-        message: 'Capture asset could not be written.',
-        retryable: true,
-      };
-    case 'permission_missing':
-    case 'permission_revoked':
-      return {
-        code,
-        message: 'Capture permission is not available.',
-        retryable: false,
-      };
-    case 'helper_unavailable':
-      return {
-        code,
-        message: 'Capture helper is unavailable.',
-        retryable: true,
-      };
-    case 'capture_failed':
-      return {
-        code,
-        message: 'Capture failed.',
-        retryable: true,
-      };
-    default:
-      return {
-        code: 'unknown',
-        message: 'Capture helper reported an error.',
-        retryable: true,
-      };
-  }
-}
-
-function safeOperationalError(
-  code: string,
-  message: string,
-  retryable: boolean,
-): SafeOperationalError {
-  return { code, message, retryable };
 }
 
 function isCaptureEnvelope(envelope: HelperEnvelope): envelope is HelperEnvelope<'capture.result'> {

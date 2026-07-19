@@ -9,7 +9,7 @@ import { createHelperProcessClient } from '../helper/index';
 import type {
   CaptureHelperClient,
   CaptureHelperCommandClient,
-  CaptureHelperStartOptions,
+  CaptureHelperTransportObserver,
 } from '../helper/index';
 
 export const CAPTURE_BUNDLE_IDENTIFIER = 'one.recapsy.desktop.capture';
@@ -116,25 +116,24 @@ export function createCaptureBundleClient(
   };
 
   return {
-    async start(startOptions?: CaptureHelperStartOptions): Promise<void> {
+    async start(observer: CaptureHelperTransportObserver): Promise<void> {
       const client = await getProcessClient();
       if (options.override) {
-        await client.start(startOptions);
+        await client.start(observer);
         return;
       }
 
       let invalidBundleHello = false;
       await client.start({
-        ...startOptions,
-        onEnvelope: async (envelope) => {
-          if (envelope.type === 'helper.hello') {
-            const hello = envelope as HelperEnvelope<'helper.hello'>;
+        async handle(event) {
+          if (event.type === 'envelope' && event.envelope.type === 'helper.hello') {
+            const hello = event.envelope as HelperEnvelope<'helper.hello'>;
             if (hello.payload.capabilities.mock) {
               invalidBundleHello = true;
               return;
             }
           }
-          await startOptions?.onEnvelope?.(envelope);
+          await observer.handle(event);
         },
       });
 
@@ -167,6 +166,12 @@ export function createCaptureBundleClient(
     },
     async sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void> {
       await processClient?.sendCommand(command);
+    },
+    async refreshPermissions(commandOptions) {
+      return await (await getProcessClient()).refreshPermissions(commandOptions);
+    },
+    async requestScreenRecordingPermission(commandOptions) {
+      return await (await getProcessClient()).requestScreenRecordingPermission(commandOptions);
     },
   };
 }

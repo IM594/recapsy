@@ -1,13 +1,3 @@
-export { createMockHelperController } from './mock-controller';
-export type {
-  MockHelperCommandResult,
-  MockHelperController,
-  MockHelperEmitResult,
-  MockHelperError,
-  MockHelperExitReason,
-  MockHelperSnapshot,
-  MockHelperState,
-} from './mock-controller';
 export { createSafeCaptureResultPayload } from './capture-result';
 export type { CaptureResultInput, UnsafeCaptureContextInput } from './capture-result';
 export {
@@ -42,23 +32,32 @@ export type {
   SafeCaptureContextPayload,
 } from './protocol/types';
 export {
+  isSafeCaptureId,
   validateHelperToMainEnvelope,
   validateMainToHelperEnvelope,
 } from './protocol/validation';
 export type { HelperEnvelopeValidator } from './protocol/validation';
-export { HelperPolicyActivationError, createHelperProcessClient } from './process-client';
+export {
+  HelperPolicyActivationError,
+  HelperPermissionCommandError,
+  HelperTransportError,
+  createHelperProcessClient,
+} from './process-client';
 export type {
+  HelperPermissionCommandErrorCode,
   HelperProcess,
   HelperProcessClientOptions,
+  HelperTransportErrorCode,
   SpawnHelperProcess,
 } from './process-client';
 export type {
-  CaptureHelperAssetRef,
   CaptureHelperClient,
   CaptureHelperCommandClient,
-  CaptureHelperEvent,
-  CaptureHelperStartOptions,
   CaptureHelperState,
   CaptureHelperStatus,
-  HelperLifecycle,
+  CaptureHelperTermination,
+  CaptureHelperTransportEvent,
+  CaptureHelperTransportObserver,
+  HelperPermissionCommandOptions,
+  HelperPermissionSnapshot,
 } from './types';

@@ -3,7 +3,6 @@ import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
   ClaimRetryableOutboxJobInput,
-  HelperRuntimeState,
   LocalCapturePolicyRule,
   OperationalStoreError,
   OperationalStoreResult,
@@ -207,19 +206,8 @@ class SqliteOperationalStore {
     return this.assets.delete(assetRefId);
   }
 
-  setHelperState(state: HelperRuntimeState): Promise<HelperRuntimeState> {
-    return this.cache.setHelperState(state);
-  }
-
-  getHelperState(): Promise<HelperRuntimeState | null> {
-    return this.cache.getHelperState();
-  }
-
-  setPolicyCache(
-    entry: PolicyCacheEntry,
-    shouldCommit?: () => boolean,
-  ): Promise<PolicyCacheEntry | null> {
-    return this.cache.setPolicyCache(entry, shouldCommit);
+  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
+    return this.cache.setPolicyCache(entry);
   }
 
   getPolicyCache(
@@ -258,7 +246,7 @@ class SqliteOperationalStore {
     return this.cache.getSettingsCache(workspaceId);
   }
 
-  async getBackpressureSnapshot(_workspaceId: string): Promise<OperationalStoreSnapshot> {
+  async getBackpressureSnapshot(): Promise<OperationalStoreSnapshot> {
     const jobRow = this.options.database
       .prepare<{ queued_jobs: number; retrying_jobs: number }>(
         `SELECT
@@ -336,7 +324,6 @@ class SqliteOperationalStore {
     this.options.database.run('DELETE FROM policy_cache');
     this.options.database.run('DELETE FROM sync_cursors');
     this.options.database.run('DELETE FROM settings_cache');
-    this.options.database.run('DELETE FROM helper_state');
   }
 }
 

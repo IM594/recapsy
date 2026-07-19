@@ -14,9 +14,10 @@ const now = '2026-07-08T00:00:00.000Z';
 function commandEnvelope<TType extends MainToHelperType>(
   type: TType,
   payload: MainToHelperPayloadByType[TType],
+  correlationId: string | null = null,
 ): HelperEnvelope<TType> {
   return {
-    correlationId: null,
+    correlationId,
     messageId: `cmd_${type}`,
     payload,
     protocolVersion: HELPER_PROTOCOL_VERSION,
@@ -69,16 +70,36 @@ describe('dev helper runtime', () => {
     });
   });
 
-  it('answers both permission commands with a status observation without changing capture state', () => {
+  it('emits a heartbeat for its current helper state', () => {
+    const lines: string[] = [];
+    const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
+
+    runtime.heartbeat();
+
+    const decoded = decodeHelperEnvelopeLine(lines[0] ?? '', validateHelperToMainEnvelope);
+    expect(decoded).toMatchObject({
+      envelope: {
+        payload: { sequence: 1, status: 'starting' },
+        type: 'helper.heartbeat',
+      },
+      ok: true,
+    });
+  });
+
+  it('answers both permission commands with a correlated status observation without changing capture state', () => {
     const lines: string[] = [];
     const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
 
     runtime.handleEnvelope({
-      envelope: commandEnvelope('permission.refresh', {}),
+      envelope: commandEnvelope('permission.refresh', {}, 'permission_refresh_1'),
       ok: true,
     });
     runtime.handleEnvelope({
-      envelope: commandEnvelope('permission.request_screen_capture', {}),
+      envelope: commandEnvelope(
+        'permission.request_screen_capture',
+        {},
+        'permission_request_screen_recording_1',
+      ),
       ok: true,
     });
 
@@ -87,12 +108,37 @@ describe('dev helper runtime', () => {
       decodeHelperEnvelopeLine(line, validateHelperToMainEnvelope),
     );
     expect(observations).toHaveLength(2);
-    for (const observation of observations) {
-      expect(observation).toMatchObject({
-        envelope: { payload: { screenCapture: 'not_determined' }, type: 'permission.status' },
+    expect(observations).toEqual([
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          correlationId: 'permission_refresh_1',
+          payload: expect.objectContaining({ screenCapture: 'not_determined' }),
+          type: 'permission.status',
+        }),
         ok: true,
-      });
-    }
+      }),
+      expect.objectContaining({
+        envelope: expect.objectContaining({
+          correlationId: 'permission_request_screen_recording_1',
+          payload: expect.objectContaining({ screenCapture: 'not_determined' }),
+          type: 'permission.status',
+        }),
+        ok: true,
+      }),
+    ]);
+  });
+
+  it('treats receipt control commands as no-ops in the dev helper', () => {
+    const lines: string[] = [];
+    const runtime = createDevHelperRuntime({ emit: (line) => lines.push(line), now: () => now });
+
+    runtime.handleEnvelope({
+      envelope: commandEnvelope('capture.flush', { reason: 'manual' }),
+      ok: true,
+    });
+
+    expect(runtime.getState()).toBe('starting');
+    expect(lines).toEqual([]);
   });
 
   it('pauses and resumes, emitting helper.status for each transition', () => {
@@ -171,6 +217,15 @@ describe('dev helper runtime', () => {
       name: 'Recapsy Dev Helper',
     });
     expect(envelope.payload.context.policy.version).toBe('policy_v7');
+    expect(envelope.payload.assets).toEqual([
+      {
+        hash: `sha256:${'1'.padStart(64, '0')}`,
+        mimeType: 'image/webp',
+        ref: 'dev_capture_1/screenshot.webp',
+        role: 'screenshot',
+        sizeBytes: 1024,
+      },
+    ]);
     const roundTripped = decodeHelperEnvelopeLine(
       encodeHelperEnvelope(envelope),
       validateHelperToMainEnvelope,

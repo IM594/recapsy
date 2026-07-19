@@ -9,9 +9,8 @@ import { createInMemoryTokenStore } from '../../auth/index';
 import type {
   CaptureHelperClient,
   CaptureHelperCommandClient,
-  CaptureHelperStartOptions,
-} from '../../capture/index';
-import type {
+  CaptureHelperTransportEvent,
+  CaptureHelperTransportObserver,
   HelperCapturePolicy,
   HelperEnvelope,
   HelperToMainType,
@@ -256,7 +255,7 @@ describe('electron main runtime wiring', () => {
       ok: true,
     });
 
-    helperClient.onSendCommand = async () => {
+    helperClient.refreshPermissionsImpl = async () => {
       await helperClient.emit({
         correlationId: null,
         messageId: 'perm_status_2',
@@ -269,6 +268,10 @@ describe('electron main runtime wiring', () => {
         sentAt: '2026-07-08T00:00:01.000Z',
         type: 'permission.status',
       });
+      return { accessibility: 'granted', screenRecording: 'granted' };
+    };
+    helperClient.requestScreenRecordingPermissionImpl = async () => {
+      return { accessibility: 'granted', screenRecording: 'granted' };
     };
 
     const refreshResponse = await ipcMain.invoke('permissions.refresh', undefined);
@@ -289,10 +292,7 @@ describe('electron main runtime wiring', () => {
       },
       ok: true,
     });
-    expect(helperClient.sentCommands.map((command) => command.type)).toEqual([
-      'permission.refresh',
-      'permission.request_screen_capture',
-    ]);
+    expect(helperClient.sentCommands).toEqual([]);
 
     await expect(
       ipcMain.invoke('permissions.openScreenRecordingSettings', undefined),
@@ -335,13 +335,6 @@ describe('electron main runtime wiring', () => {
           app: { bundleId: 'com.apple.Safari', name: 'Safari' },
           observedAt: now,
           policy: { decision: 'allow', version: 'v1' },
-        },
-        manifest: {
-          hash: 'h1',
-          mimeType: 'application/json',
-          ref: 'manifest_1',
-          role: 'manifest',
-          sizeBytes: 0,
         },
         observedAt: now,
       },
@@ -534,7 +527,7 @@ describe('electron main runtime wiring', () => {
     app.triggerReady();
     const state = await handle.ready;
 
-    expect(state.lifecycle.getSnapshot()).toMatchObject({
+    expect(state.control.getSnapshot()).toMatchObject({
       captureHelper: { lastSafeError: { code: 'helper_start_failed' }, state: 'failed' },
       status: 'stopped',
     });
@@ -564,8 +557,7 @@ describe('electron main runtime wiring', () => {
     const state = await handle.ready;
 
     expect(shellContext).toMatchObject({
-      eventHandler: state.eventHandler,
-      lifecycle: state.lifecycle,
+      control: state.control,
       store,
       workspaceId,
       workspaceIdVerified: true,
@@ -645,11 +637,10 @@ describe('electron main runtime wiring', () => {
       type: 'capture.error',
     });
 
-    expect(shellContext?.admission.getStatus()).toEqual({
-      active: true,
+    expect(shellContext?.control.getSnapshot().admission).toEqual({
       reasons: ['asset_write_failed'],
     });
-    expect(shellContext?.lifecycle.getSnapshot().pauseReasons).toContain('storage');
+    expect(shellContext?.control.getSnapshot().pauseReasons).toContain('storage');
     expect(await store.listOutboxJobs({ workspaceId })).toMatchObject([
       { id: 'job_accepted', state: 'pending' },
     ]);
@@ -1086,12 +1077,20 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
   sentCommands: Array<HelperEnvelope<MainToHelperType>> = [];
   startImpl: () => Promise<void> = () => Promise.resolve();
   stopImpl: () => Promise<void> = () => Promise.resolve();
+  refreshPermissionsImpl: () => Promise<{
+    accessibility: 'granted' | 'denied' | 'not_determined' | 'unknown';
+    screenRecording: 'granted' | 'denied' | 'not_determined' | 'unknown';
+  }> = async () => ({ accessibility: 'unknown', screenRecording: 'unknown' });
+  requestScreenRecordingPermissionImpl: () => Promise<{
+    accessibility: 'granted' | 'denied' | 'not_determined' | 'unknown';
+    screenRecording: 'granted' | 'denied' | 'not_determined' | 'unknown';
+  }> = async () => ({ accessibility: 'unknown', screenRecording: 'unknown' });
   onSendCommand: ((command: HelperEnvelope<MainToHelperType>) => Promise<void>) | undefined;
-  private onEnvelope: ((envelope: HelperEnvelope<HelperToMainType>) => Promise<void>) | undefined;
+  private observer: CaptureHelperTransportObserver | undefined;
 
-  async start(options: CaptureHelperStartOptions = {}): Promise<void> {
+  async start(observer: CaptureHelperTransportObserver): Promise<void> {
     this.startCalls += 1;
-    this.onEnvelope = options.onEnvelope;
+    this.observer = observer;
     await this.startImpl();
   }
 
@@ -1119,8 +1118,20 @@ class FakeHelperClient implements CaptureHelperClient, CaptureHelperCommandClien
     await this.onSendCommand?.(command);
   }
 
+  async refreshPermissions() {
+    return await this.refreshPermissionsImpl();
+  }
+
+  async requestScreenRecordingPermission() {
+    return await this.requestScreenRecordingPermissionImpl();
+  }
+
   async emit(envelope: HelperEnvelope<HelperToMainType>): Promise<void> {
-    await this.onEnvelope?.(envelope);
+    await this.observer?.handle({ envelope, type: 'envelope' });
+  }
+
+  async emitTransportEvent(event: CaptureHelperTransportEvent): Promise<void> {
+    await this.observer?.handle(event);
   }
 }
 

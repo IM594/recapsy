@@ -1,5 +1,4 @@
 import type {
-  HelperRuntimeState,
   LocalCapturePolicyRule,
   PolicyCacheEntry,
   PolicyCacheRead,
@@ -10,50 +9,10 @@ import type {
 } from '../types';
 import type { SqliteDatabase, SqliteRow } from './driver';
 
-const HELPER_STATE_KEY = 'runtime';
-
 export class SqliteCachePersistence {
   constructor(private readonly database: SqliteDatabase) {}
 
-  async setHelperState(state: HelperRuntimeState): Promise<HelperRuntimeState> {
-    const cloned = cloneHelperState(state);
-    this.database
-      .prepare(
-        `INSERT INTO helper_state (id, state_json, updated_at)
-         VALUES ($id, $stateJson, $updatedAt)
-         ON CONFLICT(id) DO UPDATE SET
-           state_json = excluded.state_json,
-           updated_at = excluded.updated_at`,
-      )
-      .run({
-        $id: HELPER_STATE_KEY,
-        $stateJson: JSON.stringify(cloned),
-        $updatedAt: cloned.updatedAt,
-      });
-
-    return cloneHelperState(cloned);
-  }
-
-  async getHelperState(): Promise<HelperRuntimeState | null> {
-    const row = this.database
-      .prepare<{ state_json: string }>(
-        `SELECT state_json
-         FROM helper_state
-         WHERE id = $id
-         LIMIT 1`,
-      )
-      .get({ $id: HELPER_STATE_KEY });
-
-    return row ? cloneHelperState(parseJson<HelperRuntimeState>(row.state_json)) : null;
-  }
-
-  async setPolicyCache(
-    entry: PolicyCacheEntry,
-    shouldCommit?: () => boolean,
-  ): Promise<PolicyCacheEntry | null> {
-    if (shouldCommit && !shouldCommit()) {
-      return null;
-    }
+  async setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
     const cloned = clonePolicyCache(entry);
     this.database
       .prepare(
@@ -353,14 +312,6 @@ function settingsCacheFromRow(row: SettingsCacheRow): SettingsCache {
     ),
     workspaceId: row.workspace_id,
   });
-}
-
-function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {
-  return {
-    ...state,
-    ...(state.lastSafeError ? { lastSafeError: { ...state.lastSafeError } } : {}),
-    permissions: { ...state.permissions },
-  };
 }
 
 function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {

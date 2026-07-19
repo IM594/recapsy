@@ -1,13 +1,8 @@
-import type { CaptureLifecycle } from '../capture/index';
+import type { CaptureControl } from '../capture/index';
 import { type IpcHandlerMap, type RuntimeStatusDto, createRendererSafeSuccess } from '../ipc/index';
 
-export type StatusSource = {
-  getLastObservedAt(): string | undefined;
-};
-
 export type StatusHandlerOptions = {
-  lifecycle: CaptureLifecycle;
-  statusSource: StatusSource;
+  control: CaptureControl;
 };
 
 export function createStatusHandlers(options: StatusHandlerOptions): IpcHandlerMap {
@@ -17,15 +12,16 @@ export function createStatusHandlers(options: StatusHandlerOptions): IpcHandlerM
 }
 
 function buildRuntimeStatusDto(options: StatusHandlerOptions): RuntimeStatusDto {
-  const snapshot = options.lifecycle.getSnapshot();
-  const lastObservedAt = options.statusSource.getLastObservedAt();
+  const snapshot = options.control.getSnapshot();
+  const lastHeartbeatAt = snapshot.lastHeartbeatAt;
+  const capturePauseReason = snapshot.pauseReasons?.[0];
 
   return {
     capturePaused: snapshot.status === 'paused',
-    ...(snapshot.pauseReason ? { capturePauseReason: snapshot.pauseReason } : {}),
+    ...(capturePauseReason ? { capturePauseReason } : {}),
     helper: {
       status: toHelperRuntimeStatus(snapshot.captureHelper?.state),
-      ...(lastObservedAt ? { lastHeartbeatAt: lastObservedAt } : {}),
+      ...(lastHeartbeatAt ? { lastHeartbeatAt } : {}),
     },
     menuBarActive: snapshot.menuBarActive,
     network: 'unknown',
@@ -35,7 +31,7 @@ function buildRuntimeStatusDto(options: StatusHandlerOptions): RuntimeStatusDto 
 
 function toHelperRuntimeStatus(
   state:
-    | NonNullable<ReturnType<CaptureLifecycle['getSnapshot']>['captureHelper']>['state']
+    | NonNullable<ReturnType<CaptureControl['getSnapshot']>['captureHelper']>['state']
     | undefined,
 ): RuntimeStatusDto['helper']['status'] {
   switch (state) {

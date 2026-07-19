@@ -6,7 +6,6 @@ import { createSyncQueueSummary } from '../../../sync/index';
 import { recoverSyncQueue } from '../../../sync/index';
 import {
   type AssetCacheRef,
-  type HelperRuntimeState,
   type OutboxJobCreateInput,
   type StoredOcrResult,
   evaluateOperationalStoreBackpressure,
@@ -423,7 +422,6 @@ describe('SQLite operational store', () => {
     await first.initialize();
     await first.upsertAssetCacheRef(createAsset({ localAccessKey: '/Users/alice/secret.png' }));
     await first.createOutboxJob(createJob());
-    await first.setHelperState(createHelperState());
     await first.setPolicyCache({
       deviceId: 'device_1',
       fetchedAt: now,
@@ -498,10 +496,6 @@ describe('SQLite operational store', () => {
     expect(await reopened.getAssetCacheRef('asset_1')).toMatchObject({
       assetRefId: 'asset_1',
       localAccessKey: '/Users/alice/secret.png',
-    });
-    expect(await reopened.getHelperState()).toMatchObject({
-      helperVersion: 'mock-helper-1.0.0',
-      restartCount: 1,
     });
     expect(await reopened.getPolicyCache('workspace_1', 'device_1', { now })).toMatchObject({
       expired: false,
@@ -1003,30 +997,6 @@ describe('SQLite operational store', () => {
     reopened.close();
   });
 
-  it('rejects invalid JSON text through SQLite CHECK constraints', async () => {
-    const database = createBunSqliteDatabase(tempDatabasePath());
-    migrateSqliteStore(database);
-
-    expect(() =>
-      database.run(
-        `INSERT INTO helper_state (id, state_json, updated_at)
-         VALUES ($id, $stateJson, $updatedAt)`,
-        {
-          $id: 'runtime',
-          $stateJson: '{"permissions":',
-          $updatedAt: now,
-        },
-      ),
-    ).toThrow(/constraint/i);
-
-    expect(
-      database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM helper_state').get()
-        ?.count,
-    ).toBe(0);
-
-    database.close();
-  });
-
   it('upserts asset refs and keeps renderer projections free of local absolute paths', async () => {
     const store = await createTempStore();
     await store.upsertAssetCacheRef(
@@ -1226,7 +1196,6 @@ describe('SQLite operational store', () => {
         workspaceId: 'workspace_2',
       }),
     );
-    await store.setHelperState(createHelperState());
     await store.setPolicyCache({
       deviceId: 'device_1',
       fetchedAt: now,
@@ -1265,16 +1234,11 @@ describe('SQLite operational store', () => {
     expect(await store.getAssetCacheRef('asset_2')).toMatchObject({
       workspaceId: 'workspace_2',
     });
-    expect(await store.getHelperState()).toMatchObject({
-      helperVersion: 'mock-helper-1.0.0',
-    });
-
     await store.clearSignOutCache();
 
     expect(await store.getOutboxJob('job_2')).toBeNull();
     expect(await store.getAssetCacheRef('asset_2')).toBeNull();
     expect(await store.getSettingsCache('workspace_2')).toBeNull();
-    expect(await store.getHelperState()).toBeNull();
   });
 
   it('supports backpressure snapshot and shared sync queue summary helpers', async () => {
@@ -1303,7 +1267,7 @@ describe('SQLite operational store', () => {
       retryAt: '2026-07-06T00:02:00.000Z',
     });
 
-    const snapshot = await store.getBackpressureSnapshot('workspace_1');
+    const snapshot = await store.getBackpressureSnapshot();
     const backpressure = evaluateOperationalStoreBackpressure(snapshot, {
       maxAssetBytes: 4096,
       maxQueuedJobs: 2,
@@ -1463,22 +1427,6 @@ function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): Stored
       source: 'image_ocr',
     },
     sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-    ...overrides,
-  };
-}
-
-function createHelperState(overrides: Partial<HelperRuntimeState> = {}): HelperRuntimeState {
-  return {
-    helperVersion: 'mock-helper-1.0.0',
-    lastHeartbeatAt: now,
-    permissions: {
-      accessibility: 'unknown',
-      screenRecording: 'granted',
-    },
-    pidDigest: 'pid:123',
-    restartCount: 1,
-    connectionKind: 'managed_helper',
-    updatedAt: now,
     ...overrides,
   };
 }

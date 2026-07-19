@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import type { CaptureHelperEvent } from '../../src/capture/index';
 import {
+  type CaptureHelperTransportEvent,
   type HelperEnvelope,
   type HelperToMainType,
   createHelperProcessClient,
@@ -35,7 +35,7 @@ describe('capture helper subprocess (real cross-process transport)', () => {
     await client.stop();
   });
 
-  it('delivers a synthesized capture.result through onEnvelope with correct structure', async () => {
+  it('delivers a synthesized capture.result through the transport observer', async () => {
     const { client, envelopes, child } = startRealHelperClient();
     await waitForEnvelope(envelopes, 'helper.hello');
 
@@ -43,8 +43,8 @@ describe('capture helper subprocess (real cross-process transport)', () => {
     const captureResult = await waitForEnvelope(envelopes, 'capture.result');
 
     expect(captureResult.payload.captureId).toMatch(/^dev_capture_/);
-    expect(captureResult.payload.manifest.role).toBe('manifest');
-    expect(captureResult.payload.assets.length).toBeGreaterThan(0);
+    expect(captureResult.payload.assets).toHaveLength(1);
+    expect(captureResult.payload.assets[0]?.role).toBe('screenshot');
     expect(captureResult.payload.context.app).toEqual({
       bundleId: 'one.recapsy.desktop.dev-helper',
       name: 'Recapsy Dev Helper',
@@ -78,37 +78,32 @@ describe('capture helper subprocess (real cross-process transport)', () => {
   });
 
   it('stop() causes the real child process to exit and leaves no zombie', async () => {
-    const events: CaptureHelperEvent[] = [];
-    const { client, envelopes, child } = startRealHelperClient(async (event) => {
-      events.push(event);
-    });
+    const { client, envelopes, child, events } = startRealHelperClient();
     await waitForEnvelope(envelopes, 'helper.hello');
 
     await client.stop();
     await waitForCondition(() => !isProcessAlive(child.pid), 3000);
 
     expect(isProcessAlive(child.pid)).toBe(false);
-    expect(events).toHaveLength(0);
+    expect(events.filter((event) => event.type === 'process_exit')).toHaveLength(0);
   });
 
-  it('reports unexpectedExit when the helper process is force-killed (simulated crash)', async () => {
-    const events: CaptureHelperEvent[] = [];
-    const { envelopes, child } = startRealHelperClient(async (event) => {
-      events.push(event);
-    });
+  it('reports process_exit when the helper process is force-killed (simulated crash)', async () => {
+    const { envelopes, child, events } = startRealHelperClient();
     await waitForEnvelope(envelopes, 'helper.hello');
 
     child.kill('SIGKILL');
 
     await waitForCondition(() => events.length > 0, 3000);
-    expect(events[0]).toMatchObject({ reason: 'process_crashed', type: 'unexpectedExit' });
+    expect(events[0]).toMatchObject({ reason: 'process_crashed', type: 'process_exit' });
   });
 });
 
-function startRealHelperClient(onEvent?: (event: CaptureHelperEvent) => Promise<void>): {
+function startRealHelperClient(): {
   child: ChildProcess;
   client: ReturnType<typeof createHelperProcessClient>;
   envelopes: HelperEnvelope<HelperToMainType>[];
+  events: CaptureHelperTransportEvent[];
 } {
   let capturedChild: ChildProcess | undefined;
   const client = createHelperProcessClient({
@@ -124,15 +119,19 @@ function startRealHelperClient(onEvent?: (event: CaptureHelperEvent) => Promise<
   });
 
   const envelopes: HelperEnvelope<HelperToMainType>[] = [];
+  const events: CaptureHelperTransportEvent[] = [];
 
   // start() is async but resolves synchronously relative to the spawn call
   // in this implementation, so `capturedChild` is guaranteed to be set once
   // the promise below is created; we still await it before returning.
   const startPromise = client.start({
-    onEnvelope: async (envelope) => {
-      envelopes.push(envelope);
+    async handle(event) {
+      if (event.type === 'envelope') {
+        envelopes.push(event.envelope);
+      } else {
+        events.push(event);
+      }
     },
-    onEvent,
   });
 
   // `createHelperProcessClient().start()` spawns synchronously and has
@@ -148,7 +147,7 @@ function startRealHelperClient(onEvent?: (event: CaptureHelperEvent) => Promise<
     throw new Error('capture helper subprocess was not spawned synchronously');
   }
 
-  return { child: capturedChild, client, envelopes };
+  return { child: capturedChild, client, envelopes, events };
 }
 
 function waitForEnvelope<TType extends HelperToMainType>(

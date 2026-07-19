@@ -22,13 +22,6 @@ function captureResultEnvelope(): HelperEnvelope<'capture.result'> {
         observedAt: '2026-07-15T00:00:00.000Z',
         policy: { decision: 'allow', version: 'policy_1' },
       },
-      manifest: {
-        hash: 'hash_1',
-        mimeType: 'application/json',
-        ref: 'opaque:manifest:capture_1',
-        role: 'manifest',
-        sizeBytes: 0,
-      },
       observedAt: '2026-07-15T00:00:00.000Z',
     },
     protocolVersion: HELPER_PROTOCOL_VERSION,

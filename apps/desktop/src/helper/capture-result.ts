@@ -1,4 +1,5 @@
 import type { CaptureResultPayload, SafeCaptureContextPayload } from './protocol/types';
+import { isSafeCaptureId } from './protocol/validation';
 
 export type UnsafeCaptureContextInput = {
   windowTitle?: string;
@@ -12,35 +13,32 @@ export type UnsafeCaptureContextInput = {
 export type CaptureResultInput = {
   application: { name: string; bundleId: string };
   captureId: string;
-  assetRef: string;
-  manifestRef: string;
   hash: string;
-  mimeType: string;
   sizeBytes: number;
   observedAt: string;
   unsafeContext?: UnsafeCaptureContextInput;
 };
 
 export function createSafeCaptureResultPayload(input: CaptureResultInput): CaptureResultPayload {
-  const manifest = {
-    role: 'manifest' as const,
-    ref: toOpaqueRef(input.manifestRef, 'manifest', input.captureId),
-    hash: input.hash,
-    mimeType: 'application/json',
-    sizeBytes: 0,
-  };
+  if (!isSafeCaptureId(input.captureId)) {
+    throw new Error('Capture result capture id is invalid.');
+  }
+
+  if (!Number.isInteger(input.sizeBytes) || input.sizeBytes <= 0) {
+    throw new Error('Capture result size must be a positive integer.');
+  }
+
   const asset = {
     role: 'screenshot' as const,
-    ref: toOpaqueRef(input.assetRef, 'asset', input.captureId),
+    ref: `${input.captureId}/screenshot.webp`,
     hash: input.hash,
-    mimeType: input.mimeType,
+    mimeType: 'image/webp',
     sizeBytes: input.sizeBytes,
   };
 
   return {
     captureId: input.captureId,
     observedAt: input.observedAt,
-    manifest,
     assets: [asset],
     context: createSafeContext(input),
   };
@@ -112,16 +110,4 @@ function safeDocumentName(path: string | undefined): string | undefined {
   const name = parts.at(-1);
 
   return name && name.length > 0 ? name : undefined;
-}
-
-function toOpaqueRef(ref: string, prefix: 'asset' | 'manifest', captureId: string): string {
-  if (!isLocalAbsolutePath(ref) && !ref.startsWith('file://')) {
-    return ref;
-  }
-
-  return `opaque:${prefix}:${captureId}`;
-}
-
-function isLocalAbsolutePath(value: string): boolean {
-  return value.startsWith('/') || /^[A-Za-z]:[\\/]/.test(value);
 }

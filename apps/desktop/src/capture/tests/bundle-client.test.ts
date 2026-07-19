@@ -1,16 +1,21 @@
 import { describe, expect, it } from 'bun:test';
-import type { HelperEnvelope, MainToHelperType } from '../../helper/index';
+import type {
+  CaptureHelperClient,
+  CaptureHelperCommandClient,
+  CaptureHelperTransportObserver,
+  HelperEnvelope,
+  MainToHelperType,
+} from '../../helper/index';
 import {
   CaptureBundleError,
   type CaptureBundleValidationAdapter,
   createCaptureBundleClient,
   resolveCaptureBundlePaths,
 } from '../bundle-client';
-import type {
-  CaptureHelperClient,
-  CaptureHelperCommandClient,
-  CaptureHelperStartOptions,
-} from '../index';
+
+const discardTransportEvents: CaptureHelperTransportObserver = {
+  async handle() {},
+};
 
 describe('capture bundle layout', () => {
   it('resolves the embedded bundle from Electron resources when packaged', () => {
@@ -50,7 +55,7 @@ describe('capture bundle client', () => {
     const harness = createHarness();
     const client = createCaptureBundleClient(harness.options);
 
-    await client.start();
+    await client.start(discardTransportEvents);
 
     expect(harness.validationCalls).toEqual([
       ['bundle-id', '/workspace/apps/desktop/macos/build/Recapsy.app'],
@@ -73,7 +78,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ isPackaged: true });
     const client = createCaptureBundleClient(harness.options);
 
-    await client.start();
+    await client.start(discardTransportEvents);
 
     expect(harness.validationCalls).toEqual([
       ['bundle-id', '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app'],
@@ -94,7 +99,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ bundleId: 'one.recapsy.desktop.capture.changed' });
     const client = createCaptureBundleClient(harness.options);
 
-    await expectRejected(client.start(), 'bundle_identity_invalid');
+    await expectRejected(client.start(discardTransportEvents), 'bundle_identity_invalid');
 
     expect(harness.processOptions).toBeUndefined();
     expect(harness.processClient.startCalls).toBe(0);
@@ -104,7 +109,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ executableResults: [true, false] });
     const client = createCaptureBundleClient(harness.options);
 
-    await expectRejected(client.start(), 'bundle_executable_invalid');
+    await expectRejected(client.start(discardTransportEvents), 'bundle_executable_invalid');
 
     expect(harness.processOptions).toBeUndefined();
   });
@@ -113,7 +118,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ signatureValid: false });
     const client = createCaptureBundleClient(harness.options);
 
-    await expectRejected(client.start(), 'bundle_signature_invalid');
+    await expectRejected(client.start(discardTransportEvents), 'bundle_signature_invalid');
 
     expect(harness.processOptions).toBeUndefined();
   });
@@ -122,7 +127,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ isPackaged: true, signatureResults: [true, false] });
     const client = createCaptureBundleClient(harness.options);
 
-    await expectRejected(client.start(), 'application_signature_invalid');
+    await expectRejected(client.start(discardTransportEvents), 'application_signature_invalid');
 
     expect(harness.processOptions).toBeUndefined();
   });
@@ -131,7 +136,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ helloMock: true });
     const client = createCaptureBundleClient(harness.options);
 
-    await expectRejected(client.start(), 'bundle_protocol_invalid');
+    await expectRejected(client.start(discardTransportEvents), 'bundle_protocol_invalid');
 
     expect(harness.processClient.stopCalls).toBe(1);
   });
@@ -143,7 +148,7 @@ describe('capture bundle client', () => {
     });
     const client = createCaptureBundleClient(harness.options);
 
-    await client.start();
+    await client.start(discardTransportEvents);
 
     expect(harness.validationCalls).toEqual([]);
     expect(harness.processOptions).toEqual({
@@ -160,7 +165,7 @@ describe('capture bundle client', () => {
     });
     const client = createCaptureBundleClient(harness.options);
 
-    await expectRejected(client.start(), 'bundle_override_not_allowed');
+    await expectRejected(client.start(discardTransportEvents), 'bundle_override_not_allowed');
 
     expect(harness.validationCalls).toEqual([]);
     expect(harness.processOptions).toBeUndefined();
@@ -170,7 +175,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ bundleIdentifierError: true });
 
     await expectRejected(
-      createCaptureBundleClient(harness.options).start(),
+      createCaptureBundleClient(harness.options).start(discardTransportEvents),
       'bundle_identity_invalid',
     );
 
@@ -181,7 +186,7 @@ describe('capture bundle client', () => {
     const harness = createHarness({ signatureError: true });
 
     await expectRejected(
-      createCaptureBundleClient(harness.options).start(),
+      createCaptureBundleClient(harness.options).start(discardTransportEvents),
       'bundle_signature_invalid',
     );
 
@@ -258,24 +263,28 @@ function createHarness(overrides: HarnessOverrides = {}) {
 }
 
 class FakeProcessClient implements CaptureHelperClient, CaptureHelperCommandClient {
+  async configureCapture(): Promise<void> {}
   startCalls = 0;
   stopCalls = 0;
 
   constructor(private readonly helloMock: boolean) {}
 
-  async start(options?: CaptureHelperStartOptions): Promise<void> {
+  async start(observer: CaptureHelperTransportObserver): Promise<void> {
     this.startCalls += 1;
-    await options?.onEnvelope?.({
-      correlationId: null,
-      messageId: 'hello_1',
-      payload: {
-        capabilities: { capture: true, mock: this.helloMock, permissions: true },
-        helperVersion: '0.0.1',
-        pid: 42,
+    await observer.handle({
+      envelope: {
+        correlationId: null,
+        messageId: 'hello_1',
+        payload: {
+          capabilities: { capture: true, mock: this.helloMock, permissions: true },
+          helperVersion: '0.0.1',
+          pid: 42,
+        },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-15T00:00:00.000Z',
+        type: 'helper.hello',
       },
-      protocolVersion: 'recapsy.capture-helper',
-      sentAt: '2026-07-15T00:00:00.000Z',
-      type: 'helper.hello',
+      type: 'envelope',
     });
   }
 
@@ -286,6 +295,12 @@ class FakeProcessClient implements CaptureHelperClient, CaptureHelperCommandClie
   async pauseCapture(): Promise<void> {}
   async resumeCapture(): Promise<void> {}
   async sendCommand(_command: HelperEnvelope<MainToHelperType>): Promise<void> {}
+  async refreshPermissions() {
+    return { accessibility: 'unknown' as const, screenRecording: 'unknown' as const };
+  }
+  async requestScreenRecordingPermission() {
+    return { accessibility: 'unknown' as const, screenRecording: 'unknown' as const };
+  }
 }
 
 async function expectRejected(

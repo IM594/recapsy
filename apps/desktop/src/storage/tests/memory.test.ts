@@ -43,7 +43,7 @@ describe('memory operational store', () => {
     const store = createMemoryStore();
 
     await expect(store.verifyOperationalWrite()).resolves.toBeUndefined();
-    expect(await store.getBackpressureSnapshot('workspace_1')).toEqual({
+    expect(await store.getBackpressureSnapshot()).toEqual({
       assetBytes: 0,
       queuedJobs: 0,
       retryingJobs: 0,

@@ -70,7 +70,7 @@ describe('device-wide outbox capacity contract', () => {
       try {
         await fillDeviceCapacity(store);
 
-        const snapshotFromWorkspaceB = await store.getBackpressureSnapshot(workspaceB);
+        const snapshotFromWorkspaceB = await store.getBackpressureSnapshot();
         expect(snapshotFromWorkspaceB).toEqual({
           assetBytes: 256 + maxActiveJobs * 128,
           queuedJobs: maxActiveJobs,

@@ -21,8 +21,6 @@ const CLASSIFIABLE_SYNC_ERROR_CODES = new Set([
   'workspace_required',
   'unknown',
   'result_invalid',
-  'temporary_location_missing',
-  'cleanup_failed',
 ]);
 
 const RETRYABLE_SYNC_ERROR_CODES = new Set(['offline', 'server_unavailable', 'unknown']);

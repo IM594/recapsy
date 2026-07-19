@@ -10,57 +10,48 @@ import {
   createRendererSafeSuccess,
 } from '../ipc/index';
 import type { OutboxJob, SafeOperationalError } from '../storage/index';
-import type { CaptureAdmissionController } from './admission';
-import type { CaptureHelperEventHandler } from './helper-event-handler';
-import type { CaptureLifecycle } from './lifecycle';
-import type { LocalCapturePolicyManager } from './local-policy';
+import type { CaptureControl } from './control';
+import type { CapturePolicyController } from './policy';
 import type { CaptureHistoryReader } from './store';
 
 export type CaptureIpcHandlerOptions = {
-  admission?: CaptureAdmissionController;
-  eventHandler: CaptureHelperEventHandler;
-  lifecycle: CaptureLifecycle;
-  localPolicy?: LocalCapturePolicyManager;
+  control: CaptureControl;
+  policy: CapturePolicyController;
   store: CaptureHistoryReader;
   workspaceId: string;
 };
 
 export function createCaptureIpcHandlers(options: CaptureIpcHandlerOptions): IpcHandlerMap {
-  const localPolicy = options.localPolicy;
   return {
     'capture.getStatus': async () => createRendererSafeSuccess(buildCaptureStatusDto(options)),
     'capture.getRecentEvents': async (payload) =>
       createRendererSafeSuccess(await buildRecentEventsDto(options, payload as { limit?: number })),
     'capture.pause': async () => {
-      await options.lifecycle.pause();
+      await options.control.pause();
       return createRendererSafeSuccess(buildCaptureStatusDto(options));
     },
     'capture.resume': async () => {
-      await options.lifecycle.resume();
+      await options.control.resume();
       return createRendererSafeSuccess(buildCaptureStatusDto(options));
     },
-    ...(localPolicy
-      ? {
-          'capture.listLocalRules': async () =>
-            createRendererSafeSuccess(await buildLocalRulesDto(localPolicy)),
-          'capture.blockBundle': async (payload: unknown) => {
-            await localPolicy.blockBundle((payload as { bundleId: string }).bundleId);
-            return createRendererSafeSuccess(await buildLocalRulesDto(localPolicy));
-          },
-          'capture.removeLocalRule': async (payload: unknown) => {
-            await localPolicy.remove((payload as { ruleId: string }).ruleId);
-            return createRendererSafeSuccess(await buildLocalRulesDto(localPolicy));
-          },
-        }
-      : {}),
+    'capture.listLocalRules': async () =>
+      createRendererSafeSuccess(await buildLocalRulesDto(options.policy)),
+    'capture.blockBundle': async (payload: unknown) => {
+      await options.policy.blockBundle((payload as { bundleId: string }).bundleId);
+      return createRendererSafeSuccess(await buildLocalRulesDto(options.policy));
+    },
+    'capture.removeLocalRule': async (payload: unknown) => {
+      await options.policy.removeLocalRule((payload as { ruleId: string }).ruleId);
+      return createRendererSafeSuccess(await buildLocalRulesDto(options.policy));
+    },
   };
 }
 
 async function buildLocalRulesDto(
-  manager: LocalCapturePolicyManager,
+  policy: CapturePolicyController,
 ): Promise<LocalCapturePolicyRulesDto> {
   return {
-    rules: (await manager.list()).map((rule) => ({
+    rules: (await policy.listLocalRules()).map((rule) => ({
       bundleId: rule.pattern,
       enabled: rule.enabled,
       id: rule.id,
@@ -69,30 +60,20 @@ async function buildLocalRulesDto(
 }
 
 function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatusDto {
-  const snapshot = options.lifecycle.getSnapshot();
+  const snapshot = options.control.getSnapshot();
   const helperStatus = snapshot.captureHelper;
-  const eventStatus = options.eventHandler.getStatus();
-  const permissions = eventStatus.permissions ?? {
-    accessibility: 'unknown',
-    screenRecording: 'unknown',
-  };
-  const lastSafeError = helperStatus?.lastSafeError ?? eventStatus.lastSafeError;
-  const admission = options.admission?.getStatus();
+  const pauseReason = snapshot.pauseReasons?.[0];
 
   return {
+    admission: {
+      active: snapshot.admission.reasons.length > 0,
+      reasons: [...snapshot.admission.reasons],
+    },
     paused: snapshot.status === 'paused',
-    ...(snapshot.pauseReason ? { pauseReason: snapshot.pauseReason } : {}),
-    permissions,
+    ...(pauseReason ? { pauseReason } : {}),
+    permissions: snapshot.permissions,
     recentEventCount: 0,
     state: toCaptureStatusState(helperStatus?.state),
-    ...(admission
-      ? {
-          admission: {
-            active: admission.active,
-            reasons: [...admission.reasons],
-          },
-        }
-      : {}),
     ...(helperStatus?.policyHash && helperStatus.policyVersion
       ? {
           policy: {
@@ -101,7 +82,7 @@ function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): CaptureStatus
           },
         }
       : {}),
-    ...(lastSafeError ? { lastError: toIpcError(lastSafeError) } : {}),
+    ...(snapshot.lastSafeError ? { lastError: toIpcError(snapshot.lastSafeError) } : {}),
   };
 }
 

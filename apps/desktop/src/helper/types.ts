@@ -1,9 +1,4 @@
-import type {
-  AssetAvailabilityState,
-  AssetCacheRefRole,
-  CapturePrivacyDecision,
-  SafeOperationalError,
-} from '../storage/index';
+import type { SafeOperationalError } from '../storage/index';
 import type {
   HelperCaptureIdentity,
   HelperCapturePolicy,
@@ -30,59 +25,33 @@ export type CaptureHelperStatus = {
   updatedAt?: string;
 };
 
-export type HelperLifecycle = {
-  start(): Promise<void>;
-  pauseCapture(): Promise<void>;
-  resumeCapture(): Promise<void>;
-  shutdown(): Promise<void>;
-  getStatus?(): CaptureHelperStatus;
+export type CaptureHelperTermination = {
+  type: 'process_exit';
+  reason: 'process_crashed' | 'unknown';
+  code: number | null;
 };
 
-export type CaptureHelperAssetRef = {
-  assetRefId: string;
-  role: Extract<AssetCacheRefRole, 'capture_original' | 'capture_thumbnail' | 'ocr_input'>;
-  hash: string;
-  mimeType: string;
-  sizeBytes: number;
-  localAccessKey: string;
-  availabilityState?: AssetAvailabilityState;
-  contentAddress?: string;
+export type CaptureHelperTransportEvent =
+  | { type: 'envelope'; envelope: HelperEnvelope<HelperToMainType> }
+  | CaptureHelperTermination;
+
+export type CaptureHelperTransportObserver = {
+  handle(event: CaptureHelperTransportEvent): Promise<void>;
 };
 
-export type CaptureHelperEvent =
-  | {
-      type: 'captureObserved';
-      workspaceId: string;
-      captureId: string;
-      capturedAt: string;
-      observedAt: string;
-      sourceAppName: string;
-      captureType: 'screen' | 'window';
-      asset: CaptureHelperAssetRef;
-      privacyDecision: CapturePrivacyDecision;
-      metadata?: Record<string, unknown>;
-      userId?: string;
-      bundleId?: string;
-      contextFingerprint?: string;
-      contextConfidence?: 'high' | 'medium' | 'low' | 'unknown';
-    }
-  | {
-      type: 'unexpectedExit';
-      reason: 'process_crashed' | 'quit_requested' | 'shutdown_requested' | 'unknown';
-      code?: number | null;
-      error?: string;
-    };
+export type HelperPermissionSnapshot = {
+  accessibility: HelperEnvelope<'permission.status'>['payload']['accessibility'];
+  screenRecording: HelperEnvelope<'permission.status'>['payload']['screenCapture'];
+};
 
-export type CaptureHelperStartOptions = {
-  /** @internal Legacy adapter surface for tests and mock clients. Capture events must be routed to eventHandler. */
-  onEvent?(event: CaptureHelperEvent): Promise<void>;
-  onEnvelope?(envelope: HelperEnvelope<HelperToMainType>): Promise<void>;
+export type HelperPermissionCommandOptions = {
+  timeoutMs?: number;
 };
 
 export type CaptureHelperClient = {
-  start(options?: CaptureHelperStartOptions): Promise<void>;
+  start(observer: CaptureHelperTransportObserver): Promise<void>;
   stop(): Promise<void>;
-  configureCapture?(policy: HelperCapturePolicy, identity?: HelperCaptureIdentity): Promise<void>;
+  configureCapture(policy: HelperCapturePolicy, identity?: HelperCaptureIdentity): Promise<void>;
   beginCapture(reason: 'runtime_started' | 'user_resumed'): Promise<void>;
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;
@@ -90,4 +59,8 @@ export type CaptureHelperClient = {
 
 export type CaptureHelperCommandClient = {
   sendCommand(command: HelperEnvelope<MainToHelperType>): Promise<void>;
+  refreshPermissions(options?: HelperPermissionCommandOptions): Promise<HelperPermissionSnapshot>;
+  requestScreenRecordingPermission(
+    options?: HelperPermissionCommandOptions,
+  ): Promise<HelperPermissionSnapshot>;
 };

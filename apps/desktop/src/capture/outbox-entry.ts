@@ -1,12 +1,7 @@
 import { createHash } from 'node:crypto';
-import type {
-  CaptureAssetPayload,
-  CaptureResultPayload,
-  SafeCaptureContextPayload,
-} from '../helper/index';
+import type { CaptureResultPayload, SafeCaptureContextPayload } from '../helper/index';
 import { redactSensitiveString } from '../logging/redaction';
 import type {
-  AssetCacheRefRole,
   CaptureOutboxEntryCreateInput,
   CaptureOutboxPayloadInput,
   CapturePrivacyDecision,
@@ -22,26 +17,22 @@ export function projectCaptureOutboxEntry({
   payload,
   deviceId,
   workspaceId,
-}: ProjectCaptureOutboxEntryInput): CaptureOutboxEntryCreateInput | null {
-  if (!payload.context.app?.name.trim() || !/^[A-Za-z0-9.-]+$/.test(payload.context.app.bundleId)) {
-    return null;
-  }
-  const selectedAsset = selectPrimaryAsset(payload);
-  if (!selectedAsset) return null;
+}: ProjectCaptureOutboxEntryInput): CaptureOutboxEntryCreateInput {
+  const [screenshot] = payload.assets;
 
   const capture = capturePayloadFromResult(payload);
   const assetRefs = assetRefsFromResult(payload, workspaceId);
 
   return {
     assetRefs,
-    assetRefId: selectedAsset.ref,
+    assetRefId: screenshot.ref,
     capture,
     createdAt: payload.observedAt,
     deviceId,
     id: payload.captureId,
     idempotencyKey: `${workspaceId}:${payload.captureId}`,
     payloadHash: payloadHash({
-      assetRefId: selectedAsset.ref,
+      assetRefId: screenshot.ref,
       assetRefs,
       capture,
       workspaceId,
@@ -50,29 +41,8 @@ export function projectCaptureOutboxEntry({
   };
 }
 
-function selectPrimaryAsset(payload: CaptureResultPayload): CaptureAssetPayload | undefined {
-  return (
-    payload.assets.find((asset) => asset.role === 'screenshot') ??
-    payload.assets.find((asset) => asset.role === 'thumbnail')
-  );
-}
-
-function mapAssetRole(role: CaptureAssetPayload['role']): AssetCacheRefRole | undefined {
-  switch (role) {
-    case 'screenshot':
-      return 'capture_original';
-    case 'thumbnail':
-      return 'capture_thumbnail';
-    case 'manifest':
-      return undefined;
-  }
-}
-
 function assetRefsFromResult(payload: CaptureResultPayload, workspaceId: string) {
   return payload.assets.flatMap((asset) => {
-    const role = mapAssetRole(asset.role);
-    if (!role) return [];
-
     return [
       {
         assetRefId: asset.ref,
@@ -83,7 +53,7 @@ function assetRefsFromResult(payload: CaptureResultPayload, workspaceId: string)
         hash: asset.hash,
         localAccessKey: safeLocalAccessKey(asset.ref, payload.captureId),
         mimeType: asset.mimeType,
-        role,
+        role: 'capture_original' as const,
         sizeBytes: asset.sizeBytes,
         workspaceId,
       },

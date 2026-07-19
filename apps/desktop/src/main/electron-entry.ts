@@ -24,11 +24,7 @@ import {
   createCaptureBundleClient,
   createNodeCaptureBundleValidationAdapter,
 } from '../capture/index';
-import {
-  createPrivacySettingsOpener,
-  readCapturePermissions,
-  refreshCapturePermissions,
-} from '../permissions/index';
+import { createPrivacySettingsOpener, refreshCapturePermissions } from '../permissions/index';
 import { createServerApiClient } from '../server/index';
 import {
   type DesktopShellStatus,
@@ -274,17 +270,15 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
           await privacySettings.open('screen_recording');
         },
         pauseCapture: async () => {
-          await context.lifecycle.pause();
+          await context.control.pause();
         },
         refreshPermissions: async () => {
           await refreshCapturePermissions({
             client: context.commandClient,
-            eventHandler: context.eventHandler,
-            now: () => new Date().toISOString(),
           });
         },
         resumeCapture: async () => {
-          await context.lifecycle.resume();
+          await context.control.resume();
         },
       },
       adapters: {
@@ -326,25 +320,25 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
       mainWindowHtmlPath,
       statusSource: {
         async getStatus(): Promise<DesktopShellStatus> {
-          const snapshot = context.lifecycle.getSnapshot();
-          const captureStatus = context.eventHandler.getStatus();
-          const permissions = readCapturePermissions(context.eventHandler);
+          const snapshot = context.control.getSnapshot();
+          const permissions = snapshot.permissions;
           const workerCapacity = context.syncRuntime.getCapacityStatus();
           const sync = await createSyncQueueSummary(context.store, context.workspaceId, {
             now: new Date().toISOString(),
             workerCapacity,
           });
-          const lastError = snapshot.captureHelper?.lastSafeError ?? captureStatus.lastSafeError;
-          const admission = context.admission.getStatus();
+          const lastError = snapshot.lastSafeError;
+          const admission = snapshot.admission;
           const helperStatus = snapshot.captureHelper;
+          const capturePauseReason = snapshot.pauseReasons?.[0];
 
           const status: DesktopShellStatus = {
             accessibility: permissions.accessibility,
-            captureFailureCount: captureStatus.captureFailureCount ?? 0,
+            captureFailureCount: snapshot.captureFailureCount,
             capturePaused: snapshot.status === 'paused',
-            ...(snapshot.pauseReason ? { capturePauseReason: snapshot.pauseReason } : {}),
+            ...(capturePauseReason ? { capturePauseReason } : {}),
             captureAdmission: {
-              active: admission.active,
+              active: admission.reasons.length > 0,
               reasons: [...admission.reasons],
             },
             ...(helperStatus?.policyHash && helperStatus.policyVersion
@@ -375,7 +369,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
           };
           void acceptancePublisher.tick({
             captureAdmission: {
-              active: admission.active,
+              active: admission.reasons.length > 0,
               reasons: [...admission.reasons],
             },
             capturePaused: snapshot.status === 'paused',

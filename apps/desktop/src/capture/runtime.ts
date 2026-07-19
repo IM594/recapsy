@@ -1,5 +1,9 @@
-import type { HelperEnvelope, HelperToMainType } from '../helper/index';
-import type { CaptureHelperClient } from '../helper/index';
+import type {
+  CaptureHelperClient,
+  CaptureHelperTransportEvent,
+  HelperEnvelope,
+  HelperToMainType,
+} from '../helper/index';
 import type { CapturePoliciesResult } from '../server/index';
 import {
   type AssetAvailabilityResolver,
@@ -9,23 +13,23 @@ import {
 } from '../storage/index';
 import {
   type CaptureAdmissionController,
+  type CaptureAdmissionStore,
   type CaptureStorageAdmissionOptions,
   createCaptureAdmissionController,
 } from './admission';
-import { createCaptureHelperController } from './helper-controller';
+import {
+  type CaptureControl,
+  type CaptureControlHelperPort,
+  type CaptureStartupRecovery,
+  createCaptureControl,
+} from './control';
 import {
   type CaptureHelperCommandClient,
   type CaptureHelperEventHandler,
   createCaptureHelperEventHandler,
 } from './helper-event-handler';
-import {
-  type CaptureLifecycle,
-  type CaptureStartupRecovery,
-  createCaptureLifecycle,
-} from './lifecycle';
-import { type LocalCapturePolicyManager, createLocalCapturePolicyManager } from './local-policy';
-import { createCapturePolicyActivation } from './policy';
-import type { CaptureIntakeStore, HelperStateStore } from './store';
+import { type CapturePolicyController, createCapturePolicyController } from './policy';
+import type { CaptureIntakeStore } from './store';
 import type { CapturePolicyCacheStore } from './store';
 
 export const DEFAULT_CAPTURE_MAX_QUEUED_JOBS = 24;
@@ -46,7 +50,7 @@ const alwaysAvailableAssetResolver: AssetAvailabilityResolver = {
 };
 
 export type CaptureRuntimeStore = CaptureIntakeStore &
-  HelperStateStore &
+  CaptureAdmissionStore &
   CapturePolicyCacheStore &
   AssetReconciliationStore;
 
@@ -73,64 +77,52 @@ export type CaptureRuntimeOptions = {
 export type CaptureRuntime = {
   admission: CaptureAdmissionController;
   eventHandler: CaptureHelperEventHandler;
-  lifecycle: CaptureLifecycle;
+  control: CaptureControl;
   commandClient: CaptureHelperCommandClient;
-  localPolicy: LocalCapturePolicyManager;
+  policy: CapturePolicyController;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
-  const admissionRef: { current?: CaptureAdmissionController } = {};
-  const lifecycleRef: { current?: CaptureLifecycle } = {};
   const rawEventHandler = createCaptureHelperEventHandler({
-    backpressure: options.backpressure ?? DEFAULT_CAPTURE_BACKPRESSURE,
     client: options.client,
     deviceId: options.deviceId,
     now: options.now,
-    onBackpressurePause: async () => {
-      if (admissionRef.current) {
-        await admissionRef.current.reconcile();
-        return;
-      }
-      await options.client.pauseCapture();
-    },
-    onPermissionChange: async (permissions) => {
-      await lifecycleRef.current?.setPermissionPause(permissions.screenRecording !== 'granted');
-    },
-    onStorageFailure: async () => {
-      await admissionRef.current?.reportStorageFailure();
-    },
-    onStorageWriteFailure: async () => {
-      await admissionRef.current?.reportStorageWriteFailure();
-    },
     store: options.store,
     workspaceId: options.workspaceId,
   });
   const eventHandler = decorateEventHandler(rawEventHandler, options.onHelperEnvelope);
-  const helper = createCaptureHelperController({
-    client: options.client,
+  const helper: CaptureControlHelperPort = {
+    async start() {
+      await options.client.start({
+        async handle(event: CaptureHelperTransportEvent) {
+          if (event.type === 'envelope') {
+            await eventHandler.handleEnvelope(event.envelope);
+            return;
+          }
+          await control.handleHelperTermination(event);
+        },
+      });
+    },
+    beginCapture: (reason) => options.client.beginCapture(reason),
+    pauseCapture: () => options.client.pauseCapture(),
+    resumeCapture: () => options.client.resumeCapture(),
+    stop: () => options.client.stop(),
+  };
+  const policy = createCapturePolicyController({
+    api: options.policyApi,
+    configure: (capturePolicy, identity) =>
+      options.client.configureCapture(capturePolicy, identity),
     deviceId: options.deviceId,
-    eventHandler,
-    isCaptureAdmissionPaused: () => {
-      return (lifecycleRef.current?.getSnapshot().pauseReasons?.length ?? 0) > 0;
-    },
     now: options.now,
-    workspaceId: options.workspaceId,
-    onPolicyPauseChange: async (active) => {
-      await lifecycleRef.current?.setPolicyPause(active);
-    },
-    policyActivation: createCapturePolicyActivation({
-      api: options.policyApi,
-      deviceId: options.deviceId,
-      now: options.now,
-      onActivated: (configuration) => {
-        options.onPolicyActivated?.({ maxConcurrentOcr: configuration.maxConcurrentOcr });
-      },
-      store: options.store,
-      workspaceId: options.workspaceId,
-    }),
     store: options.store,
+    workspaceId: options.workspaceId,
   });
-  const lifecycle = createCaptureLifecycle({
+  policy.subscribe((snapshot) => {
+    if (snapshot.status === 'active') {
+      options.onPolicyActivated?.({ maxConcurrentOcr: snapshot.configuration.maxConcurrentOcr });
+    }
+  });
+  const control = createCaptureControl({
     assetReconciliation: {
       async reconcile() {
         await reconcileAssetRefs({
@@ -142,25 +134,31 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
       },
     },
     helper,
-    initialPauseCauses: ['permission'],
+    initialPermissions: {
+      accessibility: 'unknown',
+      screenRecording: 'unknown',
+    },
+    policy,
     startupRecovery: options.startupRecovery,
   });
-  lifecycleRef.current = lifecycle;
   const admission = createCaptureAdmissionController({
     backpressure: options.backpressure ?? DEFAULT_CAPTURE_BACKPRESSURE,
-    lifecycle,
     storage: options.storageAdmission,
     store: options.store,
-    workspaceId: options.workspaceId,
+    onStatusChange: (status) => control.updateAdmission(status),
   });
-  admissionRef.current = admission;
-  const localPolicy = createLocalCapturePolicyManager({
-    now: options.now,
-    reloadPolicy: () => helper.refreshPolicy(),
-    store: options.store,
+  eventHandler.subscribeToObservation(async (observation) => {
+    if (observation.type !== 'storage_failure') {
+      await control.recordHelperObservation(observation);
+      return;
+    }
+    if (observation.target === 'asset') {
+      await admission.reportStorageWriteFailure();
+    } else {
+      await admission.reportStorageFailure();
+    }
   });
-
-  return { admission, commandClient: options.client, eventHandler, lifecycle, localPolicy };
+  return { admission, commandClient: options.client, control, eventHandler, policy };
 }
 
 function decorateEventHandler(
@@ -172,8 +170,7 @@ function decorateEventHandler(
   }
 
   return {
-    getStatus: () => eventHandler.getStatus(),
-    subscribeToPermissionStatus: (listener) => eventHandler.subscribeToPermissionStatus(listener),
+    subscribeToObservation: (listener) => eventHandler.subscribeToObservation(listener),
     async handleEnvelope(envelope) {
       onHelperEnvelope(envelope);
       await eventHandler.handleEnvelope(envelope);

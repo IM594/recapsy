@@ -217,20 +217,6 @@ export type UpdateAssetRefAvailabilityInput = {
 
 export type HelperPermissionState = 'granted' | 'denied' | 'not_determined' | 'unknown';
 
-export type HelperRuntimeState = {
-  helperVersion?: string;
-  connectionKind: 'managed_helper' | 'external_helper' | 'unknown';
-  pidDigest?: string;
-  permissions: {
-    screenRecording: HelperPermissionState;
-    accessibility: HelperPermissionState;
-  };
-  lastHeartbeatAt?: string;
-  restartCount: number;
-  lastSafeError?: SafeOperationalError;
-  updatedAt: string;
-};
-
 export type PolicyCacheEntry = {
   workspaceId: string;
   deviceId: string;

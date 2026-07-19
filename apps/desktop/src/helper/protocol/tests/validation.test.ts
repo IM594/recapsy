@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { HELPER_PROTOCOL_VERSION } from '../types';
-import { validateHelperToMainEnvelope, validateMainToHelperEnvelope } from '../validation';
+import {
+  isSafeCaptureId,
+  validateHelperToMainEnvelope,
+  validateMainToHelperEnvelope,
+} from '../validation';
 
 const sentAt = '2026-07-15T00:00:00.000Z';
 
@@ -19,6 +23,68 @@ describe('helper protocol direction validation', () => {
     for (const envelope of mainToHelperEnvelopes()) {
       expect(validateMainToHelperEnvelope(envelope).ok).toBe(true);
       expect(validateHelperToMainEnvelope(envelope)).toMatchObject({
+        error: { code: 'schema_mismatch' },
+        ok: false,
+      });
+    }
+  });
+
+  it('matches the native helper safe capture id boundary', () => {
+    for (const captureId of ['A', 'cap-123_ABC', 'a'.repeat(128)]) {
+      expect(isSafeCaptureId(captureId)).toBe(true);
+    }
+
+    for (const captureId of [
+      '',
+      '.',
+      '..',
+      '../capture',
+      'capture/child',
+      String.raw`capture\child`,
+      '/absolute',
+      String.raw`C:\capture`,
+      'capture.dot',
+      '-capture',
+      '_capture',
+      'a'.repeat(129),
+    ]) {
+      expect(isSafeCaptureId(captureId)).toBe(false);
+    }
+  });
+
+  it('rejects unsafe capture ids in every protocol payload that carries one', () => {
+    const unsafeCaptureId = '../outside';
+    const resultPayload = captureResultPayload(unsafeCaptureId);
+    const helperToMain = [
+      envelope('capture.result', resultPayload),
+      envelope('capture.skipped', {
+        captureId: unsafeCaptureId,
+        observedAt: sentAt,
+        reason: 'paused',
+      }),
+      envelope('capture.error', {
+        captureId: unsafeCaptureId,
+        code: 'capture_failed',
+        message: 'Failed.',
+      }),
+    ];
+    const mainToHelper = [
+      envelope('capture.ack', { captureId: unsafeCaptureId }),
+      envelope('capture.nack', {
+        captureId: unsafeCaptureId,
+        code: 'storage_unavailable',
+        message: 'Capture could not be queued locally.',
+      }),
+    ];
+
+    for (const candidate of helperToMain) {
+      expect(validateHelperToMainEnvelope(candidate)).toMatchObject({
+        error: { code: 'schema_mismatch' },
+        ok: false,
+      });
+    }
+    for (const candidate of mainToHelper) {
+      expect(validateMainToHelperEnvelope(candidate)).toMatchObject({
         error: { code: 'schema_mismatch' },
         ok: false,
       });
@@ -90,6 +156,65 @@ describe('helper protocol direction validation', () => {
     });
 
     expect(result.ok).toBe(true);
+  });
+
+  it('accepts a capture result with only the real screenshot asset', () => {
+    const payload = captureResultPayload();
+
+    expect(
+      validateHelperToMainEnvelope({
+        ...baseEnvelope('capture.result'),
+        payload,
+      }).ok,
+    ).toBe(true);
+  });
+
+  it('rejects the synthetic manifest field', () => {
+    const payload = {
+      ...captureResultPayload(),
+      manifest: {
+        hash: 'sha256:manifest',
+        mimeType: 'application/json',
+        ref: 'opaque:manifest:cap_1',
+        role: 'manifest',
+        sizeBytes: 0,
+      },
+    };
+    const result = validateHelperToMainEnvelope({
+      ...baseEnvelope('capture.result'),
+      payload,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'schema_mismatch' } });
+  });
+
+  it('rejects screenshot metadata that diverges from the canonical artifact contract', () => {
+    const payload = captureResultPayload();
+    const invalidAssets = [
+      { ...payload.assets[0], ref: '../outside/screenshot.webp' },
+      { ...payload.assets[0], ref: 'another/screenshot.webp' },
+      { ...payload.assets[0], hash: 'sha256:asset' },
+      { ...payload.assets[0], mimeType: 'image/png' },
+      { ...payload.assets[0], sizeBytes: 0 },
+    ];
+
+    for (const asset of invalidAssets) {
+      expect(
+        validateHelperToMainEnvelope({
+          ...baseEnvelope('capture.result'),
+          payload: { ...payload, assets: [asset] },
+        }).ok,
+      ).toBe(false);
+    }
+    expect(
+      validateHelperToMainEnvelope({
+        ...baseEnvelope('capture.result'),
+        payload: {
+          ...payload,
+          context: { ...payload.context, observedAt: '2026-01-01T00:00:00.000Z' },
+        },
+      }).ok,
+    ).toBe(false);
   });
 
   it('rejects capture results without a complete final application identity', () => {
@@ -210,29 +335,22 @@ function baseEnvelope(type: string) {
   };
 }
 
-function captureResultPayload() {
+function captureResultPayload(captureId = 'cap_1') {
   return {
     assets: [
       {
-        hash: 'sha256:asset',
-        mimeType: 'image/png',
-        ref: 'opaque:asset:cap_1',
+        hash: `sha256:${'a'.repeat(64)}`,
+        mimeType: 'image/webp',
+        ref: `${captureId}/screenshot.webp`,
         role: 'screenshot',
         sizeBytes: 1,
       },
     ],
-    captureId: 'cap_1',
+    captureId,
     context: {
       app: { bundleId: 'com.apple.Safari', name: 'Safari' },
       observedAt: sentAt,
       policy: { decision: 'allow', version: 'policy-v1' },
-    },
-    manifest: {
-      hash: 'sha256:manifest',
-      mimeType: 'application/json',
-      ref: 'opaque:manifest:cap_1',
-      role: 'manifest',
-      sizeBytes: 0,
     },
     observedAt: sentAt,
   };

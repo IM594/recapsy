@@ -1,2 +1,2 @@
 export { createStatusHandlers } from './handlers';
-export type { StatusHandlerOptions, StatusSource } from './handlers';
+export type { StatusHandlerOptions } from './handlers';

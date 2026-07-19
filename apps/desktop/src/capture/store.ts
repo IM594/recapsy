@@ -1,9 +1,7 @@
 import type {
   CaptureOutboxEntryCreateInput,
-  HelperRuntimeState,
   LocalCapturePolicyRule,
   OperationalStoreResult,
-  OperationalStoreSnapshot,
   OutboxJob,
   OutboxJobListFilter,
   PolicyCacheEntry,
@@ -14,13 +12,6 @@ export type CaptureIntakeStore = {
   createCaptureOutboxEntry(
     entry: CaptureOutboxEntryCreateInput,
   ): Promise<OperationalStoreResult<OutboxJob>>;
-  getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot>;
-  verifyOperationalWrite(): Promise<void>;
-};
-
-export type HelperStateStore = {
-  setHelperState(state: HelperRuntimeState): Promise<HelperRuntimeState>;
-  getHelperState(): Promise<HelperRuntimeState | null>;
 };
 
 export type CapturePolicyCacheStore = {
@@ -30,10 +21,7 @@ export type CapturePolicyCacheStore = {
     deviceId: string,
     options: { now: string },
   ): Promise<PolicyCacheRead | null>;
-  setPolicyCache(
-    entry: PolicyCacheEntry,
-    shouldCommit?: () => boolean,
-  ): Promise<PolicyCacheEntry | null>;
+  setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry>;
   listLocalCapturePolicyRules(): Promise<LocalCapturePolicyRule[]>;
   upsertLocalCapturePolicyRule(rule: LocalCapturePolicyRule): Promise<LocalCapturePolicyRule>;
 };

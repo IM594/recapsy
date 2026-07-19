@@ -155,7 +155,9 @@ function isPayloadForType(type: HelperMessageType, payload: unknown): boolean {
       return isReasonPayload(payload, ['shutdown', 'manual']);
     case 'capture.ack':
       return (
-        isRecord(payload) && hasOnlyKeys(payload, ['captureId']) && isString(payload.captureId)
+        isRecord(payload) &&
+        hasOnlyKeys(payload, ['captureId']) &&
+        isSafeCaptureId(payload.captureId)
       );
     case 'capture.nack':
       return isCaptureNackPayload(payload);
@@ -209,35 +211,36 @@ function isPermissionStatusPayload(payload: unknown): boolean {
 function isCaptureResultPayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
-    hasOnlyKeys(payload, ['captureId', 'observedAt', 'manifest', 'assets', 'context']) &&
-    isString(payload.captureId) &&
+    hasOnlyKeys(payload, ['captureId', 'observedAt', 'assets', 'context']) &&
+    isSafeCaptureId(payload.captureId) &&
     isString(payload.observedAt) &&
-    isCaptureAssetPayload(payload.manifest) &&
     Array.isArray(payload.assets) &&
-    payload.assets.every(isCaptureAssetPayload) &&
-    isSafeCaptureContextPayload(payload.context)
+    payload.assets.length === 1 &&
+    isCaptureAssetPayload(payload.assets[0], payload.captureId) &&
+    isSafeCaptureContextPayload(payload.context, payload.observedAt)
   );
 }
 
-function isCaptureAssetPayload(payload: unknown): boolean {
+function isCaptureAssetPayload(payload: unknown, captureId: string): boolean {
   return (
     isRecord(payload) &&
     hasOnlyKeys(payload, ['role', 'ref', 'hash', 'mimeType', 'sizeBytes']) &&
-    isOneOf(payload.role, ['screenshot', 'thumbnail', 'manifest']) &&
-    isOpaqueRef(payload.ref) &&
-    isString(payload.hash) &&
-    isString(payload.mimeType) &&
+    payload.role === 'screenshot' &&
+    payload.ref === `${captureId}/screenshot.webp` &&
+    isPolicyHash(payload.hash) &&
+    payload.mimeType === 'image/webp' &&
     typeof payload.sizeBytes === 'number' &&
     Number.isInteger(payload.sizeBytes) &&
-    payload.sizeBytes >= 0
+    payload.sizeBytes > 0
   );
 }
 
-function isSafeCaptureContextPayload(payload: unknown): boolean {
+function isSafeCaptureContextPayload(payload: unknown, observedAt?: string): boolean {
   return (
     isRecord(payload) &&
     hasOnlyKeys(payload, ['observedAt', 'app', 'window', 'website', 'document', 'policy']) &&
     isString(payload.observedAt) &&
+    (observedAt === undefined || payload.observedAt === observedAt) &&
     isApp(payload.app) &&
     isOptionalWindow(payload.window) &&
     isOptionalWebsite(payload.website) &&
@@ -253,7 +256,7 @@ function isCaptureSkippedPayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
     hasOnlyKeys(payload, ['captureId', 'reason', 'observedAt']) &&
-    isString(payload.captureId) &&
+    isSafeCaptureId(payload.captureId) &&
     isOneOf(payload.reason, [
       'paused',
       'policy_denied',
@@ -271,7 +274,7 @@ function isCaptureErrorPayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
     hasOnlyKeys(payload, ['captureId', 'code', 'message']) &&
-    optionalString(payload.captureId) &&
+    optionalSafeCaptureId(payload.captureId) &&
     isOneOf(payload.code, [
       'capture_failed',
       'permission_missing',
@@ -376,7 +379,7 @@ function isCaptureNackPayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
     hasOnlyKeys(payload, ['captureId', 'code', 'message']) &&
-    optionalString(payload.captureId) &&
+    optionalSafeCaptureId(payload.captureId) &&
     isOneOf(payload.code, [
       'schema_mismatch',
       'asset_unavailable',
@@ -427,10 +430,6 @@ function isOptionalDocument(value: unknown): boolean {
     value === undefined ||
     (isRecord(value) && hasOnlyKeys(value, ['name']) && isSafeDocumentName(value.name))
   );
-}
-
-function isOpaqueRef(value: unknown): boolean {
-  return isString(value) && !isLocalAbsolutePath(value) && !value.startsWith('file://');
 }
 
 function hasOnlyKeys(value: Record<string, unknown>, allowedKeys: readonly string[]): boolean {
@@ -494,7 +493,7 @@ function protocolErrorMetadata(
 
   if (messageType?.startsWith('capture.') && isRecord(value.payload)) {
     const captureId = value.payload.captureId;
-    if (isSafeProtocolIdentifier(captureId)) metadata.captureId = captureId;
+    if (isSafeCaptureId(captureId)) metadata.captureId = captureId;
   }
 
   return metadata;
@@ -510,8 +509,12 @@ function isSafeProtocolIdentifier(value: unknown): value is string {
   );
 }
 
-function optionalString(value: unknown): boolean {
-  return value === undefined || isString(value);
+export function isSafeCaptureId(value: unknown): value is string {
+  return typeof value === 'string' && SAFE_CAPTURE_ID_PATTERN.test(value);
+}
+
+function optionalSafeCaptureId(value: unknown): boolean {
+  return value === undefined || isSafeCaptureId(value);
 }
 
 function optionalSafeVisibleString(value: unknown): boolean {
@@ -534,6 +537,7 @@ function isString(value: unknown): value is string {
 }
 
 const FILE_URL_PATTERN = /^file:\/\//i;
+const SAFE_CAPTURE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const SECRET_WORD_PATTERN = /\b(token|secret|password|credential|api[ _-]?key)\b/i;
 const API_KEY_VALUE_PATTERN = /\bsk-[A-Za-z0-9_-]{12,}\b/;
 const SECRET_QUERY_KEY_PATTERN =

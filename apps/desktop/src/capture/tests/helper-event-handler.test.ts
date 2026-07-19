@@ -9,7 +9,7 @@ import {
   decodeHelperEnvelopeLine,
   validateHelperToMainEnvelope,
 } from '../../helper/index';
-import { type BackpressureConfig, createMemoryStore } from '../../storage';
+import { createMemoryStore } from '../../storage';
 import {
   type CaptureHelperCommandClient,
   createCaptureHelperEventHandler,
@@ -18,26 +18,20 @@ import {
 const observedAt = '2026-07-07T08:00:00.000Z';
 const workspaceId = 'workspace_1';
 const deviceId = 'device_1';
-const backpressure: BackpressureConfig = {
-  maxAssetBytes: 1024 * 1024,
-  maxQueuedJobs: 10,
-  maxRetryingJobs: 5,
-  resumeAssetBytes: 512 * 1024,
-  resumeQueuedJobs: 5,
-  resumeRetryingJobs: 2,
-};
-
 describe('capture helper event handler', () => {
-  it('preserves low_information in the observable skipped-capture status', async () => {
+  it('does not publish capture.skipped into the control observation channel', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
+    });
+    const observations: unknown[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation);
     });
 
     await handler.handleProtocolResult(
@@ -58,11 +52,7 @@ describe('capture helper event handler', () => {
       ),
     );
 
-    expect(handler.getStatus().lastSkippedCapture).toEqual({
-      captureId: 'capture_low_information',
-      observedAt,
-      reason: 'low_information',
-    });
+    expect(observations).toEqual([]);
     expect(client.commands).toEqual([]);
   });
 
@@ -70,14 +60,12 @@ describe('capture helper event handler', () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
     });
-
     await handler.handleEnvelope(captureResultEnvelope());
 
     expect(client.commandTypes()).toEqual(['capture.ack']);
@@ -124,45 +112,43 @@ describe('capture helper event handler', () => {
     expect((await store.getOutboxJob('capture_1'))?.serverCaptureId).toBeUndefined();
   });
 
-  it('fails closed without writing asset or outbox state when final app identity is missing', async () => {
+  it('does not classify an ACK transport failure as a storage failure', async () => {
     const store = createMemoryStore();
-    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const commands: MainToHelperType[] = [];
+    const observations: string[] = [];
     const handler = createCaptureHelperEventHandler({
-      backpressure,
-      client,
+      client: {
+        async sendCommand(command) {
+          commands.push(command.type);
+          if (command.type === 'capture.ack') {
+            throw new Error('helper transport closed');
+          }
+        },
+      },
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
     });
-    const envelope = captureResultEnvelope();
-    const context = { ...envelope.payload.context } as Record<string, unknown>;
-    context.app = undefined;
+    handler.subscribeToObservation((observation) => {
+      observations.push(
+        observation.type === 'storage_failure'
+          ? `${observation.type}:${observation.target}`
+          : observation.type,
+      );
+    });
 
-    await handler.handleEnvelope({
-      ...envelope,
-      payload: { ...envelope.payload, context },
-    } as HelperEnvelope<'capture.result'>);
+    await handler.handleEnvelope(captureResultEnvelope());
 
-    expect(client.commands).toMatchObject([
-      { payload: { captureId: 'capture_1', code: 'policy_denied' }, type: 'capture.nack' },
-    ]);
-    expect(await store.getAssetCacheRef('asset_capture_1')).toBeNull();
-    expect(await store.getOutboxJob('capture_1')).toBeNull();
+    expect(await store.getOutboxJob('capture_1')).not.toBeNull();
+    expect(commands).toEqual(['capture.ack']);
+    expect(observations).toEqual(['capture_result', 'capture_error']);
   });
 
-  it('serializes concurrent capture.result intake so only the hard queue limit is accepted', async () => {
-    const store = createMemoryStore();
+  it('lets atomic intake enforce the hard queue limit for concurrent results', async () => {
+    const store = createMemoryStore({ maxActiveOutboxJobs: 1 });
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure: {
-        maxAssetBytes: 1024 * 1024,
-        maxQueuedJobs: 1,
-        maxRetryingJobs: 5,
-        resumeAssetBytes: 512 * 1024,
-        resumeQueuedJobs: 0,
-        resumeRetryingJobs: 2,
-      },
       client,
       deviceId,
       now: () => observedAt,
@@ -183,28 +169,26 @@ describe('capture helper event handler', () => {
     ]);
   });
 
-  it('nacks before writing asset refs or outbox jobs when backpressure is active', async () => {
-    const store = createMemoryStore();
+  it('lets atomic intake decide capacity without issuing lifecycle commands', async () => {
+    const store = createMemoryStore({ maxActiveOutboxJobs: 0 });
+    const createCaptureOutboxEntry = store.createCaptureOutboxEntry.bind(store);
+    let intakeAttempts = 0;
+    store.createCaptureOutboxEntry = async (entry) => {
+      intakeAttempts += 1;
+      return createCaptureOutboxEntry(entry);
+    };
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure: {
-        maxAssetBytes: 1024 * 1024,
-        maxQueuedJobs: 0,
-        maxRetryingJobs: 5,
-        resumeAssetBytes: 512 * 1024,
-        resumeQueuedJobs: 0,
-        resumeRetryingJobs: 2,
-      },
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
     });
-
     await handler.handleEnvelope(captureResultEnvelope());
 
-    expect(client.commandTypes()).toEqual(['capture.nack', 'capture.pause']);
+    expect(intakeAttempts).toBe(1);
+    expect(client.commandTypes()).toEqual(['capture.nack']);
     expect(client.commands[0]).toMatchObject({
       type: 'capture.nack',
       payload: {
@@ -214,35 +198,6 @@ describe('capture helper event handler', () => {
     });
     expect(await store.getAssetCacheRef('asset_capture_1')).toBeNull();
     expect(await store.getOutboxJob('capture_1')).toBeNull();
-  });
-
-  it('delegates a backpressure pause to lifecycle admission instead of issuing a second helper pause', async () => {
-    const store = createMemoryStore();
-    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
-    const admissionPauses: boolean[] = [];
-    const handler = createCaptureHelperEventHandler({
-      backpressure: {
-        maxAssetBytes: 1024 * 1024,
-        maxQueuedJobs: 0,
-        maxRetryingJobs: 5,
-        resumeAssetBytes: 512 * 1024,
-        resumeQueuedJobs: 0,
-        resumeRetryingJobs: 2,
-      },
-      client,
-      deviceId,
-      now: () => observedAt,
-      onBackpressurePause: async () => {
-        admissionPauses.push(true);
-      },
-      store,
-      workspaceId,
-    });
-
-    await handler.handleEnvelope(captureResultEnvelope());
-
-    expect(admissionPauses).toEqual([true]);
-    expect(client.commandTypes()).toEqual(['capture.nack']);
   });
 
   it('nacks storage failures with a safe typed error and without leaking sensitive details', async () => {
@@ -255,15 +210,16 @@ describe('capture helper event handler', () => {
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     let storageFailures = 0;
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
-      onStorageFailure: async () => {
-        storageFailures += 1;
-      },
       store,
       workspaceId,
+    });
+    handler.subscribeToObservation((observation) => {
+      if (observation.type === 'storage_failure' && observation.target === 'intake') {
+        storageFailures += 1;
+      }
     });
 
     await handler.handleEnvelope(captureResultEnvelope());
@@ -294,15 +250,16 @@ describe('capture helper event handler', () => {
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     let storageFailures = 0;
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
-      onStorageFailure: async () => {
-        storageFailures += 1;
-      },
       store,
       workspaceId,
+    });
+    handler.subscribeToObservation((observation) => {
+      if (observation.type === 'storage_failure' && observation.target === 'intake') {
+        storageFailures += 1;
+      }
     });
 
     await handler.handleEnvelope(captureResultEnvelope());
@@ -315,7 +272,6 @@ describe('capture helper event handler', () => {
     const store = createMemoryStore({ maxActiveOutboxJobs: 0 });
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
@@ -341,7 +297,6 @@ describe('capture helper event handler', () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
@@ -364,7 +319,6 @@ describe('capture helper event handler', () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
@@ -407,7 +361,6 @@ describe('capture helper event handler', () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
@@ -489,18 +442,24 @@ describe('capture helper event handler', () => {
     expect(serialized).not.toContain('capture.raw_debug');
   });
 
-  it('stores fixed safe messages for helper capture errors instead of helper-provided text', async () => {
+  it('publishes typed capture errors without helper-provided text', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    let storageWriteFailures = 0;
+    const observations: unknown[] = [];
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
     });
-
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation);
+      if (observation.type === 'storage_failure' && observation.target === 'asset') {
+        storageWriteFailures += 1;
+      }
+    });
     await handler.handleEnvelope(
       helperEnvelope('capture.error', {
         captureId: 'capture_error',
@@ -510,39 +469,31 @@ describe('capture helper event handler', () => {
       }),
     );
 
-    expect(handler.getStatus()).toMatchObject({
-      lastSafeError: {
-        code: 'asset_write_failed',
-        message: 'Capture asset could not be written.',
-        retryable: true,
-      },
+    expect(observations).toContainEqual({
+      code: 'asset_write_failed',
+      observedAt,
+      type: 'capture_error',
     });
-    expect(await store.getHelperState()).toMatchObject({
-      lastSafeError: {
-        code: 'asset_write_failed',
-        message: 'Capture asset could not be written.',
-      },
-    });
-    const serialized = JSON.stringify({
-      helperState: await store.getHelperState(),
-      status: handler.getStatus(),
-    });
+    const serialized = JSON.stringify(observations);
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('stderr');
     expect(serialized).not.toContain('OCR raw text');
     expect(serialized).not.toContain('Quarterly Planning');
   });
 
-  it('counts consecutive native capture failures and resets the count after a durable capture result', async () => {
+  it('publishes capture failures and durable results as control facts', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
+    });
+    const observations: string[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation.type);
     });
 
     await handler.handleEnvelope(
@@ -560,14 +511,12 @@ describe('capture helper event handler', () => {
       }),
     );
 
-    expect(handler.getStatus().captureFailureCount).toBe(2);
-
     await handler.handleEnvelope(captureResultEnvelope());
 
-    expect(handler.getStatus().captureFailureCount).toBe(0);
+    expect(observations).toEqual(['capture_error', 'capture_error', 'capture_result']);
   });
 
-  it('keeps helper unexpected exit observable without deleting or resetting outbox jobs', async () => {
+  it('publishes the helper exit reason without changing accepted work', async () => {
     const store = createMemoryStore();
     await store.createOutboxJob({
       assetRefId: 'asset_existing',
@@ -580,12 +529,15 @@ describe('capture helper event handler', () => {
     });
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
+    });
+    const observations: unknown[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation);
     });
 
     await handler.handleEnvelope(helperExitingEnvelope());
@@ -595,29 +547,30 @@ describe('capture helper event handler', () => {
       id: 'job_existing',
       state: 'pending',
     });
-    expect(await store.getHelperState()).toMatchObject({
-      lastSafeError: {
-        code: 'helper_unexpected_exit',
-        retryable: true,
-      },
-      updatedAt: observedAt,
+    expect(observations).toContainEqual({
+      observedAt,
+      reason: 'process_crashed',
+      type: 'helper_exit',
     });
   });
 
-  it('persists real permission.status into helper_state and preserves it across a later capture error', async () => {
+  it('publishes permission and capture errors as control facts', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
-    let storageWriteFailures = 0;
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
-      onStorageWriteFailure: async () => {
-        storageWriteFailures += 1;
-      },
       store,
       workspaceId,
+    });
+    let storageWriteFailures = 0;
+    const observations: unknown[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation);
+      if (observation.type === 'storage_failure' && observation.target === 'asset') {
+        storageWriteFailures += 1;
+      }
     });
 
     await handler.handleEnvelope(
@@ -627,19 +580,6 @@ describe('capture helper event handler', () => {
         screenCapture: 'granted',
       }),
     );
-
-    expect(handler.getStatus()).toMatchObject({
-      permissions: {
-        accessibility: 'granted',
-        screenRecording: 'granted',
-      },
-    });
-    expect(await store.getHelperState()).toMatchObject({
-      permissions: {
-        accessibility: 'granted',
-        screenRecording: 'granted',
-      },
-    });
 
     await handler.handleEnvelope(
       helperEnvelope('capture.error', {
@@ -649,28 +589,35 @@ describe('capture helper event handler', () => {
       }),
     );
 
-    expect(await store.getHelperState()).toMatchObject({
-      lastSafeError: {
-        code: 'asset_write_failed',
-      },
+    expect(observations).toContainEqual({
+      observedAt,
       permissions: {
         accessibility: 'granted',
         screenRecording: 'granted',
       },
+      type: 'permission',
+    });
+    expect(observations).toContainEqual({
+      code: 'asset_write_failed',
+      observedAt,
+      type: 'capture_error',
     });
     expect(storageWriteFailures).toBe(1);
   });
 
-  it('advances the permission observation sequence only for permission.status events', async () => {
+  it('publishes permission observations only for permission.status events', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
+    });
+    const observations: string[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation.type);
     });
 
     await handler.handleEnvelope(
@@ -680,7 +627,6 @@ describe('capture helper event handler', () => {
         screenCapture: 'denied',
       }),
     );
-    expect(handler.getStatus().permissionStatusSequence).toBe(1);
 
     await handler.handleEnvelope(
       helperEnvelope('helper.heartbeat', {
@@ -688,7 +634,6 @@ describe('capture helper event handler', () => {
         status: 'ready',
       }),
     );
-    expect(handler.getStatus().permissionStatusSequence).toBe(1);
 
     await handler.handleEnvelope(
       helperEnvelope('permission.status', {
@@ -697,29 +642,22 @@ describe('capture helper event handler', () => {
         screenCapture: 'granted',
       }),
     );
-    expect(handler.getStatus().permissionStatusSequence).toBe(2);
+    expect(observations).toEqual(['permission', 'heartbeat', 'permission']);
   });
 
-  it('notifies permission observers only for new permission.status events', async () => {
+  it('stops publishing observations after unsubscribe', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
-      backpressure,
       client,
       deviceId,
       now: () => observedAt,
       store,
       workspaceId,
     });
-    const observations: Array<{
-      permissionStatusSequence?: number;
-      screenRecording?: string;
-    }> = [];
-    const unsubscribe = handler.subscribeToPermissionStatus((status) => {
-      observations.push({
-        permissionStatusSequence: status.permissionStatusSequence,
-        screenRecording: status.permissions?.screenRecording,
-      });
+    const observations: string[] = [];
+    const unsubscribe = handler.subscribeToObservation((observation) => {
+      observations.push(observation.type);
     });
 
     await handler.handleEnvelope(
@@ -745,16 +683,32 @@ describe('capture helper event handler', () => {
       }),
     );
 
-    expect(observations).toEqual([
-      {
-        permissionStatusSequence: 1,
-        screenRecording: 'denied',
-      },
-    ]);
+    expect(observations).toEqual(['heartbeat', 'permission']);
+  });
+
+  it('propagates observation delivery failures instead of hiding them', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+    handler.subscribeToObservation(() => {
+      throw new Error('control owner unavailable');
+    });
+
+    await expect(
+      handler.handleEnvelope(helperEnvelope('helper.heartbeat', { sequence: 1, status: 'ready' })),
+    ).rejects.toThrow('Capture control observation could not be delivered.');
   });
 });
 
-class RecordingCaptureHelperCommandClient implements CaptureHelperCommandClient {
+class RecordingCaptureHelperCommandClient
+  implements Pick<CaptureHelperCommandClient, 'sendCommand'>
+{
   readonly commands: HelperEnvelope<MainToHelperType>[] = [];
   storeStateAtFirstCommand:
     | {
@@ -803,13 +757,6 @@ function captureResultEnvelope(
         role: 'screenshot',
         sizeBytes: 4096,
       },
-      {
-        hash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
-        mimeType: 'image/png',
-        ref: 'asset_capture_1_thumb',
-        role: 'thumbnail',
-        sizeBytes: 512,
-      },
     ],
     captureId: 'capture_1',
     context: {
@@ -830,13 +777,6 @@ function captureResultEnvelope(
         title: 'Planning',
       },
     },
-    manifest: {
-      hash: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
-      mimeType: 'application/json',
-      ref: 'manifest_capture_1',
-      role: 'manifest',
-      sizeBytes: 256,
-    },
     observedAt,
     ...overrides,
   });
@@ -846,15 +786,13 @@ function captureResultEnvelopeFor(captureId: string): HelperEnvelope<'capture.re
   const base = captureResultEnvelope();
   return helperEnvelope('capture.result', {
     ...base.payload,
-    assets: base.payload.assets.map((asset) => ({
-      ...asset,
-      ref: asset.ref.replace('capture_1', captureId),
-    })),
+    assets: [
+      {
+        ...base.payload.assets[0],
+        ref: base.payload.assets[0].ref.replace('capture_1', captureId),
+      },
+    ],
     captureId,
-    manifest: {
-      ...base.payload.manifest,
-      ref: base.payload.manifest.ref.replace('capture_1', captureId),
-    },
   });
 }
 

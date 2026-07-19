@@ -1,20 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import { readFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const DESKTOP_PACKAGE_ROOT = path.resolve(import.meta.dir, '..');
 const DESKTOP_SOURCE_ROOT = path.resolve(DESKTOP_PACKAGE_ROOT, 'src');
 const DESKTOP_INTEGRATION_ROOT = path.resolve(import.meta.dir, 'integration');
-const CAPABILITY_DIRECTORIES = [
-  'auth',
-  'capture',
-  'helper',
-  'ipc',
-  'server',
-  'status',
-  'storage',
-  'sync',
-] as const;
+const WORKSPACE_ROOT = path.resolve(DESKTOP_PACKAGE_ROOT, '../..');
+const CAPABILITY_DIRECTORIES = await discoverCapabilityDirectories();
+const dependencyCruiserConfiguration = createRequire(import.meta.url)(
+  path.join(WORKSPACE_ROOT, '.dependency-cruiser.cjs'),
+) as { forbidden: Array<{ name?: string }> };
 const IMPORT_PATTERN = /from\s+['"]([^'"]+)['"]/g;
 const TEST_IMPORT_PATTERN = /(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g;
 
@@ -22,7 +18,30 @@ async function readSource(relativePath: string): Promise<string> {
   return readFile(path.join(DESKTOP_SOURCE_ROOT, relativePath), 'utf8');
 }
 
+async function discoverCapabilityDirectories(): Promise<string[]> {
+  const capabilities: string[] = [];
+  const glob = new Bun.Glob('*/index.ts');
+
+  for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
+    capabilities.push(path.posix.dirname(relativePath));
+  }
+
+  return capabilities.sort();
+}
+
 describe('desktop architecture boundaries', () => {
+  it('derives every cross-capability entrypoint rule from root index files', () => {
+    const ruleNames = dependencyCruiserConfiguration.forbidden
+      .map((rule) => rule.name)
+      .filter((name): name is string => Boolean(name?.match(/^desktop-.+-only-index-entrypoint$/)))
+      .sort();
+    const expectedRuleNames = CAPABILITY_DIRECTORIES.map(
+      (capability) => `desktop-${capability}-only-index-entrypoint`,
+    );
+
+    expect(ruleNames).toEqual(expectedRuleNames);
+  });
+
   it('keeps TypeScript tests inside owned tests directories', async () => {
     const violations: string[] = [];
     const glob = new Bun.Glob('{src,integration,tests}/**/*.ts');
@@ -154,7 +173,6 @@ describe('desktop architecture boundaries', () => {
       'createCapture',
       'toCaptureCreateBody',
       'toCaptureCreateResult',
-      'handleEvent',
     ]) {
       if (!new RegExp(`\\b${symbol}\\b`).test(source)) {
         violations.push(`required desktop capture creation symbol is missing: ${symbol}`);
@@ -163,131 +181,20 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('uses contextual names for helper results, storage DTOs, secrets, and sync recovery', async () => {
-    const sourceFiles: string[] = [];
-    const checkedSources: string[] = [];
-    const glob = new Bun.Glob('**/*.ts');
+  it('keeps Electron main-process APIs in the composition root', async () => {
+    const violations: string[] = [];
+    const glob = new Bun.Glob('main/**/*.ts');
 
     for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      sourceFiles.push(relativePath);
-      if (relativePath !== 'architecture-boundaries.test.ts') {
-        checkedSources.push(await readSource(relativePath));
-      }
-    }
-
-    const requiredPaths = ['helper/capture-result.ts', 'storage/asset-dto.ts', 'storage/node.ts'];
-    const retiredPaths = [
-      'helper/projection.ts',
-      'storage/projections.ts',
-      'storage/composition.ts',
-    ];
-    const retiredSymbols = [
-      'CaptureProjectionInput',
-      'KeychainSecretStore',
-      'MacOsKeychainTokenStoreOptions',
-      'createMacOsKeychainTokenStore',
-      'AUTH_KEYCHAIN_SERVICE',
-      'AUTH_KEYCHAIN_ACCOUNT',
-      'ProcessCaptureHelperClient',
-      'recoverInterruptedOutboxJobs',
-      'StartupRecoveryOptions',
-      'StartupRecoverySummary',
-    ];
-    const source = checkedSources.join('\n');
-    const violations = [
-      ...requiredPaths
-        .filter((relativePath) => !sourceFiles.includes(relativePath))
-        .map((relativePath) => `${relativePath} is missing`),
-      ...retiredPaths
-        .filter((relativePath) => sourceFiles.includes(relativePath))
-        .map((relativePath) => `${relativePath} is still present`),
-      ...retiredSymbols
-        .filter((symbol) => new RegExp(`\\b${symbol}\\b`).test(source))
-        .map((symbol) => `${symbol} is still present`),
-    ];
-
-    expect(violations).toEqual([]);
-    expect(source).toMatch(/\bCaptureResultInput\b/);
-    expect(source).toMatch(/\bSecretStore\b/);
-    expect(source).toMatch(/\bSecretTokenStoreOptions\b/);
-    expect(source).toMatch(/\bcreateSecretTokenStore\b/);
-    expect(source).toMatch(/\bHelperProcessClient\b/);
-    expect(source).toMatch(/\brecoverSyncQueue\b/);
-    expect(source).toMatch(/\bSyncRecoveryOptions\b/);
-    expect(source).toMatch(/\bSyncRecoverySummary\b/);
-  });
-
-  it('keeps Electron entry focused on platform wiring through narrow main adapters', async () => {
-    const sourceFiles: string[] = [];
-    const glob = new Bun.Glob('**/*.ts');
-    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      sourceFiles.push(relativePath);
-    }
-
-    const requiredPaths = [
-      'main/http-transport.ts',
-      'main/tests/http-transport.test.ts',
-      'main/dev-visibility.ts',
-      'main/tests/dev-visibility.test.ts',
-      'main/auth-storage.ts',
-      'main/tests/auth-storage.test.ts',
-    ];
-    const entrySource = await readSource('main/electron-entry.ts');
-    const adapterSources = await Promise.all(
-      ['main/http-transport.ts', 'main/dev-visibility.ts', 'main/auth-storage.ts']
-        .filter((relativePath) => sourceFiles.includes(relativePath))
-        .map((relativePath) => readSource(relativePath)),
-    );
-    const violations = requiredPaths
-      .filter((relativePath) => !sourceFiles.includes(relativePath))
-      .map((relativePath) => `${relativePath} is missing`);
-
-    for (const moduleName of ['./http-transport', './dev-visibility', './auth-storage']) {
-      if (!entrySource.includes(`from '${moduleName}'`)) {
-        violations.push(`main/electron-entry.ts does not depend on ${moduleName}`);
-      }
-    }
-    for (const retiredResponsibility of [
-      'encodeTransportBody',
-      'decodeTransportBody',
-      'logHelperEnvelope',
-      'logSyncResult',
-      'logSyncError',
-      'tokenStoreInstance',
-      'resolveTokenStore',
-    ]) {
-      if (entrySource.includes(retiredResponsibility)) {
-        violations.push(`main/electron-entry.ts still owns ${retiredResponsibility}`);
-      }
-    }
-    for (const [index, adapterSource] of adapterSources.entries()) {
-      for (const forbiddenDependency of [
-        "from 'electron'",
-        'from "electron"',
-        "from './runtime'",
-        "from '../storage/",
-        'createSqliteStore',
-        'createMemoryStore',
-      ]) {
-        if (adapterSource.includes(forbiddenDependency)) {
-          violations.push(`main adapter ${index} depends on ${forbiddenDependency}`);
-        }
-      }
-    }
-    for (const relativePath of sourceFiles) {
-      if (
-        !relativePath.startsWith('main/') ||
-        relativePath.endsWith('.test.ts') ||
-        relativePath === 'main/electron-entry.ts'
-      ) {
+      if (relativePath.endsWith('.test.ts') || relativePath === 'main/electron-entry.ts') {
         continue;
       }
-      const source = await readSource(relativePath);
-      if (/from\s+['"]electron['"]/.test(source)) {
-        violations.push(`${relativePath} imports electron outside the main entry`);
+      if (/from\s+['"]electron['"]/.test(await readSource(relativePath))) {
+        violations.push(`${relativePath} imports electron outside the composition root`);
       }
     }
 
+    expect(await readSource('main/electron-entry.ts')).toMatch(/from\s+['"]electron['"]/);
     expect(violations).toEqual([]);
   });
 
@@ -495,8 +402,7 @@ describe('desktop architecture boundaries', () => {
 
   it('gives production consumers narrow operational store ports', async () => {
     const consumers = [
-      ['capture/helper-controller.ts', ['HelperStateStore']],
-      ['capture/helper-event-handler.ts', ['CaptureIntakeStore', 'HelperStateStore']],
+      ['capture/helper-event-handler.ts', ['CaptureIntakeStore']],
       ['capture/handlers.ts', ['CaptureHistoryReader']],
       ['capture/runtime.ts', ['CaptureRuntimeStore']],
       ['storage/reconciliation.ts', ['AssetReconciliationStore']],
@@ -514,6 +420,13 @@ describe('desktop architecture boundaries', () => {
         if (!new RegExp(`\\b${expectedPort}\\b`).test(source)) {
           violations.push(`${relativePath} does not depend on ${expectedPort}`);
         }
+      }
+      if (
+        (relativePath === 'capture/helper-event-handler.ts' ||
+          relativePath === 'capture/runtime.ts') &&
+        /\bHelperStateStore\b/.test(source)
+      ) {
+        violations.push(`${relativePath} still depends on HelperStateStore`);
       }
     }
 
@@ -551,7 +464,6 @@ describe('desktop architecture boundaries', () => {
     for (const forbiddenDependency of [
       '../main/',
       '../sync/',
-      './helper-controller',
       'createMemoryStore',
       'createSqliteStore',
     ]) {
@@ -590,32 +502,6 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('retires the adapter-wide operational store repository type', async () => {
-    const retiredType = ['Operational', 'Store', 'Repository'].join('');
-    const violations: string[] = [];
-    const roots = [DESKTOP_SOURCE_ROOT, DESKTOP_INTEGRATION_ROOT];
-    const glob = new Bun.Glob('**/*.ts');
-
-    for (const root of roots) {
-      for await (const relativePath of glob.scan({ cwd: root })) {
-        const source = await readFile(path.resolve(root, relativePath), 'utf8');
-        if (source.includes(retiredType)) {
-          const scope = root === DESKTOP_SOURCE_ROOT ? 'src' : 'integration';
-          violations.push(`${scope}/${relativePath} still references the retired repository type`);
-        }
-      }
-    }
-
-    for (const relativePath of ['storage/types.ts', 'storage/index.ts']) {
-      const source = await readSource(relativePath);
-      if (source.includes(retiredType)) {
-        violations.push(`${relativePath} still exports the retired repository type`);
-      }
-    }
-
-    expect(violations).toEqual([]);
-  });
-
   it('publishes capture and storage operational ports from capability surfaces', async () => {
     const [capturePublicSource, storagePublicSource] = await Promise.all([
       readSource('capture/index.ts'),
@@ -631,15 +517,13 @@ describe('desktop architecture boundaries', () => {
     if (!sourceFiles.includes('capture/store.ts')) {
       violations.push('capture/store.ts is missing');
     }
-    for (const symbol of [
-      'CaptureIntakeStore',
-      'HelperStateStore',
-      'CaptureHistoryReader',
-      'CaptureRuntimeStore',
-    ]) {
+    for (const symbol of ['CaptureIntakeStore', 'CaptureHistoryReader', 'CaptureRuntimeStore']) {
       if (!new RegExp(`\\b${symbol}\\b`).test(capturePublicSource)) {
         violations.push(`capture/index.ts does not export ${symbol}`);
       }
+    }
+    if (/\bHelperStateStore\b/.test(capturePublicSource)) {
+      violations.push('capture/index.ts still exports HelperStateStore');
     }
     for (const symbol of ['AssetReconciliationStore', 'StoreLifecycle']) {
       if (!new RegExp(`\\b${symbol}\\b`).test(storagePublicSource)) {
@@ -659,49 +543,6 @@ describe('desktop architecture boundaries', () => {
     expect(typesSource).not.toContain('ServerApiTokenSource');
     expect(typesSource).not.toContain('tokenStore');
     expect(clientSource).not.toContain('tokenStore');
-  });
-
-  it('uses worker naming for sync claim and cancellation orchestration', async () => {
-    const sourceFiles: string[] = [];
-    const sources: string[] = [];
-    const roots = [DESKTOP_SOURCE_ROOT, DESKTOP_INTEGRATION_ROOT];
-    const glob = new Bun.Glob('**/*.ts');
-
-    for (const root of roots) {
-      for await (const relativePath of glob.scan({ cwd: root })) {
-        const scopedPath =
-          root === DESKTOP_SOURCE_ROOT ? `src/${relativePath}` : `integration/${relativePath}`;
-        sourceFiles.push(scopedPath);
-        sources.push(await readFile(path.join(root, relativePath), 'utf8'));
-      }
-    }
-
-    const source = sources.join('\n');
-    const violations: string[] = [];
-    for (const requiredPath of ['src/sync/worker.ts', 'src/sync/tests/worker.test.ts']) {
-      if (!sourceFiles.includes(requiredPath)) {
-        violations.push(`${requiredPath} is missing`);
-      }
-    }
-    for (const retiredPath of ['src/sync/scheduler.ts', 'src/sync/tests/scheduler.test.ts']) {
-      if (sourceFiles.includes(retiredPath)) {
-        violations.push(`${retiredPath} is still present`);
-      }
-    }
-    for (const retiredSymbol of [
-      'createSyncScheduler',
-      'SyncSchedulerOptions',
-      'SyncSchedulerStore',
-    ]) {
-      if (new RegExp(`\\b${retiredSymbol}\\b`).test(source)) {
-        violations.push(`${retiredSymbol} is still referenced`);
-      }
-    }
-    if (/\bscheduler\b/i.test(source)) {
-      violations.push('scheduler naming is still referenced');
-    }
-
-    expect(violations).toEqual([]);
   });
 
   it('keeps the sync worker independent from IPC and concrete server errors', async () => {
@@ -1138,22 +979,20 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('keeps capture lifecycle independent from the helper controller implementation', async () => {
-    const source = await readSource('capture/lifecycle.ts');
+  it('keeps capture control independent from helper implementation details', async () => {
+    const source = await readSource('capture/control.ts');
 
-    expect(source).not.toMatch(/from ['"]\.\/helper-controller['"]/);
     expect(source).toMatch(/from ['"]\.\.\/helper\/index['"]/);
+    expect(source).toMatch(/export type CaptureControlHelperPort/);
+    expect(source).not.toMatch(
+      /permissionStatusSequence|subscribeToPermissionStatus|captureStarted/,
+    );
   });
 
-  it('keeps helper adapters independent from the status capability', async () => {
-    const sources = await Promise.all([
-      readSource('helper/mock-controller.ts'),
-      readSource('helper/process-client.ts'),
-    ]);
+  it('keeps the helper process client independent from the status capability', async () => {
+    const source = await readSource('helper/process-client.ts');
 
-    for (const source of sources) {
-      expect(source).not.toMatch(/from ['"]\.\.\/status\//);
-    }
+    expect(source).not.toMatch(/from ['"]\.\.\/status\//);
   });
 
   it('splits helper protocol responsibilities and binds process directions explicitly', async () => {
@@ -1256,7 +1095,6 @@ describe('desktop architecture boundaries', () => {
       'sync/ocr-screen-text-mapping.ts',
     ];
     const requiredPaths = [
-      'capture/helper-controller.ts',
       'capture/helper-event-handler.ts',
       'capture/runtime.ts',
       'main/runtime.ts',
@@ -1272,114 +1110,6 @@ describe('desktop architecture boundaries', () => {
     expect(source).toMatch(/\bCaptureHelperEventHandler\b/);
     expect(source).toMatch(/\bcreateCaptureHelperEventHandler\b/);
     expect(source).toMatch(/\bmapOcrScreenText\b/);
-  });
-
-  it('uses concise capability and adapter paths', async () => {
-    const sourceFiles: string[] = [];
-    const productionSources: string[] = [];
-    const glob = new Bun.Glob('**/*.ts');
-
-    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      sourceFiles.push(relativePath);
-      if (!relativePath.endsWith('.test.ts') && !relativePath.includes('/__tests__/')) {
-        productionSources.push(await readSource(relativePath));
-      }
-    }
-
-    const retiredPaths = [
-      'server-api/client.ts',
-      'runtime/ipc-handlers.ts',
-      'auth/auth-client.ts',
-      'auth/session-startup.ts',
-      'auth/token-store.ts',
-      'auth/login-window-preload.ts',
-      'helper/spawn-capture-helper-client.ts',
-      'helper/dev-helper-process.ts',
-      'storage/sqlite-operational-store.ts',
-      'storage/memory-operational-store.ts',
-      'storage/node-sqlite-driver.ts',
-      'storage/bun-sqlite-driver.ts',
-      'storage/asset-reconciliation.ts',
-      'sync/startup-recovery.ts',
-      'sync/sync-loop.ts',
-      'sync/sync-runtime.ts',
-      'sync/ipc-handlers.ts',
-      'capture/ipc-handlers.ts',
-      'ipc/handler-registry.ts',
-      'main/keychain-secret-store.ts',
-    ];
-    const requiredPaths = [
-      'server/client.ts',
-      'status/handlers.ts',
-      'auth/client.ts',
-      'auth/session.ts',
-      'auth/tokens.ts',
-      'auth/login-preload.ts',
-      'helper/process-client.ts',
-      'helper/dev-process.ts',
-      'storage/sqlite/store.ts',
-      'storage/memory.ts',
-      'storage/sqlite/node.ts',
-      'storage/sqlite/bun.ts',
-      'storage/reconciliation.ts',
-      'sync/recovery.ts',
-      'sync/loop.ts',
-      'sync/runtime.ts',
-      'sync/handlers.ts',
-      'capture/handlers.ts',
-      'ipc/handlers.ts',
-      'main/safe-storage.ts',
-    ];
-    const source = productionSources.join('\n');
-
-    expect(retiredPaths.filter((relativePath) => sourceFiles.includes(relativePath))).toEqual([]);
-    expect(requiredPaths.filter((relativePath) => !sourceFiles.includes(relativePath))).toEqual([]);
-    expect(source).not.toMatch(/\bcreateElectronKeychainSecretStore\b/);
-    expect(source).not.toMatch(/\bcreateSpawnCaptureHelperClient\b/);
-    expect(source).not.toMatch(/\bcreateSqliteOperationalStore\b/);
-    expect(source).not.toMatch(/\bcreateInMemoryOperationalStore\b/);
-    expect(source).not.toMatch(/\bcreateRuntimeIpcHandlers\b/);
-    expect(source).toMatch(/\bcreateSafeStorageSecretStore\b/);
-    expect(source).toMatch(/\bcreateHelperProcessClient\b/);
-    expect(source).toMatch(/\bcreateSqliteStore\b/);
-    expect(source).toMatch(/\bcreateMemoryStore\b/);
-    expect(source).toMatch(/\bcreateStatusHandlers\b/);
-  });
-
-  it('owns capture lifecycle in the capture capability instead of a generic desktop runtime', async () => {
-    const sourceFiles: string[] = [];
-    const productionSources: string[] = [];
-    const glob = new Bun.Glob('**/*.ts');
-
-    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      sourceFiles.push(relativePath);
-      if (!relativePath.endsWith('.test.ts') && !relativePath.includes('/__tests__/')) {
-        productionSources.push(await readSource(relativePath));
-      }
-    }
-
-    const retiredPaths = [
-      'runtime/lifecycle-controller.ts',
-      'runtime/tests/runtime.test.ts',
-      'runtime/types.ts',
-    ];
-    const requiredPaths = ['capture/lifecycle.ts', 'capture/tests/lifecycle.test.ts'];
-    const source = productionSources.join('\n');
-
-    expect(retiredPaths.filter((relativePath) => sourceFiles.includes(relativePath))).toEqual([]);
-    expect(requiredPaths.filter((relativePath) => !sourceFiles.includes(relativePath))).toEqual([]);
-    expect(source).not.toMatch(/\bDesktopRuntime\b/);
-    expect(source).not.toMatch(/\bDesktopRuntimeOptions\b/);
-    expect(source).not.toMatch(/\bRuntimeSnapshot\b/);
-    expect(source).not.toMatch(/\bRuntimeStatus\b/);
-    expect(source).not.toMatch(/\bcreateDesktopRuntime\b/);
-    expect(source).not.toContain('captureRuntime.runtime');
-    expect(source).toMatch(/\bCaptureLifecycle\b/);
-    expect(source).toMatch(/\bCaptureLifecycleOptions\b/);
-    expect(source).toMatch(/\bCaptureLifecycleSnapshot\b/);
-    expect(source).toMatch(/\bCaptureLifecycleStatus\b/);
-    expect(source).toMatch(/\bcreateCaptureLifecycle\b/);
-    expect(source).toContain('captureRuntime.lifecycle');
   });
 
   it('keeps session startup out of the Electron lifecycle coordinator', async () => {
@@ -1409,6 +1139,23 @@ describe('desktop architecture boundaries', () => {
     expect(runtimeSource).toContain('createCaptureIpcHandlers');
     expect(captureRuntimeSource).toContain('export function createCaptureRuntime');
     expect(captureHandlersSource).toContain('export function createCaptureIpcHandlers');
+  });
+
+  it('uses the control snapshot as the only capture projection source', async () => {
+    const [handlerSource, eventSource, runtimeSource, entrySource] = await Promise.all([
+      readSource('capture/handlers.ts'),
+      readSource('capture/helper-event-handler.ts'),
+      readSource('capture/runtime.ts'),
+      readSource('main/electron-entry.ts'),
+    ]);
+
+    expect(handlerSource).not.toContain('eventHandler.getStatus');
+    expect(handlerSource).not.toContain('admission.getStatus');
+    expect(eventSource).not.toContain('getStatus()');
+    expect(eventSource).not.toContain('CaptureHelperEventStatus');
+    expect(runtimeSource).toContain('recordHelperObservation');
+    expect(entrySource).not.toContain('context.eventHandler.getStatus');
+    expect(entrySource).not.toContain('context.admission.getStatus');
   });
 
   it('gives sync ownership of recovery, worker, loop startup, and queue IPC', async () => {

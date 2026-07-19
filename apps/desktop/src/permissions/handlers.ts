@@ -17,8 +17,7 @@ import {
 
 export type PermissionIpcHandlerOptions = {
   client: CaptureHelperCommandClient;
-  eventHandler: PermissionStatusSource;
-  now(): string;
+  statusSource: PermissionStatusSource;
   privacySettings: PrivacySettingsOpener;
   refreshTimeoutMs?: number;
   screenRecordingRequestTimeoutMs?: number;
@@ -28,14 +27,12 @@ export function createPermissionIpcHandlers(options: PermissionIpcHandlerOptions
   return {
     'permissions.getStatus': async () =>
       createRendererSafeSuccess(
-        toPermissionStatusDto(readCapturePermissions(options.eventHandler)),
+        toPermissionStatusDto(readCapturePermissions(options.statusSource)),
       ),
     'permissions.refresh': async () => {
       try {
         const permissions = await refreshCapturePermissions({
           client: options.client,
-          eventHandler: options.eventHandler,
-          now: options.now,
           timeoutMs: options.refreshTimeoutMs,
         });
         return createRendererSafeSuccess(toPermissionStatusDto(permissions));
@@ -47,8 +44,6 @@ export function createPermissionIpcHandlers(options: PermissionIpcHandlerOptions
       try {
         const permissions = await requestScreenRecordingPermission({
           client: options.client,
-          eventHandler: options.eventHandler,
-          now: options.now,
           timeoutMs: options.screenRecordingRequestTimeoutMs,
         });
         return createRendererSafeSuccess(toPermissionStatusDto(permissions));

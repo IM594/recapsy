@@ -123,11 +123,15 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
           // This development-only process has no native TCC integration. It
           // still returns a fresh observation so the Electron protocol paths
           // remain testable, but it never attempts to summon a system prompt.
-          emitEnvelope('permission.status', {
-            accessibility: 'not_determined',
-            observedAt: now(),
-            screenCapture: 'not_determined',
-          });
+          emitEnvelope(
+            'permission.status',
+            {
+              accessibility: 'not_determined',
+              observedAt: now(),
+              screenCapture: 'not_determined',
+            },
+            envelope.correlationId,
+          );
           return;
         case 'capture.start':
           state = 'ready';
@@ -150,8 +154,7 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
         case 'capture.nack':
           // The dev helper never buffers a capture waiting for
           // acknowledgement — it emits one `capture.result` per SIGUSR2 and
-          // forgets about it. There is nothing to flush or reconcile here;
-          // a real Swift helper would flush pending manifests to disk.
+          // forgets about it. There is nothing to flush or reconcile here.
           return;
         case 'helper.shutdown':
           shutdown = true;
@@ -195,11 +198,8 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
           bundleId: 'one.recapsy.desktop.dev-helper',
           name: 'Recapsy Dev Helper',
         },
-        assetRef: `dev_asset_${captureSequence}`,
         captureId,
-        hash: `dev_hash_${captureSequence}`,
-        manifestRef: `dev_manifest_${captureSequence}`,
-        mimeType: 'image/png',
+        hash: `sha256:${captureSequence.toString(16).padStart(64, '0')}`,
         observedAt,
         sizeBytes: 1024,
       });

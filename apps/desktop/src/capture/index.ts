@@ -1,69 +1,30 @@
-export { createCaptureHelperController } from './helper-controller';
-export {
-  LocalCapturePolicyError,
-  createLocalCapturePolicyManager,
-  isBundleIdentifier,
-} from './local-policy';
-export type {
-  LocalCapturePolicyManager,
-  LocalCapturePolicyManagerOptions,
-  LocalCapturePolicyRuleStore,
-} from './local-policy';
 export { createCaptureAdmissionController } from './admission';
 export type {
   CaptureAdmissionController,
   CaptureAdmissionControllerOptions,
-  CaptureAdmissionLifecycle,
   CaptureAdmissionReason,
-  CaptureAdmissionStatus,
+  CaptureAdmissionSnapshot,
   CaptureAdmissionStore,
   CaptureStorageAdmissionOptions,
   CaptureStorageAdmissionSnapshot,
 } from './admission';
-export type {
-  CaptureHelperAssetRef,
-  CaptureHelperClient,
-  CaptureHelperController,
-  CaptureHelperControllerOptions,
-  CaptureHelperEvent,
-  CaptureHelperStartOptions,
-  CaptureHelperState,
-  CaptureHelperStatus,
-} from './helper-controller';
-export { createCaptureHelperEventHandler } from './helper-event-handler';
-export type {
-  CaptureHelperCommandClient,
-  CaptureHelperEventHandler,
-  CaptureHelperEventHandlerOptions,
-  CaptureHelperEventStatus,
-} from './helper-event-handler';
-export { createCaptureLifecycle } from './lifecycle';
+export { createCaptureControl } from './control';
 export type {
   CaptureAssetReconciliation,
-  CaptureLifecycle,
-  CaptureLifecycleOptions,
-  CaptureLifecycleSnapshot,
-  CaptureLifecycleStatus,
+  CaptureControl,
+  CaptureControlHelperPort,
+  CaptureControlOptions,
+  CaptureControlSnapshot,
+  CaptureControlStatus,
+  CaptureHelperExitReason,
+  CaptureHelperObservation,
+  CapturePauseCause,
+  CapturePermissionSnapshot,
   CaptureStartupRecovery,
-  HelperLifecycle,
-} from './lifecycle';
-export { createCaptureRuntime, DEFAULT_CAPTURE_MAX_QUEUED_JOBS } from './runtime';
-export {
-  CapturePolicyActivationError,
-  compileCapturePolicy,
-  createCapturePolicyActivation,
-} from './policy';
-export type {
-  CapturePolicyActivation,
-  CapturePolicyActivationConfiguration,
-  CompiledCapturePolicy,
-} from './policy';
-export type {
-  CaptureRuntime,
-  CaptureRuntimeOptions,
-  CaptureRuntimeStore,
-} from './runtime';
+} from './control';
 export { createCaptureIpcHandlers } from './handlers';
+export type { CaptureIpcHandlerOptions } from './handlers';
+export { compileCapturePolicy, createCapturePolicyController } from './policy';
 export {
   CAPTURE_BUNDLE_IDENTIFIER,
   CaptureBundleError,
@@ -78,5 +39,6 @@ export type {
   CaptureProcessLaunch,
 } from './bundle-client';
 export { createNodeCaptureBundleValidationAdapter } from './bundle-validation-node';
-export type { CaptureIpcHandlerOptions } from './handlers';
-export type { CaptureHistoryReader, CaptureIntakeStore, HelperStateStore } from './store';
+export { createCaptureRuntime, DEFAULT_CAPTURE_MAX_QUEUED_JOBS } from './runtime';
+export type { CaptureRuntime, CaptureRuntimeOptions, CaptureRuntimeStore } from './runtime';
+export type { CaptureHistoryReader, CaptureIntakeStore } from './store';

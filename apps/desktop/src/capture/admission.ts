@@ -6,13 +6,8 @@ import {
 } from '../storage/index';
 
 export type CaptureAdmissionStore = {
-  getBackpressureSnapshot(workspaceId: string): Promise<OperationalStoreSnapshot>;
+  getBackpressureSnapshot(): Promise<OperationalStoreSnapshot>;
   verifyOperationalWrite(): Promise<void>;
-};
-
-export type CaptureAdmissionLifecycle = {
-  setAutomaticPause(active: boolean): Promise<void>;
-  setStoragePause(active: boolean): Promise<void>;
 };
 
 export type CaptureAdmissionReason =
@@ -22,10 +17,9 @@ export type CaptureAdmissionReason =
   | 'queue_state_unavailable'
   | 'storage_state_unavailable';
 
-export type CaptureAdmissionStatus = {
-  active: boolean;
+export type CaptureAdmissionSnapshot = Readonly<{
   reasons: readonly CaptureAdmissionReason[];
-};
+}>;
 
 export type CaptureStorageAdmissionSnapshot = {
   availableBytes: number;
@@ -40,10 +34,10 @@ export type CaptureStorageAdmissionOptions = {
 };
 
 export type CaptureAdmissionController = {
-  getStatus(): CaptureAdmissionStatus;
-  reconcile(): Promise<CaptureAdmissionStatus>;
-  reportStorageFailure(): Promise<CaptureAdmissionStatus>;
-  reportStorageWriteFailure(): Promise<CaptureAdmissionStatus>;
+  getStatus(): CaptureAdmissionSnapshot;
+  reconcile(): Promise<CaptureAdmissionSnapshot>;
+  reportStorageFailure(): Promise<CaptureAdmissionSnapshot>;
+  reportStorageWriteFailure(): Promise<CaptureAdmissionSnapshot>;
   start(): Promise<void>;
   stop(): void;
 };
@@ -52,15 +46,39 @@ export type CaptureAdmissionControllerOptions = {
   backpressure: BackpressureConfig;
   clearIntervalFn?: (handle: unknown) => void;
   intervalMs?: number;
-  lifecycle: CaptureAdmissionLifecycle;
   setIntervalFn?: (callback: () => void, delayMs: number) => unknown;
   storage?: CaptureStorageAdmissionOptions;
   store: CaptureAdmissionStore;
-  workspaceId: string;
+  onStatusChange?(status: CaptureAdmissionSnapshot): void | Promise<void>;
 };
 
 const DEFAULT_RECONCILIATION_INTERVAL_MS = 1000;
 const INTAKE_RECOVERY_SAMPLES = 2;
+
+type HealthyHealth = { state: 'healthy' };
+
+type WatermarkHealth = HealthyHealth | { state: 'blocked' };
+
+type OperationalSnapshotHealth = HealthyHealth | { state: 'unavailable' };
+
+type DiskHealth = HealthyHealth | { state: 'low_capacity' } | { state: 'unavailable' };
+
+type AssetWriteHealth =
+  | HealthyHealth
+  | {
+      state: 'failed';
+      failureIdentity: number;
+      verification: 'required';
+    };
+
+type IntakeWriteHealth =
+  | HealthyHealth
+  | {
+      state: 'failed';
+      failureIdentity: number;
+      healthySamples: number;
+      verification: 'required' | 'confirmed';
+    };
 
 /**
  * Owns automatic capture admission. Queue volume, retry pressure, logical
@@ -74,48 +92,38 @@ export function createCaptureAdmissionController(
 }
 
 class StoreBackedCaptureAdmissionController implements CaptureAdmissionController {
-  private assetBytesBlocked = false;
-  private automaticPauseApplied = false;
-  private availableStorageBlocked = false;
-  private intakeStorageBlocked = false;
-  private intakeStorageFailureGeneration = 0;
-  private intakeStorageHealthySamples = 0;
-  private intakeStorageWriteVerifiedGeneration: number | undefined;
+  private assetBytesHealth: WatermarkHealth = healthy();
+  private assetWriteHealth: AssetWriteHealth = healthy();
+  private diskHealth: DiskHealth = healthy();
   private intervalHandle: unknown;
-  private queueBlocked = false;
-  private queueStateUnavailable = false;
-  private retryBlocked = false;
-  private reconciliationInFlight: Promise<CaptureAdmissionStatus> | undefined;
-  private pauseTransitionTail: Promise<void> = Promise.resolve();
-  private storagePauseApplied = false;
-  private storageStateUnavailable = false;
-  private storageWriteBlocked = false;
-  private storageWriteFailureGeneration = 0;
+  private intakeWriteHealth: IntakeWriteHealth = healthy();
+  private nextAssetWriteFailureIdentity = 0;
+  private nextIntakeWriteFailureIdentity = 0;
+  private operationalSnapshotHealth: OperationalSnapshotHealth = healthy();
+  private queueHealth: WatermarkHealth = healthy();
+  private reconciliationInFlight: Promise<CaptureAdmissionSnapshot> | undefined;
+  private retryHealth: WatermarkHealth = healthy();
+  private status: CaptureAdmissionSnapshot = freezeSnapshot([]);
+  private monitorEpoch = 0;
+  private acceptingSamples = true;
 
   constructor(private readonly options: CaptureAdmissionControllerOptions) {}
 
-  getStatus(): CaptureAdmissionStatus {
-    const reasons: CaptureAdmissionReason[] = [
-      ...(this.queueBlocked ? (['max_queued_jobs_reached'] as const) : []),
-      ...(this.retryBlocked ? (['max_retrying_jobs_reached'] as const) : []),
-      ...(this.assetBytesBlocked ? (['max_asset_bytes_reached'] as const) : []),
-      ...(this.availableStorageBlocked ? (['min_available_storage_reached'] as const) : []),
-      ...(this.storageWriteBlocked ? (['asset_write_failed'] as const) : []),
-      ...(this.queueStateUnavailable ? (['queue_state_unavailable'] as const) : []),
-      ...(this.storageStateUnavailable || this.intakeStorageBlocked
-        ? (['storage_state_unavailable'] as const)
-        : []),
-    ];
-
-    return { active: reasons.length > 0, reasons };
+  getStatus(): CaptureAdmissionSnapshot {
+    return this.status;
   }
 
-  reconcile(): Promise<CaptureAdmissionStatus> {
+  reconcile(): Promise<CaptureAdmissionSnapshot> {
+    if (!this.acceptingSamples) {
+      return Promise.resolve(this.status);
+    }
+
     if (this.reconciliationInFlight) {
       return this.reconciliationInFlight;
     }
 
-    const reconciliation = this.reconcileNow();
+    const epoch = this.monitorEpoch;
+    const reconciliation = this.reconcileNow(epoch);
     this.reconciliationInFlight = reconciliation;
     void reconciliation.then(
       () => {
@@ -132,29 +140,44 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
     return reconciliation;
   }
 
-  async reportStorageFailure(): Promise<CaptureAdmissionStatus> {
-    this.intakeStorageBlocked = true;
-    this.intakeStorageHealthySamples = 0;
-    this.intakeStorageFailureGeneration += 1;
-    this.intakeStorageWriteVerifiedGeneration = undefined;
-    await this.applyPauseCauses();
+  async reportStorageFailure(): Promise<CaptureAdmissionSnapshot> {
+    if (!this.acceptingSamples) {
+      return this.status;
+    }
+    this.intakeWriteHealth = {
+      state: 'failed',
+      failureIdentity: ++this.nextIntakeWriteFailureIdentity,
+      healthySamples: 0,
+      verification: 'required',
+    };
+    await this.publishStatus(this.monitorEpoch);
     return this.getStatus();
   }
 
-  async reportStorageWriteFailure(): Promise<CaptureAdmissionStatus> {
-    this.storageWriteFailureGeneration += 1;
-    this.storageWriteBlocked = true;
-    await this.applyPauseCauses();
+  async reportStorageWriteFailure(): Promise<CaptureAdmissionSnapshot> {
+    if (!this.acceptingSamples) {
+      return this.status;
+    }
+    this.assetWriteHealth = {
+      state: 'failed',
+      failureIdentity: ++this.nextAssetWriteFailureIdentity,
+      verification: 'required',
+    };
+    await this.publishStatus(this.monitorEpoch);
     return this.getStatus();
   }
 
-  private async reconcileNow(): Promise<CaptureAdmissionStatus> {
-    await Promise.all([this.reconcileQueueSignals(), this.reconcileStorageSignals()]);
-    await this.applyPauseCauses();
+  private async reconcileNow(epoch: number): Promise<CaptureAdmissionSnapshot> {
+    await Promise.all([this.reconcileQueueSignals(epoch), this.reconcileStorageSignals(epoch)]);
+    await this.publishStatus(epoch);
     return this.getStatus();
   }
 
   async start(): Promise<void> {
+    if (!this.acceptingSamples) {
+      this.acceptingSamples = true;
+      this.monitorEpoch += 1;
+    }
     await this.reconcile();
     if (this.intervalHandle !== undefined) {
       return;
@@ -169,100 +192,110 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
   }
 
   stop(): void {
-    if (this.intervalHandle === undefined) {
-      return;
+    if (this.intervalHandle !== undefined) {
+      const clearIntervalFn =
+        this.options.clearIntervalFn ??
+        ((handle: unknown) => clearInterval(handle as NodeJS.Timeout));
+      clearIntervalFn(this.intervalHandle);
+      this.intervalHandle = undefined;
     }
 
-    const clearIntervalFn =
-      this.options.clearIntervalFn ??
-      ((handle: unknown) => clearInterval(handle as NodeJS.Timeout));
-    clearIntervalFn(this.intervalHandle);
-    this.intervalHandle = undefined;
+    if (!this.acceptingSamples) {
+      return;
+    }
+    this.acceptingSamples = false;
+    this.monitorEpoch += 1;
+    this.reconciliationInFlight = undefined;
   }
 
-  private async reconcileQueueSignals(): Promise<void> {
-    const intakeFailureGeneration = this.intakeStorageFailureGeneration;
+  private async reconcileQueueSignals(epoch: number): Promise<void> {
+    const intakeFailureIdentity = intakeFailureIdentityOf(this.intakeWriteHealth);
     try {
-      const snapshot = await this.options.store.getBackpressureSnapshot(this.options.workspaceId);
+      const snapshot = await this.options.store.getBackpressureSnapshot();
       const decision = evaluateOperationalStoreBackpressure(snapshot, this.options.backpressure);
-      this.queueStateUnavailable = false;
-      if (
-        this.intakeStorageBlocked &&
-        intakeFailureGeneration === this.intakeStorageFailureGeneration
-      ) {
-        this.intakeStorageHealthySamples += 1;
-        if (
-          this.intakeStorageHealthySamples >= INTAKE_RECOVERY_SAMPLES &&
-          this.intakeStorageWriteVerifiedGeneration === intakeFailureGeneration
-        ) {
-          this.intakeStorageBlocked = false;
-          this.intakeStorageHealthySamples = 0;
-          this.intakeStorageWriteVerifiedGeneration = undefined;
-        }
-      }
-      this.queueBlocked = updateUpperWaterMark(
-        this.queueBlocked,
+      if (!this.isCurrent(epoch)) return;
+      this.operationalSnapshotHealth = healthy();
+      this.intakeWriteHealth = recordHealthyOperationalSnapshot(
+        this.intakeWriteHealth,
+        intakeFailureIdentity,
+      );
+      this.queueHealth = updateUpperWaterMark(
+        this.queueHealth,
         decision.reasons.includes('max_queued_jobs_reached'),
         snapshot.queuedJobs <= this.options.backpressure.resumeQueuedJobs,
       );
-      this.retryBlocked = updateUpperWaterMark(
-        this.retryBlocked,
+      this.retryHealth = updateUpperWaterMark(
+        this.retryHealth,
         decision.reasons.includes('max_retrying_jobs_reached'),
         snapshot.retryingJobs <= this.options.backpressure.resumeRetryingJobs,
       );
-      this.assetBytesBlocked = updateUpperWaterMark(
-        this.assetBytesBlocked,
+      this.assetBytesHealth = updateUpperWaterMark(
+        this.assetBytesHealth,
         decision.reasons.includes('max_asset_bytes_reached'),
         snapshot.assetBytes <= this.options.backpressure.resumeAssetBytes,
       );
     } catch {
-      this.queueStateUnavailable = true;
-      this.intakeStorageHealthySamples = 0;
+      if (!this.isCurrent(epoch)) return;
+      this.operationalSnapshotHealth = { state: 'unavailable' };
+      this.intakeWriteHealth = resetHealthyOperationalSamples(this.intakeWriteHealth);
     }
   }
 
-  private async reconcileStorageSignals(): Promise<void> {
+  private async reconcileStorageSignals(epoch: number): Promise<void> {
     if (!this.options.storage) {
       return;
     }
 
-    const writeFailureGeneration = this.storageWriteFailureGeneration;
-    const intakeFailureGeneration = this.intakeStorageFailureGeneration;
+    const assetWriteFailureIdentity = assetWriteFailureIdentityOf(this.assetWriteHealth);
+    const intakeFailureIdentity = intakeFailureIdentityOf(this.intakeWriteHealth);
     try {
       const snapshot = await this.options.storage.probe();
-      this.storageStateUnavailable = false;
-      this.availableStorageBlocked = updateLowerWaterMark(
-        this.availableStorageBlocked,
+      if (!this.isCurrent(epoch)) return;
+      this.diskHealth = updateLowerWaterMark(
+        this.diskHealth,
         snapshot.availableBytes <= this.options.storage.minAvailableBytes,
         snapshot.availableBytes >= this.options.storage.resumeAvailableBytes,
       );
       if (!snapshot.writable) {
-        if (!this.storageWriteBlocked) {
-          this.storageWriteFailureGeneration += 1;
+        if (this.assetWriteHealth.state === 'healthy') {
+          this.assetWriteHealth = {
+            state: 'failed',
+            failureIdentity: ++this.nextAssetWriteFailureIdentity,
+            verification: 'required',
+          };
         }
-        this.storageWriteBlocked = true;
       } else if (snapshot.availableBytes >= this.options.storage.resumeAvailableBytes) {
-        const verifyAssetWriteFailure =
-          this.storageWriteBlocked && writeFailureGeneration === this.storageWriteFailureGeneration;
-        const verifyIntakeStorageFailure =
-          this.intakeStorageBlocked &&
-          intakeFailureGeneration === this.intakeStorageFailureGeneration &&
-          this.intakeStorageWriteVerifiedGeneration !== intakeFailureGeneration;
-        if (verifyAssetWriteFailure) {
+        if (assetWriteFailureIdentity !== undefined) {
           try {
             await this.options.storage.verifyWrite();
-            if (writeFailureGeneration === this.storageWriteFailureGeneration) {
-              this.storageWriteBlocked = false;
+            if (
+              this.isCurrent(epoch) &&
+              assetWriteFailureIdentityOf(this.assetWriteHealth) === assetWriteFailureIdentity
+            ) {
+              this.assetWriteHealth = healthy();
             }
           } catch {
             // Keep the asset write-failure latch closed until a later verification succeeds.
           }
         }
-        if (verifyIntakeStorageFailure) {
+        const intakeWriteHealth = this.intakeWriteHealth;
+        if (
+          intakeFailureIdentity !== undefined &&
+          intakeWriteHealth.state === 'failed' &&
+          intakeWriteHealth.failureIdentity === intakeFailureIdentity &&
+          intakeWriteHealth.verification === 'required'
+        ) {
           try {
             await this.options.store.verifyOperationalWrite();
-            if (intakeFailureGeneration === this.intakeStorageFailureGeneration) {
-              this.intakeStorageWriteVerifiedGeneration = intakeFailureGeneration;
+            if (
+              this.isCurrent(epoch) &&
+              this.intakeWriteHealth.state === 'failed' &&
+              this.intakeWriteHealth.failureIdentity === intakeFailureIdentity
+            ) {
+              this.intakeWriteHealth = {
+                ...this.intakeWriteHealth,
+                verification: 'confirmed',
+              };
             }
           } catch {
             // Keep the intake storage-failure latch closed until a later verification succeeds.
@@ -270,38 +303,109 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
         }
       }
     } catch {
-      this.storageStateUnavailable = true;
+      if (!this.isCurrent(epoch)) return;
+      this.diskHealth = { state: 'unavailable' };
     }
   }
 
-  private async applyPauseCauses(): Promise<void> {
-    const transition = this.pauseTransitionTail.then(async () => {
-      const automaticPause = this.queueBlocked || this.retryBlocked || this.queueStateUnavailable;
-      const storagePause =
-        this.assetBytesBlocked ||
-        this.availableStorageBlocked ||
-        this.storageWriteBlocked ||
-        this.storageStateUnavailable ||
-        this.intakeStorageBlocked;
+  private isCurrent(epoch: number): boolean {
+    return this.acceptingSamples && this.monitorEpoch === epoch;
+  }
 
-      if (automaticPause !== this.automaticPauseApplied) {
-        await this.options.lifecycle.setAutomaticPause(automaticPause);
-        this.automaticPauseApplied = automaticPause;
-      }
-      if (storagePause !== this.storagePauseApplied) {
-        await this.options.lifecycle.setStoragePause(storagePause);
-        this.storagePauseApplied = storagePause;
-      }
-    });
-    this.pauseTransitionTail = transition.catch(() => undefined);
-    await transition;
+  private async publishStatus(epoch: number): Promise<void> {
+    if (!this.isCurrent(epoch)) {
+      return;
+    }
+    const reasons: CaptureAdmissionReason[] = [
+      ...(this.queueHealth.state === 'blocked' ? (['max_queued_jobs_reached'] as const) : []),
+      ...(this.retryHealth.state === 'blocked' ? (['max_retrying_jobs_reached'] as const) : []),
+      ...(this.assetBytesHealth.state === 'blocked' ? (['max_asset_bytes_reached'] as const) : []),
+      ...(this.diskHealth.state === 'low_capacity'
+        ? (['min_available_storage_reached'] as const)
+        : []),
+      ...(this.assetWriteHealth.state === 'failed' ? (['asset_write_failed'] as const) : []),
+      ...(this.operationalSnapshotHealth.state === 'unavailable'
+        ? (['queue_state_unavailable'] as const)
+        : []),
+      ...(this.diskHealth.state === 'unavailable' || this.intakeWriteHealth.state === 'failed'
+        ? (['storage_state_unavailable'] as const)
+        : []),
+    ];
+    const next = freezeSnapshot(reasons);
+    if (sameStatus(this.status, next)) {
+      return;
+    }
+    this.status = next;
+    await this.options.onStatusChange?.(next);
   }
 }
 
-function updateUpperWaterMark(active: boolean, highReached: boolean, lowReached: boolean): boolean {
-  return active ? !lowReached : highReached;
+function sameStatus(left: CaptureAdmissionSnapshot, right: CaptureAdmissionSnapshot): boolean {
+  return left.reasons.join('\u0000') === right.reasons.join('\u0000');
 }
 
-function updateLowerWaterMark(active: boolean, lowReached: boolean, highReached: boolean): boolean {
-  return active ? !highReached : lowReached;
+function freezeSnapshot(reasons: readonly CaptureAdmissionReason[]): CaptureAdmissionSnapshot {
+  return Object.freeze({ reasons: Object.freeze([...reasons]) });
+}
+
+function healthy(): HealthyHealth {
+  return { state: 'healthy' };
+}
+
+function updateUpperWaterMark(
+  health: WatermarkHealth,
+  highReached: boolean,
+  lowReached: boolean,
+): WatermarkHealth {
+  if (health.state === 'blocked') {
+    return lowReached ? healthy() : health;
+  }
+  return highReached ? { state: 'blocked' } : health;
+}
+
+function updateLowerWaterMark(
+  health: DiskHealth,
+  lowReached: boolean,
+  highReached: boolean,
+): DiskHealth {
+  if (lowReached) {
+    return { state: 'low_capacity' };
+  }
+  if (health.state === 'low_capacity' && !highReached) {
+    return health;
+  }
+  return healthy();
+}
+
+function assetWriteFailureIdentityOf(health: AssetWriteHealth): number | undefined {
+  return health.state === 'failed' ? health.failureIdentity : undefined;
+}
+
+function intakeFailureIdentityOf(health: IntakeWriteHealth): number | undefined {
+  return health.state === 'failed' ? health.failureIdentity : undefined;
+}
+
+function recordHealthyOperationalSnapshot(
+  health: IntakeWriteHealth,
+  sampledFailureIdentity: number | undefined,
+): IntakeWriteHealth {
+  if (health.state !== 'failed' || health.failureIdentity !== sampledFailureIdentity) {
+    return health;
+  }
+
+  const next = {
+    ...health,
+    healthySamples: health.healthySamples + 1,
+  };
+  if (next.healthySamples >= INTAKE_RECOVERY_SAMPLES && next.verification === 'confirmed') {
+    return healthy();
+  }
+  return next;
+}
+
+function resetHealthyOperationalSamples(health: IntakeWriteHealth): IntakeWriteHealth {
+  if (health.state === 'healthy' || health.healthySamples === 0) {
+    return health;
+  }
+  return { ...health, healthySamples: 0 };
 }

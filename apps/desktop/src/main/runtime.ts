@@ -6,18 +6,20 @@ import {
 } from '../auth/index';
 import {
   type CaptureAdmissionController,
-  type CaptureHelperClient,
-  type CaptureHelperCommandClient,
-  type CaptureHelperEventHandler,
+  type CaptureControl,
   type CaptureHistoryReader,
-  type CaptureLifecycle,
   type CaptureRuntimeStore,
   type CaptureStorageAdmissionOptions,
   createCaptureIpcHandlers,
   createCaptureRuntime,
 } from '../capture/index';
 import { createDiagnosticsIpcHandlers } from '../diagnostics/index';
-import type { HelperEnvelope, HelperToMainType } from '../helper/index';
+import type {
+  CaptureHelperClient,
+  CaptureHelperCommandClient,
+  HelperEnvelope,
+  HelperToMainType,
+} from '../helper/index';
 import {
   type ElectronIpcMainLike,
   createRendererSafeSuccess,
@@ -65,10 +67,8 @@ export type DesktopStore = StoreLifecycle &
   SyncQueueStore;
 
 export type DesktopShellFactoryContext = {
-  admission: CaptureAdmissionController;
   commandClient: CaptureHelperCommandClient;
-  eventHandler: CaptureHelperEventHandler;
-  lifecycle: CaptureLifecycle;
+  control: CaptureControl;
   store: DesktopStore;
   syncRuntime: SyncLoop & { getCapacityStatus(): import('../sync/index').SyncWorkerCapacityStatus };
   workspaceId: string;
@@ -106,8 +106,7 @@ export type ElectronMainRuntimeOptions = {
 
 export type ElectronMainRuntimeReadyState = {
   store: DesktopStore;
-  lifecycle: CaptureLifecycle;
-  eventHandler: CaptureHelperEventHandler;
+  control: CaptureControl;
   commandClient: CaptureHelperCommandClient;
   workspaceId: string;
   workspaceIdVerified: boolean;
@@ -186,9 +185,7 @@ export function createElectronMainRuntime(
     const shell = options.createShell
       ? await options.createShell({
           commandClient: captureRuntime.commandClient,
-          eventHandler: captureRuntime.eventHandler,
-          lifecycle: captureRuntime.lifecycle,
-          admission: captureRuntime.admission,
+          control: captureRuntime.control,
           store,
           syncRuntime,
           workspaceId,
@@ -198,13 +195,13 @@ export function createElectronMainRuntime(
 
     // Admission is evaluated before helper startup. A persisted high watermark
     // must prevent the native timer from producing a frame before the first
-    // lifecycle transition is known.
+    // control transition is known.
     await captureRuntime.admission.reconcile();
 
     try {
-      await captureRuntime.lifecycle.start();
+      await captureRuntime.control.start();
     } catch (error) {
-      const helperStatus = captureRuntime.lifecycle.getSnapshot().captureHelper;
+      const helperStatus = captureRuntime.control.getSnapshot().captureHelper;
       // A failing helper is an actionable desktop condition, not a reason to
       // terminate before the user can see the tray state or receive a macOS
       // notification. Other startup failures remain fail-closed and surface to
@@ -227,18 +224,13 @@ export function createElectronMainRuntime(
 
       registerIpcHandlers(options.ipcMain, {
         ...createCaptureIpcHandlers({
-          admission: captureRuntime.admission,
-          eventHandler: captureRuntime.eventHandler,
-          lifecycle: captureRuntime.lifecycle,
-          localPolicy: captureRuntime.localPolicy,
+          control: captureRuntime.control,
+          policy: captureRuntime.policy,
           store,
           workspaceId,
         }),
         ...createStatusHandlers({
-          lifecycle: captureRuntime.lifecycle,
-          statusSource: {
-            getLastObservedAt: () => captureRuntime.eventHandler.getStatus().lastObservedAt,
-          },
+          control: captureRuntime.control,
         }),
         ...createSyncIpcHandlers({
           getWorkerCapacity: () => syncRuntime.getCapacityStatus(),
@@ -249,8 +241,7 @@ export function createElectronMainRuntime(
         ...createDiagnosticsIpcHandlers({ now, store, workspaceId }),
         ...createPermissionIpcHandlers({
           client: captureRuntime.commandClient,
-          eventHandler: captureRuntime.eventHandler,
-          now,
+          statusSource: captureRuntime.control,
           privacySettings,
         }),
         ...(shell
@@ -264,8 +255,7 @@ export function createElectronMainRuntime(
 
     return {
       commandClient: captureRuntime.commandClient,
-      eventHandler: captureRuntime.eventHandler,
-      lifecycle: captureRuntime.lifecycle,
+      control: captureRuntime.control,
       ...(shell ? { shell } : {}),
       store,
       syncLoop: syncRuntime,
@@ -275,7 +265,7 @@ export function createElectronMainRuntime(
   });
 
   options.app.on('window-all-closed', () => {
-    void ready.then(({ lifecycle }) => lifecycle.handleLastWindowClosed()).catch(() => undefined);
+    void ready.then(({ control }) => control.handleLastWindowClosed()).catch(() => undefined);
   });
 
   const quitTimeoutMs = options.quitTimeoutMs ?? DEFAULT_QUIT_TIMEOUT_MS;
@@ -290,10 +280,10 @@ export function createElectronMainRuntime(
 
     void raceWithTimeout(
       ready
-        .then(({ lifecycle, shell, syncLoop }) => {
+        .then(({ control, shell, syncLoop }) => {
           return Promise.allSettled([
             Promise.resolve().then(() => shell?.dispose()),
-            Promise.resolve().then(() => lifecycle.requestQuit()),
+            Promise.resolve().then(() => control.requestQuit()),
             Promise.resolve().then(() => admission?.stop()),
             Promise.resolve().then(() => syncLoop.stop()),
           ]);

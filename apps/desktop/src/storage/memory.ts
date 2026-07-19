@@ -4,7 +4,6 @@ import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
   ClaimRetryableOutboxJobInput,
-  HelperRuntimeState,
   LocalCapturePolicyRule,
   OperationalStoreError,
   OperationalStoreResult,
@@ -51,7 +50,6 @@ class InMemoryOperationalStore {
   private readonly localCapturePolicyRules = new Map<string, LocalCapturePolicyRule>();
   private readonly syncCursors = new Map<string, SyncCursor>();
   private readonly settingsCache = new Map<string, SettingsCache>();
-  private helperState: HelperRuntimeState | null = null;
 
   constructor(private readonly options: MemoryStoreOptions) {}
 
@@ -434,22 +432,7 @@ class InMemoryOperationalStore {
     return this.assetRefs.delete(assetRefId);
   }
 
-  async setHelperState(state: HelperRuntimeState): Promise<HelperRuntimeState> {
-    this.helperState = cloneHelperState(state);
-    return cloneHelperState(this.helperState);
-  }
-
-  async getHelperState(): Promise<HelperRuntimeState | null> {
-    return this.helperState ? cloneHelperState(this.helperState) : null;
-  }
-
-  async setPolicyCache(
-    entry: PolicyCacheEntry,
-    shouldCommit?: () => boolean,
-  ): Promise<PolicyCacheEntry | null> {
-    if (shouldCommit && !shouldCommit()) {
-      return null;
-    }
+  async setPolicyCache(entry: PolicyCacheEntry): Promise<PolicyCacheEntry> {
     const cloned = clonePolicyCache(entry);
     this.policyCache.set(policyCacheKey(entry.workspaceId, entry.deviceId), cloned);
     return clonePolicyCache(cloned);
@@ -512,7 +495,7 @@ class InMemoryOperationalStore {
     return settings ? cloneSettingsCache(settings) : null;
   }
 
-  async getBackpressureSnapshot(_workspaceId: string): Promise<OperationalStoreSnapshot> {
+  async getBackpressureSnapshot(): Promise<OperationalStoreSnapshot> {
     const jobs = [...this.outboxJobs.values()];
     const assetBytes = [...this.assetRefs.values()]
       .filter((asset) => asset.cleanupState !== 'cleaned')
@@ -544,7 +527,6 @@ class InMemoryOperationalStore {
     this.policyCache.clear();
     this.syncCursors.clear();
     this.settingsCache.clear();
-    this.helperState = null;
   }
 }
 
@@ -714,16 +696,6 @@ function capturePayloadMatches(left: OutboxJob['capture'], right: OutboxJob['cap
 
 function assetRefMatches(left: AssetCacheRef, right: AssetCacheRef): boolean {
   return JSON.stringify(cloneAssetRef(left)) === JSON.stringify(cloneAssetRef(right));
-}
-
-function cloneHelperState(state: HelperRuntimeState): HelperRuntimeState {
-  return {
-    ...state,
-    ...(state.lastSafeError ? { lastSafeError: { ...state.lastSafeError } } : {}),
-    permissions: {
-      ...state.permissions,
-    },
-  };
 }
 
 function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {

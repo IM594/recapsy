@@ -305,11 +305,6 @@ const schemaStatements = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_asset_cache_refs_workspace
     ON asset_cache_refs(workspace_id, cleanup_state, created_at)`,
-  `CREATE TABLE IF NOT EXISTS helper_state (
-    id TEXT PRIMARY KEY,
-    state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-    updated_at TEXT NOT NULL
-  )`,
   buildPolicyCacheTable('policy_cache', true),
   `CREATE TABLE IF NOT EXISTS local_capture_policy_rules (
     id TEXT PRIMARY KEY,

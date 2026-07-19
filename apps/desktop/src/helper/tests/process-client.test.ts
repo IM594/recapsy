@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import type { CaptureHelperEvent } from '../../capture/index';
+import type { CaptureHelperTransportEvent, CaptureHelperTransportObserver } from '../index';
 import { type HelperProcess, createHelperProcessClient } from '../process-client';
 import { decodeHelperEnvelopeLine, encodeHelperEnvelope } from '../protocol/codec';
 import type { HelperCapturePolicy, HelperEnvelope } from '../protocol/types';
@@ -15,11 +15,16 @@ import { validateMainToHelperEnvelope } from '../protocol/validation';
  */
 class FakeChildProcess extends EventEmitter implements HelperProcess {
   readonly pid = 4321;
-  readonly stdin = new FakeWritable();
+  readonly stdin: FakeWritable | null;
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
   killed = false;
   lastKillSignal: NodeJS.Signals | number | undefined;
+
+  constructor(stdin: FakeWritable | null = new FakeWritable()) {
+    super();
+    this.stdin = stdin;
+  }
 
   kill(signal?: NodeJS.Signals | number): boolean {
     this.killed = true;
@@ -31,10 +36,27 @@ class FakeChildProcess extends EventEmitter implements HelperProcess {
 class FakeWritable {
   written: string[] = [];
 
-  write(chunk: string): boolean {
+  constructor(
+    private readonly writeError?: Error,
+    private readonly deferWriteResult = false,
+  ) {}
+
+  write(chunk: string, callback: (error?: Error | null) => void): boolean {
     this.written.push(chunk);
+    if (this.deferWriteResult) {
+      setTimeout(() => callback(this.writeError), 0);
+    } else {
+      callback(this.writeError);
+    }
     return true;
   }
+}
+
+function writtenCommands(child: FakeChildProcess): string[] {
+  if (!child.stdin) {
+    throw new Error('Expected the fake child to have stdin.');
+  }
+  return child.stdin.written;
 }
 
 function helloLine(): string {
@@ -63,14 +85,63 @@ function capturePolicy(): HelperCapturePolicy {
   };
 }
 
+function permissionStatusLine(
+  correlationId: string | null,
+  overrides: Partial<HelperEnvelope<'permission.status'>['payload']> = {},
+): string {
+  return encodeHelperEnvelope({
+    correlationId,
+    messageId: `permission_status_${correlationId ?? 'observation'}`,
+    payload: {
+      accessibility: 'granted',
+      observedAt: '2026-07-19T00:00:00.000Z',
+      screenCapture: 'granted',
+      ...overrides,
+    },
+    protocolVersion: 'recapsy.capture-helper',
+    sentAt: '2026-07-19T00:00:00.000Z',
+    type: 'permission.status',
+  });
+}
+
 async function completeStartup(
   client: ReturnType<typeof createHelperProcessClient>,
   child: FakeChildProcess,
-  options?: Parameters<ReturnType<typeof createHelperProcessClient>['start']>[0],
+  observer: CaptureHelperTransportObserver = discardTransportEvents,
 ): Promise<void> {
-  const startPromise = client.start(options);
+  const startPromise = client.start(observer);
   child.stdout.emit('data', helloLine());
   await startPromise;
+}
+
+const discardTransportEvents: CaptureHelperTransportObserver = {
+  async handle() {},
+};
+
+function recordTransportEvents(
+  events: CaptureHelperTransportEvent[],
+): CaptureHelperTransportObserver {
+  return {
+    async handle(event) {
+      events.push(event);
+    },
+  };
+}
+
+function recordTerminations(events: CaptureHelperTransportEvent[]): CaptureHelperTransportObserver {
+  return {
+    async handle(event) {
+      if (event.type === 'process_exit') events.push(event);
+    },
+  };
+}
+
+function recordEnvelopes(received: HelperEnvelope[]): CaptureHelperTransportObserver {
+  return {
+    async handle(event) {
+      if (event.type === 'envelope') received.push(event.envelope);
+    },
+  };
 }
 
 describe('helper process client', () => {
@@ -83,7 +154,7 @@ describe('helper process client', () => {
     });
     let started = false;
 
-    const startPromise = client.start().then(() => {
+    const startPromise = client.start(discardTransportEvents).then(() => {
       started = true;
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -105,7 +176,7 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    const result = await client.start().catch((error: unknown) => error);
+    const result = await client.start(discardTransportEvents).catch((error: unknown) => error);
 
     expect(result).toBeInstanceOf(Error);
     expect(result).toMatchObject({
@@ -120,7 +191,7 @@ describe('helper process client', () => {
 
   it('rejects a spawn error without leaking its raw path and terminates the child', async () => {
     const child = new FakeChildProcess();
-    const events: CaptureHelperEvent[] = [];
+    const events: CaptureHelperTransportEvent[] = [];
     const client = createHelperProcessClient({
       args: [],
       command: 'fake',
@@ -128,7 +199,7 @@ describe('helper process client', () => {
     });
 
     const startPromise = client
-      .start({ onEvent: async (event) => void events.push(event) })
+      .start(recordTransportEvents(events))
       .catch((error: unknown) => error);
     child.emit('error', new Error('spawn /Users/alice/private/Recapsy ENOENT'));
     const result = await startPromise;
@@ -154,7 +225,7 @@ describe('helper process client', () => {
       },
     });
 
-    const result = await client.start().catch((error: unknown) => error);
+    const result = await client.start(discardTransportEvents).catch((error: unknown) => error);
 
     expect(result).toMatchObject({
       code: 'spawn_failed',
@@ -172,7 +243,7 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    const startPromise = client.start().catch((error: unknown) => error);
+    const startPromise = client.start(discardTransportEvents).catch((error: unknown) => error);
     child.emit('exit', 1, null);
     const result = await startPromise;
 
@@ -200,7 +271,7 @@ describe('helper process client', () => {
       type: 'helper.status',
     });
 
-    const startPromise = client.start().catch((error: unknown) => error);
+    const startPromise = client.start(discardTransportEvents).catch((error: unknown) => error);
     child.stdout.emit('data', statusLine);
     const result = await startPromise;
 
@@ -224,7 +295,7 @@ describe('helper process client', () => {
       startupTimeoutMs: 20,
     });
 
-    const startPromise = client.start().catch((error: unknown) => error);
+    const startPromise = client.start(discardTransportEvents).catch((error: unknown) => error);
     child.stdout.emit('data', 'not json at all\n');
     const result = await startPromise;
 
@@ -260,7 +331,7 @@ describe('helper process client', () => {
       type: 'helper.hello',
     })}\n`;
 
-    const startPromise = client.start().catch((error: unknown) => error);
+    const startPromise = client.start(discardTransportEvents).catch((error: unknown) => error);
     child.stdout.emit('data', invalidHello);
     const result = await startPromise;
 
@@ -304,7 +375,7 @@ describe('helper process client', () => {
       type: 'helper.hello',
     })}\n`;
 
-    const startPromise = client.start().catch((error: unknown) => error);
+    const startPromise = client.start(discardTransportEvents).catch((error: unknown) => error);
     child.stdout.emit('data', incompatibleHello);
     const result = await startPromise;
 
@@ -340,7 +411,7 @@ describe('helper process client', () => {
     expect(detached).toBe(process.platform !== 'win32');
   });
 
-  it('forwards well-formed envelopes from stdout to onEnvelope', async () => {
+  it('forwards well-formed envelopes through the transport observer', async () => {
     const child = new FakeChildProcess();
     const received: HelperEnvelope[] = [];
     const client = createHelperProcessClient({
@@ -349,9 +420,7 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEnvelope: async (envelope) => void received.push(envelope),
-    });
+    await completeStartup(client, child, recordEnvelopes(received));
 
     expect(received).toHaveLength(1);
     expect(received[0]?.type).toBe('helper.hello');
@@ -366,9 +435,7 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    const startPromise = client.start({
-      onEnvelope: async (envelope) => void received.push(envelope),
-    });
+    const startPromise = client.start(recordEnvelopes(received));
     child.stdout.emit('data', helloLine() + helloLine());
     await startPromise;
 
@@ -386,9 +453,7 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEnvelope: async (envelope) => void received.push(envelope),
-    });
+    await completeStartup(client, child, recordEnvelopes(received));
     received.length = 0;
     expect(() => child.stdout.emit('data', 'not json at all\n')).not.toThrow();
 
@@ -408,9 +473,7 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEnvelope: async (envelope) => void received.push(envelope),
-    });
+    await completeStartup(client, child, recordEnvelopes(received));
     received.length = 0;
     child.stdout.emit(
       'data',
@@ -447,15 +510,176 @@ describe('helper process client', () => {
     await completeStartup(client, child);
     await client.beginCapture('runtime_started');
 
-    expect(child.stdin.written).toHaveLength(1);
+    expect(writtenCommands(child)).toHaveLength(1);
     const decoded = decodeHelperEnvelopeLine(
-      child.stdin.written[0] ?? '',
+      writtenCommands(child)[0] ?? '',
       validateMainToHelperEnvelope,
     );
     expect(decoded).toMatchObject({
       envelope: { type: 'capture.start', payload: { reason: 'runtime_started' } },
       ok: true,
     });
+  });
+
+  it('completes concurrent permission commands only with their matching correlation and still observes every status fact', async () => {
+    const child = new FakeChildProcess();
+    const received: HelperEnvelope[] = [];
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child, recordEnvelopes(received));
+    received.length = 0;
+
+    const refresh = client.refreshPermissions({ timeoutMs: 100 });
+    const request = client.requestScreenRecordingPermission({ timeoutMs: 100 });
+    const refreshCommand = decodeHelperEnvelopeLine(
+      writtenCommands(child)[0] ?? '',
+      validateMainToHelperEnvelope,
+    );
+    const requestCommand = decodeHelperEnvelopeLine(
+      writtenCommands(child)[1] ?? '',
+      validateMainToHelperEnvelope,
+    );
+
+    expect(refreshCommand).toMatchObject({ envelope: { type: 'permission.refresh' }, ok: true });
+    expect(requestCommand).toMatchObject({
+      envelope: { type: 'permission.request_screen_capture' },
+      ok: true,
+    });
+    if (!refreshCommand.ok || !requestCommand.ok) return;
+
+    expect(refreshCommand.envelope.correlationId).toEqual(expect.any(String));
+    expect(requestCommand.envelope.correlationId).toEqual(expect.any(String));
+    expect(requestCommand.envelope.correlationId).not.toBe(refreshCommand.envelope.correlationId);
+
+    child.stdout.emit(
+      'data',
+      permissionStatusLine(requestCommand.envelope.correlationId, {
+        accessibility: 'denied',
+        screenCapture: 'not_determined',
+      }),
+    );
+
+    await expect(request).resolves.toEqual({
+      accessibility: 'denied',
+      screenRecording: 'not_determined',
+    });
+    expect(received).toHaveLength(1);
+    expect(received[0]).toMatchObject({
+      correlationId: requestCommand.envelope.correlationId,
+      type: 'permission.status',
+    });
+
+    child.stdout.emit('data', permissionStatusLine(refreshCommand.envelope.correlationId));
+
+    await expect(refresh).resolves.toEqual({
+      accessibility: 'granted',
+      screenRecording: 'granted',
+    });
+    expect(received).toHaveLength(2);
+  });
+
+  it('does not complete a permission command from an unrelated status observation but still forwards it to the observer', async () => {
+    const child = new FakeChildProcess();
+    const received: HelperEnvelope[] = [];
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child, recordEnvelopes(received));
+    received.length = 0;
+    const refresh = client.refreshPermissions({ timeoutMs: 25 });
+
+    child.stdout.emit('data', permissionStatusLine('permission_other_request'));
+
+    await expect(refresh).rejects.toMatchObject({
+      code: 'permission_timeout',
+      message: 'Capture helper permission command timed out.',
+      name: 'HelperPermissionCommandError',
+    });
+    expect(received).toEqual([
+      expect.objectContaining({
+        correlationId: 'permission_other_request',
+        type: 'permission.status',
+      }),
+    ]);
+  });
+
+  it('rejects every pending permission command when the helper process exits', async () => {
+    const child = new FakeChildProcess();
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+    const refresh = client.refreshPermissions({ timeoutMs: 100 });
+    const request = client.requestScreenRecordingPermission({ timeoutMs: 100 });
+    child.emit('exit', 1, null);
+
+    const [refreshError, requestError] = await Promise.all([
+      refresh.catch((error: unknown) => error),
+      request.catch((error: unknown) => error),
+    ]);
+
+    expect(refreshError).toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
+    expect(requestError).toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
+  });
+
+  it('rejects a pending permission command when stop begins', async () => {
+    const child = new FakeChildProcess();
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+    const refresh = client.refreshPermissions({ timeoutMs: 100 });
+    const stop = client.stop();
+
+    await expect(refresh).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
+    child.emit('exit', 0, null);
+    await expect(stop).resolves.toBeUndefined();
+  });
+
+  it('contains permission command write failures behind the safe transport error', async () => {
+    const child = new FakeChildProcess(
+      new FakeWritable(new Error('write /Users/alice/private/permission.pipe EPIPE'), true),
+    );
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+    const result = await client
+      .refreshPermissions({ timeoutMs: 100 })
+      .catch((error: unknown) => error);
+
+    expect(result).toMatchObject({
+      code: 'helper_unavailable',
+      message: 'Capture helper is unavailable.',
+      name: 'HelperTransportError',
+    });
+    expect(JSON.stringify(result)).not.toContain('/Users/alice');
+    expect(JSON.stringify(result)).not.toContain('EPIPE');
   });
 
   it('waits for a matching helper.policy_applied acknowledgement before policy configuration resolves', async () => {
@@ -472,7 +696,7 @@ describe('helper process client', () => {
       workspaceId: 'workspace_1',
     });
     const command = decodeHelperEnvelopeLine(
-      child.stdin.written[0] ?? '',
+      writtenCommands(child)[0] ?? '',
       validateMainToHelperEnvelope,
     );
     expect(command).toMatchObject({
@@ -512,7 +736,7 @@ describe('helper process client', () => {
     await completeStartup(client, child);
     const configured = client.configureCapture(capturePolicy());
     const command = decodeHelperEnvelopeLine(
-      child.stdin.written[0] ?? '',
+      writtenCommands(child)[0] ?? '',
       validateMainToHelperEnvelope,
     );
     if (!command.ok) throw new Error('Expected helper.configure command.');
@@ -532,7 +756,29 @@ describe('helper process client', () => {
     await expect(configured).rejects.toMatchObject({ code: 'policy_ack_mismatch' });
   });
 
-  it('drops beginCapture writes silently when no child is running', async () => {
+  it('keeps policy configuration write failures behind the typed activation error', async () => {
+    const child = new FakeChildProcess(
+      new FakeWritable(new Error('write /Users/alice/private/policy.pipe EPIPE'), true),
+    );
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+    const result = await client.configureCapture(capturePolicy()).catch((error: unknown) => error);
+
+    expect(result).toMatchObject({
+      code: 'helper_unavailable',
+      message: 'Capture helper is unavailable.',
+      name: 'HelperPolicyActivationError',
+    });
+    expect(JSON.stringify(result)).not.toContain('/Users/alice');
+    expect(JSON.stringify(result)).not.toContain('EPIPE');
+  });
+
+  it('rejects capture control commands with a safe typed error when no child is running', async () => {
     const child = new FakeChildProcess();
     const client = createHelperProcessClient({
       args: [],
@@ -540,8 +786,45 @@ describe('helper process client', () => {
       spawnHelperProcess: () => child,
     });
 
-    await expect(client.beginCapture('runtime_started')).resolves.toBeUndefined();
-    expect(child.stdin.written).toHaveLength(0);
+    await expect(client.beginCapture('runtime_started')).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      message: 'Capture helper is unavailable.',
+      name: 'HelperTransportError',
+    });
+    await expect(client.pauseCapture()).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
+    await expect(client.resumeCapture()).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
+    expect(writtenCommands(child)).toHaveLength(0);
+  });
+
+  it('rejects capture control commands with the same safe error when stdin is unavailable', async () => {
+    const child = new FakeChildProcess(null);
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+
+    await expect(client.beginCapture('runtime_started')).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      message: 'Capture helper is unavailable.',
+      name: 'HelperTransportError',
+    });
+    await expect(client.pauseCapture()).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
+    await expect(client.resumeCapture()).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      name: 'HelperTransportError',
+    });
   });
 
   it('writes an encoded capture.pause / capture.resume command to stdin', async () => {
@@ -556,13 +839,13 @@ describe('helper process client', () => {
     await client.pauseCapture();
     await client.resumeCapture();
 
-    expect(child.stdin.written).toHaveLength(2);
+    expect(writtenCommands(child)).toHaveLength(2);
     const pauseDecoded = decodeHelperEnvelopeLine(
-      child.stdin.written[0] ?? '',
+      writtenCommands(child)[0] ?? '',
       validateMainToHelperEnvelope,
     );
     const resumeDecoded = decodeHelperEnvelopeLine(
-      child.stdin.written[1] ?? '',
+      writtenCommands(child)[1] ?? '',
       validateMainToHelperEnvelope,
     );
     expect(pauseDecoded).toMatchObject({ envelope: { type: 'capture.pause' }, ok: true });
@@ -587,9 +870,9 @@ describe('helper process client', () => {
       type: 'capture.ack',
     });
 
-    expect(child.stdin.written).toHaveLength(1);
+    expect(writtenCommands(child)).toHaveLength(1);
     const decoded = decodeHelperEnvelopeLine(
-      child.stdin.written[0] ?? '',
+      writtenCommands(child)[0] ?? '',
       validateMainToHelperEnvelope,
     );
     expect(decoded).toMatchObject({
@@ -603,7 +886,7 @@ describe('helper process client', () => {
     });
   });
 
-  it('drops sendCommand writes silently when no child is running', async () => {
+  it('rejects sendCommand with the shared safe transport error when no child is running', async () => {
     const child = new FakeChildProcess();
     const client = createHelperProcessClient({
       args: [],
@@ -620,56 +903,85 @@ describe('helper process client', () => {
         sentAt: '2026-07-08T00:00:00.000Z',
         type: 'capture.ack',
       }),
-    ).resolves.toBeUndefined();
-    expect(child.stdin.written).toHaveLength(0);
+    ).rejects.toMatchObject({
+      code: 'helper_unavailable',
+      message: 'Capture helper is unavailable.',
+      name: 'HelperTransportError',
+    });
+    expect(writtenCommands(child)).toHaveLength(0);
   });
 
-  it('reports unexpectedExit when the child exits without stop() being called', async () => {
-    const child = new FakeChildProcess();
-    const events: CaptureHelperEvent[] = [];
+  it('contains stdin write failures behind the shared safe transport error', async () => {
+    const child = new FakeChildProcess(
+      new FakeWritable(new Error('write /Users/alice/private/capture.pipe EPIPE'), true),
+    );
     const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEvent: async (event) => void events.push(event),
+    await completeStartup(client, child);
+    const result = await client
+      .sendCommand({
+        correlationId: null,
+        messageId: 'main_1',
+        payload: { captureId: 'cap_1' },
+        protocolVersion: 'recapsy.capture-helper',
+        sentAt: '2026-07-08T00:00:00.000Z',
+        type: 'capture.ack',
+      })
+      .catch((error: unknown) => error);
+
+    expect(result).toMatchObject({
+      code: 'helper_unavailable',
+      message: 'Capture helper is unavailable.',
+      name: 'HelperTransportError',
     });
+    expect(JSON.stringify(result)).not.toContain('/Users/alice');
+    expect(JSON.stringify(result)).not.toContain('EPIPE');
+  });
+
+  it('reports process_exit when the child exits without stop() being called', async () => {
+    const child = new FakeChildProcess();
+    const events: CaptureHelperTransportEvent[] = [];
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child, recordTerminations(events));
     child.emit('exit', 1, null);
 
-    expect(events).toEqual([{ code: 1, reason: 'process_crashed', type: 'unexpectedExit' }]);
+    expect(events).toEqual([{ code: 1, reason: 'process_crashed', type: 'process_exit' }]);
   });
 
   it('classifies a signal-terminated exit as process_crashed', async () => {
     const child = new FakeChildProcess();
-    const events: CaptureHelperEvent[] = [];
+    const events: CaptureHelperTransportEvent[] = [];
     const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEvent: async (event) => void events.push(event),
-    });
+    await completeStartup(client, child, recordTerminations(events));
     child.emit('exit', null, 'SIGKILL');
 
-    expect(events).toEqual([{ code: null, reason: 'process_crashed', type: 'unexpectedExit' }]);
+    expect(events).toEqual([{ code: null, reason: 'process_crashed', type: 'process_exit' }]);
   });
 
-  it('does not report unexpectedExit for an exit caused by stop()', async () => {
+  it('does not report process_exit for an exit caused by stop()', async () => {
     const child = new FakeChildProcess();
-    const events: CaptureHelperEvent[] = [];
+    const events: CaptureHelperTransportEvent[] = [];
     const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEvent: async (event) => void events.push(event),
-    });
+    await completeStartup(client, child, recordTerminations(events));
 
     const stopPromise = client.stop();
     child.emit('exit', 0, null);
@@ -677,7 +989,7 @@ describe('helper process client', () => {
 
     expect(events).toHaveLength(0);
     const shutdownDecoded = decodeHelperEnvelopeLine(
-      child.stdin.written[0] ?? '',
+      writtenCommands(child)[0] ?? '',
       validateMainToHelperEnvelope,
     );
     expect(shutdownDecoded).toMatchObject({ envelope: { type: 'helper.shutdown' }, ok: true });
@@ -707,21 +1019,48 @@ describe('helper process client', () => {
     expect(child.killed).toBe(false);
   });
 
-  it('reports unexpectedExit with no leaked message when the process errors after startup', async () => {
+  it('rejects with a safe typed error when the child stays alive after force-kill grace', async () => {
     const child = new FakeChildProcess();
-    const events: CaptureHelperEvent[] = [];
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      forceKillProcessGroup: () => true,
+      shutdownTimeoutMs: 5,
+      spawnHelperProcess: () => child,
+    });
+
+    await completeStartup(client, child);
+
+    await expect(client.stop()).rejects.toMatchObject({
+      code: 'helper_shutdown_failed',
+      message: 'Capture helper failed to shut down.',
+      name: 'HelperTransportError',
+    });
+  });
+
+  it('keeps stop idempotent when no child is running', async () => {
+    const client = createHelperProcessClient({
+      args: [],
+      command: 'fake',
+      spawnHelperProcess: () => new FakeChildProcess(),
+    });
+
+    await expect(client.stop()).resolves.toBeUndefined();
+  });
+
+  it('reports process_exit with no leaked message when the process errors after startup', async () => {
+    const child = new FakeChildProcess();
+    const events: CaptureHelperTransportEvent[] = [];
     const client = createHelperProcessClient({
       args: [],
       command: 'fake',
       spawnHelperProcess: () => child,
     });
 
-    await completeStartup(client, child, {
-      onEvent: async (event) => void events.push(event),
-    });
+    await completeStartup(client, child, recordTerminations(events));
     child.emit('error', new Error('spawn /Users/alice/secret/helper ENOENT'));
 
-    expect(events).toEqual([{ code: null, reason: 'unknown', type: 'unexpectedExit' }]);
+    expect(events).toEqual([{ code: null, reason: 'unknown', type: 'process_exit' }]);
     expect(JSON.stringify(events)).not.toContain('/Users/alice');
   });
 });

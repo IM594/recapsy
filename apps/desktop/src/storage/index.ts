@@ -46,7 +46,6 @@ export type {
   CapturePrivacyDecision,
   ClaimRetryableOutboxJobInput,
   HelperPermissionState,
-  HelperRuntimeState,
   LocalCapturePolicyRule,
   OperationalStoreError,
   OperationalStoreErrorCode,

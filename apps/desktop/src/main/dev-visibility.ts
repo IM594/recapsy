@@ -40,10 +40,8 @@ function logHelperEnvelope(
   switch (envelope.type) {
     case 'capture.result': {
       const { captureId, assets } = narrowHelperEnvelope(envelope, 'capture.result').payload;
-      const primaryAsset = assets.find((asset) => asset.role === 'screenshot') ?? assets[0];
-      const assetInfo = primaryAsset
-        ? `${safeDiagnosticValue(primaryAsset.mimeType)} ${primaryAsset.sizeBytes}B`
-        : 'no-asset';
+      const [screenshot] = assets;
+      const assetInfo = `${safeDiagnosticValue(screenshot.mimeType)} ${screenshot.sizeBytes}B`;
       logger.log(
         `[recapsy:capture] result captureId=${safeDiagnosticValue(captureId)} assets=${assets.length} ${assetInfo}`,
       );

@@ -4,15 +4,16 @@ import path from 'node:path';
 import type { CapturePoliciesResult } from '../../server/index';
 import { type PolicyCacheEntry, createMemoryStore } from '../../storage/index';
 import {
-  CapturePolicyActivationError,
+  CapturePolicyError,
   canonicalCapturePolicyJson,
   compileCapturePolicy,
-  createCapturePolicyActivation,
+  createCapturePolicyController,
 } from '../policy';
 
 const workspaceId = 'workspace_1';
 const deviceId = 'device_1';
 const fetchedAt = '2026-07-18T00:00:00.000Z';
+const acknowledgePolicy = async (): Promise<void> => undefined;
 
 describe('capture policy activation', () => {
   it('matches the shared UTF-8 canonical policy fixture', () => {
@@ -63,7 +64,7 @@ describe('capture policy activation', () => {
         }).capturePolicy.policy,
         version: 'policy-nul',
       }),
-    ).toThrowError(new CapturePolicyActivationError('policy_invalid_fields'));
+    ).toThrowError(new CapturePolicyError('policy_invalid_fields'));
   });
 
   it('persists the complete workspace/device snapshot and includes non-relaxable local rules', async () => {
@@ -78,7 +79,7 @@ describe('capture policy activation', () => {
       scope: 'local_user',
       updatedAt: fetchedAt,
     });
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           return remotePolicy({
@@ -95,13 +96,14 @@ describe('capture policy activation', () => {
           });
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => fetchedAt,
       store,
       workspaceId,
     });
 
-    const configuration = await activation.activate();
+    const configuration = await controller.activate();
     const cached = await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt });
 
     expect(cached).toMatchObject({
@@ -145,7 +147,7 @@ describe('capture policy activation', () => {
       cacheWrites += 1;
       return backingStore.setPolicyCache(entry);
     };
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           return remotePolicy({
@@ -162,13 +164,14 @@ describe('capture policy activation', () => {
           });
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => fetchedAt,
       store,
       workspaceId,
     });
 
-    await expect(activation.activate()).rejects.toMatchObject({ code: 'policy_invalid_scope' });
+    await expect(controller.activate()).rejects.toMatchObject({ code: 'policy_invalid_scope' });
     expect(cacheWrites).toBe(0);
     expect(await backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toBeNull();
   });
@@ -195,7 +198,7 @@ describe('capture policy activation', () => {
       ttlSeconds: 3600,
       workspaceId,
     });
-    const invalidActivation = createCapturePolicyActivation({
+    const invalidController = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           return remotePolicy({
@@ -212,13 +215,14 @@ describe('capture policy activation', () => {
           });
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => fetchedAt,
       store,
       workspaceId,
     });
 
-    await expect(invalidActivation.activate()).rejects.toMatchObject({
+    await expect(invalidController.activate()).rejects.toMatchObject({
       code: 'policy_invalid_scope',
     });
     expect(await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toMatchObject({
@@ -226,19 +230,20 @@ describe('capture policy activation', () => {
       policyVersion: 'known-good-policy',
     });
 
-    const offlineActivation = createCapturePolicyActivation({
+    const offlineController = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           throw new Error('network unavailable');
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => '2026-07-18T00:00:30.000Z',
       store,
       workspaceId,
     });
 
-    await expect(offlineActivation.activate()).resolves.toMatchObject({
+    await expect(offlineController.activate()).resolves.toMatchObject({
       policy: {
         rules: expect.arrayContaining([expect.objectContaining({ id: 'workspace-sensitive-app' })]),
         version: 'known-good-policy',
@@ -257,19 +262,20 @@ describe('capture policy activation', () => {
       ttlSeconds: 60,
       workspaceId,
     });
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           throw new Error('network unavailable');
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => '2026-07-18T00:00:30.000Z',
       store,
       workspaceId,
     });
 
-    await expect(activation.activate()).resolves.toMatchObject({
+    await expect(controller.activate()).resolves.toMatchObject({
       policy: { version: 'capture-policy-1' },
     });
   });
@@ -299,19 +305,20 @@ describe('capture policy activation', () => {
     const expiredOnline = remotePolicy();
     expiredOnline.capturePolicy.id = 'expired-online-snapshot';
     expiredOnline.capturePolicy.expiresAt = '2026-07-18T00:00:20.000Z';
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies() {
           return expiredOnline;
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => '2026-07-18T00:00:30.000Z',
       store,
       workspaceId,
     });
 
-    await expect(activation.activate()).resolves.toMatchObject({
+    await expect(controller.activate()).resolves.toMatchObject({
       policy: {
         rules: expect.arrayContaining([expect.objectContaining({ id: 'known-good-rule' })]),
         version: 'known-good-policy',
@@ -332,19 +339,20 @@ describe('capture policy activation', () => {
     const online = remotePolicy();
     online.capturePolicy.expiresAt = '2026-07-18T00:00:45.000Z';
     online.capturePolicy.ttlSeconds = 3600;
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies() {
           return online;
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => '2026-07-18T00:00:30.000Z',
       store,
       workspaceId,
     });
 
-    await activation.activate();
+    await controller.activate();
 
     await expect(
       store.getPolicyCache(workspaceId, deviceId, { now: '2026-07-18T00:00:44.000Z' }),
@@ -365,23 +373,24 @@ describe('capture policy activation', () => {
       ttlSeconds: 60,
       workspaceId,
     });
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           throw new Error('network unavailable');
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => '2026-07-18T00:01:01.000Z',
       store,
       workspaceId,
     });
 
-    await expect(activation.activate()).rejects.toBeInstanceOf(CapturePolicyActivationError);
-    await expect(activation.activate()).rejects.toMatchObject({ code: 'policy_unavailable' });
+    await expect(controller.activate()).rejects.toBeInstanceOf(CapturePolicyError);
+    await expect(controller.activate()).rejects.toMatchObject({ code: 'policy_unavailable' });
   });
 
-  it('applies a fresh stricter policy even when the offline cache cannot be persisted', async () => {
+  it('does not activate an online policy that cannot become the durable cache fact', async () => {
     const backingStore = createMemoryStore();
     await backingStore.setPolicyCache({
       deviceId,
@@ -396,7 +405,8 @@ describe('capture policy activation', () => {
     store.setPolicyCache = async () => {
       throw new Error('SQLite unavailable');
     };
-    const activation = createCapturePolicyActivation({
+    let configureCalls = 0;
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           return remotePolicy({
@@ -413,17 +423,77 @@ describe('capture policy activation', () => {
           });
         },
       },
+      async configure() {
+        configureCalls += 1;
+      },
       deviceId,
       now: () => fetchedAt,
       store,
       workspaceId,
     });
 
-    await expect(activation.activate()).resolves.toMatchObject({
-      policy: {
-        rules: expect.arrayContaining([expect.objectContaining({ id: 'new-block' })]),
-      },
+    await expect(controller.activate()).rejects.toMatchObject({ code: 'policy_cache_unavailable' });
+    expect(configureCalls).toBe(0);
+  });
+
+  it('publishes a policy only after helper acknowledgement and rejects a failed acknowledgement', async () => {
+    const store = createMemoryStore();
+    let acknowledge: (() => void) | undefined;
+    const acknowledgement = new Promise<void>((resolve) => {
+      acknowledge = resolve;
     });
+    const configured: Array<{ deviceId: string; policyVersion: string; workspaceId: string }> = [];
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy();
+        },
+      },
+      async configure(policy, identity) {
+        configured.push({
+          deviceId: identity.deviceId,
+          policyVersion: policy.version,
+          workspaceId: identity.workspaceId,
+        });
+        await acknowledgement;
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    let published = false;
+    const refresh = controller.activate().then((configuration) => {
+      published = true;
+      return configuration;
+    });
+    for (let index = 0; index < 5; index += 1) await Promise.resolve();
+
+    expect(published).toBe(false);
+    expect(configured).toEqual([{ deviceId, policyVersion: 'capture-policy-1', workspaceId }]);
+    acknowledge?.();
+    await expect(refresh).resolves.toMatchObject({
+      policy: { version: 'capture-policy-1' },
+    });
+    expect(published).toBe(true);
+
+    const rejected = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy();
+        },
+      },
+      async configure() {
+        throw new Error('helper policy mismatch');
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    await expect(rejected.activate()).rejects.toThrow('helper policy mismatch');
   });
 
   it('reduces matching policy actions monotonically, so an allow rule cannot loosen a hard block', () => {
@@ -457,101 +527,43 @@ describe('capture policy activation', () => {
     );
   });
 
-  it('does not let a late older refresh overwrite a newer policy cache', async () => {
-    const store = createMemoryStore();
-    const pending: Array<(value: CapturePoliciesResult) => void> = [];
-    const activation = createCapturePolicyActivation({
-      api: {
-        async getCapturePolicies(): Promise<CapturePoliciesResult> {
-          return await new Promise((resolve) => pending.push(resolve));
-        },
-      },
-      deviceId,
-      now: () => fetchedAt,
-      store,
-      workspaceId,
-    });
-
-    const older = activation.activate();
-    const newer = activation.activate();
-    while (pending.length < 2) await Promise.resolve();
-
-    const newerResponse = remotePolicy({
-      rules: [
-        {
-          action: 'block_capture',
-          enabled: true,
-          id: 'newer-sensitive-app',
-          kind: 'bundle_id',
-          pattern: 'com.example.sensitive',
-          scope: 'workspace_default',
-        },
-      ],
-    });
-    newerResponse.capturePolicy.id = 'snapshot_newer';
-    newerResponse.capturePolicy.version = 'policy-newer';
-    pending[1]?.(newerResponse);
-    await newer;
-
-    const olderResponse = remotePolicy();
-    olderResponse.capturePolicy.id = 'snapshot_older';
-    olderResponse.capturePolicy.version = 'policy-older';
-    pending[0]?.(olderResponse);
-
-    await expect(older).rejects.toMatchObject({ code: 'policy_stale' });
-    expect(await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toMatchObject({
-      policySnapshotId: 'snapshot_newer',
-      policyVersion: 'policy-newer',
-      policy: {
-        rules: [expect.objectContaining({ id: 'newer-sensitive-app' })],
-      },
-    });
-  });
-
-  it('serializes cache writes so an older delayed write cannot land after a newer snapshot', async () => {
+  it('serializes refreshes and commits each validated candidate through ordinary storage', async () => {
     const backingStore = createMemoryStore();
+    const writes: PolicyCacheEntry[] = [];
     const store = Object.create(backingStore) as typeof backingStore;
+    store.setPolicyCache = async (entry) => {
+      writes.push(entry);
+      return backingStore.setPolicyCache(entry);
+    };
     const responses: Array<(value: CapturePoliciesResult) => void> = [];
-    const writes: Array<{
-      complete(): Promise<void>;
-      entry: PolicyCacheEntry;
-      shouldCommit?: () => boolean;
-    }> = [];
-    store.setPolicyCache = (entry, shouldCommit) =>
-      new Promise((resolve) => {
-        writes.push({
-          async complete() {
-            resolve(
-              shouldCommit && !shouldCommit() ? null : await backingStore.setPolicyCache(entry),
-            );
-          },
-          entry,
-          shouldCommit,
-        });
-      });
-    const activation = createCapturePolicyActivation({
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
           return await new Promise((resolve) => responses.push(resolve));
         },
       },
+      configure: acknowledgePolicy,
       deviceId,
       now: () => fetchedAt,
       store,
       workspaceId,
     });
 
-    const older = activation.activate();
+    const first = controller.activate();
     while (responses.length < 1) await Promise.resolve();
-    const olderResponse = remotePolicy();
-    olderResponse.capturePolicy.id = 'snapshot_older';
-    olderResponse.capturePolicy.version = 'policy-older';
-    responses[0]?.(olderResponse);
-    while (writes.length < 1) await Promise.resolve();
+    const second = controller.refresh();
+    await Promise.resolve();
+    expect(responses).toHaveLength(1);
 
-    const newer = activation.activate();
+    const firstResponse = remotePolicy();
+    firstResponse.capturePolicy.id = 'snapshot_first';
+    firstResponse.capturePolicy.version = 'policy-first';
+    responses[0]?.(firstResponse);
+    await first;
     while (responses.length < 2) await Promise.resolve();
-    const newerResponse = remotePolicy({
+    expect(writes.map((entry) => entry.policyVersion)).toEqual(['policy-first']);
+
+    const secondResponse = remotePolicy({
       rules: [
         {
           action: 'block_capture',
@@ -563,57 +575,315 @@ describe('capture policy activation', () => {
         },
       ],
     });
-    newerResponse.capturePolicy.id = 'snapshot_newer';
-    newerResponse.capturePolicy.version = 'policy-newer';
-    responses[1]?.(newerResponse);
-    for (let index = 0; index < 5; index += 1) await Promise.resolve();
-    expect(writes).toHaveLength(1);
+    secondResponse.capturePolicy.id = 'snapshot_second';
+    secondResponse.capturePolicy.version = 'policy-second';
+    responses[1]?.(secondResponse);
+    await second;
 
-    await writes[0]?.complete();
-    await expect(older).rejects.toMatchObject({ code: 'policy_stale' });
-    expect(await backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toBeNull();
-    while (writes.length < 2) await Promise.resolve();
-    await writes[1]?.complete();
-    await newer;
-
-    expect(
-      await backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt }),
-    ).toMatchObject({
-      policySnapshotId: 'snapshot_newer',
-      policyVersion: 'policy-newer',
+    expect(writes.map((entry) => entry.policyVersion)).toEqual(['policy-first', 'policy-second']);
+    await expect(
+      backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt }),
+    ).resolves.toMatchObject({
+      policySnapshotId: 'snapshot_second',
+      policyVersion: 'policy-second',
     });
   });
 
-  it('invalidates a pending activation before it publishes or caches new state', async () => {
-    const store = createMemoryStore();
-    const pending: Array<(value: CapturePoliciesResult) => void> = [];
-    const activatedVersions: string[] = [];
-    const activation = createCapturePolicyActivation({
+  it('owns the refresh timer and cancels it when deactivated', async () => {
+    const timers: Array<() => void> = [];
+    let clearCalls = 0;
+    const controller = createCapturePolicyController({
       api: {
         async getCapturePolicies(): Promise<CapturePoliciesResult> {
-          return await new Promise((resolve) => pending.push(resolve));
+          return remotePolicy();
         },
+      },
+      clearTimeoutFn: () => {
+        clearCalls += 1;
+      },
+      configure: acknowledgePolicy,
+      deviceId,
+      now: () => fetchedAt,
+      setTimeoutFn: (callback) => {
+        timers.push(callback);
+        return timers.length;
+      },
+      store: createMemoryStore(),
+      workspaceId,
+    });
+
+    await controller.activate();
+    expect(timers).toHaveLength(1);
+
+    controller.deactivate();
+    expect(clearCalls).toBe(1);
+    expect(controller.getSnapshot()).toMatchObject({ status: 'inactive' });
+  });
+
+  it('does not commit an activation after its policy session is deactivated', async () => {
+    const response = Promise.withResolvers<CapturePoliciesResult>();
+    const store = createMemoryStore();
+    let configureCalls = 0;
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return response.promise;
+        },
+      },
+      async configure() {
+        configureCalls += 1;
       },
       deviceId,
       now: () => fetchedAt,
-      onActivated(configuration) {
-        activatedVersions.push(configuration.policy.version);
-      },
       store,
       workspaceId,
     });
 
-    const result = activation.activate();
-    while (pending.length < 1) await Promise.resolve();
-    if (!activation.invalidate) {
-      throw new Error('policy activation invalidation is required for shutdown fencing');
-    }
-    activation.invalidate();
-    pending[0]?.(remotePolicy());
+    const activation = controller.activate();
+    controller.deactivate();
+    response.resolve(remotePolicy());
 
-    await expect(result).rejects.toMatchObject({ code: 'policy_stale' });
-    expect(activatedVersions).toEqual([]);
+    await expect(activation).rejects.toBeInstanceOf(Error);
+    expect(configureCalls).toBe(0);
     expect(await store.getPolicyCache(workspaceId, deviceId, { now: fetchedAt })).toBeNull();
+    expect(controller.getSnapshot()).toEqual({ status: 'inactive' });
+  });
+
+  it('does not fetch a refresh that was queued before the policy session was deactivated', async () => {
+    const firstResponse = Promise.withResolvers<CapturePoliciesResult>();
+    let fetches = 0;
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          fetches += 1;
+          return fetches === 1 ? firstResponse.promise : remotePolicy();
+        },
+      },
+      configure: acknowledgePolicy,
+      deviceId,
+      now: () => fetchedAt,
+      store: createMemoryStore(),
+      workspaceId,
+    });
+
+    const first = controller.activate();
+    while (fetches < 1) await Promise.resolve();
+    const queued = controller.refresh();
+    controller.deactivate();
+    firstResponse.resolve(remotePolicy());
+
+    await expect(first).rejects.toBeInstanceOf(Error);
+    await expect(queued).rejects.toBeInstanceOf(Error);
+    expect(fetches).toBe(1);
+    expect(controller.getSnapshot()).toEqual({ status: 'inactive' });
+  });
+
+  it('publishes activating before the first helper acknowledgement, then publishes active', async () => {
+    const response = Promise.withResolvers<CapturePoliciesResult>();
+    const snapshots: string[] = [];
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return response.promise;
+        },
+      },
+      configure: acknowledgePolicy,
+      deviceId,
+      now: () => fetchedAt,
+      store: createMemoryStore(),
+      workspaceId,
+    });
+    controller.subscribe((snapshot) => {
+      snapshots.push(snapshot.status);
+    });
+
+    const activation = controller.activate();
+    for (let index = 0; index < 5; index += 1) await Promise.resolve();
+
+    expect(controller.getSnapshot()).toEqual({ status: 'activating' });
+    expect(snapshots).toEqual(['activating']);
+
+    response.resolve(remotePolicy());
+    await expect(activation).resolves.toMatchObject({ policy: { version: 'capture-policy-1' } });
+    expect(controller.getSnapshot()).toMatchObject({ status: 'active' });
+    expect(snapshots).toEqual(['activating', 'active']);
+  });
+
+  it('owns local bundle rules and only configures an active policy session', async () => {
+    const store = createMemoryStore();
+    let fetches = 0;
+    let configurations = 0;
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          fetches += 1;
+          return remotePolicy();
+        },
+      },
+      async configure() {
+        configurations += 1;
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    const localRule = await controller.blockBundle(' com.example.PasswordManager ');
+
+    expect(localRule).toMatchObject({
+      action: 'block_capture',
+      kind: 'bundle_id',
+      pattern: 'com.example.PasswordManager',
+      scope: 'local_user',
+    });
+    expect(await controller.listLocalRules()).toEqual([localRule]);
+    expect(fetches).toBe(0);
+    expect(configurations).toBe(0);
+
+    await controller.activate();
+    expect(fetches).toBe(1);
+    expect(configurations).toBe(1);
+
+    const duplicate = await controller.blockBundle('com.example.PasswordManager');
+    expect(duplicate).toEqual(localRule);
+    expect(fetches).toBe(2);
+    expect(configurations).toBe(2);
+
+    expect(await controller.removeLocalRule(localRule.id)).toBe(true);
+    expect(fetches).toBe(3);
+    expect(configurations).toBe(3);
+    expect(await controller.listLocalRules()).toEqual([]);
+  });
+
+  it('rejects invalid bundle identifiers before persisting or contacting the policy service', async () => {
+    const store = createMemoryStore();
+    let fetches = 0;
+    let configurations = 0;
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          fetches += 1;
+          return remotePolicy();
+        },
+      },
+      async configure() {
+        configurations += 1;
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    await expect(controller.blockBundle('https://example.com/login')).rejects.toMatchObject({
+      code: 'invalid_bundle_id',
+    });
+    expect(await controller.listLocalRules()).toEqual([]);
+    expect(fetches).toBe(0);
+    expect(configurations).toBe(0);
+  });
+
+  it('invalidates an in-flight local rule refresh without configuring or rescheduling', async () => {
+    const pendingRefresh = Promise.withResolvers<CapturePoliciesResult>();
+    let fetches = 0;
+    let configurations = 0;
+    let clearCalls = 0;
+    const timers: Array<() => void> = [];
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          fetches += 1;
+          return fetches === 1 ? remotePolicy() : pendingRefresh.promise;
+        },
+      },
+      clearTimeoutFn: () => {
+        clearCalls += 1;
+      },
+      async configure() {
+        configurations += 1;
+      },
+      deviceId,
+      now: () => fetchedAt,
+      setTimeoutFn: (callback) => {
+        timers.push(callback);
+        return timers.length;
+      },
+      store: createMemoryStore(),
+      workspaceId,
+    });
+    await controller.activate();
+
+    const mutation = controller.blockBundle('com.example.Sensitive');
+    while (fetches < 2) await Promise.resolve();
+    controller.deactivate();
+    pendingRefresh.resolve(remotePolicy());
+
+    await expect(mutation).rejects.toBeInstanceOf(Error);
+    expect(configurations).toBe(1);
+    expect(clearCalls).toBe(1);
+    expect(timers).toHaveLength(1);
+    expect(controller.getSnapshot()).toEqual({
+      configuration: expect.any(Object),
+      status: 'inactive',
+    });
+  });
+
+  it('rejects an invalid candidate before cache commit and then processes the queued refresh', async () => {
+    const backingStore = createMemoryStore();
+    const writes: PolicyCacheEntry[] = [];
+    const store = Object.create(backingStore) as typeof backingStore;
+    store.setPolicyCache = async (entry) => {
+      writes.push(entry);
+      return backingStore.setPolicyCache(entry);
+    };
+    const responses: Array<(value: CapturePoliciesResult) => void> = [];
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return await new Promise((resolve) => responses.push(resolve));
+        },
+      },
+      configure: acknowledgePolicy,
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    const invalid = controller.activate();
+    while (responses.length < 1) await Promise.resolve();
+    const queued = controller.refresh();
+    const invalidResponse = remotePolicy({
+      rules: [
+        {
+          action: 'block_capture',
+          enabled: true,
+          id: 'remote-local-rule',
+          kind: 'bundle_id',
+          pattern: 'com.example.sensitive',
+          scope: 'local_user',
+        },
+      ],
+    });
+    responses[0]?.(invalidResponse);
+    await expect(invalid).rejects.toMatchObject({ code: 'policy_invalid_scope' });
+    while (responses.length < 2) await Promise.resolve();
+    expect(writes).toHaveLength(0);
+
+    const validResponse = remotePolicy();
+    validResponse.capturePolicy.id = 'snapshot_valid';
+    validResponse.capturePolicy.version = 'policy-valid';
+    responses[1]?.(validResponse);
+    await queued;
+
+    expect(writes.map((entry) => entry.policyVersion)).toEqual(['policy-valid']);
+    await expect(
+      backingStore.getPolicyCache(workspaceId, deviceId, { now: fetchedAt }),
+    ).resolves.toMatchObject({
+      policySnapshotId: 'snapshot_valid',
+      policyVersion: 'policy-valid',
+    });
   });
 });
 
