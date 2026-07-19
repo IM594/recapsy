@@ -3,18 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {
-  AiRuntime,
-  RunVisionTextFailureReason,
-  createAiRuntime,
-} from '../../../server/src/ai/index';
-import type { InMemoryCaptureRepository } from '../../../server/src/capture/index';
-import type {
-  InMemoryProviderSettingsRepository,
-  createProviderCredentialResolver,
-} from '../../../server/src/provider-settings/index';
-import type { Logger } from '../../../server/src/shared/logger/index';
-import type { createTestHttpApp } from '../../../server/tests/support/app-test-harness';
+import type { AiRuntime, RunVisionTextFailureReason } from '../../../server/src/ai/index';
 import { type ServerApiTransport, createServerApiClient } from '../../src/server/index';
 import {
   type AssetCacheRef,
@@ -29,14 +18,13 @@ import {
   createSyncJobExecutor,
   createSyncWorker,
 } from '../../src/sync/index';
-import { startLoopbackHttpServer } from '../support/loopback-http-server';
-
-type CaptureRepositorySnapshot = ReturnType<InMemoryCaptureRepository['snapshot']>;
+import {
+  type ServerHttpHarness,
+  type ServerHttpHarnessOptions,
+  startServerHttpHarness as createServerHttpHarness,
+} from '../support/server-http-harness';
 
 const now = '2026-07-06T00:00:00.000Z';
-const adminToken = 'test-admin-bootstrap-token';
-const sessionSecret = 'test-session-secret-with-enough-entropy';
-const providerSecret = 'test-provider-secret-with-enough-entropy';
 const leakedProviderMessage =
   'Patient Magnolia Rivera belongs to Project Blue Meridian oncology plan.';
 
@@ -70,7 +58,7 @@ afterEach(() => {
 describe('desktop server sync over real HTTP', () => {
   it('runs the OCR proxy and result submission through public /v1 routes and reads screen text from timeline/search', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
-    const harness = await startServerHttpHarness({
+    const harness = await startHarness({
       aiRuntime: visionRuntimeReturning('Visible retention graph and roadmap notes'),
     });
     const user = await harness.bootstrapUser('desktop-positive@example.test');
@@ -120,7 +108,7 @@ describe('desktop server sync over real HTTP', () => {
 
   it('runs the OCR proxy over real HTTP with a SQLite-backed desktop store', async () => {
     const bytes = new Uint8Array([21, 22, 23, 24]);
-    const harness = await startServerHttpHarness({
+    const harness = await startHarness({
       aiRuntime: visionRuntimeReturning('SQLite backed OCR searchable invoice'),
     });
     const user = await harness.bootstrapUser('desktop-sqlite-positive@example.test');
@@ -158,7 +146,7 @@ describe('desktop server sync over real HTTP', () => {
 
   it('rejects missing privacyDecision.decidedAt before transport and at the server HTTP route', async () => {
     const bytes = new Uint8Array([1, 2, 3, 4]);
-    const harness = await startServerHttpHarness({
+    const harness = await startHarness({
       aiRuntime: visionRuntimeReturning('Contract guard OCR'),
     });
     const user = await harness.bootstrapUser('desktop-contract@example.test');
@@ -213,7 +201,7 @@ describe('desktop server sync over real HTTP', () => {
 
   it('fails closed when the real server reports provider_not_configured and writes no search result', async () => {
     const bytes = new Uint8Array([5, 6, 7, 8]);
-    const harness = await startServerHttpHarness({ useAppDefaultOcrRunner: true });
+    const harness = await startHarness({ useAppDefaultOcrRunner: true });
     const user = await harness.bootstrapUser('desktop-provider-missing@example.test');
     const store = createMemoryStore();
     await seedPendingCapture(store, user.workspaceId, bytes);
@@ -242,7 +230,7 @@ describe('desktop server sync over real HTTP', () => {
 
   it('keeps provider timeouts retryable without exposing provider text to desktop state or search', async () => {
     const bytes = new Uint8Array([9, 10, 11, 12]);
-    const harness = await startServerHttpHarness({
+    const harness = await startHarness({
       aiRuntime: visionRuntimeFailing('provider_timeout', true, leakedProviderMessage),
     });
     const user = await harness.bootstrapUser('desktop-provider-timeout@example.test');
@@ -283,7 +271,7 @@ describe('desktop server sync over real HTTP', () => {
 
   it('cancels an in-flight job as a purely local terminal state with no server OCR result', async () => {
     const bytes = new Uint8Array([13, 14, 15, 16]);
-    const harness = await startServerHttpHarness({
+    const harness = await startHarness({
       aiRuntime: visionRuntimeReturning('This OCR must not be submitted'),
     });
     const user = await harness.bootstrapUser('desktop-cancel@example.test');
@@ -313,7 +301,7 @@ describe('desktop server sync over real HTTP', () => {
 
   it('does not read local bytes or call the proxy for block_ocr over real HTTP', async () => {
     const bytes = new Uint8Array([17, 18, 19, 20]);
-    const harness = await startServerHttpHarness({
+    const harness = await startHarness({
       aiRuntime: visionRuntimeReturning('This OCR must not run'),
     });
     const user = await harness.bootstrapUser('desktop-block-ocr@example.test');
@@ -552,148 +540,10 @@ function sha256Hex(bytes: Uint8Array) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
 }
 
-type ServerHttpHarness = {
-  endpoint: string;
-  bootstrapUser(email: string): Promise<{ accessToken: string; workspaceId: string }>;
-  captureSnapshot(): CaptureRepositorySnapshot;
-  stop(): void;
-};
-
-type ServerHarnessOptions = {
-  aiRuntime?: AiRuntime;
-  useAppDefaultOcrRunner?: boolean;
-};
-
-type ServerModules = {
-  InMemoryCaptureRepository: new () => InMemoryCaptureRepository;
-  InMemoryProviderSettingsRepository: new () => InMemoryProviderSettingsRepository;
-  createProviderCredentialResolver: typeof createProviderCredentialResolver;
-  createAiRuntime: typeof createAiRuntime;
-  createTestHttpApp: typeof createTestHttpApp;
-};
-
-async function startServerHttpHarness(options: ServerHarnessOptions): Promise<ServerHttpHarness> {
-  const modules = await loadServerModules();
-  let listener: ReturnType<typeof startLoopbackHttpServer> | undefined;
-
-  try {
-    const captureRepository = new modules.InMemoryCaptureRepository();
-    const providerSettingsRepository = new modules.InMemoryProviderSettingsRepository();
-    const config = {
-      ADMIN_BOOTSTRAP_TOKEN: adminToken,
-      CORS_ALLOWED_ORIGINS: [],
-      DATABASE_URL: 'postgresql://test',
-      EMBEDDING_INDEXER_BATCH_SIZE: 16,
-      EMBEDDING_INDEXER_INTERVAL_MS: 15_000,
-      EMBEDDING_INDEXER_MAX_ATTEMPTS: 5,
-      EMBEDDING_INDEXER_TIMEOUT_MS: 30_000,
-      LOG_LEVEL: 'error' as const,
-      NODE_ENV: options.useAppDefaultOcrRunner ? ('production' as const) : ('test' as const),
-      OCR_MAX_INPUT_BYTES: 1024 * 1024,
-      OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
-      OCR_PROXY_TIMEOUT_MS: 60_000,
-      PORT: 0,
-      PROVIDER_ENCRYPTION_SECRET: providerSecret,
-      SESSION_SECRET: sessionSecret,
-    };
-    const logger = {
-      debug() {},
-      error() {},
-      info() {},
-      warn() {},
-    } as unknown as Logger;
-    const aiRuntime =
-      options.aiRuntime ??
-      (options.useAppDefaultOcrRunner
-        ? modules.createAiRuntime({
-            providerCredentialResolver: modules.createProviderCredentialResolver({
-              config,
-              repository: providerSettingsRepository,
-            }),
-          })
-        : undefined);
-    const app = modules.createTestHttpApp({
-      ...(aiRuntime ? { aiRuntime } : {}),
-      captureRepository,
-      config,
-      logger,
-      providerSettingsRepository,
-    }).app;
-    listener = startLoopbackHttpServer(app.fetch);
-    const endpoint = listener.endpoint;
-    const harness: ServerHttpHarness = {
-      endpoint,
-      async bootstrapUser(email) {
-        const inviteRes = await fetch(`${endpoint}/v1/bootstrap/invites`, {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${adminToken}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            initialQuota: { ocrJobsPerMonth: 100, searchQueriesPerMonth: 1000 },
-            initialTrialDays: 14,
-            note: 'Desktop HTTP sync smoke',
-          }),
-        });
-        expect(inviteRes.status).toBe(201);
-        const invite = (await inviteRes.json()) as { code: string };
-        const registerRes = await fetch(`${endpoint}/v1/auth/register`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            email,
-            inviteCode: invite.code,
-            password: 'correct horse battery staple',
-          }),
-        });
-        expect(registerRes.status).toBe(201);
-        const registered = (await registerRes.json()) as {
-          session: { currentWorkspace: { id: string } };
-          tokens: { accessToken: string };
-        };
-        return {
-          accessToken: registered.tokens.accessToken,
-          workspaceId: registered.session.currentWorkspace.id,
-        };
-      },
-      captureSnapshot() {
-        return captureRepository.snapshot();
-      },
-      stop() {
-        listener?.stop();
-        listener = undefined;
-      },
-    };
-    activeHarnesses.push(harness);
-    return harness;
-  } catch (error) {
-    listener?.stop();
-    throw error;
-  }
-}
-
-async function loadServerModules(): Promise<ServerModules> {
-  const appHarnessModule = await import(
-    new URL('../../../server/tests/support/app-test-harness.ts', import.meta.url).href
-  );
-  const aiRuntimeModule = await import(
-    new URL('../../../server/src/ai/index.ts', import.meta.url).href
-  );
-  const captureRepositoryModule = await import(
-    new URL('../../../server/src/capture/index.ts', import.meta.url).href
-  );
-  const providerSettingsModule = await import(
-    new URL('../../../server/src/provider-settings/index.ts', import.meta.url).href
-  );
-
-  return {
-    InMemoryCaptureRepository: captureRepositoryModule.InMemoryCaptureRepository,
-    InMemoryProviderSettingsRepository: providerSettingsModule.InMemoryProviderSettingsRepository,
-    createProviderCredentialResolver: providerSettingsModule.createProviderCredentialResolver,
-    createAiRuntime: aiRuntimeModule.createAiRuntime,
-    createTestHttpApp: appHarnessModule.createTestHttpApp,
-  };
+async function startHarness(options: ServerHttpHarnessOptions = {}): Promise<ServerHttpHarness> {
+  const harness = await createServerHttpHarness(options);
+  activeHarnesses.push(harness);
+  return harness;
 }
 
 function visionRuntimeReturning(text: string): AiRuntime {

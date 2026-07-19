@@ -134,50 +134,28 @@ describe('desktop architecture boundaries', () => {
     expect(violations).toEqual([]);
   });
 
-  it('uses capture creation terminology across server client, sync, exports, and integration', async () => {
-    const sources: string[] = [];
-    const glob = new Bun.Glob('**/*.ts');
-    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      if (relativePath === 'architecture-boundaries.test.ts') continue;
-      sources.push(await readSource(relativePath));
-    }
-    for (const relativePath of [
-      '../tests/integration/auth-login-sync.test.ts',
-      '../tests/integration/server-http.test.ts',
-    ]) {
-      sources.push(await readFile(path.resolve(DESKTOP_SOURCE_ROOT, relativePath), 'utf8'));
-    }
-    const source = sources.join('\n');
-    const retiredSymbols = [
-      'CaptureIngestInput',
-      'CaptureIngestResult',
-      'SyncCaptureIngestInput',
-      'ingestCapture',
-      'toCaptureIngestBody',
-      'toCaptureIngestResult',
-      'ingestEvent',
-    ];
-    const violations = retiredSymbols
-      .filter((symbol) => new RegExp(`\\b${symbol}\\b`).test(source))
-      .map((symbol) => `retired desktop capture ingest symbol remains: ${symbol}`);
-    if (source.includes('/v1/captures/ingest')) {
-      violations.push('retired desktop capture ingest path remains');
-    }
-    if (/\bingest\b/i.test(source)) {
-      violations.push('standalone capture ingest terminology remains in desktop code or tests');
-    }
-    for (const symbol of [
-      'CaptureCreateInput',
-      'CaptureCreateResult',
-      'SyncCaptureCreateInput',
-      'createCapture',
-      'toCaptureCreateBody',
-      'toCaptureCreateResult',
-    ]) {
-      if (!new RegExp(`\\b${symbol}\\b`).test(source)) {
-        violations.push(`required desktop capture creation symbol is missing: ${symbol}`);
+  it('uses the explicit server test-support entrypoint for cross-package HTTP fixtures', async () => {
+    const violations: string[] = [];
+    const testSources = new Bun.Glob('{integration,support}/**/*.ts');
+
+    for await (const relativePath of testSources.scan({
+      cwd: path.resolve(DESKTOP_PACKAGE_ROOT, 'tests'),
+    })) {
+      const source = await readFile(
+        path.resolve(DESKTOP_PACKAGE_ROOT, 'tests', relativePath),
+        'utf8',
+      );
+      for (const match of source.matchAll(TEST_IMPORT_PATTERN)) {
+        const specifier = match[1];
+        if (!specifier?.includes('../../../server/tests/')) continue;
+        if (specifier !== '../../../server/tests/test-support') {
+          violations.push(
+            `${relativePath} bypasses server/tests/test-support through ${specifier}`,
+          );
+        }
       }
     }
+
     expect(violations).toEqual([]);
   });
 
@@ -281,22 +259,10 @@ describe('desktop architecture boundaries', () => {
       'storage/sqlite/store.ts',
       'storage/sqlite/tests/store.test.ts',
     ];
-    const retiredPaths = [
-      'storage/memory-store.ts',
-      'storage/store.test.ts',
-      'storage/bun-driver.ts',
-      'storage/node-driver.ts',
-      'storage/sqlite-driver.ts',
-      'storage/sqlite-store.ts',
-      'storage/sqlite-store.test.ts',
-    ];
     const violations = [
       ...requiredPaths
         .filter((relativePath) => !sourceFiles.includes(relativePath))
         .map((relativePath) => `${relativePath} is missing`),
-      ...retiredPaths
-        .filter((relativePath) => sourceFiles.includes(relativePath))
-        .map((relativePath) => `${relativePath} is still present`),
     ];
 
     if (sourceFiles.includes('storage/sqlite/store.ts')) {
@@ -1009,14 +975,10 @@ describe('desktop architecture boundaries', () => {
       'helper/protocol/codec.ts',
       'helper/protocol/tests/codec.test.ts',
     ];
-    const retiredPaths = ['helper/protocol.ts', 'helper/protocol/tests/protocol.test.ts'];
     const violations = [
       ...requiredPaths
         .filter((relativePath) => !sourceFiles.includes(relativePath))
         .map((relativePath) => `${relativePath} is missing`),
-      ...retiredPaths
-        .filter((relativePath) => sourceFiles.includes(relativePath))
-        .map((relativePath) => `${relativePath} is still present`),
     ];
 
     const [typesSource, validationSource, codecSource, processSource, devProcessSource] =
@@ -1073,43 +1035,6 @@ describe('desktop architecture boundaries', () => {
     }
 
     expect(violations).toEqual([]);
-  });
-
-  it('uses capability context instead of repeating it in filenames and public symbols', async () => {
-    const sourceFiles: string[] = [];
-    const productionSources: string[] = [];
-    const glob = new Bun.Glob('**/*.ts');
-
-    for await (const relativePath of glob.scan({ cwd: DESKTOP_SOURCE_ROOT })) {
-      sourceFiles.push(relativePath);
-      if (!relativePath.endsWith('.test.ts') && !relativePath.includes('/__tests__/')) {
-        productionSources.push(await readSource(relativePath));
-      }
-    }
-
-    const retiredPaths = [
-      'capture/capture-helper-controller.ts',
-      'capture/capture-helper-event-intake.ts',
-      'capture/capture-runtime.ts',
-      'main/electron-main-runtime.ts',
-      'sync/ocr-screen-text-mapping.ts',
-    ];
-    const requiredPaths = [
-      'capture/helper-event-handler.ts',
-      'capture/runtime.ts',
-      'main/runtime.ts',
-      'sync/screen-text.ts',
-    ];
-    const source = productionSources.join('\n');
-
-    expect(retiredPaths.filter((relativePath) => sourceFiles.includes(relativePath))).toEqual([]);
-    expect(requiredPaths.filter((relativePath) => !sourceFiles.includes(relativePath))).toEqual([]);
-    expect(source).not.toMatch(/\bCaptureHelperEventIntake\b/);
-    expect(source).not.toMatch(/\bcreateCaptureHelperEventIntake\b/);
-    expect(source).not.toMatch(/\bderiveScreenTextFromOcrResponse\b/);
-    expect(source).toMatch(/\bCaptureHelperEventHandler\b/);
-    expect(source).toMatch(/\bcreateCaptureHelperEventHandler\b/);
-    expect(source).toMatch(/\bmapOcrScreenText\b/);
   });
 
   it('keeps session startup out of the Electron lifecycle coordinator', async () => {

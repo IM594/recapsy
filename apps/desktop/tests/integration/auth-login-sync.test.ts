@@ -1,8 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { InMemoryCaptureRepository } from '../../../server/src/capture/index';
-import type { Logger } from '../../../server/src/shared/logger/index';
-import type { createTestHttpApp } from '../../../server/tests/support/app-test-harness';
 import { createAuthClient, createInMemoryTokenStore } from '../../src/auth/index';
 import { type ServerApiTransport, createServerApiClient } from '../../src/server/index';
 import { type AssetCacheRef, createMemoryStore } from '../../src/storage/index';
@@ -11,9 +8,11 @@ import {
   createSyncJobExecutor,
   createSyncWorker,
 } from '../../src/sync/index';
-import { startLoopbackHttpServer } from '../support/loopback-http-server';
-
-type CaptureRepositorySnapshot = ReturnType<InMemoryCaptureRepository['snapshot']>;
+import {
+  type ServerHttpHarness,
+  startServerHttpHarness as createServerHttpHarness,
+  testUserPassword,
+} from '../support/server-http-harness';
 
 /**
  * End-to-end smoke test for the real login -> sync loop path this task adds:
@@ -21,24 +20,17 @@ type CaptureRepositorySnapshot = ReturnType<InMemoryCaptureRepository['snapshot'
  * through the real `createAuthClient()` (hitting the real `/v1/auth/login`
  * and `/v1/auth/session` routes, not a mock), then feed the resulting real
  * token + workspace id into `createServerApiClient` + `createSyncWorker`
- * exactly as `main/runtime.ts` does. This intentionally
- * reuses the harness pattern from `server-http.test.ts`
- * (`Bun.serve()` + in-memory repositories, no real Postgres) rather than a
- * bespoke mock server.
+ * exactly as `main/runtime.ts` does. The shared test harness starts the real
+ * in-process HTTP app with in-memory repositories.
  *
- * There is no real Swift helper yet, so there are no real asset bytes to
- * upload. That is asserted here as an honest `blocked` outbox state (via
+ * This scenario deliberately provides no readable local asset bytes. That is
+ * asserted as an honest `blocked` outbox state (via
  * the same `local_asset_unreadable` fail-closed shape
  * `main/runtime.ts`'s `failClosedReadAssetBytes` uses), not
  * faked as `synced`.
  */
 
 const now = '2026-07-06T00:00:00.000Z';
-const adminToken = 'test-admin-bootstrap-token';
-const sessionSecret = 'test-session-secret-with-enough-entropy';
-const providerSecret = 'test-provider-secret-with-enough-entropy';
-const password = 'correct horse battery staple';
-
 const activeHarnesses: ServerHttpHarness[] = [];
 
 afterEach(() => {
@@ -49,9 +41,9 @@ afterEach(() => {
 
 describe('real login through to the sync loop over real HTTP', () => {
   it('logs in through /v1/auth/login, validates the session through /v1/auth/session, and runs the sync worker against real workspace/token values', async () => {
-    const harness = await startServerHttpHarness();
+    const harness = await startHarness();
     const email = 'desktop-auth-smoke@example.test';
-    const registered = await harness.registerUser(email);
+    const registered = await harness.bootstrapUser(email);
 
     const tokenStore = createInMemoryTokenStore();
     const authClient = createAuthClient({
@@ -63,7 +55,7 @@ describe('real login through to the sync loop over real HTTP', () => {
     // 1. Real login: hits the real `/v1/auth/login` route (the same route
     // `AuthService.login` in `apps/server/src/identity/auth.ts`
     // implements), not a stand-in.
-    const loginResult = await authClient.login({ email, password });
+    const loginResult = await authClient.login({ email, password: testUserPassword });
 
     expect(loginResult.workspaceId).toBe(registered.workspaceId);
     const storedTokens = await tokenStore.getTokens();
@@ -84,7 +76,7 @@ describe('real login through to the sync loop over real HTTP', () => {
     expect(await tokenStore.getTokens()).toBeNull(); // 401 clears the stale token
 
     // Re-login for the sync portion below (the 401 probe above cleared tokenStore).
-    await authClient.login({ email, password });
+    await authClient.login({ email, password: testUserPassword });
 
     // 4. Real server API client + real sync worker, using the workspace
     // id and token that came out of the real login above — the same
@@ -152,15 +144,14 @@ describe('real login through to the sync loop over real HTTP', () => {
   });
 
   it('keeps the last confirmed workspace id cached in the token store when the real server becomes unreachable', async () => {
-    // Real-world foundation for `resolveWorkspaceId`'s offline degradation
-    // (`main/runtime.ts`): a stored token whose session cannot
-    // be re-verified because the server is down (not a confirmed 401) must
+    // A stored token whose session cannot
+    // be re-verified (`main/runtime.ts`) because the server is down must
     // still carry the last real, server-confirmed workspace id, so the main
     // process can keep running against it instead of blocking behind a
     // login window the user cannot complete offline.
-    const harness = await startServerHttpHarness();
+    const harness = await startHarness();
     const email = 'desktop-auth-smoke-offline-degrade@example.test';
-    const registered = await harness.registerUser(email);
+    const registered = await harness.bootstrapUser(email);
 
     const tokenStore = createInMemoryTokenStore();
     const authClient = createAuthClient({
@@ -169,7 +160,7 @@ describe('real login through to the sync loop over real HTTP', () => {
       transport: fetchTransport,
     });
 
-    const loginResult = await authClient.login({ email, password });
+    const loginResult = await authClient.login({ email, password: testUserPassword });
     expect(loginResult.workspaceId).toBe(registered.workspaceId);
     expect((await tokenStore.getTokens())?.workspaceId).toBe(registered.workspaceId);
 
@@ -192,9 +183,9 @@ describe('real login through to the sync loop over real HTTP', () => {
   });
 
   it('rejects a login with the wrong password against the real server without storing any token', async () => {
-    const harness = await startServerHttpHarness();
+    const harness = await startHarness();
     const email = 'desktop-auth-smoke-wrong-password@example.test';
-    await harness.registerUser(email);
+    await harness.bootstrapUser(email);
 
     const tokenStore = createInMemoryTokenStore();
     const authClient = createAuthClient({
@@ -212,6 +203,12 @@ describe('real login through to the sync loop over real HTTP', () => {
     expect(await tokenStore.getTokens()).toBeNull();
   });
 });
+
+async function startHarness(): Promise<ServerHttpHarness> {
+  const harness = await createServerHttpHarness();
+  activeHarnesses.push(harness);
+  return harness;
+}
 
 const fetchTransport: ServerApiTransport = async (request) => {
   const headers = new Headers(request.headers);
@@ -232,8 +229,8 @@ const fetchTransport: ServerApiTransport = async (request) => {
  * Mirrors `main/runtime.ts`'s `failClosedReadAssetBytes`
  * exactly (same safe-error shape `sync/job.ts` already has dedicated
  * handling for), rather than importing it: that constant is not exported
- * (deliberately private to the runtime wiring module), and duplicating a
- * five-line fail-closed stub here keeps this integration test independent
+ * (deliberately private to the runtime wiring module), and this small
+ * fail-closed implementation keeps the integration test independent
  * of that module's internals.
  */
 const failClosedReadAssetBytes: SyncAssetReader = async () => {
@@ -342,109 +339,4 @@ async function decodeResponseBody(response: Response): Promise<unknown> {
 
 function sha256Hex(bytes: Uint8Array) {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-}
-
-type ServerHttpHarness = {
-  endpoint: string;
-  registerUser(email: string): Promise<{ accessToken: string; workspaceId: string }>;
-  captureSnapshot(): CaptureRepositorySnapshot;
-  stop(): void;
-};
-
-async function startServerHttpHarness(): Promise<ServerHttpHarness> {
-  const modules = await loadServerModules();
-  let listener: ReturnType<typeof startLoopbackHttpServer> | undefined;
-
-  try {
-    const captureRepository = new modules.InMemoryCaptureRepository();
-    const app = modules.createTestHttpApp({
-      captureRepository,
-      config: {
-        ADMIN_BOOTSTRAP_TOKEN: adminToken,
-        CORS_ALLOWED_ORIGINS: [],
-        DATABASE_URL: 'postgresql://test',
-        EMBEDDING_INDEXER_BATCH_SIZE: 16,
-        EMBEDDING_INDEXER_INTERVAL_MS: 15_000,
-        EMBEDDING_INDEXER_MAX_ATTEMPTS: 5,
-        EMBEDDING_INDEXER_TIMEOUT_MS: 30_000,
-        LOG_LEVEL: 'error',
-        NODE_ENV: 'test',
-        OCR_MAX_INPUT_BYTES: 1024 * 1024,
-        OCR_PROXY_MAX_INFLIGHT_PER_USER: 2,
-        OCR_PROXY_TIMEOUT_MS: 60_000,
-        PORT: 0,
-        PROVIDER_ENCRYPTION_SECRET: providerSecret,
-        SESSION_SECRET: sessionSecret,
-      },
-      logger: {
-        debug() {},
-        error() {},
-        info() {},
-        warn() {},
-      } as unknown as Logger,
-    }).app;
-    listener = startLoopbackHttpServer(app.fetch);
-    const endpoint = listener.endpoint;
-    const harness: ServerHttpHarness = {
-      captureSnapshot() {
-        return captureRepository.snapshot() as CaptureRepositorySnapshot;
-      },
-      endpoint,
-      async registerUser(email) {
-        const inviteRes = await fetch(`${endpoint}/v1/bootstrap/invites`, {
-          body: JSON.stringify({
-            initialQuota: { ocrJobsPerMonth: 100, searchQueriesPerMonth: 1000 },
-            initialTrialDays: 14,
-            note: 'Desktop auth login sync smoke',
-          }),
-          headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
-          method: 'POST',
-        });
-        expect(inviteRes.status).toBe(201);
-        const invite = (await inviteRes.json()) as { code: string };
-        const registerRes = await fetch(`${endpoint}/v1/auth/register`, {
-          body: JSON.stringify({ email, inviteCode: invite.code, password }),
-          headers: { 'content-type': 'application/json' },
-          method: 'POST',
-        });
-        expect(registerRes.status).toBe(201);
-        const registered = (await registerRes.json()) as {
-          session: { currentWorkspace: { id: string } };
-          tokens: { accessToken: string };
-        };
-        return {
-          accessToken: registered.tokens.accessToken,
-          workspaceId: registered.session.currentWorkspace.id,
-        };
-      },
-      stop() {
-        listener?.stop();
-        listener = undefined;
-      },
-    };
-    activeHarnesses.push(harness);
-    return harness;
-  } catch (error) {
-    listener?.stop();
-    throw error;
-  }
-}
-
-type ServerModules = {
-  InMemoryCaptureRepository: new () => InMemoryCaptureRepository;
-  createTestHttpApp: typeof createTestHttpApp;
-};
-
-async function loadServerModules(): Promise<ServerModules> {
-  const appHarnessModule = await import(
-    new URL('../../../server/tests/support/app-test-harness.ts', import.meta.url).href
-  );
-  const captureRepositoryModule = await import(
-    new URL('../../../server/src/capture/index.ts', import.meta.url).href
-  );
-
-  return {
-    InMemoryCaptureRepository: captureRepositoryModule.InMemoryCaptureRepository,
-    createTestHttpApp: appHarnessModule.createTestHttpApp,
-  };
 }

@@ -7,18 +7,7 @@ const TEST_SOURCE_PATH =
   '(?:^|/)(?:__tests__|test|tests)/|[.](?:test|spec)[.](?:js|jsx|mjs|cjs|ts|tsx|mts|cts)$';
 
 const SERVER_SOURCE_ROOT = 'apps/server/src';
-const SERVER_CAPABILITIES = [
-  'ai',
-  'audit',
-  'capture',
-  'identity',
-  'ocr-proxy',
-  'provider-settings',
-  'registration',
-  'search',
-  'subscriptions',
-  'timeline',
-];
+const SERVER_CAPABILITIES = capabilityDirectories(SERVER_SOURCE_ROOT);
 
 const DESKTOP_SOURCE_ROOT = 'apps/desktop/src';
 const DESKTOP_CAPABILITIES = capabilityDirectories(DESKTOP_SOURCE_ROOT);
