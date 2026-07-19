@@ -58,15 +58,12 @@ const launcherSourcePath = fileURLToPath(
 const webpProvenancePath = path.join(desktopRoot, 'macos', 'build', 'libwebp-arm64.json');
 
 const bundleBuilt = validateCaptureBundleAvailability(captureBundle);
-// When the bundle has not been built yet (`pnpm run build:capture`), skip rather
-// than fail: skipping is honest, a fabricated pass is not.
-const bundleIt = bundleBuilt ? it : it.skip;
-
 if (!bundleBuilt) {
-  console.warn(
-    'capture bundle not found — run `pnpm run build:capture` first; skipping bundle spawn tests.',
+  throw new Error(
+    'capture bundle not found — run `pnpm run build:capture` before running bundle process tests.',
   );
 }
+const bundleIt = it;
 
 const activeChildren: ChildProcess[] = [];
 const activeCaptureProcessIds = new Set<number>();

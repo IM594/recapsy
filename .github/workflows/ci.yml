@@ -56,9 +56,6 @@ jobs:
         with:
           bun-version: 1.2.10
 
-      - name: Install libwebp
-        run: brew install webp
-
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

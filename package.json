@@ -15,7 +15,7 @@
     "test": "turbo test",
     "typecheck": "turbo typecheck",
     "format": "biome format --write .",
-    "check": "biome check --write .",
+    "check": "biome check .",
     "prepare": "lefthook install"
   },
   "devDependencies": {

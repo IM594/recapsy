@@ -23,6 +23,15 @@
     }
   },
   "files": {
-    "ignore": ["node_modules", "dist", "coverage", ".turbo", "*.gen.ts"]
+    "ignore": [
+      "node_modules",
+      "dist",
+      "coverage",
+      ".turbo",
+      "*.gen.ts",
+      "apps/desktop/macos/.build",
+      "apps/desktop/macos/build",
+      "apps/server/drizzle/meta"
+    ]
   }
 }
