@@ -89,5 +89,11 @@ describe('capture creation contracts', () => {
         ocrText: 'OCR text is produced by the server, not capture creation.',
       }).success,
     ).toBe(false);
+    expect(
+      CaptureCreateRequestSchema.safeParse({
+        ...captureCreateRequest,
+        userId: '11111111-1111-4111-8111-111111111111',
+      }).success,
+    ).toBe(false);
   });
 });

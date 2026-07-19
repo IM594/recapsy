@@ -226,7 +226,6 @@ export const CaptureSchema = z
 export const CaptureCreateRequestSchema = z
   .object({
     workspaceId: IdSchema,
-    userId: IdSchema.nullable().optional(),
     deviceId: z.string().min(1).max(256),
     localEventId: z.string().min(1).max(256).optional(),
     capturedAt: IsoDateTimeSchema,
