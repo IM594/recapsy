@@ -11,6 +11,7 @@ import {
   createSyncJobExecutor,
   createSyncWorker,
 } from '../../src/sync/index';
+import { startLoopbackHttpServer } from '../support/loopback-http-server';
 
 type CaptureRepositorySnapshot = ReturnType<InMemoryCaptureRepository['snapshot']>;
 
@@ -352,7 +353,7 @@ type ServerHttpHarness = {
 
 async function startServerHttpHarness(): Promise<ServerHttpHarness> {
   const modules = await loadServerModules();
-  let server: ReturnType<typeof Bun.serve> | undefined;
+  let listener: ReturnType<typeof startLoopbackHttpServer> | undefined;
 
   try {
     const captureRepository = new modules.InMemoryCaptureRepository();
@@ -382,8 +383,8 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
         warn() {},
       } as unknown as Logger,
     }).app;
-    server = Bun.serve({ fetch: app.fetch, port: 0 });
-    const endpoint = server.url.toString().replace(/\/$/, '');
+    listener = startLoopbackHttpServer(app.fetch);
+    const endpoint = listener.endpoint;
     const harness: ServerHttpHarness = {
       captureSnapshot() {
         return captureRepository.snapshot() as CaptureRepositorySnapshot;
@@ -417,14 +418,14 @@ async function startServerHttpHarness(): Promise<ServerHttpHarness> {
         };
       },
       stop() {
-        server?.stop(true);
-        server = undefined;
+        listener?.stop();
+        listener = undefined;
       },
     };
     activeHarnesses.push(harness);
     return harness;
   } catch (error) {
-    server?.stop(true);
+    listener?.stop();
     throw error;
   }
 }
