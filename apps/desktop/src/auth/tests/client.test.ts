@@ -22,14 +22,14 @@ function loginResponseBody(workspaceId = uuidFor('1')) {
       capabilities: {
         features: {
           auth: { enabled: true },
-          captureIngestion: { enabled: true },
+          captureCreation: { enabled: true },
           cloudSync: { enabled: true },
           embeddingSearch: { enabled: true },
           hybridSearch: { enabled: true },
           invite: { enabled: true },
           manualSubscription: { enabled: true },
           providerSettings: { enabled: true },
-          temporaryOcr: { enabled: true },
+          visionOcr: { enabled: true },
           textSearch: { enabled: true },
         },
         generatedAt,

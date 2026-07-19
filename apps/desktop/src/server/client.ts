@@ -1,11 +1,16 @@
 import {
   AiOcrResponseSchema,
+  AxAllowlistResponseSchema,
+  CapabilitiesResponseSchema,
   CaptureCreateRequestSchema,
-  CaptureNextActionSchema,
-  type CapturePolicyAction,
+  CaptureCreateResponseSchema,
+  CaptureDetailResponseSchema,
+  CapturePoliciesResponseSchema,
   type CapturePolicyRule,
   OcrResultSubmitRequestSchema,
   OcrResultSubmitResponseSchema,
+  SearchResponseSchema,
+  TimelineListResponseSchema,
 } from '@recapsy/contracts';
 import { redactLogPayload } from '../logging/redaction';
 import type {
@@ -149,33 +154,7 @@ export function createServerApiClient(
           workspaceId: input.workspaceId,
         }),
       });
-      const results = readArray(body, 'results');
-      const pageInfo = readObject(body, 'pageInfo');
-
-      return {
-        incomplete: false,
-        items: results.map((entry) => {
-          const item = readObject(entry, undefined);
-          const snippet = readObject(item, 'snippet');
-          return {
-            capturedAt: readString(item, 'capturedAt'),
-            id: readString(item, 'searchDocumentId'),
-            snippet: readString(snippet, 'text'),
-            ...(readOptionalNumber(item, 'score') !== undefined
-              ? { score: readOptionalNumber(item, 'score') }
-              : {}),
-            ...(readOptionalString(item, 'appName')
-              ? { sourceApp: readOptionalString(item, 'appName') }
-              : {}),
-            ...(readOptionalString(item, 'windowTitleSafe')
-              ? { title: readOptionalString(item, 'windowTitleSafe') }
-              : {}),
-          };
-        }),
-        ...(readOptionalString(pageInfo, 'nextCursor')
-          ? { nextCursor: readOptionalString(pageInfo, 'nextCursor') }
-          : {}),
-      };
+      return toSearchQueryResult(body);
     },
     async queryTimeline(input) {
       const body = await request(options, endpoint, {
@@ -189,40 +168,7 @@ export function createServerApiClient(
           workspaceId: input.workspaceId,
         }),
       });
-      const events = readArray(body, 'events');
-      const pageInfo = readObject(body, 'pageInfo');
-
-      return {
-        incomplete: false,
-        items: events.map((entry) => {
-          const event = readObject(entry, undefined);
-          const context = readObject(event, 'context');
-          return {
-            capturedAt: readString(event, 'occurredAt'),
-            id: readString(event, 'id'),
-            ...(readOptionalString(event, 'ocrJobId')
-              ? { ocrJobId: readOptionalString(event, 'ocrJobId') }
-              : {}),
-            ...(readOptionalString(context, 'appName')
-              ? { sourceApp: readOptionalString(context, 'appName') }
-              : {}),
-            ...(readOptionalString(event, 'semanticSummary')
-              ? { snippet: readOptionalString(event, 'semanticSummary') }
-              : {}),
-            ...((readOptionalString(event, 'semanticTitle') ??
-            readOptionalString(context, 'windowTitleSafe'))
-              ? {
-                  title:
-                    readOptionalString(event, 'semanticTitle') ??
-                    readOptionalString(context, 'windowTitleSafe'),
-                }
-              : {}),
-          };
-        }),
-        ...(readOptionalString(pageInfo, 'nextCursor')
-          ? { nextCursor: readOptionalString(pageInfo, 'nextCursor') }
-          : {}),
-      };
+      return toTimelineQueryResult(body);
     },
   };
 }
@@ -285,100 +231,64 @@ async function request(
 }
 
 function toCapabilitiesResult(body: unknown): ServerCapabilitiesResult {
-  const features = readObject(body, 'features');
-  const providers = readArray(body, 'providers');
+  const parsed = CapabilitiesResponseSchema.safeParse(body);
 
-  return {
-    features: Object.fromEntries(
-      Object.entries(features)
-        .filter((entry): entry is [string, Record<string, unknown>] => isRecord(entry[1]))
-        .map(([key, value]) => [
-          key,
-          {
-            enabled: readBoolean(value, 'enabled'),
-            ...(readOptionalString(value, 'reason')
-              ? { reason: readOptionalString(value, 'reason') }
-              : {}),
-          },
-        ]),
-    ),
-    generatedAt: readOptionalString(body, 'generatedAt'),
-    providers: providers.map((entry) => {
-      const provider = readObject(entry, undefined);
-      return {
-        enabled: readBoolean(provider, 'enabled'),
-        hasSecret: readBoolean(provider, 'hasSecret'),
-        service: readString(provider, 'service'),
-        ...(readOptionalString(provider, 'model')
-          ? { model: readOptionalString(provider, 'model') }
-          : {}),
-        ...(readOptionalString(provider, 'provider')
-          ? { provider: readOptionalString(provider, 'provider') }
-          : {}),
-        ...(readOptionalString(provider, 'reason')
-          ? { reason: readOptionalString(provider, 'reason') }
-          : {}),
-      };
-    }),
-    workspaceId: readString(body, 'workspaceId'),
-  };
+  if (!parsed.success) {
+    throw invalidResponse();
+  }
+
+  return parsed.data;
 }
 
 function toCapturePoliciesResult(body: unknown): CapturePoliciesResult {
-  const capturePolicy = readObject(body, 'capturePolicy');
-  const deliveryPolicy = readObject(body, 'deliveryPolicy');
-  const policy = readObject(capturePolicy, 'policy');
-  const storagePolicy = readObject(body, 'storagePolicy');
-  const rules = readArray(policy, 'rules').map(readCapturePolicyRule);
+  const parsed = CapturePoliciesResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw invalidResponse();
+  }
+
+  const { capturePolicy, deliveryPolicy, deviceId, generatedAt, storagePolicy, workspaceId } =
+    parsed.data;
+  const { policy } = capturePolicy;
 
   return {
-    axAllowlist: toAxAllowlistResult(readObject(body, 'axAllowlist'), {
-      generatedAt: readString(body, 'generatedAt'),
-      workspaceId: readString(body, 'workspaceId'),
-    }),
+    axAllowlist: {
+      ...parsed.data.axAllowlist,
+      generatedAt,
+      policyVersion: null,
+      workspaceId,
+    },
     capturePolicy: {
-      actionCounts: countPolicyActions(rules),
-      axTextUploadEnabled: false,
-      defaultAction: readPolicyAction(policy, 'defaultAction'),
-      expiresAt: readString(capturePolicy, 'expiresAt'),
-      id: readString(capturePolicy, 'id'),
-      paused: readBoolean(policy, 'paused'),
-      policy: {
-        axTextUploadEnabled: false,
-        defaultAction: readPolicyAction(policy, 'defaultAction'),
-        paused: readBoolean(policy, 'paused'),
-        rules,
-      },
-      rules,
-      ttlSeconds: readNumber(capturePolicy, 'ttlSeconds'),
-      version: readString(capturePolicy, 'version'),
+      actionCounts: countPolicyActions(policy.rules),
+      axTextUploadEnabled: policy.axTextUploadEnabled,
+      defaultAction: policy.defaultAction,
+      expiresAt: capturePolicy.expiresAt,
+      id: capturePolicy.id,
+      paused: policy.paused,
+      policy,
+      rules: policy.rules,
+      ttlSeconds: capturePolicy.ttlSeconds,
+      version: capturePolicy.version,
     },
-    deviceId: readOptionalString(body, 'deviceId') ?? null,
-    deliveryPolicy: {
-      maxConcurrentOcr: readPositiveInteger(deliveryPolicy, 'maxConcurrentOcr', 32),
-    },
-    generatedAt: readString(body, 'generatedAt'),
+    deviceId: deviceId ?? null,
+    deliveryPolicy,
+    generatedAt,
     storagePolicy: {
-      allowLongTermRemoteOriginal: readBoolean(storagePolicy, 'allowLongTermRemoteOriginal'),
-      authoritativeOriginalLocation: 'local_device',
+      allowLongTermRemoteOriginal: storagePolicy.allowLongTermRemoteOriginal,
+      authoritativeOriginalLocation: storagePolicy.authoritativeOriginalLocation,
     },
-    workspaceId: readString(body, 'workspaceId'),
+    workspaceId,
   };
 }
 
-function toAxAllowlistResult(
-  body: unknown,
-  fallback: { workspaceId: string; generatedAt: string } | null = null,
-) {
-  return {
-    axTextUploadEnabled: false as const,
-    enabled: false as const,
-    generatedAt: readOptionalString(body, 'generatedAt') ?? fallback?.generatedAt,
-    policyVersion: readOptionalString(body, 'policyVersion') ?? null,
-    reason: 'ax_text_upload_disabled' as const,
-    status: 'disabled' as const,
-    workspaceId: readOptionalString(body, 'workspaceId') ?? fallback?.workspaceId ?? '',
-  };
+function toAxAllowlistResult(body: unknown) {
+  const parsed = AxAllowlistResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw invalidResponse();
+  }
+
+  return parsed.data;
 }
 
 function toCaptureCreateBody(input: CaptureCreateInput): Record<string, unknown> {
@@ -455,33 +365,77 @@ function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unkn
 }
 
 function toCaptureCreateResult(body: unknown): CaptureCreateResult {
-  const capture = readObject(readObject(body, 'capture'), undefined);
-  const timelineEvent = readObject(readObject(body, 'timelineEvent'), undefined);
-  const nextAction = CaptureNextActionSchema.safeParse(readString(body, 'nextAction'));
-  const inputAsset = readArray(body, 'assets')
-    .map((entry) => readObject(entry, undefined))
-    .find((entry) => readOptionalString(entry, 'role') === 'ocr_input_image');
+  const parsed = CaptureCreateResponseSchema.safeParse(body);
 
-  if (!nextAction.success) {
+  if (!parsed.success) {
     throw invalidResponse();
   }
 
+  const inputAsset = parsed.data.assets.find((asset) => asset.role === 'ocr_input_image');
+
   return {
-    captureId: readString(capture, 'id'),
-    ...(inputAsset ? { inputAssetId: readString(inputAsset, 'id') } : {}),
-    nextAction: nextAction.data,
-    timelineEventId: readString(timelineEvent, 'id'),
+    captureId: parsed.data.capture.id,
+    ...(inputAsset ? { inputAssetId: inputAsset.id } : {}),
+    nextAction: parsed.data.nextAction,
+    timelineEventId: parsed.data.timelineEvent.id,
   };
 }
 
 function toCaptureDetailResult(body: unknown): CaptureDetailResult {
-  const capture = readObject(readObject(body, 'capture'), undefined);
-  const ocr = readObject(body, 'ocr');
+  const parsed = CaptureDetailResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw invalidResponse();
+  }
 
   return {
-    captureId: readString(capture, 'id'),
-    ocrStatus: readString(ocr, 'status') as CaptureDetailResult['ocrStatus'],
-    ...(readOptionalString(ocr, 'jobId') ? { ocrJobId: readOptionalString(ocr, 'jobId') } : {}),
+    captureId: parsed.data.capture.id,
+    ocrStatus: parsed.data.ocr.status,
+    ...(parsed.data.ocr.jobId ? { ocrJobId: parsed.data.ocr.jobId } : {}),
+  };
+}
+
+function toSearchQueryResult(body: unknown) {
+  const parsed = SearchResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw invalidResponse();
+  }
+
+  return {
+    incomplete: false,
+    items: parsed.data.results.map((result) => ({
+      capturedAt: result.capturedAt,
+      id: result.searchDocumentId,
+      score: result.score,
+      snippet: result.snippet.text,
+      sourceApp: result.appName,
+      ...(result.windowTitleSafe ? { title: result.windowTitleSafe } : {}),
+    })),
+    ...(parsed.data.pageInfo.nextCursor ? { nextCursor: parsed.data.pageInfo.nextCursor } : {}),
+  };
+}
+
+function toTimelineQueryResult(body: unknown) {
+  const parsed = TimelineListResponseSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw invalidResponse();
+  }
+
+  return {
+    incomplete: false,
+    items: parsed.data.events.map((event) => {
+      const title = event.semanticTitle ?? event.context.windowTitleSafe;
+      return {
+        capturedAt: event.occurredAt,
+        id: event.id,
+        sourceApp: event.context.appName,
+        ...(event.semanticSummary ? { snippet: event.semanticSummary } : {}),
+        ...(title ? { title } : {}),
+      };
+    }),
+    ...(parsed.data.pageInfo.nextCursor ? { nextCursor: parsed.data.pageInfo.nextCursor } : {}),
   };
 }
 
@@ -582,9 +536,7 @@ function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
     'operation_conflict',
     'input_too_large',
     'unsupported_format',
-    'temporary_location_missing',
     'result_invalid',
-    'cleanup_failed',
     'validation_failed',
     'cancelled',
     'unknown',
@@ -652,16 +604,8 @@ function defaultSafeMessage(code: ServerApiErrorCode): string {
     return 'Input format is unsupported.';
   }
 
-  if (code === 'temporary_location_missing') {
-    return 'Temporary OCR input is unavailable.';
-  }
-
   if (code === 'result_invalid') {
     return 'OCR result is invalid.';
-  }
-
-  if (code === 'cleanup_failed') {
-    return 'OCR cleanup failed.';
   }
 
   if (code === 'validation_failed') {
@@ -693,14 +637,12 @@ function isRetryableCode(code: ServerApiErrorCode): boolean {
 function isRetryableByStatus(code: ServerApiErrorCode): boolean {
   return ![
     'cancelled',
-    'cleanup_failed',
     'input_too_large',
     'policy_denied',
     'provider_auth_failed',
     'provider_not_configured',
     'quota_exceeded',
     'result_invalid',
-    'temporary_location_missing',
     'unsupported_format',
     'unauthenticated',
     'validation_failed',
@@ -716,65 +658,9 @@ function compactQuery(input: Record<string, string | undefined>): Record<string,
   );
 }
 
-function readObject(value: unknown, key: string | undefined): Record<string, unknown> {
-  const object = key === undefined ? value : isRecord(value) ? value[key] : undefined;
-
-  if (!isRecord(object)) {
-    throw invalidResponse();
-  }
-
-  return object;
-}
-
-function readArray(value: unknown, key: string): unknown[] {
-  if (!isRecord(value) || !Array.isArray(value[key])) {
-    throw invalidResponse();
-  }
-
-  return value[key];
-}
-
-function readString(value: unknown, key: string): string {
-  const entry = isRecord(value) ? value[key] : undefined;
-
-  if (typeof entry !== 'string' || entry.length === 0) {
-    throw invalidResponse();
-  }
-
-  return entry;
-}
-
 function readOptionalString(value: unknown, key: string): string | undefined {
   const entry = isRecord(value) ? value[key] : undefined;
   return typeof entry === 'string' && entry.length > 0 ? entry : undefined;
-}
-
-function readOptionalNumber(value: unknown, key: string): number | undefined {
-  const entry = isRecord(value) ? value[key] : undefined;
-  return typeof entry === 'number' ? entry : undefined;
-}
-
-function readNumber(value: unknown, key: string): number {
-  const entry = isRecord(value) ? value[key] : undefined;
-
-  if (typeof entry !== 'number') {
-    throw invalidResponse();
-  }
-
-  return entry;
-}
-
-function readPositiveInteger(value: unknown, key: string, max: number): number {
-  const number = readNumber(value, key);
-  if (!Number.isInteger(number) || number < 1 || number > max) {
-    throw invalidResponse();
-  }
-  return number;
-}
-
-function readBoolean(value: unknown, key: string): boolean {
-  const entry = isRecord(value) ? value[key] : undefined;
-  return typeof entry === 'boolean' ? entry : false;
 }
 
 function countPolicyActions(
@@ -788,46 +674,6 @@ function countPolicyActions(
   }
 
   return counts;
-}
-
-function readCapturePolicyRule(value: unknown): CapturePolicyRule {
-  const rule = readObject(value, undefined);
-  const reason = readOptionalString(rule, 'reason');
-  return {
-    action: readPolicyAction(rule, 'action'),
-    enabled: readBoolean(rule, 'enabled'),
-    id: readString(rule, 'id'),
-    kind: readPolicyRuleKind(rule, 'kind'),
-    pattern: readString(rule, 'pattern'),
-    scope: readPolicyRuleScope(rule, 'scope'),
-    ...(reason ? { reason } : {}),
-  };
-}
-
-function readPolicyAction(value: unknown, key: string): CapturePolicyAction {
-  const action = readString(value, key);
-  if (!['allow', 'block_capture', 'redact_context', 'block_ocr'].includes(action)) {
-    throw invalidResponse();
-  }
-  return action as CapturePolicyAction;
-}
-
-function readPolicyRuleKind(value: unknown, key: string): CapturePolicyRule['kind'] {
-  const kind = readString(value, key);
-  if (
-    !['pause', 'app_name', 'bundle_id', 'domain', 'document_path', 'window_title'].includes(kind)
-  ) {
-    throw invalidResponse();
-  }
-  return kind as CapturePolicyRule['kind'];
-}
-
-function readPolicyRuleScope(value: unknown, key: string): CapturePolicyRule['scope'] {
-  const scope = readString(value, key);
-  if (!['local_user', 'workspace_default'].includes(scope)) {
-    throw invalidResponse();
-  }
-  return scope as CapturePolicyRule['scope'];
 }
 
 function invalidResponse(): ServerApiError {

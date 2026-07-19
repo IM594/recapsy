@@ -23,7 +23,7 @@ const entitlement = {
   subscriptionId: ids.subscription,
   plan,
   status: 'active',
-  features: { temporaryOcr: true, textSearch: true },
+  features: { visionOcr: true, textSearch: true },
   limits: { ocrJobsPerMonth: 100 },
   usage: { ocrJobsThisMonth: 0 },
   effectiveAt: now,

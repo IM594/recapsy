@@ -54,9 +54,7 @@ export type ServerApiErrorCode =
   | 'operation_conflict'
   | 'input_too_large'
   | 'unsupported_format'
-  | 'temporary_location_missing'
   | 'result_invalid'
-  | 'cleanup_failed'
   | 'validation_failed'
   | 'cancelled'
   | 'unknown';

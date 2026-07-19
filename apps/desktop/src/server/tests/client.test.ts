@@ -6,6 +6,14 @@ import type { ServerApiTransport, ServerApiTransportRequest } from '../types';
 
 const now = '2026-07-06T00:00:00.000Z';
 const workspaceId = '22222222-2222-4222-8222-222222222222';
+const captureId = '33333333-3333-4333-8333-333333333333';
+const assetId = '44444444-4444-4444-8444-444444444444';
+const timelineEventId = '55555555-5555-4555-8555-555555555555';
+const searchDocumentId = '66666666-6666-4666-8666-666666666666';
+const ocrJobId = '77777777-7777-4777-8777-777777777777';
+const ocrResultId = '88888888-8888-4888-8888-888888888888';
+const policySnapshotId = '99999999-9999-4999-8999-999999999999';
+const storagePolicyId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 describe('desktop server API client', () => {
   it('fails closed when auth is missing and never exposes a token in the renderer response', async () => {
@@ -47,12 +55,7 @@ describe('desktop server API client', () => {
       endpoint: 'https://api.example.test',
       transport: async (request) => {
         calls.push(request);
-        return createJsonResponse({
-          features: {},
-          generatedAt: now,
-          providers: [],
-          workspaceId,
-        });
+        return createJsonResponse(createCapabilitiesResponse());
       },
     });
 
@@ -67,15 +70,7 @@ describe('desktop server API client', () => {
         idempotencyKey: 'capture-idem-1',
         workspaceId,
       });
-      return createJsonResponse({
-        capture: {
-          id: 'capture_1',
-          workspaceId,
-        },
-        assets: [{ id: 'asset_server_1', role: 'ocr_input_image' }],
-        nextAction: 'queue_ocr',
-        timelineEvent: { id: 'timeline_1' },
-      });
+      return createJsonResponse(createCaptureCreateResponse());
     });
 
     const response = await client.createCapture({
@@ -93,10 +88,10 @@ describe('desktop server API client', () => {
     expect(calls[0]?.path).toBe('/v1/captures');
     expect(calls[0]?.headers.authorization).toBe('Bearer access-token-secret');
     expect(response).toMatchObject({
-      captureId: 'capture_1',
-      inputAssetId: 'asset_server_1',
+      captureId,
+      inputAssetId: assetId,
       nextAction: 'queue_ocr',
-      timelineEventId: 'timeline_1',
+      timelineEventId,
     });
     expect(JSON.stringify(calls)).not.toContain('provider-token');
   });
@@ -106,13 +101,8 @@ describe('desktop server API client', () => {
     const retiredNextAction = ['create', 'temporary', 'upload'].join('_');
     const client = createClient(calls, async () =>
       createJsonResponse({
-        capture: {
-          id: 'capture_1',
-          workspaceId,
-        },
-        assets: [{ id: 'asset_server_1', role: 'ocr_input_image' }],
+        ...createCaptureCreateResponse(),
         nextAction: retiredNextAction,
-        timelineEvent: { id: 'timeline_1' },
       }),
     );
 
@@ -174,22 +164,7 @@ describe('desktop server API client', () => {
           limit: '10',
           workspaceId: 'workspace_1',
         });
-        return createJsonResponse({
-          events: [
-            {
-              context: {
-                appName: 'Code',
-                documentPathSafe: { displayName: 'notes.md' },
-                windowTitleSafe: 'Project notes',
-              },
-              id: 'timeline_1',
-              occurredAt: now,
-              sourceCaptureId: 'capture_1',
-            },
-          ],
-          pageInfo: { nextCursor: 'cursor_2' },
-          workspaceId: 'workspace_1',
-        });
+        return createJsonResponse(createTimelineListResponse());
       }
 
       expect(request.path).toBe('/v1/search');
@@ -198,23 +173,7 @@ describe('desktop server API client', () => {
         q: 'quarterly plan',
         workspaceId: 'workspace_1',
       });
-      return createJsonResponse({
-        pageInfo: { nextCursor: 'cursor_3' },
-        query: 'quarterly plan',
-        results: [
-          {
-            appName: 'Code',
-            captureId: 'capture_1',
-            capturedAt: now,
-            score: 1.2,
-            searchDocumentId: 'search_1',
-            snippet: { text: 'quarterly plan draft', source: 'screen_text_image_ocr' },
-            timelineEventId: 'timeline_1',
-            windowTitleSafe: 'Project notes',
-          },
-        ],
-        workspaceId: 'workspace_1',
-      });
+      return createJsonResponse(createSearchResponse());
     });
 
     const timeline = await client.queryTimeline({
@@ -233,7 +192,7 @@ describe('desktop server API client', () => {
       items: [
         {
           capturedAt: now,
-          id: 'timeline_1',
+          id: timelineEventId,
           sourceApp: 'Code',
           title: 'Project notes',
         },
@@ -245,7 +204,7 @@ describe('desktop server API client', () => {
       items: [
         {
           capturedAt: now,
-          id: 'search_1',
+          id: searchDocumentId,
           score: 1.2,
           snippet: 'quarterly plan draft',
           sourceApp: 'Code',
@@ -262,92 +221,32 @@ describe('desktop server API client', () => {
     const calls: ServerApiTransportRequest[] = [];
     const client = createClient(calls, async (request) => {
       if (request.path === '/v1/capabilities') {
-        return createJsonResponse({
-          features: {
-            temporaryOcr: { enabled: true },
-            textSearch: { enabled: true },
-          },
-          generatedAt: now,
-          providers: [
-            {
-              enabled: false,
-              hasSecret: false,
-              reason: 'provider_not_configured',
-              service: 'ocr',
-            },
-          ],
-          workspaceId: 'workspace_1',
-        });
+        return createJsonResponse(createCapabilitiesResponse());
       }
 
       if (request.path === '/v1/capture/policies') {
         expect(request.query).toMatchObject({
           deviceId: 'device_1',
-          workspaceId: 'workspace_1',
+          workspaceId,
         });
-        return createJsonResponse({
-          axAllowlist: {
-            axTextUploadEnabled: false,
-            enabled: false,
-            reason: 'ax_text_upload_disabled',
-            status: 'disabled',
-          },
-          capturePolicy: {
-            id: 'snapshot_1',
-            expiresAt: '2026-07-06T00:30:00.000Z',
-            policy: {
-              axTextUploadEnabled: false,
-              defaultAction: 'allow',
-              paused: false,
-              rules: [
-                {
-                  action: 'block_ocr',
-                  enabled: true,
-                  id: 'rule_1',
-                  kind: 'domain',
-                  pattern: 'secret.example.test',
-                  scope: 'local_user',
-                },
-              ],
-            },
-            ttlSeconds: 1800,
-            version: 'policy_1',
-          },
-          deliveryPolicy: {
-            maxConcurrentOcr: 2,
-          },
-          generatedAt: now,
-          storagePolicy: {
-            allowLongTermRemoteOriginal: false,
-            authoritativeOriginalLocation: 'local_device',
-          },
-          workspaceId: 'workspace_1',
-        });
+        return createJsonResponse(createCapturePoliciesResponse());
       }
 
       expect(request.path).toBe('/v1/ax/allowlist');
-      return createJsonResponse({
-        axTextUploadEnabled: false,
-        enabled: false,
-        generatedAt: now,
-        policyVersion: 'policy_1',
-        reason: 'ax_text_upload_disabled',
-        status: 'disabled',
-        workspaceId: 'workspace_1',
-      });
+      return createJsonResponse(createAxAllowlistResponse());
     });
 
     const capabilities = await client.getCapabilities();
     const policies = await client.getCapturePolicies({
       deviceId: 'device_1',
-      workspaceId: 'workspace_1',
+      workspaceId,
     });
-    const axAllowlist = await client.getAxAllowlist('workspace_1');
+    const axAllowlist = await client.getAxAllowlist(workspaceId);
     const serialized = JSON.stringify({ axAllowlist, capabilities, policies });
 
     expect(capabilities).toMatchObject({
       features: {
-        temporaryOcr: { enabled: true },
+        visionOcr: { enabled: true },
       },
       providers: [
         {
@@ -355,7 +254,7 @@ describe('desktop server API client', () => {
           service: 'ocr',
         },
       ],
-      workspaceId: 'workspace_1',
+      workspaceId,
     });
     expect(policies).toMatchObject({
       capturePolicy: {
@@ -368,7 +267,7 @@ describe('desktop server API client', () => {
       storagePolicy: {
         authoritativeOriginalLocation: 'local_device',
       },
-      workspaceId: 'workspace_1',
+      workspaceId,
     });
     expect(axAllowlist).toMatchObject({
       axTextUploadEnabled: false,
@@ -488,53 +387,117 @@ describe('desktop server API client', () => {
     const client = createClient(calls, async (request) => {
       expect(request.path).toBe('/v1/captures/capture_1');
       expect(request.query).toMatchObject({ workspaceId: 'workspace_1' });
-      return createJsonResponse({
-        assetLocations: [],
-        assets: [],
-        capture: {
-          appName: 'Code',
-          captureStatus: 'synced',
-          captureType: 'screen',
-          capturedAt: now,
-          contextConfidence: 'unknown',
-          createdAt: now,
-          deviceId: 'device_1',
-          id: 'capture_1',
-          indexStatus: 'indexed',
-          metadata: {},
-          observedAt: now,
-          ocrStatus: 'succeeded',
-          privacyDecision: createPrivacyDecision(),
-          timelineStatus: 'projected',
-          updatedAt: now,
-          workspaceId: 'workspace_1',
-        },
-        captureAssets: [],
-        ocr: {
-          jobId: 'ocr_job_1',
-          resultId: 'ocr_result_1',
-          resultVersion: 1,
-          status: 'succeeded',
-        },
-        search: {
-          bodySource: 'screen_text_image_ocr',
-          searchDocumentId: 'search_1',
-          status: 'indexed',
-        },
-        timeline: {
-          status: 'projected',
-          timelineEventId: 'timeline_1',
-        },
-      });
+      return createJsonResponse(createCaptureDetailResponse());
     });
 
     const capture = await client.getCapture('workspace_1', 'capture_1');
 
     expect(capture).toEqual({
-      captureId: 'capture_1',
-      ocrJobId: 'ocr_job_1',
+      captureId,
+      ocrJobId,
       ocrStatus: 'succeeded',
     });
+  });
+
+  it('rejects malformed success responses for every server resource', async () => {
+    const malformedResponses: MalformedSuccessResponseScenario[] = [
+      {
+        createClient: () =>
+          createClient([], async () => {
+            const response = createCapabilitiesResponse();
+            return createJsonResponse({
+              ...response,
+              features: {
+                ...response.features,
+                visionOcr: { enabled: 'true' },
+              },
+            });
+          }),
+        request: (client: ReturnType<typeof createClient>) => client.getCapabilities(),
+      },
+      {
+        createClient: () =>
+          createClient([], async () => {
+            const response = createCapturePoliciesResponse();
+            return createJsonResponse({
+              ...response,
+              capturePolicy: {
+                ...response.capturePolicy,
+                policy: { ...response.capturePolicy.policy, paused: 'true' },
+              },
+            });
+          }),
+        request: (client: ReturnType<typeof createClient>) =>
+          client.getCapturePolicies({ deviceId: 'device_1', workspaceId }),
+      },
+      {
+        createClient: () =>
+          createClient([], async () => {
+            const response = createCapturePoliciesResponse();
+            return createJsonResponse({
+              ...response,
+              capturePolicy: {
+                ...response.capturePolicy,
+                policy: {
+                  ...response.capturePolicy.policy,
+                  rules: [{ ...response.capturePolicy.policy.rules[0], enabled: 'true' }],
+                },
+              },
+            });
+          }),
+        request: (client: ReturnType<typeof createClient>) =>
+          client.getCapturePolicies({ deviceId: 'device_1', workspaceId }),
+      },
+      {
+        createClient: () =>
+          createClient([], async () =>
+            createJsonResponse({ ...createAxAllowlistResponse(), enabled: true }),
+          ),
+        request: (client: ReturnType<typeof createClient>) => client.getAxAllowlist(workspaceId),
+      },
+      {
+        createClient: () =>
+          createClient([], async () =>
+            createJsonResponse({ ...createCaptureCreateResponse(), syncState: 'invalid' }),
+          ),
+        request: (client: ReturnType<typeof createClient>) =>
+          client.createCapture(createCaptureCreateInput()),
+      },
+      {
+        createClient: () =>
+          createClient([], async () => {
+            const response = createCaptureDetailResponse();
+            return createJsonResponse({
+              ...response,
+              ocr: { ...response.ocr, resultVersion: '1' },
+            });
+          }),
+        request: (client: ReturnType<typeof createClient>) =>
+          client.getCapture(workspaceId, captureId),
+      },
+      {
+        createClient: () =>
+          createClient([], async () =>
+            createJsonResponse({ ...createTimelineListResponse(), generatedAt: 'not-a-date' }),
+          ),
+        request: (client: ReturnType<typeof createClient>) => client.queryTimeline({ workspaceId }),
+      },
+      {
+        createClient: () =>
+          createClient([], async () =>
+            createJsonResponse({ ...createSearchResponse(), modeUsed: 'invalid' }),
+          ),
+        request: (client: ReturnType<typeof createClient>) =>
+          client.querySearch({ query: 'quarterly plan', workspaceId }),
+      },
+    ];
+
+    for (const scenario of malformedResponses) {
+      await expect(scenario.request(scenario.createClient())).rejects.toMatchObject({
+        code: 'validation_failed',
+        retryable: false,
+      });
+    }
   });
 
   it('maps OCR result_invalid server codes without collapsing them to unknown', async () => {
@@ -761,6 +724,20 @@ function createLocalAsset() {
   };
 }
 
+function createCaptureCreateInput() {
+  return {
+    appName: 'Code',
+    asset: createLocalAsset(),
+    captureType: 'screen' as const,
+    capturedAt: now,
+    deviceId: 'device_1',
+    idempotencyKey: 'capture-idem-1',
+    observedAt: now,
+    privacyDecision: createPrivacyDecision(),
+    workspaceId,
+  };
+}
+
 function createPrivacyDecision() {
   return {
     action: 'allow' as const,
@@ -769,3 +746,244 @@ function createPrivacyDecision() {
     reasons: [],
   };
 }
+
+function createCapabilitiesResponse() {
+  return {
+    features: {
+      auth: { enabled: true },
+      captureCreation: { enabled: true },
+      cloudSync: { enabled: false },
+      embeddingSearch: { enabled: true },
+      hybridSearch: { enabled: false },
+      invite: { enabled: true },
+      manualSubscription: { enabled: true },
+      providerSettings: { enabled: true },
+      visionOcr: { enabled: true },
+      textSearch: { enabled: true },
+    },
+    generatedAt: now,
+    limits: {},
+    providers: [
+      {
+        enabled: false,
+        hasSecret: false,
+        reason: 'provider_not_configured',
+        service: 'ocr',
+      },
+    ],
+    server: {
+      contractVersion: 'v1',
+      supportedPlatforms: ['macos'],
+    },
+    usage: {},
+    workspaceId,
+  };
+}
+
+function createCapturePoliciesResponse() {
+  return {
+    axAllowlist: {
+      axTextUploadEnabled: false,
+      enabled: false,
+      reason: 'ax_text_upload_disabled',
+      status: 'disabled',
+    },
+    capturePolicy: {
+      axAllowlistStatus: 'disabled',
+      deviceId: 'device_1',
+      expiresAt: '2026-07-06T00:30:00.000Z',
+      generatedAt: now,
+      id: policySnapshotId,
+      metadata: {},
+      policy: {
+        axTextUploadEnabled: false,
+        defaultAction: 'allow',
+        paused: false,
+        rules: [
+          {
+            action: 'block_ocr',
+            enabled: true,
+            id: 'rule_1',
+            kind: 'domain',
+            pattern: 'secret.example.test',
+            scope: 'local_user',
+          },
+        ],
+      },
+      ttlSeconds: 1800,
+      version: 'policy_1',
+      workspaceId,
+    },
+    deliveryPolicy: {
+      maxConcurrentOcr: 2,
+    },
+    deviceId: 'device_1',
+    generatedAt: now,
+    storagePolicy: {
+      allowLongTermRemoteOriginal: false,
+      authoritativeOriginalLocation: 'local_device',
+      createdAt: now,
+      id: storagePolicyId,
+      metadata: {},
+      updatedAt: now,
+      workspaceId,
+    },
+    workspaceId,
+  };
+}
+
+function createAxAllowlistResponse() {
+  return {
+    axTextUploadEnabled: false,
+    enabled: false,
+    generatedAt: now,
+    policyVersion: 'policy_1',
+    reason: 'ax_text_upload_disabled',
+    status: 'disabled',
+    workspaceId,
+  };
+}
+
+function createCaptureCreateResponse() {
+  return {
+    assetLocations: [],
+    assets: [
+      {
+        byteSize: 12,
+        contentHash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        createdAt: now,
+        id: assetId,
+        metadata: {},
+        mimeType: 'image/png',
+        processingStatus: 'available',
+        privacyLevel: 'normal',
+        role: 'ocr_input_image',
+        type: 'ocr_input',
+        updatedAt: now,
+        workspaceId,
+      },
+    ],
+    capture: createCapture(),
+    captureAssets: [],
+    nextAction: 'queue_ocr',
+    policyResult: createPrivacyDecision(),
+    syncState: 'synced',
+    timelineEvent: createTimelineEvent(),
+  };
+}
+
+function createCaptureDetailResponse() {
+  return {
+    assetLocations: [],
+    assets: [],
+    capture: createCapture(),
+    captureAssets: [],
+    ocr: {
+      jobId: ocrJobId,
+      resultId: ocrResultId,
+      resultVersion: 1,
+      status: 'succeeded',
+    },
+    search: {
+      bodySource: 'screen_text_image_ocr',
+      searchDocumentId,
+      status: 'indexed',
+    },
+    timeline: {
+      status: 'projected',
+      timelineEventId,
+    },
+  };
+}
+
+function createCapture() {
+  return {
+    appName: 'Code',
+    captureStatus: 'ocr_succeeded',
+    captureType: 'screen',
+    capturedAt: now,
+    contextConfidence: 'unknown',
+    createdAt: now,
+    deviceId: 'device_1',
+    id: captureId,
+    indexStatus: 'indexed',
+    metadata: {},
+    observedAt: now,
+    ocrStatus: 'succeeded',
+    privacyDecision: createPrivacyDecision(),
+    sourceType: 'screen_capture',
+    timelineStatus: 'projected',
+    updatedAt: now,
+    workspaceId,
+  };
+}
+
+function createTimelineListResponse() {
+  return {
+    events: [createTimelineEvent()],
+    generatedAt: now,
+    pageInfo: { hasMore: true, nextCursor: 'cursor_2' },
+    workspaceId,
+  };
+}
+
+function createTimelineEvent() {
+  return {
+    assetAvailability: 'local_device_available',
+    context: {
+      appName: 'Code',
+      contextConfidence: 'unknown',
+      documentPathSafe: { displayName: 'notes.md' },
+      windowTitleSafe: 'Project notes',
+    },
+    createdAt: now,
+    eventKind: 'capture_updated',
+    id: timelineEventId,
+    metadata: {},
+    occurredAt: now,
+    privacyVisibility: 'user_visible',
+    sourceCaptureId: captureId,
+    sourceType: 'capture',
+    statuses: {
+      indexStatus: 'indexed',
+      ocrStatus: 'succeeded',
+      timelineStatus: 'ready',
+    },
+    updatedAt: now,
+    workspaceId,
+  };
+}
+
+function createSearchResponse() {
+  return {
+    generatedAt: now,
+    indexStatus: 'ready',
+    modeRequested: 'text',
+    modeUsed: 'text',
+    pageInfo: { hasMore: true, nextCursor: 'cursor_3' },
+    query: 'quarterly plan',
+    results: [
+      {
+        appName: 'Code',
+        assetAvailability: 'local_device_available',
+        captureId,
+        capturedAt: now,
+        indexStatus: 'indexed',
+        metadata: {},
+        ocrStatus: 'succeeded',
+        score: 1.2,
+        searchDocumentId,
+        snippet: { source: 'screen_text_image_ocr', text: 'quarterly plan draft' },
+        syncStatus: 'synced',
+        timelineEventId,
+        windowTitleSafe: 'Project notes',
+      },
+    ],
+    workspaceId,
+  };
+}
+
+type MalformedSuccessResponseScenario = {
+  createClient: () => ReturnType<typeof createClient>;
+  request: (client: ReturnType<typeof createClient>) => Promise<unknown>;
+};

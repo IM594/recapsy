@@ -7,6 +7,11 @@ test('API error contracts reject retired temporary-upload errors', () => {
   expect(ApiErrorCodeSchema.safeParse(retiredCode).success).toBe(false);
 });
 
+test('API error contracts reject retired OCR execution errors', () => {
+  expect(ApiErrorCodeSchema.safeParse('ocr.temporary_location_missing').success).toBe(false);
+  expect(ApiErrorCodeSchema.safeParse('ocr.cleanup_failed').success).toBe(false);
+});
+
 test('pagination contracts enforce bounded list input', () => {
   expect(PaginationSchema.parse({})).toEqual({ limit: 50 });
   expect(PaginationSchema.parse({ limit: 1, cursor: 'opaque-cursor' })).toEqual({
