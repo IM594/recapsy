@@ -16,6 +16,7 @@ import type {
   HelperToMainType,
   MainToHelperType,
 } from '../../helper/index';
+import { IPC_CHANNEL_REGISTRY } from '../../ipc/index';
 import type { CapturePoliciesResult, ServerApiClient } from '../../server/index';
 import type { DesktopShell } from '../../shell/index';
 import { createMemoryStore } from '../../storage';
@@ -83,6 +84,21 @@ describe('electron main runtime wiring', () => {
     expect(helperClient.startCalls).toBe(1);
   });
 
+  it('fails before session, storage, or helper startup when device identity resolution fails', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const handle = createElectronMainRuntime({
+      ...baseOptions({ app, helperClient, ipcMain, store }),
+      async resolveDeviceId() {
+        throw new Error('device identity unavailable');
+      },
+    });
+    app.triggerReady();
+
+    await expect(handle.ready).rejects.toThrow('device identity unavailable');
+    expect(store.initializeCalls).toBe(0);
+    expect(helperClient.startCalls).toBe(0);
+  });
+
   it('before-quit prevents the default quit, awaits runtime shutdown, then force-exits', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
@@ -139,26 +155,15 @@ describe('electron main runtime wiring', () => {
     expect(app.exitCalls).toEqual([0]);
   });
 
-  it('registers every contract channel, with real handlers for the implemented subset', async () => {
+  it('registers exactly every active IPC channel with a real runtime handler', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
     app.triggerReady();
     await handle.ready;
 
-    expect(ipcMain.handlers.has('session.getCurrent')).toBe(true);
-    expect(ipcMain.handlers.has('capture.getStatus')).toBe(true);
-    expect(ipcMain.handlers.size).toBeGreaterThan(10);
-  });
-
-  it('returns a typed unknown error for channels with no runtime implementation in this phase', async () => {
-    const { app, ipcMain, helperClient, store } = harness();
-    const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
-    app.triggerReady();
-    await handle.ready;
-
-    const response = await ipcMain.invoke('session.getCurrent', undefined);
-
-    expect(response).toMatchObject({ error: { code: 'unknown' }, ok: false });
+    expect([...ipcMain.handlers.keys()].sort()).toEqual(
+      IPC_CHANNEL_REGISTRY.map((definition) => definition.channel).sort(),
+    );
   });
 
   it('capture.getStatus reflects helper state and permissions observed through the real handler', async () => {
@@ -306,18 +311,7 @@ describe('electron main runtime wiring', () => {
     ]);
   });
 
-  it('rejects invalid capture.getRecentEvents payloads via schema validation', async () => {
-    const { app, ipcMain, helperClient, store } = harness();
-    const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
-    app.triggerReady();
-    await handle.ready;
-
-    const response = await ipcMain.invoke('capture.getRecentEvents', { limit: 0 });
-
-    expect(response).toMatchObject({ error: { code: 'validation_failed' }, ok: false });
-  });
-
-  it('maps a real capture.result envelope through to sync.getSummary and capture.getRecentEvents', async () => {
+  it('maps a real capture.result envelope through to sync.getSummary and capture status', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
     app.triggerReady();
@@ -345,12 +339,6 @@ describe('electron main runtime wiring', () => {
 
     const summary = await ipcMain.invoke('sync.getSummary', undefined);
     expect(summary).toMatchObject({ data: { pending: 1 }, ok: true });
-
-    const recent = await ipcMain.invoke('capture.getRecentEvents', undefined);
-    expect(recent).toMatchObject({
-      data: { events: [{ id: 'cap_1', state: 'accepted' }] },
-      ok: true,
-    });
 
     const status = await ipcMain.invoke('capture.getStatus', undefined);
     expect(status).toMatchObject({ data: { recentEventCount: 1 }, ok: true });
@@ -538,7 +526,7 @@ describe('electron main runtime wiring', () => {
     expect(shell.refreshCalls).toBe(1);
   });
 
-  it('assembles the desktop shell, exposes its main-window IPC action, and disposes it during quit', async () => {
+  it('assembles the desktop shell and disposes it during quit', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     const syncLoop = new FakeSyncLoop();
     const shell = new FakeDesktopShell();
@@ -567,11 +555,6 @@ describe('electron main runtime wiring', () => {
     });
     expect(shellContext?.commandClient).toBe(state.commandClient);
     expect(state.shell).toBe(shell);
-    await expect(ipcMain.invoke('app.showMainWindow', undefined)).resolves.toEqual({
-      data: { shown: true },
-      ok: true,
-    });
-    expect(shell.showMainWindowCalls).toBe(1);
 
     app.emitBeforeQuit(new FakeQuitEvent());
     await flushMicrotasks();
@@ -845,9 +828,9 @@ function baseOptions(
     createServerApi: () => notImplementedServerApi(),
     createStore: () => rest.store,
     createSyncLoop: (_loopOptions: SyncLoopOptions) => resolvedSyncLoop,
-    deviceId,
     loginPrompter: resolvedLoginPrompter,
     now: () => now,
+    resolveDeviceId: () => deviceId,
     tokenStore: createInMemoryTokenStore({ accessToken: 'access-token-1' }),
     ...rest,
   };

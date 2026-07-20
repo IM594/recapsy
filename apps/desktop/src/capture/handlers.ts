@@ -1,6 +1,5 @@
 import type { CaptureHelperState } from '../helper/index';
 import {
-  type CaptureEventSummaryDto,
   type CaptureStatusDto,
   IPC_ERROR_CODES,
   type IpcError,
@@ -9,7 +8,7 @@ import {
   type LocalCapturePolicyRulesDto,
   createRendererSafeSuccess,
 } from '../ipc/index';
-import type { OutboxJob, SafeOperationalError } from '../storage/index';
+import type { SafeOperationalError } from '../storage/index';
 import type { CaptureControl } from './control';
 import type { CapturePolicyController } from './policy';
 import type { CaptureHistoryReader } from './store';
@@ -25,8 +24,6 @@ export function createCaptureIpcHandlers(options: CaptureIpcHandlerOptions): Ipc
   return {
     'capture.getStatus': async () =>
       createRendererSafeSuccess(await buildCaptureStatusDto(options)),
-    'capture.getRecentEvents': async (payload) =>
-      createRendererSafeSuccess(await buildRecentEventsDto(options, payload as { limit?: number })),
     'capture.pause': async () => {
       await options.control.pause();
       return createRendererSafeSuccess(await buildCaptureStatusDto(options));
@@ -86,47 +83,6 @@ async function buildCaptureStatusDto(options: CaptureIpcHandlerOptions): Promise
       : {}),
     ...(snapshot.lastSafeError ? { lastError: toIpcError(snapshot.lastSafeError) } : {}),
   };
-}
-
-async function buildRecentEventsDto(
-  options: CaptureIpcHandlerOptions,
-  payload: { limit?: number },
-): Promise<{ events: CaptureEventSummaryDto[] }> {
-  const jobs = await options.store.listOutboxJobs({ workspaceId: options.workspaceId });
-  const events = jobs
-    .slice()
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
-    .slice(0, payload.limit ?? 50)
-    .map(toCaptureEventSummaryDto);
-
-  return { events };
-}
-
-function toCaptureEventSummaryDto(job: OutboxJob): CaptureEventSummaryDto {
-  const reason = job.terminalReason ?? job.lastSafeError?.code;
-
-  return {
-    id: job.id,
-    observedAt: job.capture.observedAt,
-    state: toCaptureEventState(job.state),
-    ...(reason ? { reason } : {}),
-  };
-}
-
-function toCaptureEventState(state: OutboxJob['state']): CaptureEventSummaryDto['state'] {
-  switch (state) {
-    case 'pending':
-    case 'syncing':
-    case 'result_pending':
-    case 'synced':
-      return 'accepted';
-    case 'blocked':
-      return 'blocked';
-    case 'failed':
-      return 'failed';
-    case 'cancelled':
-      return 'skipped';
-  }
 }
 
 function toCaptureStatusState(state: CaptureHelperState | undefined): CaptureStatusDto['state'] {

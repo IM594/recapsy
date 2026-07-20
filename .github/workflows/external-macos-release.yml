@@ -1,0 +1,146 @@
+name: External macOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version to package
+        required: true
+        type: string
+      previous_version:
+        description: Existing release version whose DMG must pass rollback verification
+        required: true
+        type: string
+
+jobs:
+  stage-architecture:
+    name: Stage signed ${{ matrix.arch }} application
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-14
+          - arch: x64
+            runner: macos-13
+    runs-on: ${{ matrix.runner }}
+    environment: macos-release
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15.1
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Stage Developer ID signed architecture
+        env:
+          RECAPSY_RELEASE_ARCH: ${{ matrix.arch }}
+          RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
+        run: pnpm --filter @recapsy/desktop run release:stage
+
+      - name: Upload staged application
+        uses: actions/upload-artifact@v4
+        with:
+          name: recapsy-macos-${{ matrix.arch }}
+          path: apps/desktop/dist/release/release-input/Recapsy-${{ matrix.arch }}.app
+          if-no-files-found: error
+
+  assemble-notarize-and-verify:
+    name: Assemble, notarize, and verify universal distribution
+    needs: stage-architecture
+    runs-on: macos-14
+    environment: macos-release
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15.1
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download signed architecture applications
+        uses: actions/download-artifact@v4
+        with:
+          pattern: recapsy-macos-*
+          path: apps/desktop/dist/release/release-input
+          merge-multiple: true
+
+      - name: Materialize App Store Connect API key
+        env:
+          APPLE_NOTARY_KEY_P8: ${{ secrets.APPLE_NOTARY_KEY_P8 }}
+        run: |
+          umask 077
+          printf '%s' "$APPLE_NOTARY_KEY_P8" > "$RUNNER_TEMP/recapsy-notary-key.p8"
+
+      - name: Assemble signed universal application
+        env:
+          RECAPSY_RELEASE_ARM64_APP: ${{ github.workspace }}/apps/desktop/dist/release/release-input/Recapsy-arm64.app
+          RECAPSY_RELEASE_PREVIOUS_VERSION: ${{ inputs.previous_version }}
+          RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
+          RECAPSY_RELEASE_VERSION: ${{ inputs.version }}
+          RECAPSY_RELEASE_X64_APP: ${{ github.workspace }}/apps/desktop/dist/release/release-input/Recapsy-x64.app
+        run: pnpm --filter @recapsy/desktop run release:assemble
+
+      - name: Notarize and create distribution DMG
+        env:
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_KEY: ${{ runner.temp }}/recapsy-notary-key.p8
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          RECAPSY_RELEASE_PREVIOUS_VERSION: ${{ inputs.previous_version }}
+          RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
+          RECAPSY_RELEASE_VERSION: ${{ inputs.version }}
+        run: pnpm --filter @recapsy/desktop run release:notarize
+
+      - name: Verify signed and notarized distribution
+        env:
+          RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
+          RECAPSY_RELEASE_VERSION: ${{ inputs.version }}
+        run: pnpm --filter @recapsy/desktop run release:verify
+
+      - name: Download previous release for rollback verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release download "v${{ inputs.previous_version }}"
+          --pattern "Recapsy-${{ inputs.previous_version }}-universal.dmg"
+          --dir "$RUNNER_TEMP/recapsy-rollback"
+
+      - name: Verify rollback artifact
+        env:
+          RECAPSY_RELEASE_ROLLBACK_DMG: ${{ runner.temp }}/recapsy-rollback/Recapsy-${{ inputs.previous_version }}-universal.dmg
+          RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
+        run: pnpm --filter @recapsy/desktop run release:verify-rollback
+
+      - name: Upload verified distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: recapsy-macos-universal-${{ inputs.version }}
+          path: apps/desktop/dist/release/distribution
+          if-no-files-found: error

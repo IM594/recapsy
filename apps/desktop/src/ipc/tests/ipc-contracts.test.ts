@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import { readFile } from 'node:fs/promises';
 import {
   IPC_CHANNEL_REGISTRY,
   IPC_ERROR_CODES,
   assertRendererSafeDto,
   buildPreloadAllowlist,
   createIpcErrorEnvelope,
+  registerIpcHandlers,
   validateIpcRequest,
 } from '../index';
 
@@ -18,7 +20,7 @@ const FORBIDDEN_PRELOAD_METHODS = [
 ] as const;
 
 describe('desktop ipc contracts', () => {
-  it('defines unique namespaced channels for every runtime capability', () => {
+  it('defines only the channels used by the current desktop renderer', () => {
     const channelNames = IPC_CHANNEL_REGISTRY.map((definition) => definition.channel);
     const namespaces = new Set(IPC_CHANNEL_REGISTRY.map((definition) => definition.namespace));
 
@@ -26,27 +28,28 @@ describe('desktop ipc contracts', () => {
     expect(channelNames.every((channel) => /^[a-z]+[.][a-z][a-zA-Z0-9]*$/.test(channel))).toBe(
       true,
     );
-    expect(namespaces).toEqual(
-      new Set([
-        'session',
-        'workspace',
-        'capture',
-        'sync',
-        'ocr',
-        'timeline',
-        'search',
-        'settings',
-        'diagnostics',
-        'permissions',
-        'app',
-      ]),
-    );
+    expect(channelNames).toEqual([
+      'capture.getStatus',
+      'capture.listLocalRules',
+      'capture.blockBundle',
+      'capture.removeLocalRule',
+      'capture.pause',
+      'capture.resume',
+      'sync.getSummary',
+      'diagnostics.previewRetention',
+      'diagnostics.runRetention',
+      'permissions.getStatus',
+      'permissions.refresh',
+      'permissions.requestScreenRecording',
+      'permissions.openScreenRecordingSettings',
+      'permissions.openAccessibilitySettings',
+    ]);
+    expect(namespaces).toEqual(new Set(['capture', 'sync', 'diagnostics', 'permissions']));
   });
 
   it('fails validation for invalid request payloads', () => {
-    const result = validateIpcRequest('timeline.query', {
-      cursor: 'cursor-1',
-      limit: 0,
+    const result = validateIpcRequest('capture.blockBundle', {
+      bundleId: 'https://example.com/login',
     });
 
     expect(result).toEqual({
@@ -55,9 +58,9 @@ describe('desktop ipc contracts', () => {
         ok: false,
         error: {
           code: 'validation_failed',
-          message: 'Invalid request for timeline.query.',
+          message: 'Invalid request for capture.blockBundle.',
           details: {
-            issues: ['limit must be between 1 and 100 when provided'],
+            issues: ['bundleId must be an exact application bundle identifier'],
           },
         },
       },
@@ -68,17 +71,36 @@ describe('desktop ipc contracts', () => {
     const preloadApi = buildPreloadAllowlist(async () => ({ ok: true, data: undefined }));
     const methodNames = Object.keys(preloadApi);
 
-    expect(methodNames.length).toBeGreaterThan(0);
-    expect(methodNames).toContain('timelineQuery');
-    expect(methodNames).toContain('diagnosticsGetSafeLogs');
-    expect(methodNames).toContain('diagnosticsPreviewRetention');
-    expect(methodNames).toContain('captureListLocalRules');
-    expect(methodNames).toContain('captureBlockBundle');
-    expect(methodNames).toContain('captureRemoveLocalRule');
+    expect(methodNames).toEqual([
+      'captureGetStatus',
+      'captureListLocalRules',
+      'captureBlockBundle',
+      'captureRemoveLocalRule',
+      'capturePause',
+      'captureResume',
+      'syncGetSummary',
+      'diagnosticsPreviewRetention',
+      'diagnosticsRunRetention',
+      'permissionsGetStatus',
+      'permissionsRefresh',
+      'permissionsRequestScreenRecording',
+      'permissionsOpenScreenRecordingSettings',
+      'permissionsOpenAccessibilitySettings',
+    ]);
 
     for (const forbiddenMethod of FORBIDDEN_PRELOAD_METHODS) {
       expect(methodNames).not.toContain(forbiddenMethod);
     }
+  });
+
+  it('keeps the explicit retention cleanup action reachable from the current renderer', async () => {
+    const renderer = await readFile(
+      new URL('../../shell/main-window.html', import.meta.url),
+      'utf8',
+    );
+
+    expect(renderer).toContain('id="retention-clean"');
+    expect(renderer).toContain('api.diagnosticsRunRetention({ olderThanDays: 30 })');
   });
 
   it('rejects renderer DTOs with token, path, or raw helper payload fields', () => {
@@ -110,49 +132,20 @@ describe('desktop ipc contracts', () => {
     });
   });
 
-  it('rejects unsafe settings.updateLocal payloads instead of casting broad objects', () => {
-    const unsafePayloads = [
-      { providerToken: 'provider-token' },
-      { authToken: 'auth-token' },
-      { localPath: '/Users/example/private/capture.png' },
-      { helperRawPayload: { captureId: 'cap_1' } },
-      { capture: { enabled: true, unknownNestedKey: true } },
-      { diagnostics: { enabled: true, helperRawPayload: { raw: true } } },
-    ];
+  it('fails before registering any channel when an active handler is missing', () => {
+    const registeredChannels: string[] = [];
 
-    for (const payload of unsafePayloads) {
-      const result = validateIpcRequest('settings.updateLocal', payload);
-
-      expect(result.ok).toBe(false);
-      if (!result.ok) {
-        expect(result.error.error.code).toBe('validation_failed');
-      }
-    }
-  });
-
-  it('accepts only the explicit renderer-safe settings.updateLocal schema', () => {
-    const result = validateIpcRequest('settings.updateLocal', {
-      capture: {
-        enabled: true,
-        schedule: 'disabled',
-      },
-      diagnostics: {
-        enabled: false,
-      },
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      value: {
-        capture: {
-          enabled: true,
-          schedule: 'disabled',
+    expect(() =>
+      registerIpcHandlers(
+        {
+          handle(channel) {
+            registeredChannels.push(channel);
+          },
         },
-        diagnostics: {
-          enabled: false,
-        },
-      },
-    });
+        {},
+      ),
+    ).toThrow('Missing IPC handlers for active channels: capture.getStatus');
+    expect(registeredChannels).toEqual([]);
   });
 
   it('accepts a bounded retention-preview request without exposing local paths', () => {
@@ -161,6 +154,16 @@ describe('desktop ipc contracts', () => {
       value: { olderThanDays: 30 },
     });
     expect(validateIpcRequest('diagnostics.previewRetention', { olderThanDays: 0 })).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it('accepts the same bounded request for an explicit retention execution', () => {
+    expect(validateIpcRequest('diagnostics.runRetention', { olderThanDays: 30 })).toEqual({
+      ok: true,
+      value: { olderThanDays: 30 },
+    });
+    expect(validateIpcRequest('diagnostics.runRetention', { olderThanDays: 0 })).toMatchObject({
       ok: false,
     });
   });

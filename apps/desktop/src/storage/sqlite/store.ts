@@ -2,6 +2,7 @@ import { settleServerCapture as settleStoredServerCapture } from '../reconciliat
 import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
+  ClaimAssetCleanupInput,
   ClaimRetryableOutboxJobInput,
   LocalCapturePolicyRule,
   OperationalStoreError,
@@ -17,8 +18,10 @@ import type {
   PolicyCacheRead,
   PolicyCacheReadOptions,
   RecoverInterruptedOutboxJobInput,
+  RecoverPendingAssetCleanupInput,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
+  SetAssetCleanupStateInput,
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
@@ -200,6 +203,20 @@ class SqliteOperationalStore {
     input: UpdateAssetRefAvailabilityInput,
   ): Promise<OperationalStoreResult<AssetCacheRef>> {
     return this.assets.updateAvailability(input);
+  }
+
+  claimAssetCleanup(input: ClaimAssetCleanupInput): Promise<AssetCacheRef | null> {
+    return this.assets.claimCleanup(input);
+  }
+
+  settleAssetCleanup(
+    input: SetAssetCleanupStateInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>> {
+    return this.assets.settleCleanup(input);
+  }
+
+  recoverPendingAssetCleanup(input: RecoverPendingAssetCleanupInput): Promise<number> {
+    return this.assets.recoverPendingCleanup(input);
   }
 
   deleteAssetCacheRef(assetRefId: string): Promise<boolean> {

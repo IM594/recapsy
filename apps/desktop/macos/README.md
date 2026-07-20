@@ -17,7 +17,7 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 
 ## 构建依赖与兼容性
 
-当前 helper 只构建为 `arm64`，最低系统版本为 macOS 14 Sonoma。它面向 Apple Silicon 的 macOS 14+ 开发与打包环境；Intel 与 universal 发行是独立的后续任务，当前不得将这个 arm64 产物宣传为可在 2018 Intel Mac 上运行。
+常规开发命令按当前宿主原生构建 helper，最低系统版本为 macOS 14 Sonoma。`RECAPSY_CAPTURE_ARCH` 只接受 `arm64` 或 `x86_64`，且必须与构建宿主一致，避免把未验证的交叉编译伪装成可发行产物。外部发行 workflow 会在 arm64 与 x64 runner 分别构建并签名，然后合并为 universal `.app`；本地 arm64 gate 仍只证明 Apple Silicon 路径。
 
 采集体用 libwebp 编码 WebP。构建需要 Xcode Command Line Tools、系统 `curl` 及 CMake；CMake 可通过以下命令安装：
 
@@ -25,7 +25,7 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 brew install cmake
 ```
 
-首次构建会从 WebP 官方 HTTPS 源下载固定的 `libwebp 1.6.0` 源码，校验 SHA-256 `e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564`，并以 `arm64`、`MACOSX_DEPLOYMENT_TARGET=14.0` 编译静态 `libwebp.a` 与 `libsharpyuv.a`。构建器会逐个检查归档内 Mach-O 对象的最低版本与架构，失败即中止。源码、CMake 中间产物和归档都位于 gitignored 的 `macos/build/third-party/`；`macos/build/libwebp-arm64.json` 是测试读取的可追溯 provenance。
+首次构建会从 WebP 官方 HTTPS 源下载固定的 `libwebp 1.6.0` 源码，校验 SHA-256 `e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564`，并以所选原生架构、`MACOSX_DEPLOYMENT_TARGET=14.0` 编译静态 `libwebp.a` 与 `libsharpyuv.a`。构建器会逐个检查归档内 Mach-O 对象的最低版本与架构，失败即中止。源码、CMake 中间产物和归档都位于 gitignored 的 `macos/build/third-party/`；`macos/build/libwebp-<arch>.json` 是可追溯 provenance。
 
 采集 helper 静态链接这两个归档，因此运行时不依赖 libwebp dylib（`otool -L` 无 libwebp 条目）。libwebp 的 BSD 许可证会随 bundle 安装在 `Contents/Resources/ThirdPartyNotices/libwebp.txt`。
 
@@ -76,9 +76,7 @@ CI 的布局、进程和 seal 门禁，不提供跨 rebuild 的 TCC 身份稳定
 Developer ID 时，Packager 使用同一发行身份 inside-out 签完整应用；Developer ID
 凭据、notarization 和正式分发仍由后续独立发行任务完成。
 
-当前命令只生成 host-native 架构，不生成 universal 或另一架构产物；也不包含 DMG、
-notarization 或 auto-update。自动化不得把 ad-hoc GREEN 宣称为 Developer ID、
-Gatekeeper 或正式发行完成。
+`package:macos` 仍只生成 host-native 架构；正式 universal/DMG/notarization/rollback 链路由 `release:stage`、`release:assemble`、`release:notarize`、`release:verify` 和 `release:verify-rollback` 组成，并由仅手动触发的 `.github/workflows/external-macos-release.yml` 编排。该 workflow 要求 Developer ID、App Store Connect API key 与已有 GitHub Release rollback DMG；没有这些外部输入时，自动化只验证 fail-closed contract，绝不把 ad-hoc GREEN 宣称为 Developer ID、Gatekeeper 或正式发行完成。
 
 ## 自动化测试(不依赖屏幕录制授权)
 

@@ -116,7 +116,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get(),
-    ).toEqual({ version: 7 });
+    ).toEqual({ version: 8 });
     database.close();
   });
 
@@ -160,7 +160,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 7,
+      version: 8,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -334,7 +334,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(7);
+    ).toBe(8);
 
     const rowById = (id: string) =>
       database
@@ -1043,6 +1043,52 @@ describe('SQLite operational store', () => {
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('localAccessKey');
     expect(serialized).not.toContain('contentAddress');
+  });
+
+  it('persists cleanup claim, completion, and interrupted recovery without deleting the asset record', async () => {
+    const path = tempDatabasePath();
+    const firstDatabase = createBunSqliteDatabase(path);
+    const first = createSqliteStore({ database: firstDatabase });
+    await first.initialize();
+    await first.upsertAssetCacheRef(createAsset());
+
+    const claimed = await first.claimAssetCleanup({ assetRefId: 'asset_1', now });
+    expect(claimed).toMatchObject({ cleanupState: 'cleanup_pending', cleanupUpdatedAt: now });
+    first.close();
+
+    const secondDatabase = createBunSqliteDatabase(path);
+    const second = createSqliteStore({ database: secondDatabase });
+    await second.initialize();
+    expect(
+      await second.recoverPendingAssetCleanup({
+        now: '2026-07-06T00:01:00.000Z',
+        workspaceId: 'workspace_1',
+      }),
+    ).toBe(1);
+    expect(await second.getAssetCacheRef('asset_1')).toMatchObject({
+      cleanupSafeError: { code: 'local_asset_cleanup_interrupted', retryable: true },
+      cleanupState: 'cleanup_failed',
+    });
+
+    expect(
+      await second.claimAssetCleanup({ assetRefId: 'asset_1', now: '2026-07-06T00:02:00.000Z' }),
+    ).toMatchObject({ cleanupState: 'cleanup_pending' });
+    const settled = await second.settleAssetCleanup({
+      assetRefId: 'asset_1',
+      cleanupState: 'cleaned',
+      now: '2026-07-06T00:03:00.000Z',
+    });
+
+    expect(settled).toMatchObject({
+      ok: true,
+      value: {
+        availabilityState: 'missing',
+        cleanupState: 'cleaned',
+        cleanupUpdatedAt: '2026-07-06T00:03:00.000Z',
+      },
+    });
+    expect(await second.getAssetCacheRef('asset_1')).toMatchObject({ assetRefId: 'asset_1' });
+    second.close();
   });
 
   it('persists asset ref reconciliation state and blocked jobs after close and reopen', async () => {

@@ -1,6 +1,9 @@
 import type {
   AssetCacheRef,
+  ClaimAssetCleanupInput,
   OperationalStoreResult,
+  RecoverPendingAssetCleanupInput,
+  SetAssetCleanupStateInput,
   UpdateAssetRefAvailabilityInput,
 } from '../types';
 import type { SqliteDatabase, SqliteRow } from './driver';
@@ -66,6 +69,89 @@ export class SqliteAssetPersistence {
         };
   }
 
+  async claimCleanup(input: ClaimAssetCleanupInput): Promise<AssetCacheRef | null> {
+    const row = this.database
+      .prepare<AssetCacheRefRow>(
+        `UPDATE asset_cache_refs
+         SET cleanup_state = 'cleanup_pending',
+             cleanup_updated_at = $now,
+             cleanup_safe_error_json = NULL
+         WHERE asset_ref_id = $assetRefId
+           AND cleanup_state IN ('retained', 'cleanup_failed')
+         RETURNING *`,
+      )
+      .get({ $assetRefId: input.assetRefId, $now: input.now });
+
+    return row ? assetRefFromRow(row) : null;
+  }
+
+  async settleCleanup(
+    input: SetAssetCleanupStateInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>> {
+    const row = this.database
+      .prepare<AssetCacheRefRow>(
+        `UPDATE asset_cache_refs
+         SET cleanup_state = $cleanupState,
+             cleanup_updated_at = $now,
+             cleanup_safe_error_json = $cleanupSafeErrorJson,
+             availability_state = CASE
+               WHEN $cleanupState = 'cleaned' THEN 'missing'
+               ELSE availability_state
+             END,
+             availability_checked_at = CASE
+               WHEN $cleanupState = 'cleaned' THEN $now
+               ELSE availability_checked_at
+             END,
+             availability_safe_error_json = CASE
+               WHEN $cleanupState = 'cleaned' THEN NULL
+               ELSE availability_safe_error_json
+             END
+         WHERE asset_ref_id = $assetRefId
+           AND cleanup_state = 'cleanup_pending'
+         RETURNING *`,
+      )
+      .get({
+        $assetRefId: input.assetRefId,
+        $cleanupSafeErrorJson: input.cleanupSafeError
+          ? JSON.stringify(input.cleanupSafeError)
+          : null,
+        $cleanupState: input.cleanupState,
+        $now: input.now,
+      });
+
+    return row
+      ? { ok: true, value: assetRefFromRow(row) }
+      : {
+          error: {
+            code: 'asset_cleanup_conflict',
+            message: 'Asset cleanup is no longer pending.',
+          },
+          ok: false,
+        };
+  }
+
+  async recoverPendingCleanup(input: RecoverPendingAssetCleanupInput): Promise<number> {
+    const result = this.database
+      .prepare(
+        `UPDATE asset_cache_refs
+         SET cleanup_state = 'cleanup_failed',
+             cleanup_updated_at = $now,
+             cleanup_safe_error_json = $cleanupSafeErrorJson
+         WHERE workspace_id = $workspaceId
+           AND cleanup_state = 'cleanup_pending'`,
+      )
+      .run({
+        $cleanupSafeErrorJson: JSON.stringify({
+          code: 'local_asset_cleanup_interrupted',
+          message: 'Local asset cleanup was interrupted.',
+          retryable: true,
+        }),
+        $now: input.now,
+        $workspaceId: input.workspaceId,
+      });
+    return result.changes;
+  }
+
   async delete(assetRefId: string): Promise<boolean> {
     const result = this.database
       .prepare(
@@ -102,6 +188,8 @@ export class SqliteAssetPersistence {
           mime_type,
           size_bytes,
           cleanup_state,
+          cleanup_updated_at,
+          cleanup_safe_error_json,
           availability_state,
           availability_checked_at,
           created_at,
@@ -116,6 +204,8 @@ export class SqliteAssetPersistence {
           $mimeType,
           $sizeBytes,
           $cleanupState,
+          $cleanupUpdatedAt,
+          $cleanupSafeErrorJson,
           $availabilityState,
           $availabilityCheckedAt,
           $createdAt,
@@ -130,6 +220,8 @@ export class SqliteAssetPersistence {
           mime_type = excluded.mime_type,
           size_bytes = excluded.size_bytes,
           cleanup_state = excluded.cleanup_state,
+          cleanup_updated_at = excluded.cleanup_updated_at,
+          cleanup_safe_error_json = excluded.cleanup_safe_error_json,
           availability_state = excluded.availability_state,
           availability_checked_at = excluded.availability_checked_at,
           created_at = excluded.created_at,
@@ -153,6 +245,8 @@ type AssetCacheRefRow = SqliteRow & {
   mime_type: string;
   size_bytes: number;
   cleanup_state: AssetCacheRef['cleanupState'];
+  cleanup_updated_at?: string | null;
+  cleanup_safe_error_json?: string | null;
   availability_state: AssetCacheRef['availabilityState'];
   availability_checked_at?: string | null;
   created_at: string;
@@ -169,7 +263,9 @@ function assetParameters(asset: AssetCacheRef): Record<string, string | number |
       ? JSON.stringify(asset.availabilitySafeError)
       : null,
     $availabilityState: asset.availabilityState,
+    $cleanupSafeErrorJson: asset.cleanupSafeError ? JSON.stringify(asset.cleanupSafeError) : null,
     $cleanupState: asset.cleanupState,
+    $cleanupUpdatedAt: asset.cleanupUpdatedAt ?? null,
     $contentAddress: asset.contentAddress ?? null,
     $createdAt: asset.createdAt,
     $hash: asset.hash,
@@ -194,11 +290,19 @@ function assetRefFromRow(row: AssetCacheRefRow): AssetCacheRef {
     sizeBytes: row.size_bytes,
     workspaceId: row.workspace_id,
     ...(row.availability_checked_at ? { availabilityCheckedAt: row.availability_checked_at } : {}),
+    ...(row.cleanup_updated_at ? { cleanupUpdatedAt: row.cleanup_updated_at } : {}),
     ...(row.content_address ? { contentAddress: row.content_address } : {}),
     ...(row.availability_safe_error_json
       ? {
           availabilitySafeError: parseJson<AssetCacheRef['availabilitySafeError']>(
             row.availability_safe_error_json,
+          ),
+        }
+      : {}),
+    ...(row.cleanup_safe_error_json
+      ? {
+          cleanupSafeError: parseJson<AssetCacheRef['cleanupSafeError']>(
+            row.cleanup_safe_error_json,
           ),
         }
       : {}),

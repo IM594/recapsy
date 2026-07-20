@@ -7,10 +7,14 @@ import Foundation
 public struct CaptureFrameContext: Equatable, Sendable {
     public let bundleId: String
     public let windowId: Int
+    /// A sanitized stable context identity. It deliberately excludes the
+    /// ScreenCaptureKit window id, AX node ids and transient view state.
+    public let contextFingerprint: String?
 
-    public init(bundleId: String, windowId: Int) {
+    public init(bundleId: String, windowId: Int, contextFingerprint: String? = nil) {
         self.bundleId = bundleId
         self.windowId = windowId
+        self.contextFingerprint = contextFingerprint
     }
 }
 

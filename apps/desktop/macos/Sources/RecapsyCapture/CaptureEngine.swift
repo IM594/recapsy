@@ -465,6 +465,7 @@ final class CaptureEngine {
                     version: configuredPolicy.version
                 ),
                 source: encoded.source,
+                sourceContext: encoded.sourceContext,
                 screenshot: CaptureScreenshotRecord(
                     ref: relativeKey,
                     hash: hash,

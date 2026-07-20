@@ -200,6 +200,32 @@ public struct CapturePolicyPayload: Codable {
     }
 }
 
+public struct CaptureWindowPayload: Codable, Equatable {
+    public let title: String
+
+    public init(title: String) {
+        self.title = title
+    }
+}
+
+public struct CaptureWebsitePayload: Codable, Equatable {
+    public let origin: String
+    public let host: String
+
+    public init(origin: String, host: String) {
+        self.origin = origin
+        self.host = host
+    }
+}
+
+public struct CaptureDocumentPayload: Codable, Equatable {
+    public let name: String
+
+    public init(name: String) {
+        self.name = name
+    }
+}
+
 public struct CaptureApplicationPayload: Codable, Equatable {
     public let name: String
     public let bundleId: String
@@ -274,15 +300,24 @@ public struct CaptureApplicationPayload: Codable, Equatable {
 public struct CaptureContextPayload: Codable {
     public let app: CaptureApplicationPayload?
     public let observedAt: String
+    public let window: CaptureWindowPayload?
+    public let website: CaptureWebsitePayload?
+    public let document: CaptureDocumentPayload?
     public let policy: CapturePolicyPayload
 
     public init(
         app: CaptureApplicationPayload? = nil,
         observedAt: String,
+        window: CaptureWindowPayload? = nil,
+        website: CaptureWebsitePayload? = nil,
+        document: CaptureDocumentPayload? = nil,
         policy: CapturePolicyPayload
     ) {
         self.app = app
         self.observedAt = observedAt
+        self.window = window
+        self.website = website
+        self.document = document
         self.policy = policy
     }
 }

@@ -499,7 +499,7 @@ function requiresUnavailableContext(rule: CompiledCapturePolicyRule): boolean {
   return (
     rule.enabled &&
     rule.action !== 'allow' &&
-    !['app_name', 'bundle_id', 'pause'].includes(rule.kind)
+    !['app_name', 'bundle_id', 'domain', 'pause'].includes(rule.kind)
   );
 }
 

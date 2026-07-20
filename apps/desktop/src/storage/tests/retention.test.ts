@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { planLocalRetentionDryRun } from '../retention';
-import type { AssetCacheRef, OutboxJob } from '../types';
+import { createMemoryStore } from '../memory';
+import { executeLocalRetention, planLocalRetentionDryRun } from '../retention';
+import type { AssetCacheRef, OutboxJob, OutboxJobCreateInput } from '../types';
 
 const now = '2026-07-18T00:00:00.000Z';
 const workspaceId = 'workspace_1';
@@ -66,6 +67,116 @@ describe('local retention dry run', () => {
     expect(assetRefs).toEqual([asset('eligible', '2026-06-01T00:00:00.000Z', 100)]);
     expect(jobs).toEqual([job('eligible', 'synced')]);
   });
+
+  it('includes a prior cleanup failure in the next explicit review', async () => {
+    const result = await planLocalRetentionDryRun({
+      now,
+      olderThanDays: 30,
+      store: {
+        async listAssetCacheRefs() {
+          return [
+            asset('retryable', '2026-06-01T00:00:00.000Z', 100, {
+              cleanupState: 'cleanup_failed',
+            }),
+          ];
+        },
+        async listOutboxJobs() {
+          return [job('retryable', 'synced')];
+        },
+      },
+      workspaceId,
+    });
+
+    expect(result).toMatchObject({ eligibleAssets: 1, protectedAssets: 0, reclaimableBytes: 100 });
+  });
+
+  it('records a durable cleanup failure and retries the same eligible asset', async () => {
+    const store = createMemoryStore();
+    await prepareSyncedAsset(store);
+    let attempts = 0;
+
+    const failed = await executeLocalRetention({
+      now,
+      olderThanDays: 30,
+      removeAsset: async () => {
+        attempts += 1;
+        throw new Error('permission denied for a private path');
+      },
+      store,
+      workspaceId,
+    });
+
+    expect(failed).toEqual({
+      cleanedAssets: 0,
+      failedAssets: 1,
+      protectedAssets: 0,
+      reclaimedBytes: 0,
+      retriedInterruptedAssets: 0,
+    });
+    expect(await store.getAssetCacheRef('eligible')).toMatchObject({
+      cleanupSafeError: {
+        code: 'local_asset_cleanup_failed',
+        message: 'Local asset cleanup failed.',
+        retryable: true,
+      },
+      cleanupState: 'cleanup_failed',
+      cleanupUpdatedAt: now,
+    });
+
+    const succeeded = await executeLocalRetention({
+      now: '2026-07-18T00:01:00.000Z',
+      olderThanDays: 30,
+      removeAsset: async (localAccessKey) => {
+        attempts += 1;
+        expect(localAccessKey).toBe('eligible');
+      },
+      store,
+      workspaceId,
+    });
+
+    expect(attempts).toBe(2);
+    expect(succeeded).toEqual({
+      cleanedAssets: 1,
+      failedAssets: 0,
+      protectedAssets: 0,
+      reclaimedBytes: 100,
+      retriedInterruptedAssets: 0,
+    });
+    expect(await store.getAssetCacheRef('eligible')).toMatchObject({
+      availabilityState: 'missing',
+      cleanupState: 'cleaned',
+      cleanupUpdatedAt: '2026-07-18T00:01:00.000Z',
+    });
+  });
+
+  it('reclaims an interrupted pending cleanup so a missing file converges to cleaned', async () => {
+    const store = createMemoryStore();
+    await prepareSyncedAsset(store, { cleanupState: 'cleanup_pending' });
+    const removed: string[] = [];
+
+    const result = await executeLocalRetention({
+      now,
+      olderThanDays: 30,
+      removeAsset: async (localAccessKey) => {
+        removed.push(localAccessKey);
+      },
+      store,
+      workspaceId,
+    });
+
+    expect(removed).toEqual(['eligible']);
+    expect(result).toEqual({
+      cleanedAssets: 1,
+      failedAssets: 0,
+      protectedAssets: 0,
+      reclaimedBytes: 100,
+      retriedInterruptedAssets: 1,
+    });
+    expect(await store.getAssetCacheRef('eligible')).toMatchObject({
+      cleanupState: 'cleaned',
+      cleanupUpdatedAt: now,
+    });
+  });
 });
 
 function asset(
@@ -114,4 +225,28 @@ function job(assetRefId: string, state: OutboxJob['state']): OutboxJob {
     updatedAt: now,
     workspaceId,
   };
+}
+
+async function prepareSyncedAsset(
+  store: ReturnType<typeof createMemoryStore>,
+  overrides: Partial<AssetCacheRef> = {},
+): Promise<void> {
+  const assetRefId = 'eligible';
+  await store.upsertAssetCacheRef(asset(assetRefId, '2026-06-01T00:00:00.000Z', 100, overrides));
+  const created = await store.createOutboxJob({
+    assetRefId,
+    createdAt: now,
+    deviceId: 'device_1',
+    id: 'job_eligible',
+    idempotencyKey: 'idem_eligible',
+    payloadHash: 'sha256:eligible',
+    workspaceId,
+  } satisfies OutboxJobCreateInput);
+  expect(created.ok).toBe(true);
+  const settled = await store.markOutboxJobTerminal('job_eligible', {
+    now,
+    reason: 'ocr_synced',
+    state: 'synced',
+  });
+  expect(settled.ok).toBe(true);
 }

@@ -20,11 +20,7 @@ import type {
   HelperEnvelope,
   HelperToMainType,
 } from '../helper/index';
-import {
-  type ElectronIpcMainLike,
-  createRendererSafeSuccess,
-  registerIpcHandlers,
-} from '../ipc/index';
+import { type ElectronIpcMainLike, registerIpcHandlers } from '../ipc/index';
 import {
   type OpenExternalUrl,
   createPermissionIpcHandlers,
@@ -32,8 +28,11 @@ import {
 } from '../permissions/index';
 import type { ServerApiClient } from '../server/index';
 import type { DesktopShell } from '../shell/index';
-import { createStatusHandlers } from '../status/index';
-import type { BackpressureConfig, StoreLifecycle } from '../storage/index';
+import type {
+  BackpressureConfig,
+  LocalRetentionExecutionStore,
+  StoreLifecycle,
+} from '../storage/index';
 import {
   type RetryBackoffConfig,
   type SyncAssetReader,
@@ -64,6 +63,7 @@ export type { ElectronIpcMainLike } from '../ipc/index';
 export type DesktopStore = StoreLifecycle &
   CaptureRuntimeStore &
   CaptureHistoryReader &
+  LocalRetentionExecutionStore &
   SyncQueueStore;
 
 export type DesktopShellFactoryContext = {
@@ -80,12 +80,13 @@ export type ElectronMainRuntimeOptions = {
   ipcMain?: ElectronIpcMainLike;
   createStore(): DesktopStore;
   createHelperClient(): CaptureHelperClient & CaptureHelperCommandClient;
-  deviceId: string;
+  resolveDeviceId(): string | Promise<string>;
   tokenStore: TokenStore;
   authClient: Pick<AuthClient, 'getActiveSession'>;
   loginPrompter: LoginPrompter;
   createServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'>;
   readAssetBytes?: SyncAssetReader;
+  removeLocalAsset?(localAccessKey: string): Promise<void>;
   syncIdleDelayMs?: number;
   syncActiveDelayMs?: number;
   syncLocalMaxWorkers?: number;
@@ -137,6 +138,7 @@ export function createElectronMainRuntime(
 
   let admission: CaptureAdmissionController | undefined;
   const ready: Promise<ElectronMainRuntimeReadyState> = options.app.whenReady().then(async () => {
+    const deviceId = await options.resolveDeviceId();
     const sessionStartup = createSessionStartup({
       authClient: options.authClient,
       loginPrompter: options.loginPrompter,
@@ -167,7 +169,7 @@ export function createElectronMainRuntime(
     const captureRuntime = createCaptureRuntime({
       backpressure: options.backpressure,
       client: options.createHelperClient(),
-      deviceId: options.deviceId,
+      deviceId,
       now,
       onHelperEnvelope: options.onHelperEnvelope,
       onPolicyActivated: ({ maxConcurrentOcr }) => {
@@ -229,27 +231,27 @@ export function createElectronMainRuntime(
           store,
           workspaceId,
         }),
-        ...createStatusHandlers({
-          control: captureRuntime.control,
-        }),
         ...createSyncIpcHandlers({
           getWorkerCapacity: () => syncRuntime.getCapacityStatus(),
           now,
           store,
           workspaceId,
         }),
-        ...createDiagnosticsIpcHandlers({ now, store, workspaceId }),
+        ...createDiagnosticsIpcHandlers({
+          now,
+          removeAsset:
+            options.removeLocalAsset ??
+            (async () => {
+              throw new Error('Local asset cleanup is unavailable.');
+            }),
+          store,
+          workspaceId,
+        }),
         ...createPermissionIpcHandlers({
           client: captureRuntime.commandClient,
           statusSource: captureRuntime.control,
           privacySettings,
         }),
-        ...(shell
-          ? {
-              'app.showMainWindow': async () =>
-                createRendererSafeSuccess(await shell.showMainWindow()),
-            }
-          : {}),
       });
     }
 

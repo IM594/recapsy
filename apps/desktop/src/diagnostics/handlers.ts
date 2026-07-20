@@ -1,13 +1,24 @@
-import { type IpcHandlerMap, createRendererSafeSuccess } from '../ipc/index';
-import { type LocalRetentionDryRunStore, planLocalRetentionDryRun } from '../storage/index';
+import {
+  type IpcHandlerMap,
+  createIpcErrorEnvelope,
+  createRendererSafeSuccess,
+} from '../ipc/index';
+import {
+  type LocalRetentionExecutionStore,
+  executeLocalRetention,
+  planLocalRetentionDryRun,
+} from '../storage/index';
 
 export type DiagnosticsIpcHandlerOptions = {
   now(): string;
-  store: LocalRetentionDryRunStore;
+  removeAsset(localAccessKey: string): Promise<void>;
+  store: LocalRetentionExecutionStore;
   workspaceId: string;
 };
 
 export function createDiagnosticsIpcHandlers(options: DiagnosticsIpcHandlerOptions): IpcHandlerMap {
+  let retentionRun: Promise<ReturnType<typeof createRendererSafeSuccess>> | undefined;
+
   return {
     'diagnostics.previewRetention': async (payload) => {
       const input = payload as { olderThanDays: number };
@@ -19,6 +30,28 @@ export function createDiagnosticsIpcHandlers(options: DiagnosticsIpcHandlerOptio
           workspaceId: options.workspaceId,
         }),
       );
+    },
+    'diagnostics.runRetention': async (payload) => {
+      if (retentionRun) {
+        return createIpcErrorEnvelope('unknown', 'Retention cleanup is already running.');
+      }
+
+      const input = payload as { olderThanDays: number };
+      retentionRun = executeLocalRetention({
+        now: options.now(),
+        olderThanDays: input.olderThanDays,
+        removeAsset: options.removeAsset,
+        store: options.store,
+        workspaceId: options.workspaceId,
+      }).then(createRendererSafeSuccess);
+
+      try {
+        return await retentionRun;
+      } catch {
+        return createIpcErrorEnvelope('unknown', 'Local asset cleanup failed.');
+      } finally {
+        retentionRun = undefined;
+      }
     },
   };
 }

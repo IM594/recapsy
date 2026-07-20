@@ -136,6 +136,9 @@
     <section>
       <h2>Local storage</h2>
       <div class="row"><span>30-day review</span><strong id="retention-preview">—</strong></div>
+      <div class="actions">
+        <button id="retention-clean" type="button">Clean reviewed assets</button>
+      </div>
     </section>
 
     <p id="status" class="muted" role="status"></p>
@@ -151,6 +154,7 @@
       const resumeButton = document.getElementById('resume');
       const privacyBundleInput = document.getElementById('privacy-bundle-id');
       const privacyRules = document.getElementById('privacy-rules');
+      const retentionCleanButton = document.getElementById('retention-clean');
       let screenRecordingRequestInFlight = false;
       let screenRecordingRequired = true;
 
@@ -349,6 +353,20 @@
           await refreshAll();
         } catch (error) {
           errorEl.textContent = error.message || 'Resume failed';
+        }
+      });
+
+      retentionCleanButton.addEventListener('click', async () => {
+        try {
+          errorEl.textContent = '';
+          retentionCleanButton.disabled = true;
+          const result = await unwrap(api.diagnosticsRunRetention({ olderThanDays: 30 }));
+          await refreshAll();
+          statusEl.textContent = `Cleaned ${result.cleanedAssets} assets`;
+        } catch (error) {
+          errorEl.textContent = error.message || 'Local asset cleanup failed';
+        } finally {
+          retentionCleanButton.disabled = false;
         }
       });
 

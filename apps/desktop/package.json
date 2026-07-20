@@ -9,7 +9,7 @@
   },
   "scripts": {
     "test": "pnpm run test:unit && pnpm run test:integration",
-    "test:unit": "bun test src tests/architecture-boundaries.test.ts tests/support/loopback-http-server.test.ts",
+    "test:unit": "bun test scripts/release-macos.test.ts src tests/architecture-boundaries.test.ts tests/support/loopback-http-server.test.ts",
     "test:integration": "bun test tests/integration/server-http.test.ts tests/integration/auth-login-sync.test.ts tests/integration/capture-process.test.ts",
     "test:server-http": "bun test tests/integration/server-http.test.ts",
     "test:auth-login-sync": "bun test tests/integration/auth-login-sync.test.ts",
@@ -19,6 +19,12 @@
     "test:macos": "bash macos/test-capture-core.sh && pnpm run package:macos && bun scripts/test-packaged-capture-bundle.ts && pnpm run test:packaged-layout",
     "build:capture": "bash macos/build-capture-bundle.sh",
     "package:macos": "pnpm run build:capture && pnpm run build && bun scripts/package-macos.ts",
+    "release:plan": "bun scripts/release-macos.ts plan",
+    "release:stage": "bun scripts/release-macos.ts stage",
+    "release:assemble": "bun scripts/release-macos.ts assemble",
+    "release:notarize": "bun scripts/release-macos.ts notarize",
+    "release:verify": "bun scripts/release-macos.ts verify",
+    "release:verify-rollback": "bun scripts/release-macos.ts verify-rollback",
     "typecheck": "tsc --noEmit && pnpm run typecheck:tests",
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "lint": "biome check scripts/ src/ tests/",
@@ -30,6 +36,7 @@
   "devDependencies": {
     "@electron/asar": "3.4.1",
     "@electron/packager": "18.4.4",
+    "@electron/universal": "3.0.6",
     "@types/bun": "^1.2.0",
     "@types/node": "^24.9.0",
     "electron": "^43.1.0"

@@ -14,10 +14,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.15.1
           cache: pnpm
 
       - uses: oven-sh/setup-bun@v2
@@ -27,17 +29,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: pnpm lint
-
-      - name: Type check
-        run: pnpm typecheck
-
-      - name: Architecture boundaries
-        run: pnpm architecture:check
-
-      - name: Test
-        run: pnpm test
+      - name: Verify goal
+        run: pnpm verify:goal
 
   desktop-macos:
     runs-on: macos-14
@@ -46,10 +39,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.15.1
           cache: pnpm
 
       - uses: oven-sh/setup-bun@v2
@@ -62,4 +57,52 @@ jobs:
       - name: Test macOS capture and packaged layout
         env:
           RECAPSY_CAPTURE_SIGN_IDENTITY: "-"
-        run: pnpm --filter @recapsy/desktop run test:macos
+        run: pnpm verify:goal:macos
+
+  server-postgres:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: recapsy_test
+          POSTGRES_PASSWORD: recapsy_test_password
+          POSTGRES_USER: recapsy_test
+        options: >-
+          --health-cmd "pg_isready -U recapsy_test -d recapsy_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15.1
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Migrate PostgreSQL test database
+        working-directory: apps/server
+        env:
+          DATABASE_URL: postgresql://recapsy_test:recapsy_test_password@localhost:5432/recapsy_test
+        run: pnpm db:migrate
+
+      - name: Verify PostgreSQL lease recovery and capture retention
+        env:
+          RECAPSY_TEST_DATABASE_URL: postgresql://recapsy_test:recapsy_test_password@localhost:5432/recapsy_test
+        run: pnpm --filter @recapsy/server run test:postgres

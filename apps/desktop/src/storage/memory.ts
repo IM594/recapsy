@@ -3,6 +3,7 @@ import { settleServerCapture as settleStoredServerCapture } from './reconciliati
 import type {
   AssetCacheRef,
   CaptureOutboxEntryCreateInput,
+  ClaimAssetCleanupInput,
   ClaimRetryableOutboxJobInput,
   LocalCapturePolicyRule,
   OperationalStoreError,
@@ -20,8 +21,10 @@ import type {
   PolicyCacheRead,
   PolicyCacheReadOptions,
   RecoverInterruptedOutboxJobInput,
+  RecoverPendingAssetCleanupInput,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
+  SetAssetCleanupStateInput,
   SettingsCache,
   SyncCursor,
   SyncCursorKind,
@@ -426,6 +429,76 @@ class InMemoryOperationalStore {
     this.assetRefs.set(input.assetRefId, updated);
 
     return success(cloneAssetRef(updated));
+  }
+
+  async claimAssetCleanup(input: ClaimAssetCleanupInput): Promise<AssetCacheRef | null> {
+    const asset = this.assetRefs.get(input.assetRefId);
+
+    if (!asset || (asset.cleanupState !== 'retained' && asset.cleanupState !== 'cleanup_failed')) {
+      return null;
+    }
+
+    const claimed: AssetCacheRef = {
+      ...asset,
+      cleanupSafeError: undefined,
+      cleanupState: 'cleanup_pending',
+      cleanupUpdatedAt: input.now,
+    };
+    this.assetRefs.set(input.assetRefId, claimed);
+    return cloneAssetRef(claimed);
+  }
+
+  async settleAssetCleanup(
+    input: SetAssetCleanupStateInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>> {
+    const asset = this.assetRefs.get(input.assetRefId);
+
+    if (!asset) {
+      return failure(notFound('asset_ref_not_found', 'Asset ref was not found.'));
+    }
+    if (asset.cleanupState !== 'cleanup_pending') {
+      return failure({
+        code: 'asset_cleanup_conflict',
+        message: 'Asset cleanup is no longer pending.',
+      });
+    }
+
+    const updated: AssetCacheRef = {
+      ...asset,
+      availabilityCheckedAt:
+        input.cleanupState === 'cleaned' ? input.now : asset.availabilityCheckedAt,
+      availabilitySafeError:
+        input.cleanupState === 'cleaned' ? undefined : asset.availabilitySafeError,
+      availabilityState: input.cleanupState === 'cleaned' ? 'missing' : asset.availabilityState,
+      cleanupSafeError: input.cleanupSafeError ? { ...input.cleanupSafeError } : undefined,
+      cleanupState: input.cleanupState,
+      cleanupUpdatedAt: input.now,
+    };
+    this.assetRefs.set(input.assetRefId, updated);
+    return success(cloneAssetRef(updated));
+  }
+
+  async recoverPendingAssetCleanup(input: RecoverPendingAssetCleanupInput): Promise<number> {
+    let recovered = 0;
+
+    for (const [assetRefId, asset] of this.assetRefs) {
+      if (asset.workspaceId !== input.workspaceId || asset.cleanupState !== 'cleanup_pending') {
+        continue;
+      }
+      this.assetRefs.set(assetRefId, {
+        ...asset,
+        cleanupSafeError: {
+          code: 'local_asset_cleanup_interrupted',
+          message: 'Local asset cleanup was interrupted.',
+          retryable: true,
+        },
+        cleanupState: 'cleanup_failed',
+        cleanupUpdatedAt: input.now,
+      });
+      recovered += 1;
+    }
+
+    return recovered;
   }
 
   async deleteAssetCacheRef(assetRefId: string): Promise<boolean> {

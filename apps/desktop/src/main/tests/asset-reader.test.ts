@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   createLocalAssetReader,
+  createLocalAssetRemover,
   isResolvedPathWithinRoot,
   resolveCaptureAssetPath,
 } from '../asset-reader';
@@ -147,6 +148,36 @@ describe('createLocalAssetReader', () => {
 
     expectUnreadable(thrown);
     expectNoPathLeak(thrown, root);
+  });
+});
+
+describe('createLocalAssetRemover', () => {
+  it('deletes only a relative asset within the fixed root and treats a missing retry as complete', async () => {
+    const root = makeAssetRoot();
+    mkdirSync(path.join(root, 'cap_1'), { recursive: true });
+    const assetPath = path.join(root, 'cap_1', 'screenshot.webp');
+    writeFileSync(assetPath, new Uint8Array([1, 2, 3]));
+    const remove = createLocalAssetRemover({ assetRoot: root });
+
+    await remove('cap_1/screenshot.webp');
+    await remove('cap_1/screenshot.webp');
+
+    expect(() => readFileSync(assetPath)).toThrow();
+  });
+
+  it('rejects a cleanup path escape without exposing the protected path', async () => {
+    const parent = makeAssetRoot();
+    const root = path.join(parent, 'captures');
+    const protectedPath = path.join(parent, 'protected.webp');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(protectedPath, new Uint8Array([9, 9, 9]));
+    const remove = createLocalAssetRemover({ assetRoot: root });
+
+    const error = await remove('../protected.webp').catch((reason: unknown) => reason);
+
+    expectUnreadable(error);
+    expectNoPathLeak(error, root, protectedPath);
+    expect(Uint8Array.from(readFileSync(protectedPath))).toEqual(new Uint8Array([9, 9, 9]));
   });
 });
 

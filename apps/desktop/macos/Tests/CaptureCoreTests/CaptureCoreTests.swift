@@ -739,7 +739,7 @@ final class CaptureSourcePolicyTests: XCTestCase {
         XCTAssertEqual(redacted.action, .redactContext)
     }
 
-    func testUnobservableNonAllowRuleFailsClosedInsteadOfBeingSilentlyIgnored() {
+    func testDomainRuleWithoutASafeUrlDoesNotBlockAnUnrelatedCapture() {
         let decision = CaptureSourcePolicyEvaluator.decide(
             policy: policy(rules: [
                 rule(
@@ -752,7 +752,7 @@ final class CaptureSourcePolicyTests: XCTestCase {
             source: safari
         )
 
-        XCTAssertEqual(decision.action, .blockCapture)
+        XCTAssertEqual(decision.action, .allow)
     }
 }
 

@@ -44,17 +44,32 @@ WEBP_BUILD_FLAGS=(
 # the self-signed cert ADR 0009 pins for dev. Not a secret — a local keychain
 # identity name.
 SIGN_IDENTITY="${RECAPSY_CAPTURE_SIGN_IDENTITY:-Recapsy Developer}"
+TARGET_ARCH="${RECAPSY_CAPTURE_ARCH:-$(uname -m)}"
 
-echo "==> swift build -c ${BUILD_CONFIG} (arm64 libwebp: ${WEBP_PREFIX})"
-swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" "${WEBP_BUILD_FLAGS[@]}"
+if [[ "${TARGET_ARCH}" != "arm64" && "${TARGET_ARCH}" != "x86_64" ]]; then
+	echo "error: capture builds support only arm64 or x86_64." >&2
+	exit 1
+fi
 
-BIN_DIR="$(swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" "${WEBP_BUILD_FLAGS[@]}" --show-bin-path)"
+if [[ "$(uname -m)" != "${TARGET_ARCH}" ]]; then
+	echo "error: capture builds must run natively for the requested architecture." >&2
+	exit 1
+fi
+
+echo "==> swift build -c ${BUILD_CONFIG} (${TARGET_ARCH} libwebp: ${WEBP_PREFIX})"
+swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" --arch "${TARGET_ARCH}" "${WEBP_BUILD_FLAGS[@]}"
+
+BIN_DIR="$(swift build --package-path "${SCRIPT_DIR}" -c "${BUILD_CONFIG}" --arch "${TARGET_ARCH}" "${WEBP_BUILD_FLAGS[@]}" --show-bin-path)"
 CAPTURE_BIN="${BIN_DIR}/RecapsyCapture"
 LAUNCHER_BIN="${BIN_DIR}/CaptureLauncher"
 
 for bin in "${CAPTURE_BIN}" "${LAUNCHER_BIN}"; do
 	if [[ ! -x "${bin}" ]]; then
 		echo "error: expected build product missing: ${bin}" >&2
+		exit 1
+	fi
+	if [[ "$(lipo -archs "${bin}")" != "${TARGET_ARCH}" ]]; then
+		echo "error: capture executable has an unexpected architecture: ${bin}" >&2
 		exit 1
 	fi
 done

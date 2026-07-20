@@ -5,7 +5,7 @@ export {
 } from './memory';
 export { toRendererSafeAssetRef } from './asset-dto';
 export { reconcileAssetRefs, settleServerCapture } from './reconciliation';
-export { planLocalRetentionDryRun } from './retention';
+export { executeLocalRetention, planLocalRetentionDryRun } from './retention';
 export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
@@ -18,6 +18,9 @@ export type {
   LocalRetentionDryRun,
   LocalRetentionDryRunOptions,
   LocalRetentionDryRunStore,
+  LocalRetentionExecution,
+  LocalRetentionExecutionOptions,
+  LocalRetentionExecutionStore,
 } from './retention';
 export type {
   SqliteDatabase,
@@ -43,6 +46,7 @@ export type {
   CaptureOutboxEntryCreateInput,
   CaptureOutboxPayload,
   CaptureOutboxPayloadInput,
+  ClaimAssetCleanupInput,
   CapturePrivacyDecision,
   ClaimRetryableOutboxJobInput,
   HelperPermissionState,
@@ -63,11 +67,13 @@ export type {
   PolicyCacheRead,
   PolicyCacheReadOptions,
   RecoverInterruptedOutboxJobInput,
+  RecoverPendingAssetCleanupInput,
   RendererSafeAssetRef,
   SafeOperationalError,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
   SettingsCache,
+  SetAssetCleanupStateInput,
   StoreLifecycle,
   StoredOcrResult,
   SyncCursor,

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { SyncAssetReader } from '../sync/index';
 
@@ -117,6 +117,8 @@ export type LocalAssetReaderOptions = {
   assetRoot: string;
 };
 
+export type LocalAssetRemover = (localAccessKey: string) => Promise<void>;
+
 /**
  * Builds the real `SyncAssetReader` bound to a fixed local asset root. Every
  * illegal key or read failure fails closed with `local_asset_unreadable`.
@@ -136,4 +138,43 @@ export function createLocalAssetReader(options: LocalAssetReaderOptions): SyncAs
       throw localAssetUnreadable();
     }
   };
+}
+
+/**
+ * Uses the same fixed-root path validation as reads. `ENOENT` is a successful
+ * retry outcome: the prior process may have deleted the file before crashing
+ * while its SQLite asset state was still `cleanup_pending`.
+ */
+export function createLocalAssetRemover(options: LocalAssetReaderOptions): LocalAssetRemover {
+  const root = path.resolve(options.assetRoot);
+
+  return async (localAccessKey: string): Promise<void> => {
+    const resolvedPath = resolveCaptureAssetPath(root, localAccessKey);
+
+    try {
+      await unlink(resolvedPath);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        return;
+      }
+      throw localAssetCleanupFailed();
+    }
+  };
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
+
+function localAssetCleanupFailed(): Error {
+  return Object.assign(new Error('Local asset cleanup failed.'), {
+    code: 'local_asset_cleanup_failed',
+    retryable: true,
+    safeMessage: 'Local asset cleanup failed.',
+  });
 }

@@ -15,6 +15,14 @@ export type IpcHandler = (payload: unknown) => Promise<IpcResponseEnvelope<unkno
 export type IpcHandlerMap = Partial<Record<IpcChannelName, IpcHandler>>;
 
 export function registerIpcHandlers(ipcMain: ElectronIpcMainLike, handlers: IpcHandlerMap): void {
+  const missingChannels = IPC_CHANNEL_REGISTRY.filter(
+    ({ channel }) => typeof handlers[channel] !== 'function',
+  ).map(({ channel }) => channel);
+
+  if (missingChannels.length > 0) {
+    throw new Error(`Missing IPC handlers for active channels: ${missingChannels.join(', ')}`);
+  }
+
   for (const definition of IPC_CHANNEL_REGISTRY) {
     ipcMain.handle(definition.channel, async (_event, payload) => {
       const validation = validateIpcRequest(definition.channel, payload);
@@ -25,10 +33,7 @@ export function registerIpcHandlers(ipcMain: ElectronIpcMainLike, handlers: IpcH
 
       const handler = handlers[definition.channel];
       if (!handler) {
-        return createIpcErrorEnvelope(
-          'unknown',
-          `${definition.channel} has no runtime implementation in this Electron main phase.`,
-        );
+        throw new Error(`Missing IPC handler after registration: ${definition.channel}`);
       }
 
       return handler(validation.value);

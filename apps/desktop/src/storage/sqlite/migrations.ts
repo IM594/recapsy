@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -12,6 +12,7 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
   }
 
   ensureAssetAvailabilityColumns(database);
+  ensureAssetCleanupColumns(database);
   migrateOutboxJobsToV2(database);
   ensureOutboxLeaseColumns(database);
   migratePolicyCacheToWorkspaceDevice(database);
@@ -138,6 +139,26 @@ function ensureAssetAvailabilityColumns(database: SqliteDatabase): void {
        CHECK (
          availability_safe_error_json IS NULL OR json_valid(availability_safe_error_json)
        )`,
+    );
+  }
+}
+
+function ensureAssetCleanupColumns(database: SqliteDatabase): void {
+  const columns = new Set(
+    database
+      .prepare<{ name: string }>('PRAGMA table_info(asset_cache_refs)')
+      .all()
+      .map((column) => column.name),
+  );
+
+  if (!columns.has('cleanup_updated_at')) {
+    database.run('ALTER TABLE asset_cache_refs ADD COLUMN cleanup_updated_at TEXT');
+  }
+  if (!columns.has('cleanup_safe_error_json')) {
+    database.run(
+      `ALTER TABLE asset_cache_refs
+       ADD COLUMN cleanup_safe_error_json TEXT
+       CHECK (cleanup_safe_error_json IS NULL OR json_valid(cleanup_safe_error_json))`,
     );
   }
 }
@@ -291,6 +312,10 @@ const schemaStatements = [
     size_bytes INTEGER NOT NULL CHECK (size_bytes >= 0),
     cleanup_state TEXT NOT NULL CHECK (
       cleanup_state IN ('retained', 'cleanup_pending', 'cleaned', 'cleanup_failed')
+    ),
+    cleanup_updated_at TEXT,
+    cleanup_safe_error_json TEXT CHECK (
+      cleanup_safe_error_json IS NULL OR json_valid(cleanup_safe_error_json)
     ),
     availability_state TEXT NOT NULL DEFAULT 'available' CHECK (
       availability_state IN ('available', 'missing', 'unreadable')

@@ -56,6 +56,8 @@ export async function startServerHttpHarness(
       OCR_PROXY_TIMEOUT_MS: 60_000,
       PORT: 0,
       PROVIDER_ENCRYPTION_SECRET: 'test-provider-secret-with-enough-entropy',
+      RETENTION_WORKER_BATCH_SIZE: 100,
+      RETENTION_WORKER_INTERVAL_MS: 60_000,
       SESSION_SECRET: 'test-session-secret-with-enough-entropy',
     };
     const aiRuntime =

@@ -37,9 +37,10 @@ import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
 import { startDesktopSingleInstance } from './application-instance';
 import { resolveDesktopApplicationPaths } from './application-layout';
 import { configureDesktopApplicationProfile } from './application-profile';
-import { createLocalAssetReader } from './asset-reader';
+import { createLocalAssetReader, createLocalAssetRemover } from './asset-reader';
 import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';
+import { resolveDesktopDeviceId } from './device-identity';
 import { createHttpTransport } from './http-transport';
 import { type ElectronMainRuntimeOptions, createElectronMainRuntime } from './runtime';
 import { createSafeStorageSecretStore } from './safe-storage';
@@ -57,10 +58,10 @@ import {
  * so it is verified by manual smoke test instead — see the task notes for
  * that run.
  *
- * All configurable values below (capture override, SQLite path, device id,
- * server endpoint) are read from environment variables with dev-only
- * fallbacks; none of the fallbacks encode a secret, a production
- * domain/port, or a specific person's filesystem path.
+ * Capture override, SQLite path, and server endpoint can be configured by the
+ * environment; no fallback encodes a secret, a production domain/port, or a
+ * specific person's filesystem path. The device identity is generated and
+ * persisted locally instead, with a development-only explicit override.
  *
  * Runtime paths come from Electron's application and resources roots, never
  * from the caller's working directory. Development and packaged execution
@@ -68,7 +69,7 @@ import {
  */
 const helperCommandOverride = process.env.RECAPSY_DESKTOP_HELPER_COMMAND;
 const helperArgumentOverride = process.env.RECAPSY_DESKTOP_HELPER_ARGS;
-const deviceId = process.env.RECAPSY_DESKTOP_DEVICE_ID ?? 'dev-device';
+const developmentDeviceIdOverride = process.env.RECAPSY_DESKTOP_DEV_DEVICE_ID;
 // Dev-only default matches `apps/server`'s own dev default (`PORT=3000` in
 // `apps/server/.env.example`), not a production domain or port.
 const serverEndpoint = process.env.RECAPSY_SERVER_ENDPOINT ?? 'http://localhost:3000';
@@ -127,6 +128,12 @@ let captureAssetReader: SyncAssetReader | undefined;
 function resolveCaptureAssetReader(): SyncAssetReader {
   captureAssetReader ??= createLocalAssetReader({ assetRoot: resolveCaptureAssetRoot() });
   return captureAssetReader;
+}
+
+let captureAssetRemover: ReturnType<typeof createLocalAssetRemover> | undefined;
+function resolveCaptureAssetRemover(): ReturnType<typeof createLocalAssetRemover> {
+  captureAssetRemover ??= createLocalAssetRemover({ assetRoot: resolveCaptureAssetRoot() });
+  return captureAssetRemover;
 }
 
 /**
@@ -244,6 +251,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
       endpoint: serverEndpoint,
       transport: fetchTransport,
     }),
+  removeLocalAsset: async (localAccessKey) => resolveCaptureAssetRemover()(localAccessKey),
   createShell: (context) => {
     const acceptancePublisher = createDesktopAcceptancePublisher({
       accessTokenProvider: {
@@ -401,7 +409,6 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
       maxActiveOutboxJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
     });
   },
-  deviceId,
   hideDockIcon: devVisibilityEnabled ? false : undefined,
   ipcMain,
   loginPrompter,
@@ -415,6 +422,12 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
   // fail-closed default. Bound to the same `resolveCaptureAssetRoot()` the
   // capture process is handed above, so writer and reader share one root.
   readAssetBytes: (localAccessKey) => resolveCaptureAssetReader()(localAccessKey),
+  resolveDeviceId: () =>
+    resolveDesktopDeviceId({
+      developmentOverride: developmentDeviceIdOverride,
+      directory: app.getPath('userData'),
+      isDevelopment: !app.isPackaged,
+    }),
   storageAdmission: {
     minAvailableBytes: 512 * 1024 * 1024,
     probe: () => createLocalStorageAdmissionProbe({ assetRoot: resolveCaptureAssetRoot() })(),

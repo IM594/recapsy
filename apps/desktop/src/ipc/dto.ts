@@ -1,45 +1,5 @@
 import type { IpcError } from './errors';
 
-export type SafeSessionSummary = {
-  state: 'signed_out' | 'signed_in' | 'expired';
-  userId?: string;
-  expiresAt?: string;
-  workspaces: WorkspaceSummaryDto[];
-};
-
-export type RuntimeStatusDto = {
-  status: 'starting' | 'running' | 'paused' | 'stopping' | 'stopped';
-  menuBarActive: boolean;
-  capturePaused: boolean;
-  capturePauseReason?: 'user' | 'backpressure' | 'storage' | 'policy' | 'permission';
-  network: 'online' | 'offline' | 'unknown';
-  helper: {
-    status: 'not_started' | 'starting' | 'ready' | 'degraded' | 'stopped';
-    version?: string;
-    lastHeartbeatAt?: string;
-  };
-};
-
-export type WorkspaceSummaryDto = {
-  id: string;
-  displayName: string;
-  role: 'owner' | 'admin' | 'member' | 'viewer';
-  current: boolean;
-  quota: {
-    capturesUsed: number;
-    capturesLimit: number | null;
-  };
-  capabilities: WorkspaceCapabilitiesDto;
-};
-
-export type WorkspaceCapabilitiesDto = {
-  capture: boolean;
-  sync: boolean;
-  ocr: boolean;
-  timeline: boolean;
-  search: boolean;
-};
-
 export type CaptureStatusDto = {
   state: 'idle' | 'capturing' | 'paused' | 'blocked' | 'degraded';
   paused: boolean;
@@ -69,17 +29,6 @@ export type PermissionStatusDto = {
 
 export type PrivacySettingsOpenResultDto = {
   opened: true;
-};
-
-export type AppWindowActionResultDto = {
-  shown: true;
-};
-
-export type CaptureEventSummaryDto = {
-  id: string;
-  observedAt: string;
-  state: 'accepted' | 'skipped' | 'blocked' | 'failed';
-  reason?: string;
 };
 
 export type LocalCapturePolicyRuleDto = {
@@ -115,91 +64,6 @@ export type SyncQueueSummaryDto = {
   lastError?: IpcError;
 };
 
-export type OcrJobSummaryDto = {
-  id: string;
-  state: 'queued' | 'uploading' | 'processing' | 'completed' | 'failed' | 'cancelled';
-  captureId?: string;
-  provider: {
-    configured: boolean;
-    available: boolean;
-  };
-  cleanupState: 'not_started' | 'pending' | 'cleaned' | 'failed';
-  createdAt: string;
-  updatedAt: string;
-  lastError?: IpcError;
-};
-
-export type TimelineQueryRequestDto = {
-  cursor?: string;
-  limit?: number;
-  range?: {
-    from?: string;
-    to?: string;
-  };
-};
-
-export type TimelineItemDto = {
-  id: string;
-  capturedAt: string;
-  sourceApp?: string;
-  title?: string;
-  snippet?: string;
-  ocrJobId?: string;
-};
-
-export type TimelineQueryResponseDto = {
-  items: TimelineItemDto[];
-  nextCursor?: string;
-  incomplete: boolean;
-};
-
-export type SearchQueryRequestDto = {
-  query: string;
-  cursor?: string;
-  limit?: number;
-};
-
-export type SearchResultDto = {
-  id: string;
-  capturedAt: string;
-  sourceApp?: string;
-  title?: string;
-  snippet: string;
-  score?: number;
-};
-
-export type SearchQueryResponseDto = {
-  items: SearchResultDto[];
-  nextCursor?: string;
-  incomplete: boolean;
-};
-
-export type SettingsRuntimeDto = {
-  capture: {
-    enabled: boolean;
-    schedule: 'disabled' | 'available';
-  };
-  diagnostics: {
-    enabled: boolean;
-  };
-};
-
-export type DiagnosticsLogEntryDto = {
-  id: string;
-  level: 'debug' | 'info' | 'warn' | 'error';
-  event: string;
-  occurredAt: string;
-  errorCode?: string;
-};
-
-export type DiagnosticsBundleDto = {
-  id: string;
-  createdAt: string;
-  containsImages: false;
-  containsOcrText: false;
-  redacted: true;
-};
-
 export type RetentionPreviewDto = {
   cutoffAt: string;
   eligibleAssets: number;
@@ -207,6 +71,14 @@ export type RetentionPreviewDto = {
   olderThanDays: number;
   protectedAssets: number;
   reclaimableBytes: number;
+};
+
+export type RetentionExecutionDto = {
+  cleanedAssets: number;
+  failedAssets: number;
+  protectedAssets: number;
+  reclaimedBytes: number;
+  retriedInterruptedAssets: number;
 };
 
 export type RendererSafeDtoResult =

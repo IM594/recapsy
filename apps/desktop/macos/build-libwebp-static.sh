@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
-# Builds the exact libwebp archive consumed by the arm64 capture helper.
+# Builds the exact libwebp archive consumed by the native capture helper.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build"
-ARCHITECTURE="arm64"
+ARCHITECTURE="${RECAPSY_CAPTURE_ARCH:-$(uname -m)}"
 DEPLOYMENT_TARGET="14.0"
 VERSION="1.6.0"
 SOURCE_SHA256="e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564"
 SOURCE_URL="https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-${VERSION}.tar.gz"
 
+if [[ "${ARCHITECTURE}" != "arm64" && "${ARCHITECTURE}" != "x86_64" ]]; then
+	echo "error: capture builds support only arm64 or x86_64." >&2
+	exit 1
+fi
+
 if [[ "$(uname -m)" != "${ARCHITECTURE}" ]]; then
-	echo "error: arm64 libwebp builds require an arm64 macOS host." >&2
+	echo "error: capture builds must run natively for the requested architecture." >&2
 	exit 1
 fi
 

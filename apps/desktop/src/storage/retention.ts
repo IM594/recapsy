@@ -1,4 +1,11 @@
-import type { AssetCacheRef, OutboxJob, OutboxJobListFilter } from './types';
+import type {
+  AssetCacheRef,
+  OperationalStoreResult,
+  OutboxJob,
+  OutboxJobListFilter,
+  RecoverPendingAssetCleanupInput,
+  SetAssetCleanupStateInput,
+} from './types';
 
 export type LocalRetentionDryRun = {
   cutoffAt: string;
@@ -21,10 +28,34 @@ export type LocalRetentionDryRunOptions = {
   workspaceId: string;
 };
 
+export type LocalRetentionExecution = {
+  cleanedAssets: number;
+  failedAssets: number;
+  protectedAssets: number;
+  reclaimedBytes: number;
+  retriedInterruptedAssets: number;
+};
+
+export type LocalRetentionExecutionStore = LocalRetentionDryRunStore & {
+  claimAssetCleanup(input: { assetRefId: string; now: string }): Promise<AssetCacheRef | null>;
+  recoverPendingAssetCleanup(input: RecoverPendingAssetCleanupInput): Promise<number>;
+  settleAssetCleanup(
+    input: SetAssetCleanupStateInput,
+  ): Promise<OperationalStoreResult<AssetCacheRef>>;
+};
+
+export type LocalRetentionExecutionOptions = {
+  now: string;
+  olderThanDays: number;
+  removeAsset(localAccessKey: string): Promise<void>;
+  store: LocalRetentionExecutionStore;
+  workspaceId: string;
+};
+
 /**
- * Produces a conservative, read-only cleanup preview. It intentionally never
- * marks or deletes files: only an explicit retention policy can authorize a
- * real cleanup worker in a later product increment.
+ * Produces a conservative, read-only cleanup preview. The explicit cleanup
+ * action uses the same eligibility predicate, so review and execution cannot
+ * drift apart.
  */
 export async function planLocalRetentionDryRun(
   options: LocalRetentionDryRunOptions,
@@ -39,7 +70,7 @@ export async function planLocalRetentionDryRun(
   let reclaimableBytes = 0;
 
   for (const asset of assets) {
-    if (isEligibleForPreview(asset, jobsByAsset.get(asset.assetRefId) ?? [], cutoffAt)) {
+    if (isEligibleForCleanup(asset, jobsByAsset.get(asset.assetRefId) ?? [], cutoffAt)) {
       eligibleAssets += 1;
       reclaimableBytes += asset.sizeBytes;
     }
@@ -54,6 +85,82 @@ export async function planLocalRetentionDryRun(
     reclaimableBytes,
   };
 }
+
+/**
+ * Deletes only assets that the same conservative preview would permit. Every
+ * attempt first persists `cleanup_pending`; completion or failure then remains
+ * inspectable on the asset reference. A prior pending state means the process
+ * stopped between those writes, so it is retried on the next explicit run.
+ */
+export async function executeLocalRetention(
+  options: LocalRetentionExecutionOptions,
+): Promise<LocalRetentionExecution> {
+  const cutoffAt = cutoffFor(options.now, options.olderThanDays);
+  const retriedInterruptedAssets = await options.store.recoverPendingAssetCleanup({
+    now: options.now,
+    workspaceId: options.workspaceId,
+  });
+  const [assets, jobs] = await Promise.all([
+    options.store.listAssetCacheRefs(options.workspaceId),
+    options.store.listOutboxJobs({ workspaceId: options.workspaceId }),
+  ]);
+  const jobsByAsset = groupJobsByAsset(jobs);
+  let cleanedAssets = 0;
+  let failedAssets = 0;
+  let reclaimedBytes = 0;
+  let eligibleAssets = 0;
+
+  for (const asset of assets) {
+    if (!isEligibleForCleanup(asset, jobsByAsset.get(asset.assetRefId) ?? [], cutoffAt)) {
+      continue;
+    }
+    eligibleAssets += 1;
+    const claimed = await options.store.claimAssetCleanup({
+      assetRefId: asset.assetRefId,
+      now: options.now,
+    });
+    if (!claimed) {
+      continue;
+    }
+
+    try {
+      await options.removeAsset(claimed.localAccessKey);
+      const settled = await options.store.settleAssetCleanup({
+        assetRefId: claimed.assetRefId,
+        cleanupState: 'cleaned',
+        now: options.now,
+      });
+      if (!settled.ok) {
+        failedAssets += 1;
+        continue;
+      }
+      cleanedAssets += 1;
+      reclaimedBytes += claimed.sizeBytes;
+    } catch {
+      await options.store.settleAssetCleanup({
+        assetRefId: claimed.assetRefId,
+        cleanupSafeError: LOCAL_ASSET_CLEANUP_FAILED,
+        cleanupState: 'cleanup_failed',
+        now: options.now,
+      });
+      failedAssets += 1;
+    }
+  }
+
+  return {
+    cleanedAssets,
+    failedAssets,
+    protectedAssets: assets.length - eligibleAssets,
+    reclaimedBytes,
+    retriedInterruptedAssets,
+  };
+}
+
+const LOCAL_ASSET_CLEANUP_FAILED = {
+  code: 'local_asset_cleanup_failed',
+  message: 'Local asset cleanup failed.',
+  retryable: true,
+} as const;
 
 function cutoffFor(now: string, olderThanDays: number): string {
   if (!Number.isInteger(olderThanDays) || olderThanDays < 1) {
@@ -78,13 +185,13 @@ function groupJobsByAsset(jobs: readonly OutboxJob[]): Map<string, OutboxJob[]> 
   return jobsByAsset;
 }
 
-function isEligibleForPreview(
+function isEligibleForCleanup(
   asset: AssetCacheRef,
   jobs: readonly OutboxJob[],
   cutoffAt: string,
 ): boolean {
   return (
-    asset.cleanupState === 'retained' &&
+    (asset.cleanupState === 'retained' || asset.cleanupState === 'cleanup_failed') &&
     asset.availabilityState === 'available' &&
     asset.createdAt < cutoffAt &&
     jobs.length > 0 &&

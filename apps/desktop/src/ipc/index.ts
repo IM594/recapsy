@@ -12,30 +12,14 @@ export type {
 } from './contracts';
 export { assertRendererSafeDto } from './dto';
 export type {
-  AppWindowActionResultDto,
-  CaptureEventSummaryDto,
   CaptureStatusDto,
   LocalCapturePolicyRuleDto,
   LocalCapturePolicyRulesDto,
-  DiagnosticsBundleDto,
-  DiagnosticsLogEntryDto,
-  OcrJobSummaryDto,
   PermissionStatusDto,
   PrivacySettingsOpenResultDto,
   RetentionPreviewDto,
   RendererSafeDtoResult,
-  RuntimeStatusDto,
-  SafeSessionSummary,
-  SearchQueryRequestDto,
-  SearchQueryResponseDto,
-  SearchResultDto,
-  SettingsRuntimeDto,
   SyncQueueSummaryDto,
-  TimelineItemDto,
-  TimelineQueryRequestDto,
-  TimelineQueryResponseDto,
-  WorkspaceCapabilitiesDto,
-  WorkspaceSummaryDto,
 } from './dto';
 export {
   IPC_ERROR_CODES,

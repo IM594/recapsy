@@ -9,6 +9,7 @@ import CWebP
 struct EncodedScreenshot {
     let imageData: Data
     let source: CaptureWindowIdentity
+    let sourceContext: CaptureSourceContext?
     let frameFingerprint: CaptureFrameFingerprint
     let policyDecision: CaptureSourcePolicyAction
 }
@@ -154,12 +155,30 @@ enum ScreenshotCapturer {
                 windowId: Int(window.windowID),
                 ownerProcessId: Int(ownerProcessId)
             )
+            let sourceIdentity = CaptureSourceIdentity(
+                applicationName: application.name,
+                bundleId: application.bundleId
+            )
+            let sourcePolicyDecision = CaptureSourcePolicyEvaluator.decide(
+                policy: policy,
+                source: sourceIdentity
+            )
+            guard sourcePolicyDecision.action != .blockCapture else {
+                return .failure(.policyDenied)
+            }
+
+            // Domain policy is intentionally evaluated only after a direct AX
+            // sample produced a sanitized host. A missing Accessibility grant or
+            // URL therefore omits metadata instead of blocking unrelated apps.
+            let sourceContext = AccessibilityContextSampler.sample(
+                processId: Int32(ownerProcessId),
+                application: application,
+                windowId: Int(window.windowID)
+            )
             let policyDecision = CaptureSourcePolicyEvaluator.decide(
                 policy: policy,
-                source: CaptureSourceIdentity(
-                    applicationName: application.name,
-                    bundleId: application.bundleId
-                )
+                source: sourceIdentity,
+                context: sourceContext
             )
             guard policyDecision.action != .blockCapture else {
                 return .failure(.policyDenied)
@@ -187,7 +206,8 @@ enum ScreenshotCapturer {
                 height: CaptureFrameEconomy.sampleHeight,
                 context: CaptureFrameContext(
                     bundleId: application.bundleId,
-                    windowId: Int(window.windowID)
+                    windowId: Int(window.windowID),
+                    contextFingerprint: sourceContext?.fingerprint
                 ),
                 previous: previousFingerprint
             )
@@ -205,6 +225,7 @@ enum ScreenshotCapturer {
                 return .success(EncodedScreenshot(
                     imageData: encoded,
                     source: source,
+                    sourceContext: sourceContext,
                     frameFingerprint: fingerprint,
                     policyDecision: policyDecision.action
                 ))

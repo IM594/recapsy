@@ -188,6 +188,8 @@ export type AssetCacheRef = {
   mimeType: string;
   sizeBytes: number;
   cleanupState: AssetCleanupState;
+  cleanupUpdatedAt?: string;
+  cleanupSafeError?: SafeOperationalError;
   availabilityState: AssetAvailabilityState;
   availabilityCheckedAt?: string;
   availabilitySafeError?: SafeOperationalError;
@@ -213,6 +215,23 @@ export type UpdateAssetRefAvailabilityInput = {
   availabilityState: AssetAvailabilityState;
   now: string;
   availabilitySafeError?: SafeOperationalError;
+};
+
+export type ClaimAssetCleanupInput = {
+  assetRefId: string;
+  now: string;
+};
+
+export type SetAssetCleanupStateInput = {
+  assetRefId: string;
+  cleanupState: Extract<AssetCleanupState, 'cleaned' | 'cleanup_failed'>;
+  cleanupSafeError?: SafeOperationalError;
+  now: string;
+};
+
+export type RecoverPendingAssetCleanupInput = {
+  now: string;
+  workspaceId: string;
 };
 
 export type HelperPermissionState = 'granted' | 'denied' | 'not_determined' | 'unknown';
@@ -275,6 +294,7 @@ export type OperationalStoreErrorCode =
   | 'asset_ref_not_found'
   | 'outbox_job_id_conflict'
   | 'asset_ref_conflict'
+  | 'asset_cleanup_conflict'
   | 'idempotency_key_conflict'
   | 'terminal_state_conflict'
   | 'outbox_lease_lost'

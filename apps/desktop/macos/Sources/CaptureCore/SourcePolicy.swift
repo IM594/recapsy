@@ -82,7 +82,8 @@ public struct CaptureSourcePolicyDecision: Equatable, Sendable {
 public enum CaptureSourcePolicyEvaluator {
     public static func decide(
         policy: CaptureSourcePolicy,
-        source: CaptureSourceIdentity?
+        source: CaptureSourceIdentity?,
+        context: CaptureSourceContext? = nil
     ) -> CaptureSourcePolicyDecision {
         guard let source else {
             return CaptureSourcePolicyDecision(action: .blockCapture, matchedRuleIds: [])
@@ -96,7 +97,7 @@ public enum CaptureSourcePolicyEvaluator {
         var matchedRuleIds: [String] = []
 
         for rule in policy.rules where rule.enabled {
-            switch match(rule: rule, source: source) {
+            switch match(rule: rule, source: source, context: context) {
             case .matched:
                 matchedRuleIds.append(rule.id)
                 action = stricter(action, rule.action)
@@ -119,7 +120,11 @@ public enum CaptureSourcePolicyEvaluator {
         case unobservableNonAllow
     }
 
-    private static func match(rule: CaptureSourcePolicyRule, source: CaptureSourceIdentity) -> RuleMatch {
+    private static func match(
+        rule: CaptureSourcePolicyRule,
+        source: CaptureSourceIdentity,
+        context: CaptureSourceContext?
+    ) -> RuleMatch {
         switch rule.kind {
         case "bundle_id":
             return rule.pattern == source.bundleId ? .matched : .notMatched
@@ -129,7 +134,18 @@ public enum CaptureSourcePolicyEvaluator {
                 : .notMatched
         case "pause":
             return .matched
-        case "domain", "document_path", "window_title":
+        case "domain":
+            guard
+                let host = context?.website?.host,
+                let pattern = CaptureSourceContext.normalizedDomainPattern(rule.pattern)
+            else {
+                // A domain rule has no meaning until a direct AX sample supplied
+                // a safe URL host. It must not turn unrelated non-browser apps
+                // into blanket capture blocks.
+                return .notMatched
+            }
+            return pattern.caseInsensitiveCompare(host) == .orderedSame ? .matched : .notMatched
+        case "document_path", "window_title":
             return rule.action == .allow ? .notMatched : .unobservableNonAllow
         default:
             // The protocol validator rejects unknown kinds. Retain fail-closed

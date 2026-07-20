@@ -86,6 +86,12 @@ export const StoragePolicySchema = z
   })
   .strict();
 
+export const StoragePolicyUpdateRequestSchema = z
+  .object({
+    retentionDays: z.number().int().positive().max(3650).nullable(),
+  })
+  .strict();
+
 export const CapturePoliciesResponseSchema = z
   .object({
     workspaceId: IdSchema,
@@ -140,6 +146,7 @@ export type CapturePrivacyDecision = z.infer<typeof CapturePrivacyDecisionSchema
 export type CaptureDefaultPolicy = z.infer<typeof CaptureDefaultPolicySchema>;
 export type CapturePolicySnapshot = z.infer<typeof CapturePolicySnapshotSchema>;
 export type StoragePolicy = z.infer<typeof StoragePolicySchema>;
+export type StoragePolicyUpdateRequest = z.infer<typeof StoragePolicyUpdateRequestSchema>;
 export type CapturePoliciesResponse = z.infer<typeof CapturePoliciesResponseSchema>;
 export type StoragePoliciesResponse = z.infer<typeof StoragePoliciesResponseSchema>;
 export type AxAllowlistResponse = z.infer<typeof AxAllowlistResponseSchema>;

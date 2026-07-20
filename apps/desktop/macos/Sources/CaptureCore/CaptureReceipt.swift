@@ -67,6 +67,9 @@ public struct CaptureReceipt: Codable, Equatable {
     public let observedAt: String
     public let policy: CapturePolicyIdentity
     public let source: CaptureWindowIdentity
+    /// Optional because receipts written before native context sampling remain
+    /// recoverable. It contains only the already-sanitized fields.
+    public let sourceContext: CaptureSourceContext?
     public let screenshot: CaptureScreenshotRecord
     public let decision: String
 
@@ -77,6 +80,7 @@ public struct CaptureReceipt: Codable, Equatable {
         observedAt: String,
         policy: CapturePolicyIdentity,
         source: CaptureWindowIdentity,
+        sourceContext: CaptureSourceContext? = nil,
         screenshot: CaptureScreenshotRecord,
         decision: String
     ) {
@@ -87,21 +91,28 @@ public struct CaptureReceipt: Codable, Equatable {
         self.observedAt = observedAt
         self.policy = policy
         self.source = source
+        self.sourceContext = sourceContext
         self.screenshot = screenshot
         self.decision = decision
     }
 
     /// Current helper wire contract, derived from the canonical receipt.
     public var payload: CaptureResultPayload {
+        let policyPayload = CapturePolicyPayload(version: policy.version, decision: decision)
+        let context = sourceContext?.payload(
+            application: source.application,
+            observedAt: observedAt,
+            policy: policyPayload
+        ) ?? CaptureContextPayload(
+            app: source.application,
+            observedAt: observedAt,
+            policy: policyPayload
+        )
         return CaptureResultPayload(
             captureId: captureId,
             observedAt: observedAt,
             screenshot: screenshot.payload(),
-            context: CaptureContextPayload(
-                app: source.application,
-                observedAt: observedAt,
-                policy: CapturePolicyPayload(version: policy.version, decision: decision)
-            )
+            context: context
         )
     }
 }

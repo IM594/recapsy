@@ -67,6 +67,44 @@ describe('capture policy activation', () => {
     ).toThrowError(new CapturePolicyError('policy_invalid_fields'));
   });
 
+  it('configures an exact domain redaction rule for the native context sampler', async () => {
+    const configured: unknown[] = [];
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy({
+            rules: [
+              {
+                action: 'redact_context',
+                enabled: true,
+                id: 'workspace-private-domain',
+                kind: 'domain',
+                pattern: 'private.example',
+                scope: 'workspace_default',
+              },
+            ],
+          });
+        },
+      },
+      async configure(policy) {
+        configured.push(policy);
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store: createMemoryStore(),
+      workspaceId,
+    });
+
+    const configuration = await controller.activate();
+
+    expect(configuration.policy.rules).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'domain', pattern: 'private.example' }),
+      ]),
+    );
+    expect(configured).toHaveLength(1);
+  });
+
   it('persists the complete workspace/device snapshot and includes non-relaxable local rules', async () => {
     const store = createMemoryStore();
     await store.upsertLocalCapturePolicyRule({

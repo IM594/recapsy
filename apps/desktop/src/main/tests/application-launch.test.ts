@@ -26,4 +26,19 @@ describe('desktop development launch', () => {
 
     expect(entrySource).toContain('maxActiveOutboxJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS');
   });
+
+  it('resolves the device identity after readiness and limits environment overrides to development', async () => {
+    const entrySource = await readFile(
+      path.join(desktopRoot, 'src', 'main', 'electron-entry.ts'),
+      'utf8',
+    );
+
+    expect(entrySource).toContain("from './device-identity'");
+    expect(entrySource).toContain('process.env.RECAPSY_DESKTOP_DEV_DEVICE_ID');
+    expect(entrySource).not.toContain('RECAPSY_DESKTOP_DEVICE_ID');
+    expect(entrySource).not.toContain("'dev-device'");
+    expect(entrySource).toContain('resolveDeviceId: () =>');
+    expect(entrySource).toContain("directory: app.getPath('userData')");
+    expect(entrySource).toContain('isDevelopment: !app.isPackaged');
+  });
 });

@@ -26,6 +26,8 @@ const electronZipDir = await findElectronZipDirectory(
 let outputPaths: string[] = [];
 try {
   await prepareMinimalApplication();
+  // `overwrite` does not reliably replace an existing signed application bundle.
+  await rm(releaseRoot, { force: true, recursive: true });
   outputPaths = await packager({
     appBundleId: 'one.recapsy.desktop',
     arch: targetArchitecture,
