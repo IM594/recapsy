@@ -11,7 +11,7 @@ const now = '2026-07-06T00:00:00.000Z';
 const recoveryNow = '2026-07-06T00:10:00.000Z';
 
 describe('desktop startup recovery', () => {
-  it('recovers interrupted outbox jobs while preserving terminal and retryable jobs', async () => {
+  it('reads only interrupted jobs during startup recovery', async () => {
     const store = createMemoryStore();
     await seedJob(store, createJob({ id: 'job_syncing', idempotencyKey: 'idem_syncing' }));
     await store.updateOutboxJobState('job_syncing', {
@@ -61,10 +61,8 @@ describe('desktop startup recovery', () => {
       reconciledSynced: 0,
       recovered: 2,
       resultSubmitInterrupted: 1,
-      scanned: 7,
+      scanned: 2,
       syncInterrupted: 1,
-      unchangedRetryable: 1,
-      unchangedTerminal: 4,
     });
     expect(await store.getOutboxJob('job_syncing')).toMatchObject({
       lastSafeError: {

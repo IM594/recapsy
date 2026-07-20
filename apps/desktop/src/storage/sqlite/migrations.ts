@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -17,6 +17,7 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
   ensureOutboxLeaseColumns(database);
   migratePolicyCacheToWorkspaceDevice(database);
   ensurePolicyCacheDeliveryCapacityColumn(database);
+  ensureOperationalStoreStatistics(database);
 
   database.run(
     `INSERT OR IGNORE INTO schema_migrations (version, applied_at)
@@ -26,6 +27,52 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
       $version: SCHEMA_VERSION,
     },
   );
+}
+
+function ensureOperationalStoreStatistics(database: SqliteDatabase): void {
+  database.run(
+    `CREATE TABLE IF NOT EXISTS operational_store_statistics (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      queued_jobs INTEGER NOT NULL CHECK (queued_jobs >= 0),
+      retrying_jobs INTEGER NOT NULL CHECK (retrying_jobs >= 0),
+      asset_bytes INTEGER NOT NULL CHECK (asset_bytes >= 0)
+    )`,
+  );
+  for (const trigger of operationalStoreStatisticTriggers) {
+    database.run(`DROP TRIGGER IF EXISTS ${trigger.name}`);
+  }
+  database.run(
+    `INSERT INTO operational_store_statistics (
+      id,
+      queued_jobs,
+      retrying_jobs,
+      asset_bytes
+    ) VALUES (
+      1,
+      (
+        SELECT COUNT(*)
+        FROM outbox_jobs
+        WHERE state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+      ),
+      (
+        SELECT COUNT(*)
+        FROM outbox_jobs
+        WHERE state = 'pending' AND next_retry_at IS NOT NULL
+      ),
+      (
+        SELECT COALESCE(SUM(size_bytes), 0)
+        FROM asset_cache_refs
+        WHERE cleanup_state != 'cleaned'
+      )
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      queued_jobs = excluded.queued_jobs,
+      retrying_jobs = excluded.retrying_jobs,
+      asset_bytes = excluded.asset_bytes`,
+  );
+  for (const trigger of operationalStoreStatisticTriggers) {
+    database.run(trigger.statement);
+  }
 }
 
 function ensureOutboxLeaseColumns(database: SqliteDatabase): void {
@@ -274,6 +321,99 @@ function buildOutboxJobsTable(tableName: string, ifNotExists: boolean): string {
 
 const OUTBOX_JOBS_INDEX_STATEMENT = `CREATE INDEX IF NOT EXISTS idx_outbox_jobs_workspace_state_retry
     ON outbox_jobs(workspace_id, state, next_retry_at, created_at)`;
+
+const operationalStoreStatisticTriggers = [
+  {
+    name: 'outbox_jobs_statistics_after_insert',
+    statement: `CREATE TRIGGER outbox_jobs_statistics_after_insert
+      AFTER INSERT ON outbox_jobs
+      BEGIN
+        UPDATE operational_store_statistics
+        SET
+          queued_jobs = queued_jobs + CASE
+            WHEN NEW.state NOT IN ('synced', 'blocked', 'failed', 'cancelled') THEN 1
+            ELSE 0
+          END,
+          retrying_jobs = retrying_jobs + CASE
+            WHEN NEW.state = 'pending' AND NEW.next_retry_at IS NOT NULL THEN 1
+            ELSE 0
+          END
+        WHERE id = 1;
+      END`,
+  },
+  {
+    name: 'outbox_jobs_statistics_after_update',
+    statement: `CREATE TRIGGER outbox_jobs_statistics_after_update
+      AFTER UPDATE OF state, next_retry_at ON outbox_jobs
+      BEGIN
+        UPDATE operational_store_statistics
+        SET
+          queued_jobs = queued_jobs
+            + CASE WHEN NEW.state NOT IN ('synced', 'blocked', 'failed', 'cancelled') THEN 1 ELSE 0 END
+            - CASE WHEN OLD.state NOT IN ('synced', 'blocked', 'failed', 'cancelled') THEN 1 ELSE 0 END,
+          retrying_jobs = retrying_jobs
+            + CASE WHEN NEW.state = 'pending' AND NEW.next_retry_at IS NOT NULL THEN 1 ELSE 0 END
+            - CASE WHEN OLD.state = 'pending' AND OLD.next_retry_at IS NOT NULL THEN 1 ELSE 0 END
+        WHERE id = 1;
+      END`,
+  },
+  {
+    name: 'outbox_jobs_statistics_after_delete',
+    statement: `CREATE TRIGGER outbox_jobs_statistics_after_delete
+      AFTER DELETE ON outbox_jobs
+      BEGIN
+        UPDATE operational_store_statistics
+        SET
+          queued_jobs = queued_jobs - CASE
+            WHEN OLD.state NOT IN ('synced', 'blocked', 'failed', 'cancelled') THEN 1
+            ELSE 0
+          END,
+          retrying_jobs = retrying_jobs - CASE
+            WHEN OLD.state = 'pending' AND OLD.next_retry_at IS NOT NULL THEN 1
+            ELSE 0
+          END
+        WHERE id = 1;
+      END`,
+  },
+  {
+    name: 'asset_cache_refs_statistics_after_insert',
+    statement: `CREATE TRIGGER asset_cache_refs_statistics_after_insert
+      AFTER INSERT ON asset_cache_refs
+      BEGIN
+        UPDATE operational_store_statistics
+        SET asset_bytes = asset_bytes + CASE
+          WHEN NEW.cleanup_state != 'cleaned' THEN NEW.size_bytes
+          ELSE 0
+        END
+        WHERE id = 1;
+      END`,
+  },
+  {
+    name: 'asset_cache_refs_statistics_after_update',
+    statement: `CREATE TRIGGER asset_cache_refs_statistics_after_update
+      AFTER UPDATE OF size_bytes, cleanup_state ON asset_cache_refs
+      BEGIN
+        UPDATE operational_store_statistics
+        SET asset_bytes = asset_bytes
+          + CASE WHEN NEW.cleanup_state != 'cleaned' THEN NEW.size_bytes ELSE 0 END
+          - CASE WHEN OLD.cleanup_state != 'cleaned' THEN OLD.size_bytes ELSE 0 END
+        WHERE id = 1;
+      END`,
+  },
+  {
+    name: 'asset_cache_refs_statistics_after_delete',
+    statement: `CREATE TRIGGER asset_cache_refs_statistics_after_delete
+      AFTER DELETE ON asset_cache_refs
+      BEGIN
+        UPDATE operational_store_statistics
+        SET asset_bytes = asset_bytes - CASE
+          WHEN OLD.cleanup_state != 'cleaned' THEN OLD.size_bytes
+          ELSE 0
+        END
+        WHERE id = 1;
+      END`,
+  },
+] as const;
 
 function buildPolicyCacheTable(tableName: string, ifNotExists: boolean): string {
   return `CREATE TABLE ${ifNotExists ? 'IF NOT EXISTS ' : ''}${tableName} (

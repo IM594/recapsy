@@ -5,6 +5,46 @@ import { type SyncSummaryStore, createSyncQueueSummary } from '../summary';
 const now = '2026-07-06T00:00:00.000Z';
 
 describe('sync queue summary', () => {
+  it('uses the store aggregate without loading workspace outbox rows', async () => {
+    const reads: Array<{ minuteAgo: string; now: string; workspaceId: string }> = [];
+    const store = {
+      async getOutboxSummary(input: { minuteAgo: string; now: string; workspaceId: string }) {
+        reads.push(input);
+        return {
+          blocked: 1,
+          completedPerMinute: 2,
+          failed: 3,
+          inputPerMinute: 4,
+          pending: 5,
+          processing: 6,
+          retrying: 7,
+          syncing: 6,
+        };
+      },
+      async listOutboxJobs() {
+        throw new Error('summary must not load full outbox rows');
+      },
+    } satisfies SyncSummaryStore;
+
+    await expect(createSyncQueueSummary(store, 'workspace-1', { now })).resolves.toMatchObject({
+      blocked: 1,
+      completedPerMinute: 2,
+      failed: 3,
+      inputPerMinute: 4,
+      pending: 5,
+      processing: 6,
+      retrying: 7,
+      syncing: 6,
+    });
+    expect(reads).toEqual([
+      {
+        minuteAgo: '2026-07-05T23:59:00.000Z',
+        now,
+        workspaceId: 'workspace-1',
+      },
+    ]);
+  });
+
   it('reads one workspace-filtered snapshot and derives queue counts in returned order', async () => {
     const reads: Array<{ workspaceId: string }> = [];
     const jobs = [
@@ -17,7 +57,9 @@ describe('sync queue summary', () => {
         },
         nextRetryAt: '2026-07-06T00:05:00.000Z',
       }),
-      outboxJob('syncing', 'syncing'),
+      outboxJob('syncing', 'syncing', {
+        nextRetryAt: '2026-07-06T00:00:30.000Z',
+      }),
       outboxJob('result-pending', 'result_pending'),
       outboxJob('blocked', 'blocked'),
       outboxJob('failed', 'failed', {

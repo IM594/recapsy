@@ -453,6 +453,21 @@ describe('capture admission controller', () => {
     expect(timers.cleared).toEqual([1]);
   });
 
+  it('uses a low-frequency safety poll when no store change has requested reconciliation', async () => {
+    const timers = new FakeIntervals();
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      clearIntervalFn: timers.clear,
+      setIntervalFn: timers.set,
+      store: new SnapshotStore({ assetBytes: 0, queuedJobs: 0, retryingJobs: 0 }),
+    });
+
+    await controller.start();
+    controller.stop();
+
+    expect(timers.delays).toEqual([30_000]);
+  });
+
   it('does not publish a sample that completes after the monitor stops', async () => {
     const timers = new FakeIntervals();
     const lateSnapshot = Promise.withResolvers<OperationalStoreSnapshot>();

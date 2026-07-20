@@ -19,7 +19,7 @@ import type {
 import { IPC_CHANNEL_REGISTRY } from '../../ipc/index';
 import type { CapturePoliciesResult, ServerApiClient } from '../../server/index';
 import type { DesktopShell } from '../../shell/index';
-import { createMemoryStore } from '../../storage';
+import { type AssetCacheRef, createMemoryStore } from '../../storage';
 import type { SyncLoop, SyncLoopOptions, SyncRunResult, SyncServerApi } from '../../sync/index';
 import {
   type DesktopShellFactoryContext,
@@ -82,6 +82,51 @@ describe('electron main runtime wiring', () => {
 
     expect(store.initializeCalls).toBe(1);
     expect(helperClient.startCalls).toBe(1);
+  });
+
+  it('starts historical asset reconciliation only after helper startup finishes', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const mutableStore = store as unknown as ReturnType<typeof createMemoryStore>;
+    const asset = historicalAsset();
+    await mutableStore.upsertAssetCacheRef(asset);
+    let historicalPageReads = 0;
+    const originalListPage = mutableStore.listHistoricalAssetRefPage.bind(mutableStore);
+    mutableStore.listHistoricalAssetRefPage = async (input) => {
+      historicalPageReads += 1;
+      return await originalListPage(input);
+    };
+    const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
+
+    app.triggerReady();
+    await handle.ready;
+    await flushMicrotasks();
+
+    expect(helperClient.startCalls).toBe(1);
+    expect(historicalPageReads).toBe(1);
+  });
+
+  it('cancels a historical page read during quit before it can update an asset', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    const mutableStore = store as unknown as ReturnType<typeof createMemoryStore>;
+    const asset = historicalAsset();
+    await mutableStore.upsertAssetCacheRef(asset);
+    const pageRead = Promise.withResolvers<AssetCacheRef[]>();
+    let historicalPageReads = 0;
+    mutableStore.listHistoricalAssetRefPage = async () => {
+      historicalPageReads += 1;
+      return await pageRead.promise;
+    };
+    const handle = createElectronMainRuntime(baseOptions({ app, helperClient, ipcMain, store }));
+
+    app.triggerReady();
+    await handle.ready;
+    await waitFor(() => historicalPageReads === 1);
+
+    app.emitBeforeQuit(new FakeQuitEvent());
+    pageRead.resolve([asset]);
+    await flushMicrotasks();
+
+    expect((await store.getAssetCacheRef(asset.assetRefId))?.availabilityCheckedAt).toBeUndefined();
   });
 
   it('fails before session, storage, or helper startup when device identity resolution fails', async () => {
@@ -782,6 +827,45 @@ describe('electron main runtime wiring', () => {
     expect(observedResults).toEqual([{ processed: 0, status: 'idle' }]);
     expect(capturedOptions?.onError).toBe(onSyncError);
   });
+
+  it('reconciles capture admission immediately after a sync worker changes the local queue', async () => {
+    const { app, ipcMain, helperClient, store } = harness();
+    let capturedOptions: SyncLoopOptions | undefined;
+    const handle = createElectronMainRuntime({
+      ...baseOptions({ app, helperClient, ipcMain, store }),
+      backpressure: {
+        maxAssetBytes: 1024,
+        maxQueuedJobs: 1,
+        maxRetryingJobs: 1,
+        resumeAssetBytes: 512,
+        resumeQueuedJobs: 0,
+        resumeRetryingJobs: 0,
+      },
+      createSyncLoop: (loopOptions) => {
+        capturedOptions = loopOptions;
+        return new FakeSyncLoop();
+      },
+    });
+    app.triggerReady();
+    const ready = await handle.ready;
+
+    const mutableStore = store as unknown as ReturnType<typeof createMemoryStore>;
+    await mutableStore.createOutboxJob({
+      assetRefId: 'asset_after_start',
+      createdAt: now,
+      deviceId,
+      id: 'job_after_start',
+      idempotencyKey: 'after-start',
+      payloadHash: 'sha256:after-start',
+      workspaceId,
+    });
+    capturedOptions?.onResult?.({ jobId: 'job_after_start', processed: 1, status: 'synced' });
+    await flushMicrotasks();
+
+    expect(ready.control.getSnapshot().admission).toEqual({
+      reasons: ['max_queued_jobs_reached'],
+    });
+  });
 });
 
 type Harness = {
@@ -980,6 +1064,30 @@ function testStore(): DesktopStore & { initializeCalls: number; closeCalls: numb
   });
 
   return store;
+}
+
+function historicalAsset(): AssetCacheRef {
+  return {
+    assetRefId: 'asset_historical',
+    availabilityState: 'available',
+    cleanupState: 'retained',
+    createdAt: now,
+    hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    localAccessKey: 'content-addressed/local/asset_historical',
+    mimeType: 'image/webp',
+    role: 'capture_original',
+    sizeBytes: 1024,
+    workspaceId,
+  };
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempts = 0; attempts < 100; attempts += 1) {
+    if (predicate()) return;
+    await Promise.resolve();
+  }
+
+  throw new Error('Timed out waiting for runtime work.');
 }
 
 class FakeQuitEvent implements ElectronQuitEvent {

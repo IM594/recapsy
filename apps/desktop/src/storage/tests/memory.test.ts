@@ -91,6 +91,66 @@ describe('memory operational store', () => {
     expect(await store.listOutboxJobs({ workspaceId: 'workspace_1' })).toHaveLength(1);
   });
 
+  it('keeps stored OCR results isolated from caller-owned nested values', async () => {
+    const store = createMemoryStore();
+    await store.createOutboxJob(createJob());
+
+    const updated = await store.updateOutboxJobState('job_1', {
+      now: '2026-07-06T00:00:01.000Z',
+      ocrResult: {
+        durationMs: 1200,
+        model: 'test-model',
+        providerName: 'test-provider',
+        screenText: {
+          blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'original' }],
+          readingOrder: 'top_to_bottom_left_to_right',
+          source: 'image_ocr',
+        },
+        sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      },
+      state: 'result_pending',
+    });
+
+    if (!updated.ok) throw new Error('Expected outbox update to succeed.');
+    const storedResult = updated.value.ocrResult;
+    if (!storedResult) throw new Error('Expected stored OCR result.');
+    const firstBlock = storedResult.screenText.blocks[0];
+    if (!firstBlock) throw new Error('Expected stored OCR block.');
+    firstBlock.text = 'mutated';
+
+    expect((await store.getOutboxJob('job_1'))?.ocrResult?.screenText.blocks[0]?.text).toBe(
+      'original',
+    );
+  });
+
+  it('keeps nested asset safe errors isolated from caller-owned values', async () => {
+    const store = createMemoryStore();
+    const asset = createAsset({
+      availabilitySafeError: {
+        code: 'local_asset_unreadable',
+        message: 'Local asset is unreadable.',
+        retryable: false,
+      },
+      cleanupSafeError: {
+        code: 'local_asset_cleanup_interrupted',
+        message: 'Local asset cleanup was interrupted.',
+        retryable: true,
+      },
+    });
+
+    await store.upsertAssetCacheRef(asset);
+    const availabilityError = asset.availabilitySafeError;
+    const cleanupError = asset.cleanupSafeError;
+    if (!availabilityError || !cleanupError) throw new Error('Expected asset safe errors.');
+    availabilityError.message = 'mutated availability error';
+    cleanupError.message = 'mutated cleanup error';
+
+    expect(await store.getAssetCacheRef(asset.assetRefId)).toMatchObject({
+      availabilitySafeError: { message: 'Local asset is unreadable.' },
+      cleanupSafeError: { message: 'Local asset cleanup was interrupted.' },
+    });
+  });
+
   it('normalizes capture privacy decisions with a required decidedAt timestamp', async () => {
     const store = createMemoryStore();
 
@@ -242,6 +302,17 @@ describe('memory operational store', () => {
       id: 'job_ready',
       state: 'syncing',
       lockedAt: '2026-07-06T00:02:00.000Z',
+    });
+    expect(claimed?.nextRetryAt).toBeUndefined();
+    await expect(
+      store.getOutboxSummary({
+        minuteAgo: '2026-07-06T00:01:00.000Z',
+        now: '2026-07-06T00:02:00.000Z',
+        workspaceId: 'workspace_1',
+      }),
+    ).resolves.toMatchObject({
+      nextRetryAt: '2026-07-06T00:05:00.000Z',
+      retrying: 1,
     });
   });
 

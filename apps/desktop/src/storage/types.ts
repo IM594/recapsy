@@ -334,6 +334,20 @@ export type OperationalStoreSnapshot = {
   retryingJobs: number;
 };
 
+export type OutboxQueueSummary = {
+  blocked: number;
+  completedPerMinute: number;
+  failed: number;
+  inputPerMinute: number;
+  pending: number;
+  processing: number;
+  retrying: number;
+  syncing: number;
+  lastSafeError?: SafeOperationalError;
+  nextRetryAt?: string;
+  oldestActiveCreatedAt?: string;
+};
+
 export type BackpressureConfig = {
   maxQueuedJobs: number;
   maxAssetBytes: number;

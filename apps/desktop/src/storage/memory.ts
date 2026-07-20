@@ -1,4 +1,19 @@
 import { randomUUID } from 'node:crypto';
+import { assetRefMatches, cloneAssetRef } from './asset-values';
+import {
+  cloneLocalCapturePolicyRule,
+  clonePolicyCache,
+  cloneSettingsCache,
+  cloneSyncCursor,
+} from './cache-values';
+import {
+  capturePayloadMatches,
+  cloneOutboxJob,
+  cloneStoredOcrResult,
+  createPendingOutboxJob,
+  normalizeCapturePayload,
+  requiresLocalAssetBytes,
+} from './outbox-values';
 import { settleServerCapture as settleStoredServerCapture } from './reconciliation';
 import type {
   AssetCacheRef,
@@ -14,6 +29,7 @@ import type {
   OutboxJobListFilter,
   OutboxJobState,
   OutboxJobStateUpdate,
+  OutboxQueueSummary,
   OutboxSafeErrorInput,
   OutboxTerminalState,
   OutboxTerminalUpdate,
@@ -90,20 +106,7 @@ class InMemoryOperationalStore {
       });
     }
 
-    const created: OutboxJob = {
-      assetRefId: job.assetRefId,
-      attempt: 0,
-      capture: normalizeCapturePayload(job),
-      createdAt: job.createdAt,
-      deviceId: job.deviceId,
-      id: job.id,
-      idempotencyKey: job.idempotencyKey,
-      payloadHash: job.payloadHash,
-      state: 'pending',
-      updatedAt: job.createdAt,
-      workspaceId: job.workspaceId,
-      ...(job.nextRetryAt ? { nextRetryAt: job.nextRetryAt } : {}),
-    };
+    const created = createPendingOutboxJob(job);
 
     this.outboxJobs.set(job.id, created);
 
@@ -158,20 +161,7 @@ class InMemoryOperationalStore {
       }
     }
 
-    const created: OutboxJob = {
-      assetRefId: entry.assetRefId,
-      attempt: 0,
-      capture: normalizeCapturePayload(entry),
-      createdAt: entry.createdAt,
-      deviceId: entry.deviceId,
-      id: entry.id,
-      idempotencyKey: entry.idempotencyKey,
-      payloadHash: entry.payloadHash,
-      state: 'pending',
-      updatedAt: entry.createdAt,
-      workspaceId: entry.workspaceId,
-      ...(entry.nextRetryAt ? { nextRetryAt: entry.nextRetryAt } : {}),
-    };
+    const created = createPendingOutboxJob(entry);
 
     for (const assetRef of entry.assetRefs) {
       this.assetRefs.set(assetRef.assetRefId, cloneAssetRef(assetRef));
@@ -192,6 +182,45 @@ class InMemoryOperationalStore {
       .filter((job) => (filter.workspaceId ? job.workspaceId === filter.workspaceId : true))
       .filter((job) => (filter.state ? job.state === filter.state : true))
       .map(cloneOutboxJob);
+  }
+
+  async listInterruptedOutboxJobs(workspaceId?: string): Promise<OutboxJob[]> {
+    return [...this.outboxJobs.values()]
+      .filter((job) => (workspaceId ? job.workspaceId === workspaceId : true))
+      .filter((job) => job.state === 'syncing' || job.state === 'result_pending')
+      .sort(compareOutboxJobs)
+      .map(cloneOutboxJob);
+  }
+
+  async listActiveAssetRefDependencies(
+    workspaceId?: string,
+  ): Promise<Array<{ asset: AssetCacheRef; jobs: OutboxJob[] }>> {
+    const jobsByAssetRef = groupActiveAssetDependencies(this.outboxJobs.values(), workspaceId);
+
+    return [...jobsByAssetRef.entries()]
+      .flatMap(([assetRefId, jobs]) => {
+        const asset = this.assetRefs.get(assetRefId);
+        return asset ? [{ asset: cloneAssetRef(asset), jobs: jobs.map(cloneOutboxJob) }] : [];
+      })
+      .sort((left, right) => left.asset.assetRefId.localeCompare(right.asset.assetRefId));
+  }
+
+  async listHistoricalAssetRefPage(input: {
+    afterAssetRefId?: string;
+    limit: number;
+    workspaceId?: string;
+  }): Promise<AssetCacheRef[]> {
+    const activeAssetRefIds = new Set(
+      groupActiveAssetDependencies(this.outboxJobs.values(), input.workspaceId).keys(),
+    );
+
+    return [...this.assetRefs.values()]
+      .filter((asset) => (input.workspaceId ? asset.workspaceId === input.workspaceId : true))
+      .filter((asset) => !input.afterAssetRefId || asset.assetRefId > input.afterAssetRefId)
+      .filter((asset) => !activeAssetRefIds.has(asset.assetRefId))
+      .sort((left, right) => left.assetRefId.localeCompare(right.assetRefId))
+      .slice(0, input.limit)
+      .map(cloneAssetRef);
   }
 
   async updateOutboxJobState(
@@ -217,7 +246,7 @@ class InMemoryOperationalStore {
       updatedAt: update.now,
       ...(update.nextRetryAt ? { nextRetryAt: update.nextRetryAt } : {}),
       ...(update.serverCaptureId ? { serverCaptureId: update.serverCaptureId } : {}),
-      ...(update.ocrResult ? { ocrResult: update.ocrResult } : {}),
+      ...(update.ocrResult ? { ocrResult: cloneStoredOcrResult(update.ocrResult) } : {}),
     };
 
     if (update.state === 'syncing') {
@@ -250,6 +279,7 @@ class InMemoryOperationalStore {
       leaseExpiresAt: new Date(Date.parse(input.now) + OUTBOX_LEASE_DURATION_MS).toISOString(),
       leaseToken: randomUUID(),
       lockedAt: input.now,
+      nextRetryAt: undefined,
       state: 'syncing',
       updatedAt: input.now,
     };
@@ -582,6 +612,70 @@ class InMemoryOperationalStore {
     };
   }
 
+  async getOutboxSummary(input: {
+    minuteAgo: string;
+    now: string;
+    workspaceId: string;
+  }): Promise<OutboxQueueSummary> {
+    const minuteAgo = Date.parse(input.minuteAgo);
+    const now = Date.parse(input.now);
+    const summary: OutboxQueueSummary = {
+      blocked: 0,
+      completedPerMinute: 0,
+      failed: 0,
+      inputPerMinute: 0,
+      pending: 0,
+      processing: 0,
+      retrying: 0,
+      syncing: 0,
+    };
+
+    for (const job of this.outboxJobs.values()) {
+      if (job.workspaceId !== input.workspaceId) continue;
+
+      if (job.state === 'blocked') summary.blocked += 1;
+      if (job.state === 'failed') summary.failed += 1;
+      if (job.state === 'pending') summary.pending += 1;
+      if (job.state === 'pending' && job.nextRetryAt) summary.retrying += 1;
+      if (job.state === 'syncing' || job.state === 'result_pending') {
+        summary.processing += 1;
+        summary.syncing += 1;
+      }
+
+      const createdAt = Date.parse(job.createdAt);
+      if (Number.isFinite(createdAt) && createdAt >= minuteAgo && createdAt <= now) {
+        summary.inputPerMinute += 1;
+      }
+      if (
+        job.state === 'synced' &&
+        Number.isFinite(Date.parse(job.updatedAt)) &&
+        Date.parse(job.updatedAt) >= minuteAgo &&
+        Date.parse(job.updatedAt) <= now
+      ) {
+        summary.completedPerMinute += 1;
+      }
+      if (
+        (job.state === 'pending' || job.state === 'syncing' || job.state === 'result_pending') &&
+        Number.isFinite(createdAt) &&
+        (!summary.oldestActiveCreatedAt || job.createdAt < summary.oldestActiveCreatedAt)
+      ) {
+        summary.oldestActiveCreatedAt = job.createdAt;
+      }
+      if (
+        job.state === 'pending' &&
+        job.nextRetryAt &&
+        (!summary.nextRetryAt || job.nextRetryAt < summary.nextRetryAt)
+      ) {
+        summary.nextRetryAt = job.nextRetryAt;
+      }
+      if (job.lastSafeError) {
+        summary.lastSafeError = { ...job.lastSafeError };
+      }
+    }
+
+    return summary;
+  }
+
   verifyOperationalWrite(): Promise<void> {
     return Promise.resolve();
   }
@@ -612,6 +706,29 @@ function compareRetryableJobs(left: OutboxJob, right: OutboxJob): number {
   }
 
   return left.createdAt.localeCompare(right.createdAt);
+}
+
+function compareOutboxJobs(left: OutboxJob, right: OutboxJob): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function groupActiveAssetDependencies(
+  jobs: Iterable<OutboxJob>,
+  workspaceId?: string,
+): Map<string, OutboxJob[]> {
+  const jobsByAssetRef = new Map<string, OutboxJob[]>();
+
+  for (const job of jobs) {
+    if ((workspaceId && job.workspaceId !== workspaceId) || !requiresLocalAssetBytes(job)) {
+      continue;
+    }
+
+    const dependencies = jobsByAssetRef.get(job.assetRefId) ?? [];
+    dependencies.push(job);
+    jobsByAssetRef.set(job.assetRefId, dependencies);
+  }
+
+  return jobsByAssetRef;
 }
 
 function isTerminalOutboxState(state: OutboxJobState): state is OutboxTerminalState {
@@ -675,75 +792,6 @@ function deleteMatching<T>(map: Map<string, T>, predicate: (value: T) => boolean
   }
 }
 
-function cloneOutboxJob(job: OutboxJob): OutboxJob {
-  return {
-    ...job,
-    capture: cloneCapturePayload(job.capture),
-    ...(job.lastSafeError ? { lastSafeError: { ...job.lastSafeError } } : {}),
-  };
-}
-
-function normalizeCapturePayload(job: OutboxJobCreateInput): OutboxJob['capture'] {
-  return {
-    appName: job.capture?.appName ?? 'Recapsy Desktop',
-    capturedAt: job.capture?.capturedAt ?? job.createdAt,
-    captureType: job.capture?.captureType ?? 'screen',
-    observedAt: job.capture?.observedAt ?? job.createdAt,
-    privacyDecision: {
-      action: job.capture?.privacyDecision?.action ?? 'allow',
-      decidedAt:
-        job.capture?.privacyDecision?.decidedAt ??
-        job.capture?.observedAt ??
-        job.capture?.capturedAt ??
-        job.createdAt,
-      policyVersion: job.capture?.privacyDecision?.policyVersion ?? 'desktop-default',
-      reasons: [...(job.capture?.privacyDecision?.reasons ?? [])],
-    },
-    ...(job.capture?.bundleId ? { bundleId: job.capture.bundleId } : {}),
-    ...(job.capture?.contextConfidence ? { contextConfidence: job.capture.contextConfidence } : {}),
-    ...(job.capture?.contextFingerprint
-      ? { contextFingerprint: job.capture.contextFingerprint }
-      : {}),
-    ...(job.capture?.documentPathCandidate
-      ? { documentPathCandidate: { ...job.capture.documentPathCandidate } }
-      : {}),
-    ...(job.capture?.localEventId ? { localEventId: job.capture.localEventId } : {}),
-    ...(job.capture?.metadata ? { metadata: { ...job.capture.metadata } } : {}),
-    ...(job.capture?.urlCandidate ? { urlCandidate: { ...job.capture.urlCandidate } } : {}),
-    ...(job.capture?.userId ? { userId: job.capture.userId } : {}),
-    ...(job.capture?.windowTitleCandidate
-      ? { windowTitleCandidate: { ...job.capture.windowTitleCandidate } }
-      : {}),
-  };
-}
-
-function cloneCapturePayload(capture: OutboxJob['capture']): OutboxJob['capture'] {
-  return {
-    ...capture,
-    privacyDecision: {
-      ...capture.privacyDecision,
-      reasons: [...capture.privacyDecision.reasons],
-    },
-    ...(capture.documentPathCandidate
-      ? { documentPathCandidate: { ...capture.documentPathCandidate } }
-      : {}),
-    ...(capture.metadata ? { metadata: { ...capture.metadata } } : {}),
-    ...(capture.urlCandidate ? { urlCandidate: { ...capture.urlCandidate } } : {}),
-    ...(capture.windowTitleCandidate
-      ? { windowTitleCandidate: { ...capture.windowTitleCandidate } }
-      : {}),
-  };
-}
-
-function cloneAssetRef(asset: AssetCacheRef): AssetCacheRef {
-  return {
-    ...asset,
-    ...(asset.availabilitySafeError
-      ? { availabilitySafeError: { ...asset.availabilitySafeError } }
-      : {}),
-  };
-}
-
 function existingCaptureOutboxEntryMatches(
   existingJob: OutboxJob,
   entry: CaptureOutboxEntryCreateInput,
@@ -763,28 +811,6 @@ function existingCaptureOutboxEntryMatches(
   });
 }
 
-function capturePayloadMatches(left: OutboxJob['capture'], right: OutboxJob['capture']): boolean {
-  return JSON.stringify(cloneCapturePayload(left)) === JSON.stringify(cloneCapturePayload(right));
-}
-
-function assetRefMatches(left: AssetCacheRef, right: AssetCacheRef): boolean {
-  return JSON.stringify(cloneAssetRef(left)) === JSON.stringify(cloneAssetRef(right));
-}
-
-function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {
-  return {
-    ...entry,
-    policy: {
-      ...entry.policy,
-      rules: entry.policy.rules.map((rule) => ({ ...rule })),
-    },
-  };
-}
-
-function cloneLocalCapturePolicyRule(rule: LocalCapturePolicyRule): LocalCapturePolicyRule {
-  return { ...rule };
-}
-
 function compareLocalCapturePolicyRules(
   left: LocalCapturePolicyRule,
   right: LocalCapturePolicyRule,
@@ -794,17 +820,4 @@ function compareLocalCapturePolicyRules(
 
 function policyCacheKey(workspaceId: string, deviceId: string): string {
   return `${workspaceId}:${deviceId}`;
-}
-
-function cloneSyncCursor(cursor: SyncCursor): SyncCursor {
-  return { ...cursor };
-}
-
-function cloneSettingsCache(settings: SettingsCache): SettingsCache {
-  return {
-    ...settings,
-    serverCapabilities: {
-      ...settings.serverCapabilities,
-    },
-  };
 }

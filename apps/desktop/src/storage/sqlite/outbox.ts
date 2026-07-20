@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { cloneOutboxJob, createPendingOutboxJob, requiresLocalAssetBytes } from '../outbox-values';
 import type {
   ClaimRetryableOutboxJobInput,
   OperationalStoreError,
@@ -8,6 +9,7 @@ import type {
   OutboxJobListFilter,
   OutboxJobState,
   OutboxJobStateUpdate,
+  OutboxQueueSummary,
   OutboxSafeErrorInput,
   OutboxTerminalState,
   OutboxTerminalUpdate,
@@ -15,6 +17,9 @@ import type {
   StoredOcrResult,
 } from '../types';
 import type { SqliteDatabase, SqliteRow } from './driver';
+import { parseJson } from './serialization';
+
+export { cloneOutboxJob, createPendingOutboxJob, outboxJobMatchesInput } from '../outbox-values';
 
 const TERMINAL_OUTBOX_STATES = new Set<OutboxJobState>([
   'synced',
@@ -92,6 +97,124 @@ export class SqliteOutboxPersistence {
     return rows.map(outboxJobFromRow);
   }
 
+  async listInterrupted(workspaceId?: string): Promise<OutboxJob[]> {
+    const rows = workspaceId
+      ? this.database
+          .prepare<OutboxJobRow>(
+            `SELECT *
+             FROM outbox_jobs
+             WHERE workspace_id = $workspaceId
+               AND state IN ('syncing', 'result_pending')
+             ORDER BY created_at ASC, id ASC`,
+          )
+          .all({ $workspaceId: workspaceId })
+      : this.database
+          .prepare<OutboxJobRow>(
+            `SELECT *
+             FROM outbox_jobs
+             WHERE state IN ('syncing', 'result_pending')
+             ORDER BY created_at ASC, id ASC`,
+          )
+          .all();
+
+    return rows.map(outboxJobFromRow);
+  }
+
+  async listLocalAssetDependencies(workspaceId?: string): Promise<OutboxJob[]> {
+    const rows = workspaceId
+      ? this.database
+          .prepare<OutboxJobRow>(
+            `SELECT *
+             FROM outbox_jobs
+             WHERE workspace_id = $workspaceId
+               AND state IN ('pending', 'syncing')
+             ORDER BY created_at ASC, id ASC`,
+          )
+          .all({ $workspaceId: workspaceId })
+      : this.database
+          .prepare<OutboxJobRow>(
+            `SELECT *
+             FROM outbox_jobs
+             WHERE state IN ('pending', 'syncing')
+             ORDER BY created_at ASC, id ASC`,
+          )
+          .all();
+
+    return rows.map(outboxJobFromRow).filter(requiresLocalAssetBytes);
+  }
+
+  async summary(input: {
+    minuteAgo: string;
+    now: string;
+    workspaceId: string;
+  }): Promise<OutboxQueueSummary> {
+    const row = this.database
+      .prepare<{
+        blocked: number;
+        completed_per_minute: number;
+        failed: number;
+        input_per_minute: number;
+        next_retry_at: string | null;
+        oldest_active_created_at: string | null;
+        pending: number;
+        processing: number;
+        retrying: number;
+        syncing: number;
+      }>(
+        `SELECT
+           COALESCE(SUM(CASE WHEN state = 'blocked' THEN 1 ELSE 0 END), 0) AS blocked,
+           COALESCE(SUM(CASE
+             WHEN state = 'synced' AND updated_at >= $minuteAgo AND updated_at <= $now THEN 1
+             ELSE 0
+           END), 0) AS completed_per_minute,
+           COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+           COALESCE(SUM(CASE WHEN created_at >= $minuteAgo AND created_at <= $now THEN 1 ELSE 0 END), 0)
+             AS input_per_minute,
+           MIN(CASE WHEN state = 'pending' AND next_retry_at IS NOT NULL THEN next_retry_at END)
+             AS next_retry_at,
+           MIN(CASE
+             WHEN state IN ('pending', 'syncing', 'result_pending') THEN created_at
+             ELSE NULL
+           END) AS oldest_active_created_at,
+           COALESCE(SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+           COALESCE(SUM(CASE WHEN state IN ('syncing', 'result_pending') THEN 1 ELSE 0 END), 0)
+             AS processing,
+           COALESCE(SUM(CASE WHEN state = 'pending' AND next_retry_at IS NOT NULL THEN 1 ELSE 0 END), 0)
+             AS retrying,
+           COALESCE(SUM(CASE WHEN state IN ('syncing', 'result_pending') THEN 1 ELSE 0 END), 0)
+             AS syncing
+         FROM outbox_jobs
+         WHERE workspace_id = $workspaceId`,
+      )
+      .get({ $minuteAgo: input.minuteAgo, $now: input.now, $workspaceId: input.workspaceId });
+    const latestError = this.database
+      .prepare<{ last_safe_error_json: string }>(
+        `SELECT last_safe_error_json
+         FROM outbox_jobs
+         WHERE workspace_id = $workspaceId
+           AND last_safe_error_json IS NOT NULL
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`,
+      )
+      .get({ $workspaceId: input.workspaceId });
+
+    return {
+      blocked: row?.blocked ?? 0,
+      completedPerMinute: row?.completed_per_minute ?? 0,
+      failed: row?.failed ?? 0,
+      inputPerMinute: row?.input_per_minute ?? 0,
+      pending: row?.pending ?? 0,
+      processing: row?.processing ?? 0,
+      retrying: row?.retrying ?? 0,
+      syncing: row?.syncing ?? 0,
+      ...(latestError ? { lastSafeError: parseJson(latestError.last_safe_error_json) } : {}),
+      ...(row?.next_retry_at ? { nextRetryAt: row.next_retry_at } : {}),
+      ...(row?.oldest_active_created_at
+        ? { oldestActiveCreatedAt: row.oldest_active_created_at }
+        : {}),
+    };
+  }
+
   async updateState(
     id: string,
     update: OutboxJobStateUpdate,
@@ -130,6 +253,7 @@ export class SqliteOutboxPersistence {
       .prepare<OutboxJobRow>(
         `UPDATE outbox_jobs
          SET state = 'syncing',
+             next_retry_at = NULL,
              locked_at = $now,
              lease_token = $leaseToken,
              lease_expires_at = $leaseExpiresAt,
@@ -366,9 +490,9 @@ export class SqliteOutboxPersistence {
     return (
       this.database
         .prepare<{ count: number }>(
-          `SELECT COUNT(*) AS count
-           FROM outbox_jobs
-           WHERE state NOT IN ('synced', 'blocked', 'failed', 'cancelled')`,
+          `SELECT queued_jobs AS count
+           FROM operational_store_statistics
+           WHERE id = 1`,
         )
         .get()?.count ?? 0
     );
@@ -401,40 +525,6 @@ export class SqliteOutboxPersistence {
       message: 'Outbox job state changed before the update could be applied.',
     };
   }
-}
-
-export function createPendingOutboxJob(job: OutboxJobCreateInput): OutboxJob {
-  return {
-    assetRefId: job.assetRefId,
-    attempt: 0,
-    capture: normalizeCapturePayload(job),
-    createdAt: job.createdAt,
-    deviceId: job.deviceId,
-    id: job.id,
-    idempotencyKey: job.idempotencyKey,
-    payloadHash: job.payloadHash,
-    state: 'pending',
-    updatedAt: job.createdAt,
-    workspaceId: job.workspaceId,
-    ...(job.nextRetryAt ? { nextRetryAt: job.nextRetryAt } : {}),
-  };
-}
-
-export function outboxJobMatchesInput(existing: OutboxJob, input: OutboxJobCreateInput): boolean {
-  return (
-    existing.assetRefId === input.assetRefId &&
-    existing.payloadHash === input.payloadHash &&
-    JSON.stringify(cloneCapturePayload(existing.capture)) ===
-      JSON.stringify(cloneCapturePayload(normalizeCapturePayload(input)))
-  );
-}
-
-export function cloneOutboxJob(job: OutboxJob): OutboxJob {
-  return {
-    ...job,
-    capture: cloneCapturePayload(job.capture),
-    ...(job.lastSafeError ? { lastSafeError: { ...job.lastSafeError } } : {}),
-  };
 }
 
 export function mapCreateOutboxConstraintError(error: unknown): OperationalStoreError | null {
@@ -508,55 +598,6 @@ function outboxJobFromRow(row: OutboxJobRow): OutboxJob {
   });
 }
 
-function normalizeCapturePayload(job: OutboxJobCreateInput): OutboxJob['capture'] {
-  return {
-    appName: job.capture?.appName ?? 'Recapsy Desktop',
-    capturedAt: job.capture?.capturedAt ?? job.createdAt,
-    captureType: job.capture?.captureType ?? 'screen',
-    observedAt: job.capture?.observedAt ?? job.createdAt,
-    privacyDecision: {
-      action: job.capture?.privacyDecision?.action ?? 'allow',
-      decidedAt:
-        job.capture?.privacyDecision?.decidedAt ??
-        job.capture?.observedAt ??
-        job.capture?.capturedAt ??
-        job.createdAt,
-      policyVersion: job.capture?.privacyDecision?.policyVersion ?? 'desktop-default',
-      reasons: [...(job.capture?.privacyDecision?.reasons ?? [])],
-    },
-    ...(job.capture?.bundleId ? { bundleId: job.capture.bundleId } : {}),
-    ...(job.capture?.contextConfidence ? { contextConfidence: job.capture.contextConfidence } : {}),
-    ...(job.capture?.contextFingerprint
-      ? { contextFingerprint: job.capture.contextFingerprint }
-      : {}),
-    ...(job.capture?.documentPathCandidate
-      ? { documentPathCandidate: { ...job.capture.documentPathCandidate } }
-      : {}),
-    ...(job.capture?.localEventId ? { localEventId: job.capture.localEventId } : {}),
-    ...(job.capture?.metadata ? { metadata: { ...job.capture.metadata } } : {}),
-    ...(job.capture?.urlCandidate ? { urlCandidate: { ...job.capture.urlCandidate } } : {}),
-    ...(job.capture?.userId ? { userId: job.capture.userId } : {}),
-    ...(job.capture?.windowTitleCandidate
-      ? { windowTitleCandidate: { ...job.capture.windowTitleCandidate } }
-      : {}),
-  };
-}
-
-function cloneCapturePayload(capture: OutboxJob['capture']): OutboxJob['capture'] {
-  return {
-    ...capture,
-    privacyDecision: { ...capture.privacyDecision, reasons: [...capture.privacyDecision.reasons] },
-    ...(capture.documentPathCandidate
-      ? { documentPathCandidate: { ...capture.documentPathCandidate } }
-      : {}),
-    ...(capture.metadata ? { metadata: { ...capture.metadata } } : {}),
-    ...(capture.urlCandidate ? { urlCandidate: { ...capture.urlCandidate } } : {}),
-    ...(capture.windowTitleCandidate
-      ? { windowTitleCandidate: { ...capture.windowTitleCandidate } }
-      : {}),
-  };
-}
-
 function isTerminalOutboxState(state: OutboxJobState): state is OutboxTerminalState {
   return TERMINAL_OUTBOX_STATES.has(state);
 }
@@ -585,20 +626,4 @@ function success<T>(value: T): OperationalStoreResult<T> {
 
 function failure<T>(error: OperationalStoreError): OperationalStoreResult<T> {
   return { error, ok: false };
-}
-
-function parseJson<T>(value: string): T {
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    throw new StorageCorruptionError();
-  }
-}
-
-class StorageCorruptionError extends Error {
-  readonly code = 'storage_corruption';
-
-  constructor() {
-    super('Local operational store contains invalid JSON.');
-  }
 }

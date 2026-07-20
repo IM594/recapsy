@@ -6,17 +6,21 @@ import {
   type StoredOcrResult,
   createMemoryStore,
 } from '../index';
-import { type AssetAvailabilityResolver, reconcileAssetRefs } from '../reconciliation';
+import {
+  type AssetAvailabilityResolver,
+  createHistoricalAssetReconciliation,
+  reconcileActiveAssetRefs,
+} from '../reconciliation';
 
 const now = '2026-07-06T00:00:00.000Z';
 const reconcileNow = '2026-07-06T00:05:00.000Z';
 
-describe('asset ref reconciliation', () => {
+describe('active asset ref reconciliation', () => {
   it('leaves available refs and associated retryable jobs unchanged in memory', async () => {
     const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
 
-    const summary = await reconcileAssetRefs({
+    const summary = await reconcileActiveAssetRefs({
       now: reconcileNow,
       resolver: resolverReturning('available'),
       store,
@@ -28,7 +32,6 @@ describe('asset ref reconciliation', () => {
       blocked: 0,
       checked: 1,
       missing: 0,
-      skippedTerminal: 0,
       unreadable: 0,
     });
     expect(await store.getAssetCacheRef('asset_1')).toMatchObject({
@@ -63,7 +66,7 @@ describe('asset ref reconciliation', () => {
       state: 'syncing',
     });
 
-    const summary = await reconcileAssetRefs({
+    const summary = await reconcileActiveAssetRefs({
       now: reconcileNow,
       resolver: resolverFromMap({
         asset_missing: 'missing',
@@ -111,7 +114,7 @@ describe('asset ref reconciliation', () => {
     });
   });
 
-  it('does not revive terminal jobs and leaves result_pending jobs untouched when local assets are gone', async () => {
+  it('leaves result_pending jobs untouched when local assets are gone', async () => {
     const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
     await createAssetBackedJob(
@@ -135,18 +138,19 @@ describe('asset ref reconciliation', () => {
       state: 'result_pending',
     });
 
-    const summary = await reconcileAssetRefs({
+    const summary = await reconcileActiveAssetRefs({
       now: reconcileNow,
       resolver: resolverReturning('missing'),
       store,
       workspaceId: 'workspace_1',
     });
 
-    expect(summary).toMatchObject({
+    expect(summary).toEqual({
+      available: 0,
       blocked: 0,
-      checked: 2,
-      missing: 2,
-      skippedTerminal: 1,
+      checked: 0,
+      missing: 0,
+      unreadable: 0,
     });
     expect(await store.getOutboxJob('job_1')).toMatchObject({
       state: 'synced',
@@ -160,6 +164,118 @@ describe('asset ref reconciliation', () => {
       state: 'result_pending',
     });
     expect(resultPendingJob?.terminalReason).toBeUndefined();
+  });
+
+  it('leaves recovered OCR submissions pending when their original asset is missing', async () => {
+    const store = createMemoryStore();
+    await createAssetBackedJob(store, createAsset(), createJob());
+    await store.updateOutboxJobState('job_1', {
+      now,
+      ocrResult: createStoredOcrResult(),
+      serverCaptureId: 'capture_result_pending',
+      state: 'result_pending',
+    });
+    await store.recoverInterruptedOutboxJob({
+      id: 'job_1',
+      lastSafeError: {
+        code: 'interrupted_before_result_submit',
+        message: 'OCR result submission was interrupted before startup recovery.',
+        retryable: true,
+      },
+      nextRetryAt: reconcileNow,
+      now: reconcileNow,
+    });
+
+    const summary = await reconcileActiveAssetRefs({
+      now: reconcileNow,
+      resolver: resolverReturning('missing'),
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    expect(summary).toEqual({
+      available: 0,
+      blocked: 0,
+      checked: 0,
+      missing: 0,
+      unreadable: 0,
+    });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      ocrResult: {
+        sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+      },
+      serverCaptureId: 'capture_result_pending',
+      state: 'pending',
+    });
+  });
+
+  it('checks only assets still needed by active outbox jobs', async () => {
+    const store = createMemoryStore();
+    const checked: string[] = [];
+    await createAssetBackedJob(
+      store,
+      createAsset({
+        assetRefId: 'asset_terminal',
+        availabilityCheckedAt: '2026-07-06T00:04:00.000Z',
+      }),
+      createJob({
+        assetRefId: 'asset_terminal',
+        id: 'job_terminal',
+        idempotencyKey: 'idem_terminal',
+      }),
+    );
+    await store.markOutboxJobTerminal('job_terminal', {
+      now,
+      reason: 'completed',
+      state: 'synced',
+    });
+    await createAssetBackedJob(
+      store,
+      createAsset({
+        assetRefId: 'asset_active',
+        availabilityCheckedAt: '2026-07-06T00:04:00.000Z',
+      }),
+      createJob({
+        assetRefId: 'asset_active',
+        id: 'job_active',
+        idempotencyKey: 'idem_active',
+      }),
+    );
+
+    await createAssetBackedJob(
+      store,
+      createAsset({ assetRefId: 'asset_privacy_blocked' }),
+      createJob({
+        assetRefId: 'asset_privacy_blocked',
+        capture: { privacyDecision: { action: 'block_ocr' } },
+        id: 'job_privacy_blocked',
+        idempotencyKey: 'idem_privacy_blocked',
+      }),
+    );
+
+    const summary = await reconcileActiveAssetRefs({
+      now: reconcileNow,
+      resolver: {
+        async checkAvailability(asset) {
+          checked.push(asset.assetRefId);
+          return { availabilityState: 'available' };
+        },
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    expect(summary).toEqual({
+      available: 1,
+      blocked: 0,
+      checked: 1,
+      missing: 0,
+      unreadable: 0,
+    });
+    expect(checked).toEqual(['asset_active']);
+    expect((await store.getAssetCacheRef('asset_terminal'))?.availabilityCheckedAt).toBe(
+      '2026-07-06T00:04:00.000Z',
+    );
   });
 
   it('can reconcile all workspaces without returning sensitive asset fields in the summary', async () => {
@@ -180,7 +296,7 @@ describe('asset ref reconciliation', () => {
       }),
     );
 
-    const summary = await reconcileAssetRefs({
+    const summary = await reconcileActiveAssetRefs({
       now: reconcileNow,
       resolver: resolverReturning('missing'),
       store,
@@ -201,7 +317,7 @@ describe('asset ref reconciliation', () => {
     const store = createMemoryStore();
     await createAssetBackedJob(store, createAsset(), createJob());
 
-    const summary = await reconcileAssetRefs({
+    const summary = await reconcileActiveAssetRefs({
       now: reconcileNow,
       resolver: {
         async checkAvailability(): Promise<never> {
@@ -237,6 +353,76 @@ describe('asset ref reconciliation', () => {
     expect(serialized).not.toContain('/Users/alice');
     expect(serialized).not.toContain('permission denied');
     expect(serialized).not.toContain('secret');
+  });
+});
+
+describe('historical asset reconciliation', () => {
+  it('sweeps terminal assets in bounded pages without delaying active reconciliation', async () => {
+    const store = createMemoryStore();
+    const checked: string[] = [];
+
+    for (const assetRefId of ['asset_1', 'asset_2', 'asset_3']) {
+      await store.upsertAssetCacheRef(createAsset({ assetRefId }));
+    }
+
+    const reconciliation = createHistoricalAssetReconciliation({
+      now: () => reconcileNow,
+      pageSize: 2,
+      resolver: {
+        async checkAvailability(asset) {
+          checked.push(asset.assetRefId);
+          return { availabilityState: 'available' };
+        },
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    reconciliation.start();
+    await waitFor(() => checked.length === 3);
+    await waitFor(
+      async () => (await store.getAssetCacheRef('asset_3'))?.availabilityCheckedAt === reconcileNow,
+    );
+    await reconciliation.stop();
+
+    expect(checked).toEqual(['asset_1', 'asset_2', 'asset_3']);
+    expect((await store.getAssetCacheRef('asset_1'))?.availabilityCheckedAt).toBe(reconcileNow);
+    expect((await store.getAssetCacheRef('asset_2'))?.availabilityCheckedAt).toBe(reconcileNow);
+    expect((await store.getAssetCacheRef('asset_3'))?.availabilityCheckedAt).toBe(reconcileNow);
+  });
+
+  it('keeps one sweep in flight and prevents an interrupted generation from writing after stop', async () => {
+    const store = createMemoryStore();
+    await store.upsertAssetCacheRef(createAsset());
+    const firstCheck = Promise.withResolvers<void>();
+    let checks = 0;
+
+    const reconciliation = createHistoricalAssetReconciliation({
+      now: () => reconcileNow,
+      resolver: {
+        async checkAvailability() {
+          checks += 1;
+          if (checks === 1) await firstCheck.promise;
+          return { availabilityState: 'available' };
+        },
+      },
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    reconciliation.start();
+    reconciliation.start();
+    await waitFor(() => checks === 1);
+
+    const stopping = reconciliation.stop();
+    reconciliation.start();
+    firstCheck.resolve();
+    await stopping;
+    await waitFor(() => checks === 2);
+    await reconciliation.stop();
+
+    expect(checks).toBe(2);
+    expect((await store.getAssetCacheRef('asset_1'))?.availabilityCheckedAt).toBe(reconcileNow);
   });
 });
 
@@ -370,4 +556,13 @@ function createAsset(overrides: Partial<AssetCacheRef> = {}): AssetCacheRef {
     workspaceId: 'workspace_1',
     ...overrides,
   };
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempts = 0; attempts < 100; attempts += 1) {
+    if (await predicate()) return;
+    await Promise.resolve();
+  }
+
+  throw new Error('Timed out waiting for asynchronous reconciliation.');
 }

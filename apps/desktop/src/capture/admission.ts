@@ -52,7 +52,7 @@ export type CaptureAdmissionControllerOptions = {
   onStatusChange?(status: CaptureAdmissionSnapshot): void | Promise<void>;
 };
 
-const DEFAULT_RECONCILIATION_INTERVAL_MS = 1000;
+const DEFAULT_RECONCILIATION_INTERVAL_MS = 30_000;
 const INTAKE_RECOVERY_SAMPLES = 2;
 
 type HealthyHealth = { state: 'healthy' };

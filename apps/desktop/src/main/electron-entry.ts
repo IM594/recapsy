@@ -31,13 +31,17 @@ import {
   createDesktopShell,
   createTrayIconPngBuffer,
 } from '../shell/index';
-import { createSqliteStore } from '../storage/index';
+import { type AssetAvailabilityResolver, createSqliteStore } from '../storage/index';
 import { createNodeSqliteDatabase } from '../storage/node';
 import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
 import { startDesktopSingleInstance } from './application-instance';
 import { resolveDesktopApplicationPaths } from './application-layout';
 import { configureDesktopApplicationProfile } from './application-profile';
-import { createLocalAssetReader, createLocalAssetRemover } from './asset-reader';
+import {
+  createLocalAssetAvailabilityResolver,
+  createLocalAssetReader,
+  createLocalAssetRemover,
+} from './asset-reader';
 import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';
 import { resolveDesktopDeviceId } from './device-identity';
@@ -128,6 +132,14 @@ let captureAssetReader: SyncAssetReader | undefined;
 function resolveCaptureAssetReader(): SyncAssetReader {
   captureAssetReader ??= createLocalAssetReader({ assetRoot: resolveCaptureAssetRoot() });
   return captureAssetReader;
+}
+
+let captureAssetAvailabilityResolver: AssetAvailabilityResolver | undefined;
+function resolveCaptureAssetAvailabilityResolver(): AssetAvailabilityResolver {
+  captureAssetAvailabilityResolver ??= createLocalAssetAvailabilityResolver({
+    assetRoot: resolveCaptureAssetRoot(),
+  });
+  return captureAssetAvailabilityResolver;
 }
 
 let captureAssetRemover: ReturnType<typeof createLocalAssetRemover> | undefined;
@@ -228,6 +240,10 @@ const privacySettings = createPrivacySettingsOpener(async (url) => {
 // invoked until the primary process owns Electron's single-instance lock.
 const runtimeOptions: ElectronMainRuntimeOptions = {
   app,
+  assetResolver: {
+    checkAvailability: async (asset) =>
+      await resolveCaptureAssetAvailabilityResolver().checkAvailability(asset),
+  },
   authClient,
   createHelperClient: () =>
     createCaptureBundleClient({

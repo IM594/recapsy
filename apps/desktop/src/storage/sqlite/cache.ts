@@ -1,3 +1,9 @@
+import {
+  cloneLocalCapturePolicyRule,
+  clonePolicyCache,
+  cloneSettingsCache,
+  cloneSyncCursor,
+} from '../cache-values';
 import type {
   LocalCapturePolicyRule,
   PolicyCacheEntry,
@@ -8,6 +14,7 @@ import type {
   SyncCursorKind,
 } from '../types';
 import type { SqliteDatabase, SqliteRow } from './driver';
+import { parseJson } from './serialization';
 
 export class SqliteCachePersistence {
   constructor(private readonly database: SqliteDatabase) {}
@@ -314,44 +321,6 @@ function settingsCacheFromRow(row: SettingsCacheRow): SettingsCache {
   });
 }
 
-function clonePolicyCache(entry: PolicyCacheEntry): PolicyCacheEntry {
-  return {
-    ...entry,
-    policy: {
-      ...entry.policy,
-      rules: entry.policy.rules.map((rule) => ({ ...rule })),
-    },
-  };
-}
-
-function cloneLocalCapturePolicyRule(rule: LocalCapturePolicyRule): LocalCapturePolicyRule {
-  return { ...rule };
-}
-
-function cloneSyncCursor(cursor: SyncCursor): SyncCursor {
-  return { ...cursor };
-}
-
-function cloneSettingsCache(settings: SettingsCache): SettingsCache {
-  return { ...settings, serverCapabilities: { ...settings.serverCapabilities } };
-}
-
 function isExpired(fetchedAt: string, ttlSeconds: number, now: string): boolean {
   return Date.parse(now) > Date.parse(fetchedAt) + ttlSeconds * 1000;
-}
-
-function parseJson<T>(value: string): T {
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    throw new StorageCorruptionError();
-  }
-}
-
-class StorageCorruptionError extends Error {
-  readonly code = 'storage_corruption';
-
-  constructor() {
-    super('Local operational store contains invalid JSON.');
-  }
 }

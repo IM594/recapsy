@@ -9,7 +9,9 @@ import {
   type AssetAvailabilityResolver,
   type AssetReconciliationStore,
   type BackpressureConfig,
-  reconcileAssetRefs,
+  type HistoricalAssetReconciliation,
+  createHistoricalAssetReconciliation,
+  reconcileActiveAssetRefs,
 } from '../storage/index';
 import {
   type CaptureAdmissionController,
@@ -78,10 +80,12 @@ export type CaptureRuntime = {
   admission: CaptureAdmissionController;
   control: CaptureControl;
   commandClient: CaptureHelperCommandClient;
+  historicalAssetReconciliation: HistoricalAssetReconciliation;
   policy: CapturePolicyController;
 };
 
 export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRuntime {
+  const assetResolver = options.assetResolver ?? alwaysAvailableAssetResolver;
   const rawEventHandler = createCaptureHelperEventHandler({
     client: options.client,
     deviceId: options.deviceId,
@@ -124,9 +128,9 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
   const control = createCaptureControl({
     assetReconciliation: {
       async reconcile() {
-        await reconcileAssetRefs({
+        await reconcileActiveAssetRefs({
           now: options.now(),
-          resolver: options.assetResolver ?? alwaysAvailableAssetResolver,
+          resolver: assetResolver,
           store: options.store,
           workspaceId: options.workspaceId,
         });
@@ -146,9 +150,18 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
     store: options.store,
     onStatusChange: (status) => control.updateAdmission(status),
   });
+  const historicalAssetReconciliation = createHistoricalAssetReconciliation({
+    now: options.now,
+    resolver: assetResolver,
+    store: options.store,
+    workspaceId: options.workspaceId,
+  });
   eventHandler.subscribeToObservation(async (observation) => {
     if (observation.type !== 'storage_failure') {
       await control.recordHelperObservation(observation);
+      if (observation.type === 'capture_result') {
+        await admission.reconcile();
+      }
       return;
     }
     if (observation.target === 'asset') {
@@ -157,7 +170,13 @@ export function createCaptureRuntime(options: CaptureRuntimeOptions): CaptureRun
       await admission.reportStorageFailure();
     }
   });
-  return { admission, commandClient: options.client, control, policy };
+  return {
+    admission,
+    commandClient: options.client,
+    control,
+    historicalAssetReconciliation,
+    policy,
+  };
 }
 
 function decorateEventHandler(

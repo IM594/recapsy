@@ -4,14 +4,22 @@ export {
   type MemoryStoreOptions,
 } from './memory';
 export { toRendererSafeAssetRef } from './asset-dto';
-export { reconcileAssetRefs, settleServerCapture } from './reconciliation';
+export {
+  createHistoricalAssetReconciliation,
+  reconcileActiveAssetRefs,
+  settleServerCapture,
+} from './reconciliation';
 export { executeLocalRetention, planLocalRetentionDryRun } from './retention';
 export type {
   AssetAvailabilityCheck,
   AssetAvailabilityResolver,
   AssetReconciliationStore,
-  AssetReconciliationOptions,
-  AssetReconciliationSummary,
+  ActiveAssetReconciliationOptions,
+  ActiveAssetReconciliationSummary,
+  ActiveAssetRefDependency,
+  HistoricalAssetReconciliation,
+  HistoricalAssetReconciliationOptions,
+  HistoricalAssetRefPageInput,
   ServerCaptureSettlementStore,
 } from './reconciliation';
 export type {
@@ -55,6 +63,7 @@ export type {
   OperationalStoreErrorCode,
   OperationalStoreResult,
   OperationalStoreSnapshot,
+  OutboxQueueSummary,
   OutboxJob,
   OutboxJobCreateInput,
   OutboxJobListFilter,

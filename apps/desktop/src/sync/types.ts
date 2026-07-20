@@ -64,6 +64,7 @@ export type SyncQueueStore = {
   claimNextRetryableOutboxJob(input: ClaimRetryableOutboxJobInput): Promise<OutboxJob | null>;
   getAssetCacheRef(assetRefId: string): Promise<AssetCacheRef | null>;
   getOutboxJob(id: string): Promise<OutboxJob | null>;
+  listInterruptedOutboxJobs(workspaceId?: string): Promise<OutboxJob[]>;
   listOutboxJobs(filter?: OutboxJobListFilter): Promise<OutboxJob[]>;
   markOutboxJobTerminal(
     id: string,

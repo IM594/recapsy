@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
+  createLocalAssetAvailabilityResolver,
   createLocalAssetReader,
   createLocalAssetRemover,
   isResolvedPathWithinRoot,
@@ -21,6 +22,21 @@ function makeAssetRoot(): string {
   const root = mkdtempSync(path.join(tmpdir(), 'recapsy-asset-root-'));
   tempDirs.push(root);
   return root;
+}
+
+function assetRef(localAccessKey: string) {
+  return {
+    assetRefId: `asset_${localAccessKey}`,
+    availabilityState: 'available' as const,
+    cleanupState: 'retained' as const,
+    createdAt: '2026-07-20T00:00:00.000Z',
+    hash: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    localAccessKey,
+    mimeType: 'image/webp',
+    role: 'capture_original' as const,
+    sizeBytes: 3,
+    workspaceId: 'workspace_1',
+  };
 }
 
 /** Mirrors the local-asset error shape classified by `sync/errors.ts`. */
@@ -148,6 +164,30 @@ describe('createLocalAssetReader', () => {
 
     expectUnreadable(thrown);
     expectNoPathLeak(thrown, root);
+  });
+});
+
+describe('createLocalAssetAvailabilityResolver', () => {
+  it('checks a local asset without reading its bytes and classifies missing or unreadable paths', async () => {
+    const root = makeAssetRoot();
+    mkdirSync(path.join(root, 'cap_1'), { recursive: true });
+    writeFileSync(path.join(root, 'cap_1', 'screenshot.webp'), new Uint8Array([1, 2, 3]));
+    const resolver = createLocalAssetAvailabilityResolver({ assetRoot: root });
+
+    await expect(resolver.checkAvailability(assetRef('cap_1/screenshot.webp'))).resolves.toEqual({
+      availabilityState: 'available',
+    });
+    await expect(
+      resolver.checkAvailability(assetRef('cap_missing/screenshot.webp')),
+    ).resolves.toEqual({
+      availabilityState: 'missing',
+    });
+    await expect(resolver.checkAvailability(assetRef('../outside.webp'))).resolves.toEqual({
+      availabilityState: 'unreadable',
+    });
+    await expect(resolver.checkAvailability(assetRef('cap_1'))).resolves.toEqual({
+      availabilityState: 'unreadable',
+    });
   });
 });
 

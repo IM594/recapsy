@@ -29,7 +29,9 @@ import {
 import type { ServerApiClient } from '../server/index';
 import type { DesktopShell } from '../shell/index';
 import type {
+  AssetAvailabilityResolver,
   BackpressureConfig,
+  HistoricalAssetReconciliation,
   LocalRetentionExecutionStore,
   StoreLifecycle,
 } from '../storage/index';
@@ -77,6 +79,7 @@ export type DesktopShellFactoryContext = {
 
 export type ElectronMainRuntimeOptions = {
   app: ElectronAppLike;
+  assetResolver?: AssetAvailabilityResolver;
   ipcMain?: ElectronIpcMainLike;
   createStore(): DesktopStore;
   createHelperClient(): CaptureHelperClient & CaptureHelperCommandClient;
@@ -137,6 +140,7 @@ export function createElectronMainRuntime(
   }
 
   let admission: CaptureAdmissionController | undefined;
+  let historicalAssetReconciliation: HistoricalAssetReconciliation | undefined;
   const ready: Promise<ElectronMainRuntimeReadyState> = options.app.whenReady().then(async () => {
     const deviceId = await options.resolveDeviceId();
     const sessionStartup = createSessionStartup({
@@ -159,7 +163,10 @@ export function createElectronMainRuntime(
       localMaxWorkers: options.syncLocalMaxWorkers,
       now,
       onError: options.onSyncError,
-      onResult: options.onSyncResult,
+      onResult: (result) => {
+        options.onSyncResult?.(result);
+        void admission?.reconcile();
+      },
       readAssetBytes: options.readAssetBytes,
       retryBackoff: options.syncRetryBackoff,
       resolveServerMaxConcurrentOcr: () => serverMaxConcurrentOcr,
@@ -167,6 +174,7 @@ export function createElectronMainRuntime(
       workspaceId,
     });
     const captureRuntime = createCaptureRuntime({
+      assetResolver: options.assetResolver,
       backpressure: options.backpressure,
       client: options.createHelperClient(),
       deviceId,
@@ -183,6 +191,7 @@ export function createElectronMainRuntime(
       workspaceId,
     });
     admission = captureRuntime.admission;
+    historicalAssetReconciliation = captureRuntime.historicalAssetReconciliation;
 
     const shell = options.createShell
       ? await options.createShell({
@@ -200,8 +209,10 @@ export function createElectronMainRuntime(
     // control transition is known.
     await captureRuntime.admission.reconcile();
 
+    let helperStarted = false;
     try {
       await captureRuntime.control.start();
+      helperStarted = true;
     } catch (error) {
       const helperStatus = captureRuntime.control.getSnapshot().captureHelper;
       // A failing helper is an actionable desktop condition, not a reason to
@@ -211,6 +222,9 @@ export function createElectronMainRuntime(
       if (!shell || helperStatus?.lastSafeError?.code !== 'helper_start_failed') {
         throw error;
       }
+    }
+    if (helperStarted) {
+      captureRuntime.historicalAssetReconciliation.start();
     }
     await captureRuntime.admission.start();
     syncRuntime.start();
@@ -284,6 +298,7 @@ export function createElectronMainRuntime(
       ready
         .then(({ control, shell, syncLoop }) => {
           return Promise.allSettled([
+            Promise.resolve().then(() => historicalAssetReconciliation?.stop()),
             Promise.resolve().then(() => shell?.dispose()),
             Promise.resolve().then(() => control.requestQuit()),
             Promise.resolve().then(() => admission?.stop()),

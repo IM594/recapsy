@@ -11,7 +11,7 @@ import {
   evaluateOperationalStoreBackpressure,
   toRendererSafeAssetRef,
 } from '../../index';
-import { reconcileAssetRefs } from '../../reconciliation';
+import { reconcileActiveAssetRefs } from '../../reconciliation';
 import { createBunSqliteDatabase } from '../bun';
 import type { SqliteDatabase, SqliteRow, SqliteStatement } from '../driver';
 import { migrateSqliteStore } from '../migrations';
@@ -116,7 +116,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get(),
-    ).toEqual({ version: 8 });
+    ).toEqual({ version: 9 });
     database.close();
   });
 
@@ -160,7 +160,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 8,
+      version: 9,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -168,6 +168,57 @@ describe('SQLite operational store', () => {
     ).toBe(1);
 
     database.close();
+  });
+
+  it('maintains device-wide admission statistics through outbox and asset state changes', async () => {
+    const { database, store } = await createTempStoreWithDatabase();
+
+    expect(toOperationalSnapshot(readOperationalStatistics(database))).toEqual({
+      assetBytes: 0,
+      queuedJobs: 0,
+      retryingJobs: 0,
+    });
+
+    await store.createOutboxJob(createJob());
+    await store.upsertAssetCacheRef(createAsset({ sizeBytes: 2048 }));
+    await store.recordOutboxSafeError('job_1', {
+      code: 'server_unavailable',
+      maxAttempts: 5,
+      message: 'Server is unavailable.',
+      now: '2026-07-06T00:01:00.000Z',
+      retryable: true,
+      retryAt: '2026-07-06T00:02:00.000Z',
+    });
+
+    expect(toOperationalSnapshot(readOperationalStatistics(database))).toEqual({
+      assetBytes: 2048,
+      queuedJobs: 1,
+      retryingJobs: 1,
+    });
+
+    await store.markOutboxJobTerminal('job_1', {
+      now: '2026-07-06T00:03:00.000Z',
+      reason: 'terminal_test',
+      state: 'failed',
+    });
+    await store.claimAssetCleanup({
+      assetRefId: 'asset_1',
+      now: '2026-07-06T00:03:00.000Z',
+    });
+    await store.settleAssetCleanup({
+      assetRefId: 'asset_1',
+      cleanupState: 'cleaned',
+      now: '2026-07-06T00:04:00.000Z',
+    });
+
+    expect(toOperationalSnapshot(readOperationalStatistics(database))).toEqual({
+      assetBytes: 0,
+      queuedJobs: 0,
+      retryingJobs: 0,
+    });
+    expect(await store.getBackpressureSnapshot()).toEqual(
+      toOperationalSnapshot(readOperationalStatistics(database)),
+    );
   });
 
   it('adds asset availability columns to an existing early operational table', async () => {
@@ -241,6 +292,34 @@ describe('SQLite operational store', () => {
     });
 
     database.close();
+  });
+
+  it('maps malformed serialized values to storage_corruption consistently', async () => {
+    const { database, store } = await createTempStoreWithDatabase();
+    await store.createOutboxJob(createJob());
+    await store.upsertAssetCacheRef(createAsset());
+    await store.setSettingsCache({
+      captureEnabled: true,
+      deviceId: 'device_1',
+      fetchedAt: now,
+      serverCapabilities: { ocr: true, search: true, sync: true, timeline: true },
+      workspaceId: 'workspace_1',
+    });
+
+    database.run('PRAGMA ignore_check_constraints = ON');
+    database.run("UPDATE outbox_jobs SET capture_json = '{'");
+    await expect(store.getOutboxJob('job_1')).rejects.toMatchObject({ code: 'storage_corruption' });
+
+    database.run("UPDATE asset_cache_refs SET availability_safe_error_json = '{'");
+    await expect(store.getAssetCacheRef('asset_1')).rejects.toMatchObject({
+      code: 'storage_corruption',
+    });
+
+    database.run("UPDATE settings_cache SET server_capabilities_json = '{'");
+    await expect(store.getSettingsCache('workspace_1')).rejects.toMatchObject({
+      code: 'storage_corruption',
+    });
+    database.run('PRAGMA ignore_check_constraints = OFF');
   });
 
   it('rebuilds a v1 outbox_jobs table into the v2 shape, remapping the retired states', async () => {
@@ -334,7 +413,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(8);
+    ).toBe(9);
 
     const rowById = (id: string) =>
       database
@@ -566,10 +645,8 @@ describe('SQLite operational store', () => {
       reconciledSynced: 0,
       recovered: 2,
       resultSubmitInterrupted: 1,
-      scanned: 3,
+      scanned: 2,
       syncInterrupted: 1,
-      unchangedRetryable: 0,
-      unchangedTerminal: 1,
     });
     expect(await reopened.getOutboxJob('job_1')).toMatchObject({
       lastSafeError: {
@@ -797,6 +874,16 @@ describe('SQLite operational store', () => {
       now: '2026-07-06T00:02:00.000Z',
       workspaceId: 'workspace_1',
     });
+    await expect(
+      store.getOutboxSummary({
+        minuteAgo: '2026-07-06T00:01:00.000Z',
+        now: '2026-07-06T00:02:00.000Z',
+        workspaceId: 'workspace_1',
+      }),
+    ).resolves.toMatchObject({
+      nextRetryAt: '2026-07-06T00:05:00.000Z',
+      retrying: 1,
+    });
     const retry = await store.recordOutboxSafeError('job_ready', {
       code: 'provider_unavailable',
       leaseToken: claimed?.leaseToken,
@@ -831,6 +918,7 @@ describe('SQLite operational store', () => {
       lockedAt: '2026-07-06T00:02:00.000Z',
       state: 'syncing',
     });
+    expect(claimed?.nextRetryAt).toBeUndefined();
     expect(retry).toMatchObject({
       ok: true,
       value: {
@@ -1105,7 +1193,7 @@ describe('SQLite operational store', () => {
     );
     await first.createOutboxJob(createJob());
 
-    const summary = await reconcileAssetRefs({
+    const summary = await reconcileActiveAssetRefs({
       now: '2026-07-06T00:05:00.000Z',
       resolver: {
         async checkAvailability() {
@@ -1161,6 +1249,33 @@ describe('SQLite operational store', () => {
     expect(serializedSummary).not.toContain('contentAddress');
 
     reopened.close();
+  });
+
+  it('paginates historical assets without returning active local-byte dependencies', async () => {
+    const store = await createTempStore();
+    await store.upsertAssetCacheRef(createAsset({ assetRefId: 'asset_1' }));
+    await store.upsertAssetCacheRef(createAsset({ assetRefId: 'asset_2' }));
+    await store.upsertAssetCacheRef(createAsset({ assetRefId: 'asset_3' }));
+    await store.createOutboxJob(
+      createJob({
+        assetRefId: 'asset_2',
+        id: 'job_active_asset',
+        idempotencyKey: 'idem_active_asset',
+      }),
+    );
+
+    const firstPage = await store.listHistoricalAssetRefPage({
+      limit: 1,
+      workspaceId: 'workspace_1',
+    });
+    const secondPage = await store.listHistoricalAssetRefPage({
+      afterAssetRefId: firstPage[0]?.assetRefId,
+      limit: 2,
+      workspaceId: 'workspace_1',
+    });
+
+    expect(firstPage.map((asset) => asset.assetRefId)).toEqual(['asset_1']);
+    expect(secondPage.map((asset) => asset.assetRefId)).toEqual(['asset_3']);
   });
 
   it('expires policy cache entries by TTL and persists sync cursor and settings cache', async () => {
@@ -1474,5 +1589,39 @@ function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): Stored
     },
     sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     ...overrides,
+  };
+}
+
+function readOperationalStatistics(database: SqliteDatabase) {
+  return database
+    .prepare<{
+      asset_bytes: number;
+      queued_jobs: number;
+      retrying_jobs: number;
+    }>(
+      `SELECT
+         asset_bytes,
+         queued_jobs,
+         retrying_jobs
+       FROM operational_store_statistics
+       WHERE id = 1`,
+    )
+    .get();
+}
+
+function toOperationalSnapshot(
+  row: {
+    asset_bytes: number;
+    queued_jobs: number;
+    retrying_jobs: number;
+  } | null,
+) {
+  if (!row) {
+    throw new Error('Expected operational statistics row.');
+  }
+  return {
+    assetBytes: row.asset_bytes,
+    queuedJobs: row.queued_jobs,
+    retryingJobs: row.retrying_jobs,
   };
 }

@@ -1,3 +1,4 @@
+import { cloneAssetRef } from '../asset-values';
 import type {
   AssetCacheRef,
   ClaimAssetCleanupInput,
@@ -7,6 +8,7 @@ import type {
   UpdateAssetRefAvailabilityInput,
 } from '../types';
 import type { SqliteDatabase, SqliteRow } from './driver';
+import { parseJson } from './serialization';
 
 export class SqliteAssetPersistence {
   constructor(private readonly database: SqliteDatabase) {}
@@ -36,6 +38,68 @@ export class SqliteAssetPersistence {
             'SELECT * FROM asset_cache_refs ORDER BY workspace_id ASC, created_at ASC, asset_ref_id ASC',
           )
           .all();
+
+    return rows.map(assetRefFromRow);
+  }
+
+  async listByIds(assetRefIds: readonly string[]): Promise<AssetCacheRef[]> {
+    if (assetRefIds.length === 0) {
+      return [];
+    }
+
+    const parameters: Record<string, string> = {};
+    const placeholders = assetRefIds.map((assetRefId, index) => {
+      const parameter = `$assetRefId${index}`;
+      parameters[parameter] = assetRefId;
+      return parameter;
+    });
+    const rows = this.database
+      .prepare<AssetCacheRefRow>(
+        `SELECT *
+         FROM asset_cache_refs
+         WHERE asset_ref_id IN (${placeholders.join(', ')})`,
+      )
+      .all(parameters);
+
+    return rows.map(assetRefFromRow);
+  }
+
+  async listPage(input: {
+    afterAssetRefId?: string;
+    excludedAssetRefIds: readonly string[];
+    limit: number;
+    workspaceId?: string;
+  }): Promise<AssetCacheRef[]> {
+    const parameters: Record<string, string | number> = { $limit: input.limit };
+    const conditions: string[] = [];
+
+    if (input.workspaceId) {
+      conditions.push('workspace_id = $workspaceId');
+      parameters.$workspaceId = input.workspaceId;
+    }
+    if (input.afterAssetRefId) {
+      conditions.push('asset_ref_id > $afterAssetRefId');
+      parameters.$afterAssetRefId = input.afterAssetRefId;
+    }
+    if (input.excludedAssetRefIds.length > 0) {
+      const placeholders = input.excludedAssetRefIds.map((assetRefId, index) => {
+        const parameter = `$excludedAssetRefId${index}`;
+        parameters[parameter] = assetRefId;
+        return parameter;
+      });
+      conditions.push(`asset_ref_id NOT IN (${placeholders.join(', ')})`);
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.database
+      .prepare<AssetCacheRefRow>(
+        `SELECT *
+         FROM asset_cache_refs
+         ${where}
+         ORDER BY asset_ref_id ASC
+         LIMIT $limit`,
+      )
+      .all(parameters);
 
     return rows.map(assetRefFromRow);
   }
@@ -131,7 +195,21 @@ export class SqliteAssetPersistence {
   }
 
   async recoverPendingCleanup(input: RecoverPendingAssetCleanupInput): Promise<number> {
-    const result = this.database
+    const pending =
+      this.database
+        .prepare<{ count: number }>(
+          `SELECT COUNT(*) AS count
+         FROM asset_cache_refs
+         WHERE workspace_id = $workspaceId
+           AND cleanup_state = 'cleanup_pending'`,
+        )
+        .get({ $workspaceId: input.workspaceId })?.count ?? 0;
+
+    if (pending === 0) {
+      return 0;
+    }
+
+    this.database
       .prepare(
         `UPDATE asset_cache_refs
          SET cleanup_state = 'cleanup_failed',
@@ -149,7 +227,7 @@ export class SqliteAssetPersistence {
         $now: input.now,
         $workspaceId: input.workspaceId,
       });
-    return result.changes;
+    return pending;
   }
 
   async delete(assetRefId: string): Promise<boolean> {
@@ -233,10 +311,6 @@ export class SqliteAssetPersistence {
   }
 }
 
-export function assetRefMatches(left: AssetCacheRef, right: AssetCacheRef): boolean {
-  return JSON.stringify(cloneAssetRef(left)) === JSON.stringify(cloneAssetRef(right));
-}
-
 type AssetCacheRefRow = SqliteRow & {
   asset_ref_id: string;
   workspace_id: string;
@@ -309,22 +383,4 @@ function assetRefFromRow(row: AssetCacheRefRow): AssetCacheRef {
   });
 }
 
-function cloneAssetRef(asset: AssetCacheRef): AssetCacheRef {
-  return { ...asset };
-}
-
-function parseJson<T>(value: string): T {
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    throw new StorageCorruptionError();
-  }
-}
-
-class StorageCorruptionError extends Error {
-  readonly code = 'storage_corruption';
-
-  constructor() {
-    super('Local operational store contains invalid JSON.');
-  }
-}
+export { assetRefMatches } from '../asset-values';

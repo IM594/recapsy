@@ -16,16 +16,7 @@ export type SyncRecoverySummary = {
   syncInterrupted: number;
   resultSubmitInterrupted: number;
   reconciledSynced: number;
-  unchangedRetryable: number;
-  unchangedTerminal: number;
 };
-
-const TERMINAL_OUTBOX_STATES = new Set<OutboxJob['state']>([
-  'synced',
-  'blocked',
-  'failed',
-  'cancelled',
-]);
 
 const STARTUP_RECOVERY_ERRORS = {
   interrupted_during_sync: {
@@ -41,30 +32,16 @@ const STARTUP_RECOVERY_ERRORS = {
 } satisfies Record<string, SafeOperationalError>;
 
 export async function recoverSyncQueue(options: SyncRecoveryOptions): Promise<SyncRecoverySummary> {
-  const jobs = await options.store.listOutboxJobs(
-    options.workspaceId ? { workspaceId: options.workspaceId } : undefined,
-  );
+  const jobs = await options.store.listInterruptedOutboxJobs(options.workspaceId);
   const summary: SyncRecoverySummary = {
     reconciledSynced: 0,
     recovered: 0,
     resultSubmitInterrupted: 0,
     scanned: jobs.length,
     syncInterrupted: 0,
-    unchangedRetryable: 0,
-    unchangedTerminal: 0,
   };
 
   for (const job of jobs) {
-    if (TERMINAL_OUTBOX_STATES.has(job.state)) {
-      summary.unchangedTerminal += 1;
-      continue;
-    }
-
-    if (job.state === 'pending') {
-      summary.unchangedRetryable += 1;
-      continue;
-    }
-
     // A recovered `result_pending` job already holds its transcript locally, so
     // it replays as a submit-only retry (no billed proxy re-run) — the
     // job executor's fast path handles the resubmission. See

@@ -12,6 +12,7 @@ import type {
   OutboxJobCreateInput,
   OutboxJobListFilter,
   OutboxJobStateUpdate,
+  OutboxQueueSummary,
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
   PolicyCacheEntry,
@@ -152,6 +153,56 @@ class SqliteOperationalStore {
     return this.outbox.list(filter);
   }
 
+  listInterruptedOutboxJobs(workspaceId?: string): Promise<OutboxJob[]> {
+    return this.outbox.listInterrupted(workspaceId);
+  }
+
+  async listActiveAssetRefDependencies(
+    workspaceId?: string,
+  ): Promise<Array<{ asset: AssetCacheRef; jobs: OutboxJob[] }>> {
+    const jobsByAssetRef = groupJobsByAssetRef(
+      await this.outbox.listLocalAssetDependencies(workspaceId),
+    );
+    const assetsById = new Map(
+      (await this.assets.listByIds([...jobsByAssetRef.keys()])).map((asset) => [
+        asset.assetRefId,
+        asset,
+      ]),
+    );
+
+    return [...jobsByAssetRef.entries()]
+      .flatMap(([assetRefId, jobs]) => {
+        const asset = assetsById.get(assetRefId);
+        return asset ? [{ asset, jobs }] : [];
+      })
+      .sort((left, right) => left.asset.assetRefId.localeCompare(right.asset.assetRefId));
+  }
+
+  async listHistoricalAssetRefPage(input: {
+    afterAssetRefId?: string;
+    limit: number;
+    workspaceId?: string;
+  }): Promise<AssetCacheRef[]> {
+    const activeAssetRefIds = (await this.outbox.listLocalAssetDependencies(input.workspaceId)).map(
+      (job) => job.assetRefId,
+    );
+
+    return this.assets.listPage({
+      afterAssetRefId: input.afterAssetRefId,
+      excludedAssetRefIds: activeAssetRefIds,
+      limit: input.limit,
+      workspaceId: input.workspaceId,
+    });
+  }
+
+  getOutboxSummary(input: {
+    minuteAgo: string;
+    now: string;
+    workspaceId: string;
+  }): Promise<OutboxQueueSummary> {
+    return this.outbox.summary(input);
+  }
+
   updateOutboxJobState(
     id: string,
     update: OutboxJobStateUpdate,
@@ -264,28 +315,21 @@ class SqliteOperationalStore {
   }
 
   async getBackpressureSnapshot(): Promise<OperationalStoreSnapshot> {
-    const jobRow = this.options.database
-      .prepare<{ queued_jobs: number; retrying_jobs: number }>(
+    const statistics = this.options.database
+      .prepare<{ asset_bytes: number; queued_jobs: number; retrying_jobs: number }>(
         `SELECT
-           SUM(CASE WHEN state NOT IN ('synced', 'blocked', 'failed', 'cancelled') THEN 1 ELSE 0 END)
-             AS queued_jobs,
-           SUM(CASE WHEN state = 'pending' AND next_retry_at IS NOT NULL THEN 1 ELSE 0 END)
-             AS retrying_jobs
-         FROM outbox_jobs`,
-      )
-      .get();
-    const assetRow = this.options.database
-      .prepare<{ asset_bytes: number | null }>(
-        `SELECT SUM(size_bytes) AS asset_bytes
-         FROM asset_cache_refs
-         WHERE cleanup_state != 'cleaned'`,
+           asset_bytes,
+           queued_jobs,
+           retrying_jobs
+         FROM operational_store_statistics
+         WHERE id = 1`,
       )
       .get();
 
     return {
-      assetBytes: assetRow?.asset_bytes ?? 0,
-      queuedJobs: jobRow?.queued_jobs ?? 0,
-      retryingJobs: jobRow?.retrying_jobs ?? 0,
+      assetBytes: statistics?.asset_bytes ?? 0,
+      queuedJobs: statistics?.queued_jobs ?? 0,
+      retryingJobs: statistics?.retrying_jobs ?? 0,
     };
   }
 
@@ -350,4 +394,16 @@ function success<T>(value: T): OperationalStoreResult<T> {
 
 function failure<T>(error: OperationalStoreError): OperationalStoreResult<T> {
   return { error, ok: false };
+}
+
+function groupJobsByAssetRef(jobs: readonly OutboxJob[]): Map<string, OutboxJob[]> {
+  const jobsByAssetRef = new Map<string, OutboxJob[]>();
+
+  for (const job of jobs) {
+    const dependencies = jobsByAssetRef.get(job.assetRefId) ?? [];
+    dependencies.push(job);
+    jobsByAssetRef.set(job.assetRefId, dependencies);
+  }
+
+  return jobsByAssetRef;
 }
