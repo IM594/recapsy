@@ -24,6 +24,7 @@ coverage/
 .env
 .env.local
 .env.*.local
+apps/server/.env.local-setup
 
 # Data
 data/
