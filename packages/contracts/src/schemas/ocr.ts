@@ -36,6 +36,9 @@ export const OcrScreenTextBlockSchema = z
     text: z.string().min(1),
     readingOrder: z.number().int().nonnegative(),
     kind: OcrScreenTextBlockKindSchema.default('text'),
+    // Reserved for a future local Apple Vision OCR pass, the only path that can
+    // emit a calibrated per-block confidence. The LLM proxy path never fills
+    // it — fabricating a number there would violate the fact/inference boundary.
     confidence: z.number().min(0).max(1).nullable().optional(),
     bbox: OcrBoundingBoxSchema.nullable().optional(),
   })
@@ -102,7 +105,10 @@ export const OcrResultSummarySchema = z
 // body field. Idempotency key is (capture + sourceAssetHash) — no independent
 // idempotencyKey and no resultVersion in the request (server derives it).
 // layout/activity are never client-supplied; the server synthesizes empty
-// defaults, matching the current server-side OCR behavior.
+// defaults, matching the current server-side OCR behavior. `qualityFlags`,
+// however, are real facts the desktop derives at OCR time (e.g. a truncated
+// provider response) and submits, so the server stops synthesizing an empty
+// list.
 export const OcrResultSubmitRequestSchema = z
   .object({
     workspaceId: IdSchema,
@@ -112,6 +118,7 @@ export const OcrResultSubmitRequestSchema = z
     providerName: z.string().min(1).max(120),
     durationMs: z.number().int().nonnegative(),
     usage: AiOcrUsageSchema.optional(),
+    qualityFlags: z.array(OcrQualityFlagSchema).default([]),
   })
   .strict();
 

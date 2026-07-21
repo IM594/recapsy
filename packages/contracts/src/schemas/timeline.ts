@@ -72,6 +72,9 @@ export const TimelineEventSchema = z
     searchDocumentId: IdSchema.nullable().optional(),
     eventKind: TimelineEventKindSchema,
     occurredAt: IsoDateTimeSchema,
+    // Derived at read time from device clock offset samples; absent until a read
+    // model fills it. Never persisted onto the timeline event fact.
+    clockCorrectedAt: IsoDateTimeSchema.nullable().optional(),
     context: TimelineContextSummarySchema,
     statuses: TimelineEventStatusesSchema,
     semanticTitle: z.string().min(1).max(256).nullable().optional(),

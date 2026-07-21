@@ -1,9 +1,11 @@
 export { VERSION } from './version.js';
+export * from './headers.js';
 export * from './schemas/ai-ocr.js';
 export * from './schemas/auth.js';
 export * from './schemas/capabilities.js';
 export * from './schemas/capture.js';
 export * from './schemas/common.js';
+export * from './schemas/coverage.js';
 export * from './schemas/dev-acceptance.js';
 export * from './schemas/invite.js';
 export * from './schemas/ocr.js';

@@ -59,7 +59,7 @@ export const CaptureStatusSchema = z.enum([
   'ocr_succeeded',
   'search_document_indexed',
   'searchable',
-  'skipped',
+  'privacy_withheld',
   'sync_failed',
   'timeline_failed',
   'ocr_failed',
@@ -200,8 +200,16 @@ export const CaptureSchema = z
     userId: IdSchema.nullable().optional(),
     deviceId: z.string().min(1).max(256),
     sourceType: CaptureSourceTypeSchema.default('screen_capture'),
+    // Two distinct client wall-clock facts, never corrected in place:
+    // `observedAt` is when the tick was scheduled (intent); `capturedAt` is
+    // taken right after the frame was grabbed (an upper bound on when the frame
+    // was actually presented). `clockCorrectedAt` below is the read model's
+    // derived correction and replaces neither.
     capturedAt: IsoDateTimeSchema,
     observedAt: IsoDateTimeSchema,
+    // Derived at read time from device clock offset samples; absent until a
+    // read model fills it. Never persisted onto the capture fact.
+    clockCorrectedAt: IsoDateTimeSchema.nullable().optional(),
     appName: z.string().min(1).max(256),
     bundleId: z.string().min(1).max(256).nullable().optional(),
     windowTitleSafe: z.string().min(1).max(512).nullable().optional(),
@@ -228,6 +236,9 @@ export const CaptureCreateRequestSchema = z
     workspaceId: IdSchema,
     deviceId: z.string().min(1).max(256),
     localEventId: z.string().min(1).max(256).optional(),
+    // `observedAt` = tick scheduling instant; `capturedAt` = wall clock right
+    // after the frame was grabbed. Both are client wall-clock facts submitted
+    // verbatim; the server does not regenerate them.
     capturedAt: IsoDateTimeSchema,
     observedAt: IsoDateTimeSchema,
     appName: z.string().min(1).max(256),
