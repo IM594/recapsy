@@ -11,6 +11,10 @@ struct EncodedScreenshot {
     let source: CaptureWindowIdentity
     let sourceContext: CaptureSourceContext?
     let frameFingerprint: CaptureFrameFingerprint
+    let frameQuality: CaptureFrameQuality
+    /// Wall clock taken immediately after `SCScreenshotManager.captureImage`
+    /// returns, distinct from the tick's scheduled `observedAt`.
+    let capturedAt: String
     let policyDecision: CaptureSourcePolicyAction
 }
 
@@ -196,6 +200,10 @@ enum ScreenshotCapturer {
                 contentFilter: filter,
                 configuration: config
             )
+            // Taken immediately on return from the capture call, before any
+            // further work — the closest available wall-clock bound on when
+            // the frame was actually presented.
+            let capturedAt = CaptureEngine.iso8601(Date())
             try Task.checkCancellation()
             guard let luminance = CaptureFrameSampler.sampledLuminance(from: image) else {
                 return .failure(.captureFailed)
@@ -222,11 +230,17 @@ enum ScreenshotCapturer {
                 guard let encoded = encodeWebP(cgImage: image) else {
                     return .failure(.encodeFailed)
                 }
+                let quality = CaptureFrameQuality(
+                    luminanceBucket: CaptureFrameEconomy.luminanceBucket(luminance),
+                    marginal: CaptureFrameSampler.isLowContrast(luminance)
+                )
                 return .success(EncodedScreenshot(
                     imageData: encoded,
                     source: source,
                     sourceContext: sourceContext,
                     frameFingerprint: fingerprint,
+                    frameQuality: quality,
+                    capturedAt: capturedAt,
                     policyDecision: policyDecision.action
                 ))
             }

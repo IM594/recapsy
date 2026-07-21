@@ -30,6 +30,27 @@ public struct CaptureFrameFingerprint: Equatable, Sendable {
     }
 }
 
+/// A frame's coarse brightness signature from the same low-resolution sample
+/// used for the accept/skip decision. Kept alongside the durable receipt
+/// because it is a capture-time fact: the exact downsampled sample cannot be
+/// reconstructed later from the encoded screenshot, and a later OCR pass can
+/// use it to tell a genuine OCR failure apart from a low-contrast or
+/// borderline-informative frame (`blurred` / `partial_capture`).
+public struct CaptureFrameQuality: Codable, Equatable, Sendable {
+    /// Mean sample luminance, quantized on the same 16-level scale as the
+    /// near-duplicate digest (range 0...15).
+    public let luminanceBucket: Int
+    /// The sample was admitted for OCR, but its luminance range sits just
+    /// above the blank floor — low-contrast content that is harder to read
+    /// reliably.
+    public let marginal: Bool
+
+    public init(luminanceBucket: Int, marginal: Bool) {
+        self.luminanceBucket = luminanceBucket
+        self.marginal = marginal
+    }
+}
+
 public enum CaptureFrameSkipReason: String, Equatable, Sendable {
     case blank
     case lowInformation = "low_information"
@@ -84,6 +105,16 @@ public enum CaptureFrameEconomy {
             return .skip(.duplicate)
         }
         return .accept(fingerprint)
+    }
+
+    /// Mean sample luminance quantized on the same scale as `quantizedDigest`,
+    /// for `CaptureFrameQuality.luminanceBucket`.
+    public static func luminanceBucket(_ luminance: [UInt8]) -> Int {
+        guard !luminance.isEmpty else {
+            return 0
+        }
+        let mean = luminance.reduce(0) { $0 + Int($1) } / luminance.count
+        return mean / Int(quantizationStep)
     }
 
     private static func quantizedDigest(_ luminance: [UInt8]) -> String {

@@ -362,53 +362,61 @@ final class CaptureEngine {
             return
         } catch ScreenshotError.noActiveWindow {
             // No capturable foreground window this tick (e.g. Finder desktop
-            // with nothing open). Emit nothing — no result, no error — and let
-            // the next interval try again. Log a single stderr breadcrumb only on
-            // entering the windowless state, so a long windowless stretch does
-            // not dribble a line every tick. No protocol reason code is invented.
+            // with nothing open). This is still a coverage fact — every tick
+            // produces one — so it is emitted on every windowless tick, not
+            // just the first. The stderr breadcrumb stays edge-triggered so a
+            // long windowless stretch does not dribble a line every tick.
             if !skippingNoActiveWindow {
                 skippingNoActiveWindow = true
                 FileHandle.standardError.write(
                     Data("capture skipped: no active window (since \(captureId))\n".utf8)
                 )
             }
+            emit(
+                type: "capture.coverage",
+                payload: CaptureCoveragePayload(
+                    captureId: captureId,
+                    state: .noWindow,
+                    observedAt: observedAt
+                )
+            )
             return
         } catch ScreenshotError.policyDenied {
             emit(
-                type: "capture.skipped",
-                payload: CaptureSkippedPayload(
+                type: "capture.coverage",
+                payload: CaptureCoveragePayload(
                     captureId: captureId,
-                    reason: .policyDenied,
+                    state: .privacyWithheld,
                     observedAt: observedAt
                 )
             )
             return
         } catch ScreenshotError.blankFrame {
             emit(
-                type: "capture.skipped",
-                payload: CaptureSkippedPayload(
+                type: "capture.coverage",
+                payload: CaptureCoveragePayload(
                     captureId: captureId,
-                    reason: .blank,
+                    state: .blank,
                     observedAt: observedAt
                 )
             )
             return
         } catch ScreenshotError.lowInformationFrame {
             emit(
-                type: "capture.skipped",
-                payload: CaptureSkippedPayload(
+                type: "capture.coverage",
+                payload: CaptureCoveragePayload(
                     captureId: captureId,
-                    reason: .lowInformation,
+                    state: .lowInformation,
                     observedAt: observedAt
                 )
             )
             return
         } catch ScreenshotError.duplicateFrame {
             emit(
-                type: "capture.skipped",
-                payload: CaptureSkippedPayload(
+                type: "capture.coverage",
+                payload: CaptureCoveragePayload(
                     captureId: captureId,
-                    reason: .duplicate,
+                    state: .static,
                     observedAt: observedAt
                 )
             )
@@ -460,6 +468,7 @@ final class CaptureEngine {
                 deviceId: deviceId,
                 captureId: captureId,
                 observedAt: observedAt,
+                capturedAt: encoded.capturedAt,
                 policy: CapturePolicyIdentity(
                     hash: configuredPolicy.hash,
                     version: configuredPolicy.version
@@ -472,6 +481,7 @@ final class CaptureEngine {
                     mimeType: CaptureAsset.screenshotMimeType,
                     sizeBytes: encoded.imageData.count
                 ),
+                frameQuality: encoded.frameQuality,
                 decision: encoded.policyDecision.rawValue
             ),
             imageData: encoded.imageData,
@@ -510,12 +520,12 @@ final class CaptureEngine {
             case let .committed(payload, _):
                 frameHistory.recordAccepted(prepared.frameFingerprint)
                 emit(type: "capture.result", payload: payload)
-            case let .skipped(reason):
+            case let .skipped(state):
                 emit(
-                    type: "capture.skipped",
-                    payload: CaptureSkippedPayload(
+                    type: "capture.coverage",
+                    payload: CaptureCoveragePayload(
                         captureId: prepared.captureId,
-                        reason: reason,
+                        state: state,
                         observedAt: prepared.observedAt
                     )
                 )
@@ -639,10 +649,10 @@ final class CaptureEngine {
         }
         if disposition == .discardPolicyMismatch {
             emit(
-                type: "capture.skipped",
-                payload: CaptureSkippedPayload(
+                type: "capture.coverage",
+                payload: CaptureCoveragePayload(
                     captureId: receipt.captureId,
-                    reason: .policyDenied,
+                    state: .privacyWithheld,
                     observedAt: receipt.observedAt
                 )
             )

@@ -58,19 +58,24 @@ public struct CaptureScreenshotRecord: Codable, Equatable {
 /// encoded to disk; the wire payload is derived by `payload` and is never a
 /// second source of truth.
 public struct CaptureReceipt: Codable, Equatable {
-    public static let currentSchemaVersion = 2
+    // Bumped for the `capturedAt` / `frameQuality` fields: a receipt written
+    // by an older helper build cannot recover through a newer one anyway,
+    // since both are non-optional capture-time facts.
+    public static let currentSchemaVersion = 3
 
     public let schemaVersion: Int
     public let workspaceId: String
     public let deviceId: String
     public let captureId: String
     public let observedAt: String
+    public let capturedAt: String
     public let policy: CapturePolicyIdentity
     public let source: CaptureWindowIdentity
     /// Optional because receipts written before native context sampling remain
     /// recoverable. It contains only the already-sanitized fields.
     public let sourceContext: CaptureSourceContext?
     public let screenshot: CaptureScreenshotRecord
+    public let frameQuality: CaptureFrameQuality
     public let decision: String
 
     public init(
@@ -78,10 +83,12 @@ public struct CaptureReceipt: Codable, Equatable {
         deviceId: String,
         captureId: String,
         observedAt: String,
+        capturedAt: String,
         policy: CapturePolicyIdentity,
         source: CaptureWindowIdentity,
         sourceContext: CaptureSourceContext? = nil,
         screenshot: CaptureScreenshotRecord,
+        frameQuality: CaptureFrameQuality,
         decision: String
     ) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -89,10 +96,12 @@ public struct CaptureReceipt: Codable, Equatable {
         self.deviceId = deviceId
         self.captureId = captureId
         self.observedAt = observedAt
+        self.capturedAt = capturedAt
         self.policy = policy
         self.source = source
         self.sourceContext = sourceContext
         self.screenshot = screenshot
+        self.frameQuality = frameQuality
         self.decision = decision
     }
 
@@ -111,8 +120,10 @@ public struct CaptureReceipt: Codable, Equatable {
         return CaptureResultPayload(
             captureId: captureId,
             observedAt: observedAt,
+            capturedAt: capturedAt,
             screenshot: screenshot.payload(),
-            context: context
+            context: context,
+            frameQuality: frameQuality
         )
     }
 }
@@ -168,6 +179,7 @@ public enum CaptureArtifactValidator {
             !receipt.workspaceId.isEmpty,
             !receipt.deviceId.isEmpty,
             isValidTimestamp(receipt.observedAt),
+            isValidTimestamp(receipt.capturedAt),
             !receipt.policy.version.isEmpty,
             receipt.policy.hash.range(of: "^sha256:[a-f0-9]{64}$", options: .regularExpression) != nil,
             CaptureApplicationPayload.fromRuntimeMetadata(

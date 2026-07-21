@@ -2,7 +2,7 @@ import Foundation
 
 public enum CaptureCommitOutcome {
     case committed(CaptureResultPayload, URL)
-    case skipped(CaptureSkippedReason)
+    case skipped(CaptureCoverageState)
 }
 
 /// Immutable identity for one active capture session. Reconfiguring, pausing,
@@ -33,7 +33,7 @@ public enum CaptureCommitCoordinator {
             currentSession == startedSession,
             receipt.policy == startedSession.policy
         else {
-            return .skipped(.policyDenied)
+            return .skipped(.privacyWithheld)
         }
         try CaptureArtifactValidator.validate(
             receipt,

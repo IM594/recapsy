@@ -152,24 +152,31 @@ public struct CaptureErrorPayload: Encodable {
     }
 }
 
-public enum CaptureSkippedReason: String, Encodable {
-    case paused
-    case policyDenied = "policy_denied"
-    case duplicate
+/// One capture-tick fact: either a frame was written (`capture.result`) or it
+/// was not, and this is why. `static`/`blank`/`low_information`/`no_window`
+/// are observed directly by this tick; `privacy_withheld`/`secure_field`/
+/// `private_context`/`paused` are policy/runtime facts. `gap` is deliberately
+/// not a state here — an absent tick is inferred by the read model, never
+/// fabricated by the device.
+public enum CaptureCoverageState: String, Encodable {
+    case `static`
     case blank
     case lowInformation = "low_information"
-    case secureInput = "secure_input"
+    case noWindow = "no_window"
+    case privacyWithheld = "privacy_withheld"
+    case secureField = "secure_field"
     case privateContext = "private_context"
+    case paused
 }
 
-public struct CaptureSkippedPayload: Encodable {
+public struct CaptureCoveragePayload: Encodable {
     public let captureId: String
-    public let reason: CaptureSkippedReason
+    public let state: CaptureCoverageState
     public let observedAt: String
 
-    public init(captureId: String, reason: CaptureSkippedReason, observedAt: String) {
+    public init(captureId: String, state: CaptureCoverageState, observedAt: String) {
         self.captureId = captureId
-        self.reason = reason
+        self.state = state
         self.observedAt = observedAt
     }
 }
@@ -324,27 +331,40 @@ public struct CaptureContextPayload: Codable {
 
 public struct CaptureResultPayload: Codable {
     public let captureId: String
+    /// When the tick was scheduled (intent), independent of how long the
+    /// ScreenCaptureKit call took to return.
     public let observedAt: String
+    /// Wall clock taken immediately after `SCScreenshotManager.captureImage`
+    /// returns — an upper bound on when the frame was actually presented.
+    /// Never corrected in place; a read model derives any clock correction.
+    public let capturedAt: String
     public let screenshot: CaptureAssetPayload
     public let context: CaptureContextPayload
+    public let frameQuality: CaptureFrameQuality
 
     private enum CodingKeys: String, CodingKey {
         case captureId
         case observedAt
+        case capturedAt
         case assets
         case context
+        case frameQuality
     }
 
     public init(
         captureId: String,
         observedAt: String,
+        capturedAt: String,
         screenshot: CaptureAssetPayload,
-        context: CaptureContextPayload
+        context: CaptureContextPayload,
+        frameQuality: CaptureFrameQuality
     ) {
         self.captureId = captureId
         self.observedAt = observedAt
+        self.capturedAt = capturedAt
         self.screenshot = screenshot
         self.context = context
+        self.frameQuality = frameQuality
     }
 
     public init(from decoder: Decoder) throws {
@@ -359,16 +379,20 @@ public struct CaptureResultPayload: Codable {
         }
         self.captureId = try values.decode(String.self, forKey: .captureId)
         self.observedAt = try values.decode(String.self, forKey: .observedAt)
+        self.capturedAt = try values.decode(String.self, forKey: .capturedAt)
         self.screenshot = screenshot
         self.context = try values.decode(CaptureContextPayload.self, forKey: .context)
+        self.frameQuality = try values.decode(CaptureFrameQuality.self, forKey: .frameQuality)
     }
 
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(captureId, forKey: .captureId)
         try values.encode(observedAt, forKey: .observedAt)
+        try values.encode(capturedAt, forKey: .capturedAt)
         try values.encode([screenshot], forKey: .assets)
         try values.encode(context, forKey: .context)
+        try values.encode(frameQuality, forKey: .frameQuality)
     }
 }
 

@@ -68,6 +68,7 @@ final class CaptureReceiptTests: XCTestCase {
             deviceId: "device-1",
             captureId: captureId,
             observedAt: "2026-07-18T00:00:00.000Z",
+            capturedAt: "2026-07-18T00:00:00.100Z",
             policy: CapturePolicyIdentity(
                 hash: "sha256:" + String(repeating: "a", count: 64),
                 version: "policy-1"
@@ -83,6 +84,7 @@ final class CaptureReceiptTests: XCTestCase {
                 mimeType: CaptureAsset.screenshotMimeType,
                 sizeBytes: image.count
             ),
+            frameQuality: CaptureFrameQuality(luminanceBucket: 8, marginal: false),
             decision: "allow"
         )
 
@@ -192,6 +194,7 @@ final class CaptureReceiptTests: XCTestCase {
             deviceId: "device-1",
             captureId: captureId,
             observedAt: "2026-07-18T00:00:00.000Z",
+            capturedAt: "2026-07-18T00:00:00.100Z",
             policy: CapturePolicyIdentity(
                 hash: "sha256:" + String(repeating: "a", count: 64),
                 version: "policy-1"
@@ -207,6 +210,7 @@ final class CaptureReceiptTests: XCTestCase {
                 mimeType: CaptureAsset.screenshotMimeType,
                 sizeBytes: image.count
             ),
+            frameQuality: CaptureFrameQuality(luminanceBucket: 8, marginal: false),
             decision: "allow"
         )
         try FileManager.default.createDirectory(
@@ -323,35 +327,35 @@ final class ProtocolEncodingTests: XCTestCase {
         XCTAssertEqual(payload["policyHash"] as? String, "sha256:" + String(repeating: "a", count: 64))
     }
 
-    func testCaptureSkippedPayloadHasNoAssetOrContextFields() throws {
+    func testCaptureCoveragePayloadHasNoAssetOrContextFields() throws {
         let envelope = HelperEnvelope(
-            messageId: "cap-msg-skipped-1",
+            messageId: "cap-msg-coverage-1",
             correlationId: nil,
             sentAt: "2026-07-18T00:00:00.000Z",
-            type: "capture.skipped",
-            payload: CaptureSkippedPayload(
+            type: "capture.coverage",
+            payload: CaptureCoveragePayload(
                 captureId: "cap-1",
-                reason: .policyDenied,
+                state: .privacyWithheld,
                 observedAt: "2026-07-18T00:00:00.000Z"
             )
         )
 
         let payload = try XCTUnwrap(try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any])
         XCTAssertEqual(payload["captureId"] as? String, "cap-1")
-        XCTAssertEqual(payload["reason"] as? String, "policy_denied")
+        XCTAssertEqual(payload["state"] as? String, "privacy_withheld")
         XCTAssertFalse(payload.keys.contains("assets"))
         XCTAssertFalse(payload.keys.contains("context"))
     }
 
-    func testLowInformationCaptureSkippedReasonUsesStableWireValue() throws {
+    func testLowInformationCaptureCoverageStateUsesStableWireValue() throws {
         let envelope = HelperEnvelope(
             messageId: "cap-msg-low-information-1",
             correlationId: nil,
             sentAt: "2026-07-18T00:00:00.000Z",
-            type: "capture.skipped",
-            payload: CaptureSkippedPayload(
+            type: "capture.coverage",
+            payload: CaptureCoveragePayload(
                 captureId: "cap-low-information-1",
-                reason: .lowInformation,
+                state: .lowInformation,
                 observedAt: "2026-07-18T00:00:00.000Z"
             )
         )
@@ -359,7 +363,45 @@ final class ProtocolEncodingTests: XCTestCase {
         let payload = try XCTUnwrap(
             try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any]
         )
-        XCTAssertEqual(payload["reason"] as? String, "low_information")
+        XCTAssertEqual(payload["state"] as? String, "low_information")
+    }
+
+    func testStaticCaptureCoverageStateUsesStableWireValue() throws {
+        let envelope = HelperEnvelope(
+            messageId: "cap-msg-static-1",
+            correlationId: nil,
+            sentAt: "2026-07-18T00:00:00.000Z",
+            type: "capture.coverage",
+            payload: CaptureCoveragePayload(
+                captureId: "cap-static-1",
+                state: .static,
+                observedAt: "2026-07-18T00:00:00.000Z"
+            )
+        )
+
+        let payload = try XCTUnwrap(
+            try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any]
+        )
+        XCTAssertEqual(payload["state"] as? String, "static")
+    }
+
+    func testNoWindowCaptureCoverageStateUsesStableWireValue() throws {
+        let envelope = HelperEnvelope(
+            messageId: "cap-msg-no-window-1",
+            correlationId: nil,
+            sentAt: "2026-07-18T00:00:00.000Z",
+            type: "capture.coverage",
+            payload: CaptureCoveragePayload(
+                captureId: "cap-no-window-1",
+                state: .noWindow,
+                observedAt: "2026-07-18T00:00:00.000Z"
+            )
+        )
+
+        let payload = try XCTUnwrap(
+            try decode(try encodeEnvelopeLine(envelope))["payload"] as? [String: Any]
+        )
+        XCTAssertEqual(payload["state"] as? String, "no_window")
     }
 
     func testCaptureResultKeepsRelativeRefSlashUnescaped() throws {
@@ -373,11 +415,13 @@ final class ProtocolEncodingTests: XCTestCase {
         let payload = CaptureResultPayload(
             captureId: "cap-100-1",
             observedAt: "2026-07-09T00:00:00.000Z",
+            capturedAt: "2026-07-09T00:00:00.250Z",
             screenshot: asset,
             context: CaptureContextPayload(
                 observedAt: "2026-07-09T00:00:00.000Z",
                 policy: CapturePolicyPayload(version: "policy-1", decision: "allow")
-            )
+            ),
+            frameQuality: CaptureFrameQuality(luminanceBucket: 8, marginal: false)
         )
         let envelope = HelperEnvelope(
             messageId: "cap-msg-4",
@@ -404,6 +448,14 @@ final class ProtocolEncodingTests: XCTestCase {
         let policy = try XCTUnwrap(context["policy"] as? [String: Any])
         XCTAssertEqual(policy["decision"] as? String, "allow")
         XCTAssertEqual(policy["version"] as? String, "policy-1")
+        // observedAt (scheduled) and capturedAt (post-capture wall clock) are
+        // two distinct facts, never collapsed into one field on the wire.
+        XCTAssertEqual(decodedPayload["observedAt"] as? String, "2026-07-09T00:00:00.000Z")
+        XCTAssertEqual(decodedPayload["capturedAt"] as? String, "2026-07-09T00:00:00.250Z")
+        XCTAssertNotEqual(decodedPayload["observedAt"] as? String, decodedPayload["capturedAt"] as? String)
+        let frameQuality = try XCTUnwrap(decodedPayload["frameQuality"] as? [String: Any])
+        XCTAssertEqual(frameQuality["luminanceBucket"] as? Int, 8)
+        XCTAssertEqual(frameQuality["marginal"] as? Bool, false)
     }
 
     func testCaptureResultDecoderRejectsAnythingButOneScreenshot() throws {

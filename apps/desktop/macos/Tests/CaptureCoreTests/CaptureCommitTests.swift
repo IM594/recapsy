@@ -366,10 +366,10 @@ final class CaptureCommitCoordinatorTests: XCTestCase {
             captureId: captureId
         )
 
-        guard case let .skipped(reason) = outcome else {
+        guard case let .skipped(state) = outcome else {
             return XCTFail("A stale capture must not produce a committed result.")
         }
-        XCTAssertEqual(reason.rawValue, "policy_denied")
+        XCTAssertEqual(state.rawValue, "privacy_withheld")
         XCTAssertFalse(FileManager.default.fileExists(atPath: captureDirectory(root, captureId).path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: receiptURL(root, captureId).path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagedURL(root, captureId).path))
@@ -481,10 +481,10 @@ final class CaptureCommitCoordinatorTests: XCTestCase {
             captureId: captureId
         )
 
-        guard case let .skipped(reason) = outcome else {
+        guard case let .skipped(state) = outcome else {
             return XCTFail("A capture crossing a paused session boundary must be skipped.")
         }
-        XCTAssertEqual(reason.rawValue, "policy_denied")
+        XCTAssertEqual(state.rawValue, "privacy_withheld")
         XCTAssertFalse(FileManager.default.fileExists(atPath: captureDirectory(root, captureId).path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: receiptURL(root, captureId).path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: stagedURL(root, captureId).path))
@@ -536,6 +536,7 @@ final class CaptureCommitCoordinatorTests: XCTestCase {
             deviceId: "device-1",
             captureId: captureId,
             observedAt: "2026-07-18T00:00:00.000Z",
+            capturedAt: "2026-07-18T00:00:00.100Z",
             policy: CapturePolicyIdentity(
                 hash: policyHash ?? newPolicyHash,
                 version: policyVersion
@@ -551,6 +552,7 @@ final class CaptureCommitCoordinatorTests: XCTestCase {
                 mimeType: CaptureAsset.screenshotMimeType,
                 sizeBytes: image.count
             ),
+            frameQuality: CaptureFrameQuality(luminanceBucket: 8, marginal: false),
             decision: "allow"
         )
     }

@@ -98,6 +98,17 @@ public enum CaptureFrameSampler {
         return .lowInformation
     }
 
+    /// Whether the sample's luminance range sits within one band above the
+    /// blank floor, for `CaptureFrameQuality.marginal`. A frame this flat can
+    /// clear the blank/low-information gates yet still be low-contrast enough
+    /// to be a marginal, harder-to-read capture.
+    public static func isLowContrast(_ luminance: [UInt8]) -> Bool {
+        guard let darkest = luminance.min(), let brightest = luminance.max() else {
+            return true
+        }
+        return brightest &- darkest <= maximumBlankLuminanceSpread * 2
+    }
+
     private static func isInformativeTransition(_ left: UInt8, _ right: UInt8) -> Bool {
         let difference = left >= right ? left - right : right - left
         return difference > maximumBlankLuminanceSpread

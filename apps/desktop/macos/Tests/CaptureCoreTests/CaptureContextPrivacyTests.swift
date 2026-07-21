@@ -158,6 +158,7 @@ final class CaptureContextPrivacyTests: XCTestCase {
             deviceId: "device-1",
             captureId: "cap-redacted-context",
             observedAt: "2026-07-20T00:00:00.000Z",
+            capturedAt: "2026-07-20T00:00:00.100Z",
             policy: CapturePolicyIdentity(
                 hash: "sha256:" + String(repeating: "a", count: 64),
                 version: "policy-1"
@@ -174,6 +175,7 @@ final class CaptureContextPrivacyTests: XCTestCase {
                 mimeType: "image/webp",
                 sizeBytes: 512
             ),
+            frameQuality: CaptureFrameQuality(luminanceBucket: 8, marginal: false),
             decision: "redact_context"
         )
 
