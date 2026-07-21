@@ -833,6 +833,7 @@ function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): Stored
     durationMs: 1200,
     model: 'test-model',
     providerName: 'test-provider',
+    qualityFlags: [],
     screenText: {
       blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'hello world' }],
       readingOrder: 'top_to_bottom_left_to_right',

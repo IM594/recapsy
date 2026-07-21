@@ -75,8 +75,26 @@ export type CaptureControlHelperPort = {
   stop(): Promise<void>;
 };
 
+/**
+ * Narrow coverage-tracking surface the control plane drives directly, for
+ * the facts only it can observe: an actual pause/resume of the helper (any
+ * gate cause, not just the user), device liveness, and the helper going
+ * away. Backed by the shared `CoverageAggregator` instance owned by
+ * `capture/runtime.ts`; each method is fire-and-forget from the control
+ * plane's perspective (best-effort local telemetry, not part of the control
+ * state machine's own correctness).
+ */
+export type CaptureCoveragePort = {
+  pause(observedAt: string): void;
+  resume(observedAt: string): void;
+  recordHeartbeat(observedAt: string): void;
+  handleHelperExit(observedAt: string): void;
+};
+
 export type CaptureControlOptions = {
+  coverage: CaptureCoveragePort;
   helper: CaptureControlHelperPort;
+  now(): string;
   policy: CapturePolicyController;
   startupRecovery?: CaptureStartupRecovery;
   assetReconciliation?: CaptureAssetReconciliation;
@@ -190,6 +208,7 @@ class CaptureControlActor implements CaptureControl {
           this.captureHelper = clearSafeError(this.captureHelper);
           return;
         case 'helper_exit':
+          this.options.coverage.handleHelperExit(observation.observedAt);
           if (
             observation.reason === 'shutdown_requested' ||
             observation.reason === 'quit_requested'
@@ -206,6 +225,7 @@ class CaptureControlActor implements CaptureControl {
           };
           return;
         case 'heartbeat':
+          this.options.coverage.recordHeartbeat(observation.observedAt);
           return;
         case 'protocol_error':
           this.captureHelper = {
@@ -290,6 +310,7 @@ class CaptureControlActor implements CaptureControl {
       this.options.policy.deactivate();
       this.menuBarActive = false;
       this.state = { kind: 'stopped' };
+      this.options.coverage.handleHelperExit(this.options.now());
       this.captureHelper = {
         ...policyStatus(this.captureHelper),
         lastSafeError: safeOperationalError(
@@ -497,7 +518,12 @@ class CaptureControlActor implements CaptureControl {
       }
       throw error;
     }
-    if (this.holdsOperation(operation)) this.state = { kind: 'paused', operation };
+    if (this.holdsOperation(operation)) {
+      this.state = { kind: 'paused', operation };
+      // The helper actually stopped producing frames — regardless of which
+      // gate cause triggered it — so the coverage spine must record it.
+      this.options.coverage.pause(this.options.now());
+    }
   }
 
   private async resumeCapture(operation: ControlOperation): Promise<void> {
@@ -514,6 +540,7 @@ class CaptureControlActor implements CaptureControl {
     if (this.holdsOperation(operation)) {
       this.captureHelper = clearSafeError(this.captureHelper);
       this.state = { kind: 'running', operation };
+      this.options.coverage.resume(this.options.now());
     }
   }
 

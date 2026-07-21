@@ -1,4 +1,5 @@
 import {
+  type CaptureCoverageState,
   HELPER_PROTOCOL_VERSION,
   type HelperEnvelope,
   type HelperMessageType,
@@ -20,7 +21,7 @@ const HELPER_TO_MAIN_TYPES: readonly HelperToMainType[] = [
   'helper.policy_applied',
   'permission.status',
   'capture.result',
-  'capture.skipped',
+  'capture.coverage',
   'capture.error',
   'helper.heartbeat',
   'helper.exiting',
@@ -127,8 +128,8 @@ function isPayloadForType(type: HelperMessageType, payload: unknown): boolean {
       return isPermissionStatusPayload(payload);
     case 'capture.result':
       return isCaptureResultPayload(payload);
-    case 'capture.skipped':
-      return isCaptureSkippedPayload(payload);
+    case 'capture.coverage':
+      return isCaptureCoveragePayload(payload);
     case 'capture.error':
       return isCaptureErrorPayload(payload);
     case 'helper.heartbeat':
@@ -211,13 +212,31 @@ function isPermissionStatusPayload(payload: unknown): boolean {
 function isCaptureResultPayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
-    hasOnlyKeys(payload, ['captureId', 'observedAt', 'assets', 'context']) &&
+    hasOnlyKeys(payload, [
+      'captureId',
+      'observedAt',
+      'capturedAt',
+      'frameQuality',
+      'assets',
+      'context',
+    ]) &&
     isSafeCaptureId(payload.captureId) &&
     isString(payload.observedAt) &&
+    (payload.capturedAt === undefined || isString(payload.capturedAt)) &&
+    (payload.frameQuality === undefined || isCaptureFrameQuality(payload.frameQuality)) &&
     Array.isArray(payload.assets) &&
     payload.assets.length === 1 &&
     isCaptureAssetPayload(payload.assets[0], payload.captureId) &&
     isSafeCaptureContextPayload(payload.context, payload.observedAt)
+  );
+}
+
+function isCaptureFrameQuality(payload: unknown): boolean {
+  return (
+    isRecord(payload) &&
+    hasOnlyKeys(payload, ['luminanceBucket', 'marginal']) &&
+    typeof payload.luminanceBucket === 'number' &&
+    typeof payload.marginal === 'boolean'
   );
 }
 
@@ -252,20 +271,23 @@ function isSafeCaptureContextPayload(payload: unknown, observedAt?: string): boo
   );
 }
 
-function isCaptureSkippedPayload(payload: unknown): boolean {
+const CAPTURE_COVERAGE_STATES: readonly CaptureCoverageState[] = [
+  'static',
+  'blank',
+  'low_information',
+  'no_window',
+  'privacy_withheld',
+  'secure_field',
+  'private_context',
+  'paused',
+];
+
+function isCaptureCoveragePayload(payload: unknown): boolean {
   return (
     isRecord(payload) &&
-    hasOnlyKeys(payload, ['captureId', 'reason', 'observedAt']) &&
+    hasOnlyKeys(payload, ['captureId', 'state', 'observedAt']) &&
     isSafeCaptureId(payload.captureId) &&
-    isOneOf(payload.reason, [
-      'paused',
-      'policy_denied',
-      'duplicate',
-      'blank',
-      'low_information',
-      'secure_input',
-      'private_context',
-    ]) &&
+    isOneOf(payload.state, CAPTURE_COVERAGE_STATES) &&
     isString(payload.observedAt)
   );
 }

@@ -13,6 +13,7 @@ export type {
   ServerApiAccessTokenProvider,
   ServerApiClient,
   ServerApiClientOptions,
+  ServerApiCoverageClient,
   ServerApiErrorCode,
   ServerApiErrorShape,
   ServerApiOcrProxyClient,

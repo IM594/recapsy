@@ -530,6 +530,7 @@ function createJob(overrides: Partial<OutboxJobCreateInput> = {}): OutboxJobCrea
 function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): StoredOcrResult {
   return {
     durationMs: 1200,
+    qualityFlags: [],
     model: 'test-model',
     providerName: 'test-provider',
     screenText: {

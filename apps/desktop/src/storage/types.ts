@@ -1,7 +1,10 @@
 import type {
   AiOcrUsage,
+  CaptureCoverageState,
   CaptureDefaultPolicy,
   CapturePolicyRule,
+  DeviceCaptureDesiredState,
+  OcrQualityFlag,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
 
@@ -41,6 +44,8 @@ export type StoredOcrResult = {
   providerName: string;
   durationMs: number;
   usage?: AiOcrUsage;
+  /** Real facts about this transcript's fidelity, derived at OCR time (see `sync/screen-text.ts`). */
+  qualityFlags: OcrQualityFlag[];
 };
 
 export type OutboxJob = {
@@ -371,4 +376,86 @@ export type BackpressureDecision = {
 export type StoreLifecycle = {
   initialize(): Promise<void>;
   close(): void;
+};
+
+// Capture-coverage spine (local persistence). A device tracks at most one
+// growing "open" run per (workspaceId, deviceId) at a time; its tail lives on
+// the device's own liveness row (`open_coverage_*` columns) rather than as a
+// row of its own, so a static hour costs one liveness row update per tick
+// instead of a growing table. Only closed runs become rows in
+// `capture_coverage_segments`, and only closed rows ever sync to the server
+// (see `packages/contracts/src/schemas/coverage.ts`).
+export type CoverageCloseReason =
+  | 'frame_captured'
+  | 'state_changed'
+  | 'cadence_gap'
+  | 'paused'
+  | 'helper_exit'
+  | 'inferred_on_recovery';
+
+export type CaptureCoverageSegmentRecord = {
+  id: string;
+  workspaceId: string;
+  deviceId: string;
+  coverageState: CaptureCoverageState;
+  startedAt: string;
+  endedAt: string;
+  tickCount: number;
+  intervalMs: number;
+  closeReason: CoverageCloseReason;
+  syncState: 'pending' | 'synced';
+  createdAt: string;
+};
+
+export type OpenCoverageSegmentInput = {
+  workspaceId: string;
+  deviceId: string;
+  coverageState: CaptureCoverageState;
+  startedAt: string;
+  intervalMs: number;
+  now: string;
+};
+
+export type ExtendOpenCoverageSegmentInput = {
+  workspaceId: string;
+  deviceId: string;
+  tickCount: number;
+  now: string;
+};
+
+export type CloseOpenCoverageSegmentInput = {
+  workspaceId: string;
+  deviceId: string;
+  endedAt: string;
+  closeReason: CoverageCloseReason;
+  now: string;
+};
+
+export type OpenCoverageSegmentRecord = {
+  coverageState: CaptureCoverageState;
+  startedAt: string;
+  tickCount: number;
+  intervalMs: number;
+};
+
+export type DeviceCaptureLivenessRecord = {
+  workspaceId: string;
+  deviceId: string;
+  lastAliveAt: string;
+  desiredState: DeviceCaptureDesiredState;
+  updatedAt: string;
+};
+
+export type UpsertDeviceCaptureLivenessInput = {
+  workspaceId: string;
+  deviceId: string;
+  lastAliveAt: string;
+  desiredState: DeviceCaptureDesiredState;
+  now: string;
+};
+
+export type RecoverHangingCoverageSegmentInput = {
+  workspaceId: string;
+  deviceId: string;
+  now: string;
 };

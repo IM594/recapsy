@@ -26,7 +26,7 @@ import {
   createPermissionIpcHandlers,
   createPrivacySettingsOpener,
 } from '../permissions/index';
-import type { ServerApiClient } from '../server/index';
+import type { ServerApiClient, ServerApiCoverageClient } from '../server/index';
 import type { DesktopShell } from '../shell/index';
 import type {
   AssetAvailabilityResolver,
@@ -36,6 +36,7 @@ import type {
   StoreLifecycle,
 } from '../storage/index';
 import {
+  type CoverageSyncDriver,
   type RetryBackoffConfig,
   type SyncAssetReader,
   type SyncLoop,
@@ -43,6 +44,7 @@ import {
   type SyncQueueStore,
   type SyncRunResult,
   type SyncServerApi,
+  createCoverageSyncDriver,
   createSyncIpcHandlers,
   createSyncRuntime,
 } from '../sync/index';
@@ -87,7 +89,9 @@ export type ElectronMainRuntimeOptions = {
   tokenStore: TokenStore;
   authClient: Pick<AuthClient, 'getActiveSession'>;
   loginPrompter: LoginPrompter;
-  createServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'>;
+  createServerApi(): SyncServerApi &
+    Pick<ServerApiClient, 'getCapturePolicies'> &
+    ServerApiCoverageClient;
   readAssetBytes?: SyncAssetReader;
   removeLocalAsset?(localAccessKey: string): Promise<void>;
   syncIdleDelayMs?: number;
@@ -141,6 +145,7 @@ export function createElectronMainRuntime(
 
   let admission: CaptureAdmissionController | undefined;
   let historicalAssetReconciliation: HistoricalAssetReconciliation | undefined;
+  let coverageSyncDriver: CoverageSyncDriver | undefined;
   const ready: Promise<ElectronMainRuntimeReadyState> = options.app.whenReady().then(async () => {
     const deviceId = await options.resolveDeviceId();
     const sessionStartup = createSessionStartup({
@@ -192,6 +197,13 @@ export function createElectronMainRuntime(
     });
     admission = captureRuntime.admission;
     historicalAssetReconciliation = captureRuntime.historicalAssetReconciliation;
+    coverageSyncDriver = createCoverageSyncDriver({
+      api: options.createServerApi(),
+      deviceId,
+      onError: options.onSyncError,
+      store,
+      workspaceId,
+    });
 
     const shell = options.createShell
       ? await options.createShell({
@@ -228,6 +240,7 @@ export function createElectronMainRuntime(
     }
     await captureRuntime.admission.start();
     syncRuntime.start();
+    coverageSyncDriver?.start();
     // Shell construction starts its own initial refresh before capture startup
     // settles. Refresh once more so a classified startup failure is immediately
     // visible instead of waiting for the next periodic poll.
@@ -302,6 +315,7 @@ export function createElectronMainRuntime(
             Promise.resolve().then(() => shell?.dispose()),
             Promise.resolve().then(() => control.requestQuit()),
             Promise.resolve().then(() => admission?.stop()),
+            Promise.resolve().then(() => coverageSyncDriver?.stop()),
             Promise.resolve().then(() => syncLoop.stop()),
           ]);
         })

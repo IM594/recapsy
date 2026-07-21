@@ -1,5 +1,6 @@
 import {
   type AiOcrResponse,
+  type OcrQualityFlag,
   type OcrScreenTextBlock,
   type OcrScreenTextBlockKind,
   type OcrScreenTextResult,
@@ -79,6 +80,26 @@ export function mapOcrScreenText(response: AiOcrResponse): OcrScreenTextResult {
   }
 
   return parsed.data;
+}
+
+/**
+ * Real facts about this transcript's fidelity, derived from the provider
+ * response at OCR time rather than fabricated later. Today this only reads
+ * `completion.stopReason`: a provider that hit its output-token ceiling kept
+ * the partial transcript (not discarded) but it is incomplete, so the
+ * desktop marks it `truncated`. `blurred`/`partial_capture` would need frame
+ * quality signals from the Swift capture layer that are not yet threaded
+ * through this proxy response — left for when that signal exists rather than
+ * guessed at here.
+ */
+export function deriveOcrQualityFlags(response: AiOcrResponse): OcrQualityFlag[] {
+  const flags: OcrQualityFlag[] = [];
+
+  if (response.completion?.stopReason === 'output_truncated') {
+    flags.push('truncated');
+  }
+
+  return flags;
 }
 
 function normalizeKind(kind: string | undefined): OcrScreenTextBlockKind {

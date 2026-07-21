@@ -29,6 +29,14 @@ export type {
 } from './capacity';
 export { createSyncRuntime } from './runtime';
 export type { SyncRuntime, SyncRuntimeOptions } from './runtime';
+export { createCoverageSyncDriver, runCoverageSyncPass } from './coverage-job';
+export type {
+  CoverageSyncDriver,
+  CoverageSyncDriverDeps,
+  CoverageSyncPassDeps,
+  CoverageSyncPassResult,
+  CoverageSyncStore,
+} from './coverage-job';
 export { createSyncIpcHandlers } from './handlers';
 export type { SyncIpcHandlerOptions } from './handlers';
 export type {

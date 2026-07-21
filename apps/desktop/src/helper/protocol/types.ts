@@ -68,21 +68,42 @@ export type SafeCaptureContextPayload = {
   };
 };
 
+// Mirrors `@recapsy/contracts`' `CaptureCoverageStateSchema` values. Declared
+// locally rather than imported: this file is a self-contained wire vocabulary
+// with no runtime dependencies (see the `CaptureAssetRole` /
+// `HelperCapturePolicyAction` types below for the same pattern); the shared
+// business vocabulary is bridged at the capability boundary instead (see
+// `capture/coverage-aggregator.ts`).
+export type CaptureCoverageState =
+  | 'static'
+  | 'blank'
+  | 'low_information'
+  | 'no_window'
+  | 'privacy_withheld'
+  | 'secure_field'
+  | 'private_context'
+  | 'paused';
+
 export type CaptureResultPayload = {
   captureId: string;
   observedAt: string;
+  /**
+   * The wall-clock instant the frame was presented on screen, as measured by
+   * the native capture layer — distinct from `observedAt`, which is the tick
+   * scheduler's timestamp. Optional so a helper that does not yet report it
+   * falls back to `observedAt` (see `capture/outbox-entry.ts`).
+   */
+  capturedAt?: string;
+  /**
+   * Native capture-layer frame-quality fact measured at accept time: a coarse
+   * luminance bucket and whether the frame was borderline (near-blank /
+   * low-contrast). Optional so mock or older helpers may omit it; used to
+   * derive OCR quality flags (see `sync/screen-text.ts`).
+   */
+  frameQuality?: { luminanceBucket: number; marginal: boolean };
   assets: [CaptureAssetPayload];
   context: SafeCaptureContextPayload;
 };
-
-export type CaptureSkippedReason =
-  | 'paused'
-  | 'policy_denied'
-  | 'duplicate'
-  | 'blank'
-  | 'low_information'
-  | 'secure_input'
-  | 'private_context';
 
 export type HelperToMainPayloadByType = {
   'helper.hello': {
@@ -104,9 +125,14 @@ export type HelperToMainPayloadByType = {
     observedAt: string;
   };
   'capture.result': CaptureResultPayload;
-  'capture.skipped': {
+  /**
+   * A tick produced no frame; `state` is the reason, recorded as a coverage
+   * fact rather than discarded (see `capture/coverage-aggregator.ts`). Shares
+   * its state vocabulary with the server contract's capture-coverage spine.
+   */
+  'capture.coverage': {
     captureId: string;
-    reason: CaptureSkippedReason;
+    state: CaptureCoverageState;
     observedAt: string;
   };
   'capture.error': {

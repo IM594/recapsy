@@ -1,10 +1,16 @@
 import { settleServerCapture as settleStoredServerCapture } from '../reconciliation';
 import type {
   AssetCacheRef,
+  CaptureCoverageSegmentRecord,
   CaptureOutboxEntryCreateInput,
   ClaimAssetCleanupInput,
   ClaimRetryableOutboxJobInput,
+  CloseOpenCoverageSegmentInput,
+  DeviceCaptureLivenessRecord,
+  ExtendOpenCoverageSegmentInput,
   LocalCapturePolicyRule,
+  OpenCoverageSegmentInput,
+  OpenCoverageSegmentRecord,
   OperationalStoreError,
   OperationalStoreResult,
   OperationalStoreSnapshot,
@@ -18,6 +24,7 @@ import type {
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
+  RecoverHangingCoverageSegmentInput,
   RecoverInterruptedOutboxJobInput,
   RecoverPendingAssetCleanupInput,
   ServerCaptureSettlement,
@@ -27,9 +34,11 @@ import type {
   SyncCursor,
   SyncCursorKind,
   UpdateAssetRefAvailabilityInput,
+  UpsertDeviceCaptureLivenessInput,
 } from '../types';
 import { SqliteAssetPersistence, assetRefMatches } from './assets';
 import { SqliteCachePersistence } from './cache';
+import { SqliteCoveragePersistence } from './coverage';
 import type { SqliteDatabase } from './driver';
 import { migrateSqliteStore } from './migrations';
 import {
@@ -52,11 +61,13 @@ export function createSqliteStore(options: SqliteStoreOptions) {
 class SqliteOperationalStore {
   private readonly assets: SqliteAssetPersistence;
   private readonly cache: SqliteCachePersistence;
+  private readonly coverage: SqliteCoveragePersistence;
   private readonly outbox: SqliteOutboxPersistence;
 
   constructor(private readonly options: SqliteStoreOptions) {
     this.assets = new SqliteAssetPersistence(options.database);
     this.cache = new SqliteCachePersistence(options.database);
+    this.coverage = new SqliteCoveragePersistence(options.database);
     this.outbox = new SqliteOutboxPersistence(options.database, options.maxActiveOutboxJobs);
   }
 
@@ -314,6 +325,52 @@ class SqliteOperationalStore {
     return this.cache.getSettingsCache(workspaceId);
   }
 
+  openCoverageSegment(input: OpenCoverageSegmentInput): Promise<void> {
+    return this.coverage.openCoverageSegment(input);
+  }
+
+  extendOpenCoverageSegment(input: ExtendOpenCoverageSegmentInput): Promise<void> {
+    return this.coverage.extendOpenCoverageSegment(input);
+  }
+
+  closeOpenCoverageSegment(
+    input: CloseOpenCoverageSegmentInput,
+  ): Promise<CaptureCoverageSegmentRecord | null> {
+    return this.coverage.closeOpenCoverageSegment(input);
+  }
+
+  recoverHangingCoverageSegment(input: RecoverHangingCoverageSegmentInput): Promise<void> {
+    return this.coverage.recoverHangingCoverageSegment(input);
+  }
+
+  listPendingCoverageSegments(workspaceId?: string): Promise<CaptureCoverageSegmentRecord[]> {
+    return this.coverage.listPendingCoverageSegments(workspaceId);
+  }
+
+  markCoverageSegmentsSynced(ids: readonly string[]): Promise<void> {
+    return this.coverage.markCoverageSegmentsSynced(ids);
+  }
+
+  getOpenCoverageSegment(
+    workspaceId: string,
+    deviceId: string,
+  ): Promise<OpenCoverageSegmentRecord | null> {
+    return this.coverage.getOpenCoverageSegment(workspaceId, deviceId);
+  }
+
+  getDeviceCaptureLiveness(
+    workspaceId: string,
+    deviceId: string,
+  ): Promise<DeviceCaptureLivenessRecord | null> {
+    return this.coverage.getDeviceCaptureLiveness(workspaceId, deviceId);
+  }
+
+  upsertDeviceCaptureLiveness(
+    input: UpsertDeviceCaptureLivenessInput,
+  ): Promise<DeviceCaptureLivenessRecord> {
+    return this.coverage.upsertDeviceCaptureLiveness(input);
+  }
+
   async getBackpressureSnapshot(): Promise<OperationalStoreSnapshot> {
     const statistics = this.options.database
       .prepare<{ asset_bytes: number; queued_jobs: number; retrying_jobs: number }>(
@@ -377,6 +434,14 @@ class SqliteOperationalStore {
     this.options.database.run('DELETE FROM settings_cache WHERE workspace_id = $workspaceId', {
       $workspaceId: workspaceId,
     });
+    this.options.database.run(
+      'DELETE FROM capture_coverage_segments WHERE workspace_id = $workspaceId',
+      { $workspaceId: workspaceId },
+    );
+    this.options.database.run(
+      'DELETE FROM device_capture_liveness WHERE workspace_id = $workspaceId',
+      { $workspaceId: workspaceId },
+    );
   }
 
   async clearSignOutCache(): Promise<void> {
@@ -385,6 +450,8 @@ class SqliteOperationalStore {
     this.options.database.run('DELETE FROM policy_cache');
     this.options.database.run('DELETE FROM sync_cursors');
     this.options.database.run('DELETE FROM settings_cache');
+    this.options.database.run('DELETE FROM capture_coverage_segments');
+    this.options.database.run('DELETE FROM device_capture_liveness');
   }
 }
 

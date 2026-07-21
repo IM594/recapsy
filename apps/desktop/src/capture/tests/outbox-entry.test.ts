@@ -80,6 +80,24 @@ describe('capture outbox entry projection', () => {
     );
   });
 
+  it('prefers capturedAt over observedAt when the helper reports both', () => {
+    const capturedAt = '2026-07-07T08:00:00.500Z';
+    const payload = capturePayload({ capturedAt });
+
+    const result = projectCaptureOutboxEntry({ deviceId, payload, workspaceId });
+
+    expect(result.capture?.capturedAt).toBe(capturedAt);
+    expect(result.createdAt).toBe(observedAt);
+  });
+
+  it('falls back to observedAt for capturedAt when the helper does not report it', () => {
+    const payload = capturePayload();
+
+    const result = projectCaptureOutboxEntry({ deviceId, payload, workspaceId });
+
+    expect(result.capture?.capturedAt).toBe(observedAt);
+  });
+
   it('keeps unsafe refs out of localAccessKey without changing their identity fields', () => {
     const payload = capturePayload({
       assets: [{ ...screenshotAsset(), ref: '/Users/alice/private.png' }],

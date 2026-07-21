@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { CLIENT_SENT_AT_HEADER } from '@recapsy/contracts';
 import { createInMemoryTokenStore } from '../../auth/index';
 import { assertRendererSafeDto } from '../../ipc/index';
 import { ServerApiError, createServerApiClient } from '../client';
@@ -61,6 +62,43 @@ describe('desktop server API client', () => {
 
     await expect(client.getCapabilities()).resolves.toMatchObject({ workspaceId });
     expect(calls[0]?.headers.authorization).toBe('Bearer access-token-secret');
+  });
+
+  it('stamps every request with the device clock via CLIENT_SENT_AT_HEADER', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createServerApiClient({
+      accessTokenProvider: {
+        getAccessToken: async () => 'access-token-secret',
+      },
+      endpoint: 'https://api.example.test',
+      now: () => '2026-07-20T08:00:00.000Z',
+      transport: async (request) => {
+        calls.push(request);
+        return createJsonResponse(createCapabilitiesResponse());
+      },
+    });
+
+    await client.getCapabilities();
+
+    expect(calls[0]?.headers[CLIENT_SENT_AT_HEADER]).toBe('2026-07-20T08:00:00.000Z');
+  });
+
+  it('defaults the device clock header to the current time when none is supplied', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createServerApiClient({
+      accessTokenProvider: {
+        getAccessToken: async () => 'access-token-secret',
+      },
+      endpoint: 'https://api.example.test',
+      transport: async (request) => {
+        calls.push(request);
+        return createJsonResponse(createCapabilitiesResponse());
+      },
+    });
+
+    await client.getCapabilities();
+
+    expect(Number.isNaN(Date.parse(calls[0]?.headers[CLIENT_SENT_AT_HEADER] ?? ''))).toBe(false);
   });
 
   it('passes capture creation idempotency keys through the public API boundary', async () => {
@@ -658,6 +696,7 @@ describe('desktop server API client', () => {
       durationMs: 1200,
       model: 'ocr-model-1',
       providerName: 'openai',
+      qualityFlags: [],
       screenText: {
         blocks: [
           { kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'quarterly plan draft' },
@@ -688,6 +727,7 @@ describe('desktop server API client', () => {
         durationMs: 1200,
         model: 'ocr-model-1',
         providerName: 'openai',
+        qualityFlags: [],
         screenText: {
           blocks: [
             { kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'quarterly plan draft' },

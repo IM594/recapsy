@@ -41,4 +41,4 @@ export type {
 export { createNodeCaptureBundleValidationAdapter } from './bundle-validation-node';
 export { createCaptureRuntime, DEFAULT_CAPTURE_MAX_QUEUED_JOBS } from './runtime';
 export type { CaptureRuntime, CaptureRuntimeOptions, CaptureRuntimeStore } from './runtime';
-export type { CaptureHistoryReader, CaptureIntakeStore } from './store';
+export type { CaptureCoverageStore, CaptureHistoryReader, CaptureIntakeStore } from './store';

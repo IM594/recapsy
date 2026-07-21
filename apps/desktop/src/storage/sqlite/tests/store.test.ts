@@ -116,7 +116,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get(),
-    ).toEqual({ version: 9 });
+    ).toEqual({ version: 10 });
     database.close();
   });
 
@@ -160,7 +160,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 9,
+      version: 10,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -413,7 +413,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(9);
+    ).toBe(10);
 
     const rowById = (id: string) =>
       database
@@ -1580,6 +1580,7 @@ function createFailingSqliteDatabase(
 function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): StoredOcrResult {
   return {
     durationMs: 1200,
+    qualityFlags: [],
     model: 'test-model',
     providerName: 'test-provider',
     screenText: {

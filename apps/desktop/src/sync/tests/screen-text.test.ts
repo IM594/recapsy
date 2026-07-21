@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AiOcrResponse } from '@recapsy/contracts';
-import { mapOcrScreenText } from '../screen-text';
+import { deriveOcrQualityFlags, mapOcrScreenText } from '../screen-text';
 
 function ocrResponse(blocks: AiOcrResponse['blocks']): AiOcrResponse {
   return {
@@ -95,5 +95,29 @@ describe('mapOcrScreenText', () => {
       readingOrder: 'top_to_bottom_left_to_right',
       source: 'image_ocr',
     });
+  });
+});
+
+describe('deriveOcrQualityFlags', () => {
+  it('flags a truncated transcript when the provider hit its output-token ceiling', () => {
+    const response = {
+      ...ocrResponse([{ text: 'partial' }]),
+      completion: { outputTokensCapped: true, stopReason: 'output_truncated' as const },
+    };
+
+    expect(deriveOcrQualityFlags(response)).toEqual(['truncated']);
+  });
+
+  it('reports no quality flags for a complete transcript', () => {
+    const response = {
+      ...ocrResponse([{ text: 'complete' }]),
+      completion: { outputTokensCapped: false, stopReason: 'complete' as const },
+    };
+
+    expect(deriveOcrQualityFlags(response)).toEqual([]);
+  });
+
+  it('reports no quality flags when completion is not observed at all', () => {
+    expect(deriveOcrQualityFlags(ocrResponse([{ text: 'no completion signal' }]))).toEqual([]);
   });
 });

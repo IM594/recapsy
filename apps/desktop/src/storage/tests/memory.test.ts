@@ -101,6 +101,7 @@ describe('memory operational store', () => {
         durationMs: 1200,
         model: 'test-model',
         providerName: 'test-provider',
+        qualityFlags: [],
         screenText: {
           blocks: [{ kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'original' }],
           readingOrder: 'top_to_bottom_left_to_right',
@@ -630,6 +631,158 @@ describe('memory operational store', () => {
     await store.clearSignOutCache();
 
     expect(await store.getSettingsCache('workspace_2')).toBeNull();
+  });
+});
+
+describe('memory store capture coverage', () => {
+  const workspaceId = 'workspace_1';
+  const deviceId = 'device_1';
+
+  it('opens, extends, and closes a run-length segment as one growing record', async () => {
+    const store = createMemoryStore();
+
+    await store.openCoverageSegment({
+      coverageState: 'static',
+      deviceId,
+      intervalMs: 3000,
+      now: '2026-07-20T08:00:00.000Z',
+      startedAt: '2026-07-20T08:00:00.000Z',
+      workspaceId,
+    });
+    await store.extendOpenCoverageSegment({
+      deviceId,
+      now: '2026-07-20T08:00:03.000Z',
+      tickCount: 2,
+      workspaceId,
+    });
+
+    expect(await store.getOpenCoverageSegment(workspaceId, deviceId)).toEqual({
+      coverageState: 'static',
+      intervalMs: 3000,
+      startedAt: '2026-07-20T08:00:00.000Z',
+      tickCount: 2,
+    });
+
+    const closed = await store.closeOpenCoverageSegment({
+      closeReason: 'frame_captured',
+      deviceId,
+      endedAt: '2026-07-20T08:00:03.000Z',
+      now: '2026-07-20T08:00:04.000Z',
+      workspaceId,
+    });
+
+    expect(closed).toMatchObject({
+      closeReason: 'frame_captured',
+      coverageState: 'static',
+      syncState: 'pending',
+      tickCount: 2,
+    });
+    expect(await store.getOpenCoverageSegment(workspaceId, deviceId)).toBeNull();
+  });
+
+  it('is a no-op closing when nothing is open', async () => {
+    const store = createMemoryStore();
+
+    expect(
+      await store.closeOpenCoverageSegment({
+        closeReason: 'helper_exit',
+        deviceId,
+        endedAt: '2026-07-20T08:00:00.000Z',
+        now: '2026-07-20T08:00:00.000Z',
+        workspaceId,
+      }),
+    ).toBeNull();
+  });
+
+  it('lists only pending segments and marks them synced', async () => {
+    const store = createMemoryStore();
+    await store.openCoverageSegment({
+      coverageState: 'static',
+      deviceId,
+      intervalMs: 3000,
+      now: '2026-07-20T08:00:00.000Z',
+      startedAt: '2026-07-20T08:00:00.000Z',
+      workspaceId,
+    });
+    const closed = await store.closeOpenCoverageSegment({
+      closeReason: 'frame_captured',
+      deviceId,
+      endedAt: '2026-07-20T08:00:03.000Z',
+      now: '2026-07-20T08:00:04.000Z',
+      workspaceId,
+    });
+
+    expect(await store.listPendingCoverageSegments(workspaceId)).toHaveLength(1);
+
+    await store.markCoverageSegmentsSynced(closed ? [closed.id] : []);
+
+    expect(await store.listPendingCoverageSegments(workspaceId)).toEqual([]);
+  });
+
+  it('recovers a hanging open segment using the last-alive liveness timestamp', async () => {
+    const store = createMemoryStore();
+    await store.openCoverageSegment({
+      coverageState: 'no_window',
+      deviceId,
+      intervalMs: 3000,
+      now: '2026-07-20T08:00:00.000Z',
+      startedAt: '2026-07-20T08:00:00.000Z',
+      workspaceId,
+    });
+    await store.upsertDeviceCaptureLiveness({
+      deviceId,
+      desiredState: 'running',
+      lastAliveAt: '2026-07-20T08:00:03.000Z',
+      now: '2026-07-20T08:00:03.000Z',
+      workspaceId,
+    });
+
+    await store.recoverHangingCoverageSegment({
+      deviceId,
+      now: '2026-07-20T08:05:00.000Z',
+      workspaceId,
+    });
+
+    const pending = await store.listPendingCoverageSegments(workspaceId);
+    expect(pending).toMatchObject([
+      {
+        closeReason: 'inferred_on_recovery',
+        coverageState: 'no_window',
+        endedAt: '2026-07-20T08:00:03.000Z',
+      },
+    ]);
+    expect(await store.getOpenCoverageSegment(workspaceId, deviceId)).toBeNull();
+  });
+
+  it('clears coverage segments and liveness on workspace and sign-out cache clears', async () => {
+    const store = createMemoryStore();
+    await store.openCoverageSegment({
+      coverageState: 'static',
+      deviceId,
+      intervalMs: 3000,
+      now: '2026-07-20T08:00:00.000Z',
+      startedAt: '2026-07-20T08:00:00.000Z',
+      workspaceId,
+    });
+    await store.closeOpenCoverageSegment({
+      closeReason: 'frame_captured',
+      deviceId,
+      endedAt: '2026-07-20T08:00:03.000Z',
+      now: '2026-07-20T08:00:04.000Z',
+      workspaceId,
+    });
+    await store.upsertDeviceCaptureLiveness({
+      deviceId,
+      desiredState: 'running',
+      lastAliveAt: '2026-07-20T08:00:04.000Z',
+      now: '2026-07-20T08:00:04.000Z',
+      workspaceId,
+    });
+
+    await store.clearWorkspaceCache(workspaceId);
+
+    expect(await store.listPendingCoverageSegments(workspaceId)).toEqual([]);
+    expect(await store.getDeviceCaptureLiveness(workspaceId, deviceId)).toBeNull();
   });
 });
 

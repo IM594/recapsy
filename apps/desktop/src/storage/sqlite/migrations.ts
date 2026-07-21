@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -497,5 +497,56 @@ const schemaStatements = [
     capture_enabled INTEGER NOT NULL CHECK (capture_enabled IN (0, 1)),
     fetched_at TEXT NOT NULL,
     server_capabilities_json TEXT NOT NULL CHECK (json_valid(server_capabilities_json))
+  )`,
+  `CREATE TABLE IF NOT EXISTS capture_coverage_segments (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    coverage_state TEXT NOT NULL CHECK (
+      coverage_state IN (
+        'static', 'blank', 'low_information', 'no_window',
+        'privacy_withheld', 'secure_field', 'private_context', 'paused'
+      )
+    ),
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    tick_count INTEGER NOT NULL CHECK (tick_count > 0),
+    interval_ms INTEGER NOT NULL CHECK (interval_ms > 0),
+    close_reason TEXT NOT NULL CHECK (
+      close_reason IN (
+        'frame_captured', 'state_changed', 'cadence_gap',
+        'paused', 'helper_exit', 'inferred_on_recovery'
+      )
+    ),
+    sync_state TEXT NOT NULL DEFAULT 'pending' CHECK (sync_state IN ('pending', 'synced')),
+    created_at TEXT NOT NULL
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_capture_coverage_segments_pending
+    ON capture_coverage_segments(workspace_id, sync_state, created_at)`,
+  // One row per device. `open_coverage_*` mirrors the still-growing run's tail
+  // (cleared once it closes into `capture_coverage_segments`) so the read
+  // model can see it without waiting for a close, and so a crash without a
+  // graceful `helper_exit` can be recovered from `last_alive_at` at startup
+  // (see `recoverHangingCoverageSegment` in `storage/sqlite/coverage.ts`).
+  `CREATE TABLE IF NOT EXISTS device_capture_liveness (
+    workspace_id TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    last_alive_at TEXT NOT NULL,
+    desired_state TEXT NOT NULL CHECK (desired_state IN ('running', 'paused', 'stopped')),
+    open_coverage_state TEXT CHECK (
+      open_coverage_state IS NULL OR open_coverage_state IN (
+        'static', 'blank', 'low_information', 'no_window',
+        'privacy_withheld', 'secure_field', 'private_context', 'paused'
+      )
+    ),
+    open_coverage_started_at TEXT,
+    open_coverage_tick_count INTEGER CHECK (
+      open_coverage_tick_count IS NULL OR open_coverage_tick_count > 0
+    ),
+    open_coverage_interval_ms INTEGER CHECK (
+      open_coverage_interval_ms IS NULL OR open_coverage_interval_ms > 0
+    ),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (workspace_id, device_id)
   )`,
 ];

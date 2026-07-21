@@ -1,3 +1,4 @@
+import type { CaptureCoverageState } from '@recapsy/contracts';
 import {
   type CaptureHelperCommandClient,
   HELPER_PROTOCOL_VERSION,
@@ -29,8 +30,26 @@ export type CaptureHandlerObservation =
       type: 'storage_failure';
     };
 
+/**
+ * Narrow coverage-tracking surface this handler depends on: feeding the
+ * shared capture-coverage aggregator (see `capture/runtime.ts`, which owns
+ * the aggregator instance and its `CaptureCoverageStore`-backed persistence).
+ * Optional so existing callers that do not yet wire coverage tracking keep
+ * working; a missing tracker means coverage facts are silently dropped
+ * rather than the handler failing closed.
+ */
+export type CaptureCoverageObserver = {
+  observeCoverage(input: {
+    captureId: string;
+    state: CaptureCoverageState;
+    observedAt: string;
+  }): Promise<void>;
+  observeCaptureResult(input: { captureId: string; observedAt: string }): Promise<void>;
+};
+
 export type CaptureHelperEventHandlerOptions = {
   client: Pick<CaptureHelperCommandClient, 'sendCommand'>;
+  coverage?: CaptureCoverageObserver;
   deviceId: string;
   now(): string;
   store: CaptureIntakeStore;
@@ -74,7 +93,8 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         case 'capture.result':
           await this.handleCaptureResult(narrowHelperEnvelope(envelope, 'capture.result'));
           return;
-        case 'capture.skipped':
+        case 'capture.coverage':
+          await this.handleCaptureCoverage(narrowHelperEnvelope(envelope, 'capture.coverage'));
           return;
         case 'capture.error':
           await this.recordCaptureError(narrowHelperEnvelope(envelope, 'capture.error'));
@@ -117,6 +137,14 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
 
   private async handleCaptureResult(envelope: HelperEnvelope<'capture.result'>): Promise<void> {
     const captureId = envelope.payload.captureId;
+    // A frame was produced for this tick — the fact that closes whatever
+    // no-frame coverage run was open (see `capture/coverage-aggregator.ts`).
+    // Recorded regardless of whether local intake below succeeds: the frame
+    // arriving from the helper is true independent of local storage outcome.
+    await this.options.coverage?.observeCaptureResult({
+      captureId,
+      observedAt: envelope.payload.observedAt,
+    });
     const entry = projectCaptureOutboxEntry({
       deviceId: this.options.deviceId,
       payload: envelope.payload,
@@ -166,6 +194,14 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         type: 'capture_error',
       });
     }
+  }
+
+  private async handleCaptureCoverage(envelope: HelperEnvelope<'capture.coverage'>): Promise<void> {
+    await this.options.coverage?.observeCoverage({
+      captureId: envelope.payload.captureId,
+      observedAt: envelope.payload.observedAt,
+      state: envelope.payload.state,
+    });
   }
 
   private async recordCaptureError(envelope: HelperEnvelope<'capture.error'>): Promise<void> {
@@ -315,7 +351,7 @@ function isHelperToMainType(type: string): type is HelperToMainType {
     'helper.status',
     'permission.status',
     'capture.result',
-    'capture.skipped',
+    'capture.coverage',
     'capture.error',
     'helper.heartbeat',
     'helper.exiting',

@@ -1,12 +1,17 @@
 import {
   AiOcrResponseSchema,
   AxAllowlistResponseSchema,
+  CLIENT_SENT_AT_HEADER,
   CapabilitiesResponseSchema,
+  CaptureCoverageBatchCreateRequestSchema,
+  CaptureCoverageBatchCreateResponseSchema,
   CaptureCreateRequestSchema,
   CaptureCreateResponseSchema,
   CaptureDetailResponseSchema,
   CapturePoliciesResponseSchema,
   type CapturePolicyRule,
+  DeviceCaptureLivenessResponseSchema,
+  DeviceCaptureLivenessUpsertRequestSchema,
   OcrResultSubmitRequestSchema,
   OcrResultSubmitResponseSchema,
   SearchResponseSchema,
@@ -21,14 +26,19 @@ import type {
   RunOcrProxyResult,
   ServerApiClient,
   ServerApiClientOptions,
+  ServerApiCoverageClient,
   ServerApiErrorCode,
   ServerApiErrorShape,
   ServerApiOcrProxyClient,
   ServerApiTransportRequest,
   ServerApiTransportResponse,
   ServerCapabilitiesResult,
+  SubmitCoverageBatchInput,
+  SubmitCoverageBatchResult,
   SubmitOcrResultInput,
   SubmitOcrResultResult,
+  UpsertLivenessInput,
+  UpsertLivenessResult,
 } from './types';
 
 export class ServerApiError extends Error implements ServerApiErrorShape {
@@ -64,63 +74,94 @@ export class ServerApiError extends Error implements ServerApiErrorShape {
 
 export function createServerApiClient(
   options: ServerApiClientOptions,
-): ServerApiClient & ServerApiOcrProxyClient {
+): ServerApiClient & ServerApiOcrProxyClient & ServerApiCoverageClient {
   const endpoint = normalizeEndpoint(options.endpoint);
+  const now = options.now ?? (() => new Date().toISOString());
 
   return {
     async getAxAllowlist(workspaceId) {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: '/v1/ax/allowlist',
-        query: { workspaceId },
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          method: 'GET',
+          path: '/v1/ax/allowlist',
+          query: { workspaceId },
+        },
+        now,
+      );
       return toAxAllowlistResult(body);
     },
     async getCapabilities() {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: '/v1/capabilities',
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          method: 'GET',
+          path: '/v1/capabilities',
+        },
+        now,
+      );
       return toCapabilitiesResult(body);
     },
     async getCapturePolicies(input) {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: '/v1/capture/policies',
-        query: compactQuery({
-          deviceId: input.deviceId,
-          workspaceId: input.workspaceId,
-        }),
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          method: 'GET',
+          path: '/v1/capture/policies',
+          query: compactQuery({
+            deviceId: input.deviceId,
+            workspaceId: input.workspaceId,
+          }),
+        },
+        now,
+      );
       return toCapturePoliciesResult(body);
     },
     async getCapture(workspaceId, captureId) {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: `/v1/captures/${captureId}`,
-        query: { workspaceId },
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          method: 'GET',
+          path: `/v1/captures/${captureId}`,
+          query: { workspaceId },
+        },
+        now,
+      );
       return toCaptureDetailResult(body);
     },
     async createCapture(input) {
-      const body = await request(options, endpoint, {
-        body: toCaptureCreateBody(input),
-        method: 'POST',
-        path: '/v1/captures',
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          body: toCaptureCreateBody(input),
+          method: 'POST',
+          path: '/v1/captures',
+        },
+        now,
+      );
       return toCaptureCreateResult(body);
     },
     async runOcrProxy(input): Promise<RunOcrProxyResult> {
-      const body = await request(options, endpoint, {
-        body: input.bytes,
-        headers: {
-          'content-type': input.mimeType,
-          'idempotency-key': input.operationKey,
+      const body = await request(
+        options,
+        endpoint,
+        {
+          body: input.bytes,
+          headers: {
+            'content-type': input.mimeType,
+            'idempotency-key': input.operationKey,
+          },
+          method: 'POST',
+          path: '/v1/ai/ocr',
+          query: { workspaceId: input.workspaceId },
         },
-        method: 'POST',
-        path: '/v1/ai/ocr',
-        query: { workspaceId: input.workspaceId },
-      });
+        now,
+      );
       const parsed = AiOcrResponseSchema.safeParse(body);
 
       if (!parsed.success) {
@@ -130,11 +171,16 @@ export function createServerApiClient(
       return parsed.data;
     },
     async submitOcrResult(input): Promise<SubmitOcrResultResult> {
-      const body = await request(options, endpoint, {
-        body: toOcrResultSubmitBody(input),
-        method: 'POST',
-        path: `/v1/captures/${input.captureId}/ocr-result`,
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          body: toOcrResultSubmitBody(input),
+          method: 'POST',
+          path: `/v1/captures/${input.captureId}/ocr-result`,
+        },
+        now,
+      );
       const parsed = OcrResultSubmitResponseSchema.safeParse(body);
 
       if (!parsed.success) {
@@ -143,31 +189,79 @@ export function createServerApiClient(
 
       return parsed.data;
     },
+    async submitCoverageBatch(input): Promise<SubmitCoverageBatchResult> {
+      const body = await request(
+        options,
+        endpoint,
+        {
+          body: toCoverageBatchBody(input),
+          method: 'POST',
+          path: '/v1/captures/coverage',
+        },
+        now,
+      );
+      const parsed = CaptureCoverageBatchCreateResponseSchema.safeParse(body);
+
+      if (!parsed.success) {
+        throw invalidResponse();
+      }
+
+      return parsed.data;
+    },
+    async upsertLiveness(input): Promise<UpsertLivenessResult> {
+      const body = await request(
+        options,
+        endpoint,
+        {
+          body: toLivenessUpsertBody(input),
+          method: 'PUT',
+          path: `/v1/devices/${input.deviceId}/capture-liveness`,
+        },
+        now,
+      );
+      const parsed = DeviceCaptureLivenessResponseSchema.safeParse(body);
+
+      if (!parsed.success) {
+        throw invalidResponse();
+      }
+
+      return parsed.data;
+    },
     async querySearch(input) {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: '/v1/search',
-        query: compactQuery({
-          cursor: input.cursor,
-          limit: input.limit?.toString(),
-          q: input.query,
-          workspaceId: input.workspaceId,
-        }),
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          method: 'GET',
+          path: '/v1/search',
+          query: compactQuery({
+            cursor: input.cursor,
+            limit: input.limit?.toString(),
+            q: input.query,
+            workspaceId: input.workspaceId,
+          }),
+        },
+        now,
+      );
       return toSearchQueryResult(body);
     },
     async queryTimeline(input) {
-      const body = await request(options, endpoint, {
-        method: 'GET',
-        path: '/v1/timeline',
-        query: compactQuery({
-          cursor: input.cursor,
-          from: input.range?.from,
-          limit: input.limit?.toString(),
-          to: input.range?.to,
-          workspaceId: input.workspaceId,
-        }),
-      });
+      const body = await request(
+        options,
+        endpoint,
+        {
+          method: 'GET',
+          path: '/v1/timeline',
+          query: compactQuery({
+            cursor: input.cursor,
+            from: input.range?.from,
+            limit: input.limit?.toString(),
+            to: input.range?.to,
+            workspaceId: input.workspaceId,
+          }),
+        },
+        now,
+      );
       return toTimelineQueryResult(body);
     },
   };
@@ -180,6 +274,7 @@ async function request(
     headers?: Record<string, string>;
     query?: Record<string, string>;
   },
+  now: () => string,
 ): Promise<unknown> {
   const accessToken = await options.accessTokenProvider.getAccessToken();
 
@@ -204,6 +299,7 @@ async function request(
       body: input.body,
       headers: {
         authorization: `Bearer ${accessToken}`,
+        [CLIENT_SENT_AT_HEADER]: now(),
         ...input.headers,
       },
       method: input.method,
@@ -344,6 +440,7 @@ function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unkn
     durationMs: input.durationMs,
     model: input.model,
     providerName: input.providerName,
+    qualityFlags: input.qualityFlags,
     screenText: input.screenText,
     sourceAssetHash: input.sourceAssetHash,
     workspaceId: input.workspaceId,
@@ -357,6 +454,52 @@ function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unkn
       details: redactLogPayload(parsed.error.flatten()),
       retryable: false,
       safeMessage: 'OCR result submission payload does not match the public contract.',
+    });
+  }
+
+  return parsed.data;
+}
+
+function toCoverageBatchBody(input: SubmitCoverageBatchInput): Record<string, unknown> {
+  const body = {
+    segments: input.segments,
+    workspaceId: input.workspaceId,
+  };
+  const parsed = CaptureCoverageBatchCreateRequestSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new ServerApiError({
+      code: 'validation_failed',
+      details: redactLogPayload(parsed.error.flatten()),
+      retryable: false,
+      safeMessage: 'Coverage batch payload does not match the public contract.',
+    });
+  }
+
+  return parsed.data;
+}
+
+function toLivenessUpsertBody(input: UpsertLivenessInput): Record<string, unknown> {
+  const body = {
+    desiredState: input.desiredState,
+    deviceId: input.deviceId,
+    lastAliveAt: input.lastAliveAt,
+    workspaceId: input.workspaceId,
+    ...(input.openCoverageState !== undefined
+      ? { openCoverageState: input.openCoverageState }
+      : {}),
+    ...(input.openCoverageStartedAt !== undefined
+      ? { openCoverageStartedAt: input.openCoverageStartedAt }
+      : {}),
+  };
+  const parsed = DeviceCaptureLivenessUpsertRequestSchema.safeParse(body);
+
+  if (!parsed.success) {
+    throw new ServerApiError({
+      code: 'validation_failed',
+      details: redactLogPayload(parsed.error.flatten()),
+      retryable: false,
+      safeMessage: 'Device liveness payload does not match the public contract.',
     });
   }
 

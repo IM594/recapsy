@@ -43,6 +43,9 @@ export async function startServerHttpHarness(
     const providerSettingsRepository = new modules.InMemoryProviderSettingsRepository();
     const config: TestHttpAppOptions['config'] = {
       ADMIN_BOOTSTRAP_TOKEN: 'test-admin-bootstrap-token',
+      CAPTURE_DOWNTIME_MONITOR_BATCH_SIZE: 1_000,
+      CAPTURE_DOWNTIME_MONITOR_INTERVAL_MS: 60_000,
+      CAPTURE_DOWNTIME_STALE_THRESHOLD_MS: 180_000,
       CORS_ALLOWED_ORIGINS: [],
       DATABASE_URL: 'postgresql://test',
       EMBEDDING_INDEXER_BATCH_SIZE: 16,

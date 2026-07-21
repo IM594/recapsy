@@ -57,10 +57,10 @@ describe('helper protocol direction validation', () => {
     const resultPayload = captureResultPayload(unsafeCaptureId);
     const helperToMain = [
       envelope('capture.result', resultPayload),
-      envelope('capture.skipped', {
+      envelope('capture.coverage', {
         captureId: unsafeCaptureId,
         observedAt: sentAt,
-        reason: 'paused',
+        state: 'paused',
       }),
       envelope('capture.error', {
         captureId: unsafeCaptureId,
@@ -242,26 +242,53 @@ describe('helper protocol direction validation', () => {
     }
   });
 
-  it('accepts low_information as a capture skip reason and rejects near-miss values', () => {
+  it('accepts low_information as a coverage state and rejects near-miss values', () => {
     expect(
       validateHelperToMainEnvelope(
-        envelope('capture.skipped', {
+        envelope('capture.coverage', {
           captureId: 'cap_low_information',
           observedAt: sentAt,
-          reason: 'low_information',
+          state: 'low_information',
         }),
       ).ok,
     ).toBe(true);
 
     expect(
       validateHelperToMainEnvelope(
-        envelope('capture.skipped', {
+        envelope('capture.coverage', {
           captureId: 'cap_low_information',
           observedAt: sentAt,
-          reason: 'low-information',
+          state: 'low-information',
         }),
       ),
     ).toMatchObject({ error: { code: 'schema_mismatch' }, ok: false });
+  });
+
+  it('accepts every capture coverage state and no_window as a first-class reason', () => {
+    for (const state of [
+      'static',
+      'blank',
+      'low_information',
+      'no_window',
+      'privacy_withheld',
+      'secure_field',
+      'private_context',
+      'paused',
+    ]) {
+      expect(
+        validateHelperToMainEnvelope(
+          envelope('capture.coverage', { captureId: 'cap_1', observedAt: sentAt, state }),
+        ).ok,
+      ).toBe(true);
+    }
+  });
+
+  it('accepts a capture result carrying capturedAt alongside observedAt', () => {
+    const payload = { ...captureResultPayload(), capturedAt: sentAt };
+
+    expect(validateHelperToMainEnvelope({ ...baseEnvelope('capture.result'), payload }).ok).toBe(
+      true,
+    );
   });
 
   it('distinguishes unknown message types from known types in the wrong direction', () => {
@@ -295,7 +322,7 @@ function helperToMainEnvelopes(): unknown[] {
       screenCapture: 'granted',
     }),
     envelope('capture.result', captureResultPayload()),
-    envelope('capture.skipped', { captureId: 'cap_1', observedAt: sentAt, reason: 'paused' }),
+    envelope('capture.coverage', { captureId: 'cap_1', observedAt: sentAt, state: 'paused' }),
     envelope('capture.error', { captureId: 'cap_1', code: 'capture_failed', message: 'Failed.' }),
     envelope('helper.heartbeat', { sequence: 1, status: 'ready' }),
     envelope('helper.exiting', { code: 0, reason: 'shutdown_requested' }),

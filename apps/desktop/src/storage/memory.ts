@@ -17,10 +17,16 @@ import {
 import { settleServerCapture as settleStoredServerCapture } from './reconciliation';
 import type {
   AssetCacheRef,
+  CaptureCoverageSegmentRecord,
   CaptureOutboxEntryCreateInput,
   ClaimAssetCleanupInput,
   ClaimRetryableOutboxJobInput,
+  CloseOpenCoverageSegmentInput,
+  DeviceCaptureLivenessRecord,
+  ExtendOpenCoverageSegmentInput,
   LocalCapturePolicyRule,
+  OpenCoverageSegmentInput,
+  OpenCoverageSegmentRecord,
   OperationalStoreError,
   OperationalStoreResult,
   OperationalStoreSnapshot,
@@ -36,6 +42,7 @@ import type {
   PolicyCacheEntry,
   PolicyCacheRead,
   PolicyCacheReadOptions,
+  RecoverHangingCoverageSegmentInput,
   RecoverInterruptedOutboxJobInput,
   RecoverPendingAssetCleanupInput,
   ServerCaptureSettlement,
@@ -45,7 +52,12 @@ import type {
   SyncCursor,
   SyncCursorKind,
   UpdateAssetRefAvailabilityInput,
+  UpsertDeviceCaptureLivenessInput,
 } from './types';
+
+type InMemoryDeviceLiveness = DeviceCaptureLivenessRecord & {
+  openCoverage?: OpenCoverageSegmentRecord;
+};
 
 export type MemoryStoreOptions = {
   maxActiveOutboxJobs?: number;
@@ -69,6 +81,8 @@ class InMemoryOperationalStore {
   private readonly localCapturePolicyRules = new Map<string, LocalCapturePolicyRule>();
   private readonly syncCursors = new Map<string, SyncCursor>();
   private readonly settingsCache = new Map<string, SettingsCache>();
+  private readonly coverageSegments = new Map<string, CaptureCoverageSegmentRecord>();
+  private readonly deviceLiveness = new Map<string, InMemoryDeviceLiveness>();
 
   constructor(private readonly options: MemoryStoreOptions) {}
 
@@ -598,6 +612,143 @@ class InMemoryOperationalStore {
     return settings ? cloneSettingsCache(settings) : null;
   }
 
+  async openCoverageSegment(input: OpenCoverageSegmentInput): Promise<void> {
+    const key = livenessKey(input.workspaceId, input.deviceId);
+    const existing = this.deviceLiveness.get(key);
+    this.deviceLiveness.set(key, {
+      deviceId: input.deviceId,
+      desiredState: existing?.desiredState ?? 'running',
+      lastAliveAt: existing?.lastAliveAt ?? input.now,
+      openCoverage: {
+        coverageState: input.coverageState,
+        intervalMs: input.intervalMs,
+        startedAt: input.startedAt,
+        tickCount: 1,
+      },
+      updatedAt: input.now,
+      workspaceId: input.workspaceId,
+    });
+  }
+
+  async extendOpenCoverageSegment(input: ExtendOpenCoverageSegmentInput): Promise<void> {
+    const key = livenessKey(input.workspaceId, input.deviceId);
+    const existing = this.deviceLiveness.get(key);
+    if (!existing?.openCoverage) return;
+
+    this.deviceLiveness.set(key, {
+      ...existing,
+      openCoverage: { ...existing.openCoverage, tickCount: input.tickCount },
+      updatedAt: input.now,
+    });
+  }
+
+  async closeOpenCoverageSegment(
+    input: CloseOpenCoverageSegmentInput,
+  ): Promise<CaptureCoverageSegmentRecord | null> {
+    return this.closeOpenSegment(
+      input.workspaceId,
+      input.deviceId,
+      input.endedAt,
+      input.closeReason,
+      input.now,
+    );
+  }
+
+  async recoverHangingCoverageSegment(input: RecoverHangingCoverageSegmentInput): Promise<void> {
+    const existing = this.deviceLiveness.get(livenessKey(input.workspaceId, input.deviceId));
+    if (!existing?.openCoverage) return;
+
+    const endedAt = existing.lastAliveAt ?? existing.openCoverage.startedAt;
+    this.closeOpenSegment(
+      input.workspaceId,
+      input.deviceId,
+      endedAt,
+      'inferred_on_recovery',
+      input.now,
+    );
+  }
+
+  async listPendingCoverageSegments(workspaceId?: string): Promise<CaptureCoverageSegmentRecord[]> {
+    return [...this.coverageSegments.values()]
+      .filter((segment) => segment.syncState === 'pending')
+      .filter((segment) => (workspaceId ? segment.workspaceId === workspaceId : true))
+      .sort(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+      )
+      .map((segment) => ({ ...segment }));
+  }
+
+  async markCoverageSegmentsSynced(ids: readonly string[]): Promise<void> {
+    for (const id of ids) {
+      const segment = this.coverageSegments.get(id);
+      if (segment) this.coverageSegments.set(id, { ...segment, syncState: 'synced' });
+    }
+  }
+
+  async getOpenCoverageSegment(
+    workspaceId: string,
+    deviceId: string,
+  ): Promise<OpenCoverageSegmentRecord | null> {
+    const openCoverage = this.deviceLiveness.get(livenessKey(workspaceId, deviceId))?.openCoverage;
+    return openCoverage ? { ...openCoverage } : null;
+  }
+
+  async getDeviceCaptureLiveness(
+    workspaceId: string,
+    deviceId: string,
+  ): Promise<DeviceCaptureLivenessRecord | null> {
+    const liveness = this.deviceLiveness.get(livenessKey(workspaceId, deviceId));
+    if (!liveness) return null;
+    const { openCoverage: _openCoverage, ...record } = liveness;
+    return { ...record };
+  }
+
+  async upsertDeviceCaptureLiveness(
+    input: UpsertDeviceCaptureLivenessInput,
+  ): Promise<DeviceCaptureLivenessRecord> {
+    const key = livenessKey(input.workspaceId, input.deviceId);
+    const existing = this.deviceLiveness.get(key);
+    const record: DeviceCaptureLivenessRecord = {
+      deviceId: input.deviceId,
+      desiredState: input.desiredState,
+      lastAliveAt: input.lastAliveAt,
+      updatedAt: input.now,
+      workspaceId: input.workspaceId,
+    };
+    this.deviceLiveness.set(key, { ...record, openCoverage: existing?.openCoverage });
+    return { ...record };
+  }
+
+  private closeOpenSegment(
+    workspaceId: string,
+    deviceId: string,
+    endedAt: string,
+    closeReason: CaptureCoverageSegmentRecord['closeReason'],
+    now: string,
+  ): CaptureCoverageSegmentRecord | null {
+    const key = livenessKey(workspaceId, deviceId);
+    const existing = this.deviceLiveness.get(key);
+    if (!existing?.openCoverage) return null;
+
+    const record: CaptureCoverageSegmentRecord = {
+      closeReason,
+      coverageState: existing.openCoverage.coverageState,
+      createdAt: now,
+      deviceId,
+      endedAt,
+      id: randomUUID(),
+      intervalMs: existing.openCoverage.intervalMs,
+      startedAt: existing.openCoverage.startedAt,
+      syncState: 'pending',
+      tickCount: existing.openCoverage.tickCount,
+      workspaceId,
+    };
+    this.coverageSegments.set(record.id, record);
+    this.deviceLiveness.set(key, { ...existing, openCoverage: undefined, updatedAt: now });
+    return { ...record };
+  }
+
   async getBackpressureSnapshot(): Promise<OperationalStoreSnapshot> {
     const jobs = [...this.outboxJobs.values()];
     const assetBytes = [...this.assetRefs.values()]
@@ -686,6 +837,8 @@ class InMemoryOperationalStore {
     deleteMatching(this.policyCache, (entry) => entry.workspaceId === workspaceId);
     deleteMatching(this.syncCursors, (cursor) => cursor.workspaceId === workspaceId);
     this.settingsCache.delete(workspaceId);
+    deleteMatching(this.coverageSegments, (segment) => segment.workspaceId === workspaceId);
+    deleteMatching(this.deviceLiveness, (liveness) => liveness.workspaceId === workspaceId);
   }
 
   async clearSignOutCache(): Promise<void> {
@@ -694,6 +847,8 @@ class InMemoryOperationalStore {
     this.policyCache.clear();
     this.syncCursors.clear();
     this.settingsCache.clear();
+    this.coverageSegments.clear();
+    this.deviceLiveness.clear();
   }
 }
 
@@ -819,5 +974,9 @@ function compareLocalCapturePolicyRules(
 }
 
 function policyCacheKey(workspaceId: string, deviceId: string): string {
+  return `${workspaceId}:${deviceId}`;
+}
+
+function livenessKey(workspaceId: string, deviceId: string): string {
   return `${workspaceId}:${deviceId}`;
 }

@@ -19,7 +19,7 @@ const observedAt = '2026-07-07T08:00:00.000Z';
 const workspaceId = 'workspace_1';
 const deviceId = 'device_1';
 describe('capture helper event handler', () => {
-  it('does not publish capture.skipped into the control observation channel', async () => {
+  it('does not publish capture.coverage into the control observation channel', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
     const handler = createCaptureHelperEventHandler({
@@ -42,11 +42,11 @@ describe('capture helper event handler', () => {
           payload: {
             captureId: 'capture_low_information',
             observedAt,
-            reason: 'low_information',
+            state: 'low_information',
           },
           protocolVersion: HELPER_PROTOCOL_VERSION,
           sentAt: observedAt,
-          type: 'capture.skipped',
+          type: 'capture.coverage',
         }),
         validateHelperToMainEnvelope,
       ),
@@ -54,6 +54,46 @@ describe('capture helper event handler', () => {
 
     expect(observations).toEqual([]);
     expect(client.commands).toEqual([]);
+  });
+
+  it('feeds capture.coverage and capture.result into the coverage tracker', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const coverageCalls: unknown[] = [];
+    const handler = createCaptureHelperEventHandler({
+      client,
+      coverage: {
+        async observeCoverage(input) {
+          coverageCalls.push({ type: 'coverage', ...input });
+        },
+        async observeCaptureResult(input) {
+          coverageCalls.push({ type: 'result', ...input });
+        },
+      },
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+
+    await handler.handleEnvelope(
+      helperEnvelope('capture.coverage', {
+        captureId: 'capture_low_information',
+        observedAt,
+        state: 'low_information',
+      }),
+    );
+    await handler.handleEnvelope(captureResultEnvelope());
+
+    expect(coverageCalls).toEqual([
+      {
+        captureId: 'capture_low_information',
+        observedAt,
+        state: 'low_information',
+        type: 'coverage',
+      },
+      { captureId: 'capture_1', observedAt, type: 'result' },
+    ]);
   });
 
   it('acks capture.result only after asset refs and outbox jobs are durably recorded', async () => {

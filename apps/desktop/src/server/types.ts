@@ -1,10 +1,16 @@
 import type {
   AiOcrResponse,
   AiOcrUsage,
+  CaptureCoverageBatchCreateResponse,
+  CaptureCoverageSegmentInput,
+  CaptureCoverageState,
   CaptureDefaultPolicy,
   CaptureNextAction,
   CapturePolicyAction,
   CapturePolicyRule,
+  DeviceCaptureDesiredState,
+  DeviceCaptureLivenessResponse,
+  OcrQualityFlag,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -36,6 +42,12 @@ export type ServerApiClientOptions = {
   accessTokenProvider: ServerApiAccessTokenProvider;
   endpoint: string;
   transport: ServerApiTransport;
+  /**
+   * The device's own wall-clock, stamped onto every request via
+   * `CLIENT_SENT_AT_HEADER` so the server can derive a clock-offset sample
+   * (see `packages/contracts/src/headers.ts`). Defaults to `Date.now`.
+   */
+  now?(): string;
 };
 
 export type ServerApiErrorCode =
@@ -157,9 +169,33 @@ export type SubmitOcrResultInput = {
   providerName: string;
   durationMs: number;
   usage?: AiOcrUsage;
+  qualityFlags: OcrQualityFlag[];
 };
 
 export type SubmitOcrResultResult = OcrResultSubmitResponse;
+
+// Capture-coverage spine: batch upload of closed local run-length segments,
+// plus a per-device liveness upsert. Local-only bookkeeping (`id`,
+// `closeReason`, `syncState`) never leaves the device — only the fields the
+// public contract defines are sent. See `capture/coverage-aggregator.ts` and
+// `packages/contracts/src/schemas/coverage.ts`.
+export type SubmitCoverageBatchInput = {
+  workspaceId: string;
+  segments: CaptureCoverageSegmentInput[];
+};
+
+export type SubmitCoverageBatchResult = CaptureCoverageBatchCreateResponse;
+
+export type UpsertLivenessInput = {
+  workspaceId: string;
+  deviceId: string;
+  lastAliveAt: string;
+  desiredState: DeviceCaptureDesiredState;
+  openCoverageState?: CaptureCoverageState | null;
+  openCoverageStartedAt?: string | null;
+};
+
+export type UpsertLivenessResult = DeviceCaptureLivenessResponse;
 
 export type TimelineQueryInput = {
   workspaceId: string;
@@ -289,4 +325,12 @@ export type ServerApiClient = {
 export type ServerApiOcrProxyClient = {
   runOcrProxy(input: RunOcrProxyInput): Promise<RunOcrProxyResult>;
   submitOcrResult(input: SubmitOcrResultInput): Promise<SubmitOcrResultResult>;
+};
+
+// Capture-coverage spine capabilities, additive alongside the OCR proxy
+// capabilities above for the same reason (see the comment on
+// `ServerApiOcrProxyClient`).
+export type ServerApiCoverageClient = {
+  submitCoverageBatch(input: SubmitCoverageBatchInput): Promise<SubmitCoverageBatchResult>;
+  upsertLiveness(input: UpsertLivenessInput): Promise<UpsertLivenessResult>;
 };

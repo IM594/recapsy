@@ -47,10 +47,10 @@ function logHelperEnvelope(
       );
       return;
     }
-    case 'capture.skipped': {
-      const payload = narrowHelperEnvelope(envelope, 'capture.skipped').payload;
+    case 'capture.coverage': {
+      const payload = narrowHelperEnvelope(envelope, 'capture.coverage').payload;
       logger.log(
-        `[recapsy:capture] skipped captureId=${safeDiagnosticValue(payload.captureId)} reason=${payload.reason}`,
+        `[recapsy:capture] coverage captureId=${safeDiagnosticValue(payload.captureId)} state=${payload.state}`,
       );
       return;
     }

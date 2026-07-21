@@ -65,7 +65,10 @@ function capturePayloadFromResult(payload: CaptureResultPayload): CaptureOutboxP
   return {
     appName: payload.context.app.name,
     bundleId: payload.context.app.bundleId,
-    capturedAt: payload.observedAt,
+    // `capturedAt` is the native layer's own presentation-time fact; fall
+    // back to the tick scheduler's `observedAt` when the helper does not yet
+    // report it (see `helper/protocol/types.ts`).
+    capturedAt: payload.capturedAt ?? payload.observedAt,
     captureType: 'screen',
     documentPathCandidate: documentPathCandidate(payload.context),
     localEventId: payload.captureId,

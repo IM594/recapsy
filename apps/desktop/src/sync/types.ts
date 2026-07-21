@@ -2,6 +2,7 @@ import type {
   AiOcrResponse,
   AiOcrUsage,
   CaptureNextAction,
+  OcrQualityFlag,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -57,6 +58,7 @@ export type SyncServerApi = {
     providerName: string;
     durationMs: number;
     usage?: AiOcrUsage;
+    qualityFlags: OcrQualityFlag[];
   }): Promise<OcrResultSubmitResponse>;
 };
 

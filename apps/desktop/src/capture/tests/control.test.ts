@@ -4,6 +4,7 @@ import { recoverSyncQueue } from '../../sync/index';
 import {
   type CaptureControlHelperPort,
   type CaptureControlOptions,
+  type CaptureCoveragePort,
   createCaptureControl as createControlActor,
 } from '../control';
 import type { CapturePolicyConfiguration, CapturePolicyController } from '../policy';
@@ -297,6 +298,69 @@ describe('capture control', () => {
       'pauseCapture',
       'resumeCapture',
     ]);
+  });
+
+  it('records an actual helper pause and resume through the coverage port', async () => {
+    const coverageCalls: string[] = [];
+    const control = createCaptureControl({
+      coverage: recordingCoveragePort(coverageCalls),
+      helper: createRecordingHelper([]),
+      now: () => '2026-07-19T09:00:00.000Z',
+      policy: createRecordingPolicy([]),
+    });
+
+    await control.start();
+    await control.pause();
+    await control.resume();
+
+    expect(coverageCalls).toEqual([
+      'pause:2026-07-19T09:00:00.000Z',
+      'resume:2026-07-19T09:00:00.000Z',
+    ]);
+  });
+
+  it('advances the coverage tracker on every heartbeat', async () => {
+    const coverageCalls: string[] = [];
+    const harness = createControlHarness({ coverage: recordingCoveragePort(coverageCalls) });
+
+    await harness.control.recordHelperObservation({
+      observedAt: '2026-07-19T08:00:05.000Z',
+      type: 'heartbeat',
+    });
+
+    expect(coverageCalls).toEqual(['heartbeat:2026-07-19T08:00:05.000Z']);
+  });
+
+  it('closes the coverage tracker on a graceful helper exit', async () => {
+    const coverageCalls: string[] = [];
+    const harness = createControlHarness({ coverage: recordingCoveragePort(coverageCalls) });
+
+    await harness.control.recordHelperObservation({
+      observedAt: '2026-07-19T08:00:09.000Z',
+      reason: 'process_crashed',
+      type: 'helper_exit',
+    });
+
+    expect(coverageCalls).toEqual(['helperExit:2026-07-19T08:00:09.000Z']);
+  });
+
+  it('closes the coverage tracker when the helper process terminates', async () => {
+    const coverageCalls: string[] = [];
+    const control = createCaptureControl({
+      coverage: recordingCoveragePort(coverageCalls),
+      helper: createRecordingHelper([]),
+      now: () => '2026-07-19T09:30:00.000Z',
+      policy: createRecordingPolicy([]),
+    });
+    await control.start();
+
+    await control.handleHelperTermination({
+      code: 9,
+      reason: 'process_crashed',
+      type: 'process_exit',
+    });
+
+    expect(coverageCalls).toEqual(['helperExit:2026-07-19T09:30:00.000Z']);
   });
 
   it('serializes overlapping user intents so the latest resume wins', async () => {
@@ -779,14 +843,28 @@ describe('capture control', () => {
   });
 });
 
-function createCaptureControl(options: CaptureControlOptions) {
+function createCaptureControl(
+  options: Partial<Pick<CaptureControlOptions, 'coverage' | 'now'>> &
+    Omit<CaptureControlOptions, 'coverage' | 'now'>,
+) {
   return createControlActor({
+    coverage: createNoopCoveragePort(),
     initialPermissions: { accessibility: 'granted', screenRecording: 'granted' },
+    now: () => '2026-07-19T08:00:00.000Z',
     ...options,
   });
 }
 
-function createControlHarness() {
+function createNoopCoveragePort(): CaptureCoveragePort {
+  return {
+    handleHelperExit() {},
+    pause() {},
+    recordHeartbeat() {},
+    resume() {},
+  };
+}
+
+function createControlHarness(overrides: Partial<CaptureControlOptions> = {}) {
   const helper = createRecordingHelper([]);
 
   return {
@@ -795,7 +873,17 @@ function createControlHarness() {
       helper,
       initialPermissions: { accessibility: 'granted', screenRecording: 'granted' },
       policy: createRecordingPolicy(helper.calls),
+      ...overrides,
     }),
+  };
+}
+
+function recordingCoveragePort(calls: string[]): CaptureCoveragePort {
+  return {
+    handleHelperExit: (observedAt) => calls.push(`helperExit:${observedAt}`),
+    pause: (observedAt) => calls.push(`pause:${observedAt}`),
+    recordHeartbeat: (observedAt) => calls.push(`heartbeat:${observedAt}`),
+    resume: (observedAt) => calls.push(`resume:${observedAt}`),
   };
 }
 

@@ -17,7 +17,11 @@ import type {
   MainToHelperType,
 } from '../../helper/index';
 import { IPC_CHANNEL_REGISTRY } from '../../ipc/index';
-import type { CapturePoliciesResult, ServerApiClient } from '../../server/index';
+import type {
+  CapturePoliciesResult,
+  ServerApiClient,
+  ServerApiCoverageClient,
+} from '../../server/index';
 import type { DesktopShell } from '../../shell/index';
 import { type AssetCacheRef, createMemoryStore } from '../../storage';
 import type { SyncLoop, SyncLoopOptions, SyncRunResult, SyncServerApi } from '../../sync/index';
@@ -938,7 +942,9 @@ function fakeAuthClient(
   };
 }
 
-function notImplementedServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'> {
+function notImplementedServerApi(): SyncServerApi &
+  Pick<ServerApiClient, 'getCapturePolicies'> &
+  ServerApiCoverageClient {
   const notImplemented = () => {
     throw new Error('server API should not be called in this test');
   };
@@ -991,7 +997,11 @@ function notImplementedServerApi(): SyncServerApi & Pick<ServerApiClient, 'getCa
     queryTimeline: notImplemented,
     runOcrProxy: notImplemented,
     submitOcrResult: notImplemented,
-  } as unknown as SyncServerApi & Pick<ServerApiClient, 'getCapturePolicies'>;
+    submitCoverageBatch: notImplemented,
+    upsertLiveness: notImplemented,
+  } as unknown as SyncServerApi &
+    Pick<ServerApiClient, 'getCapturePolicies'> &
+    ServerApiCoverageClient;
 }
 
 class FakeLoginPrompter implements LoginPrompter {
