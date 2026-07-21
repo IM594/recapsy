@@ -2,6 +2,7 @@ import type { DesktopShellStatus } from './status-model';
 
 export type DesktopHealthAlertKind =
   | 'capture_unavailable'
+  | 'capture_stalled'
   | 'screen_recording_required'
   | 'capture_failures'
   | 'sync_blocked'
@@ -22,6 +23,17 @@ export type DesktopHealthSnapshot = {
 
 export type DesktopHealthMonitorOptions = {
   consecutiveCaptureFailureThreshold?: number;
+  /**
+   * How old a helper heartbeat may be while capture is `running` before the
+   * stall condition becomes pending. Tuned as a small multiple of the native
+   * helper heartbeat cadence (~1s).
+   */
+  heartbeatStaleThresholdMs?: number;
+  /**
+   * How long the stall condition must remain continuously true before the
+   * alert fires. Absorbs sleep/wake gaps and brief helper hiccups.
+   */
+  heartbeatStaleGraceMs?: number;
   syncBacklogGraceMs?: number;
   syncBacklogThreshold?: number;
 };
@@ -31,6 +43,10 @@ export type DesktopHealthMonitor = {
 };
 
 const DEFAULT_CAPTURE_FAILURE_THRESHOLD = 3;
+/** ~15× the native 1s heartbeat — clearly dead, not a single missed pulse. */
+const DEFAULT_HEARTBEAT_STALE_THRESHOLD_MS = 15_000;
+/** Require the stall to persist across sleep/wake blips before notifying. */
+const DEFAULT_HEARTBEAT_STALE_GRACE_MS = 15_000;
 const DEFAULT_SYNC_BACKLOG_GRACE_MS = 5 * 60_000;
 const DEFAULT_SYNC_BACKLOG_THRESHOLD = 20;
 
@@ -40,6 +56,12 @@ const ALERTS: Readonly<Record<DesktopHealthAlertKind, DesktopHealthAlert>> = {
     kind: 'capture_unavailable',
     title: 'Recapsy capture stopped',
     trayLabel: 'Capture stopped',
+  },
+  capture_stalled: {
+    body: 'Capture appears to have stopped silently. Open Recapsy to restore capture.',
+    kind: 'capture_stalled',
+    title: 'Recapsy capture stalled',
+    trayLabel: 'Capture stalled',
   },
   screen_recording_required: {
     body: 'Screen Recording permission is required. Open Recapsy to restore capture.',
@@ -93,6 +115,14 @@ export function createDesktopHealthMonitor(
     options.consecutiveCaptureFailureThreshold,
     DEFAULT_CAPTURE_FAILURE_THRESHOLD,
   );
+  const heartbeatStaleThresholdMs = positiveInteger(
+    options.heartbeatStaleThresholdMs,
+    DEFAULT_HEARTBEAT_STALE_THRESHOLD_MS,
+  );
+  const heartbeatStaleGraceMs = positiveInteger(
+    options.heartbeatStaleGraceMs,
+    DEFAULT_HEARTBEAT_STALE_GRACE_MS,
+  );
   const syncBacklogGraceMs = positiveInteger(
     options.syncBacklogGraceMs,
     DEFAULT_SYNC_BACKLOG_GRACE_MS,
@@ -103,23 +133,35 @@ export function createDesktopHealthMonitor(
   );
   let previousActive = new Set<DesktopHealthAlertKind>();
   let backlogStartedAt: number | undefined;
+  let stallStartedAt: number | undefined;
 
   return {
     evaluate(status, now) {
       const activeKinds = activeAlertKinds(status, {
         captureFailureThreshold,
+        heartbeatStaleGraceMs,
+        heartbeatStaleThresholdMs,
         syncBacklogGraceMs,
         syncBacklogThreshold,
         backlogStartedAt,
+        stallStartedAt,
         now,
       });
       const hasBacklog = activeKinds.includes('sync_backlog');
+      const hasStalled = activeKinds.includes('capture_stalled');
       const pendingBacklog = status.syncPending >= syncBacklogThreshold;
+      const pendingStall = isHeartbeatStalePending(status, now, heartbeatStaleThresholdMs);
 
       if (pendingBacklog && backlogStartedAt === undefined) {
         backlogStartedAt = now;
       } else if (!pendingBacklog) {
         backlogStartedAt = undefined;
+      }
+
+      if (pendingStall && stallStartedAt === undefined) {
+        stallStartedAt = now;
+      } else if (!pendingStall) {
+        stallStartedAt = undefined;
       }
 
       // `activeAlertKinds` reads the start timestamp from the previous sample,
@@ -132,6 +174,14 @@ export function createDesktopHealthMonitor(
         now - backlogStartedAt >= syncBacklogGraceMs
       ) {
         activeKinds.push('sync_backlog');
+      }
+      if (
+        !hasStalled &&
+        pendingStall &&
+        stallStartedAt !== undefined &&
+        now - stallStartedAt >= heartbeatStaleGraceMs
+      ) {
+        activeKinds.push('capture_stalled');
       }
 
       const nextActive = new Set(activeKinds);
@@ -149,15 +199,25 @@ function activeAlertKinds(
   status: DesktopShellStatus,
   options: {
     captureFailureThreshold: number;
+    heartbeatStaleGraceMs: number;
+    heartbeatStaleThresholdMs: number;
     syncBacklogGraceMs: number;
     syncBacklogThreshold: number;
     backlogStartedAt: number | undefined;
+    stallStartedAt: number | undefined;
     now: number;
   },
 ): DesktopHealthAlertKind[] {
   const active: DesktopHealthAlertKind[] = [];
   if (status.lastErrorCode && CAPTURE_UNAVAILABLE_CODES.has(status.lastErrorCode)) {
     active.push('capture_unavailable');
+  }
+  if (
+    options.stallStartedAt !== undefined &&
+    options.now - options.stallStartedAt >= options.heartbeatStaleGraceMs &&
+    isHeartbeatStalePending(status, options.now, options.heartbeatStaleThresholdMs)
+  ) {
+    active.push('capture_stalled');
   }
   if (
     status.screenRecording === 'denied' ||
@@ -185,6 +245,29 @@ function activeAlertKinds(
     active.push('sync_backlog');
   }
   return active;
+}
+
+/**
+ * Local counterpart of server `isCaptureStale`: intended-to-run capture with no
+ * fresh helper heartbeat. Paused/stopped/starting are explained absences.
+ * A missing `lastHeartbeatAt` while running counts as stale (never pulsed).
+ */
+function isHeartbeatStalePending(
+  status: DesktopShellStatus,
+  now: number,
+  thresholdMs: number,
+): boolean {
+  if (status.captureState !== 'running' || status.capturePaused) {
+    return false;
+  }
+  if (!status.lastHeartbeatAt) {
+    return true;
+  }
+  const heartbeatAt = Date.parse(status.lastHeartbeatAt);
+  if (!Number.isFinite(heartbeatAt)) {
+    return true;
+  }
+  return now - heartbeatAt > thresholdMs;
 }
 
 function positiveInteger(value: number | undefined, fallback: number): number {

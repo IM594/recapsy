@@ -28,6 +28,8 @@ export type DesktopShellStatus = {
     version: string;
   };
   captureFailureCount?: number;
+  /** ISO timestamp of the latest helper heartbeat; absent until the first pulse. */
+  lastHeartbeatAt?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
 };

@@ -7,6 +7,8 @@ const healthyStatus: DesktopShellStatus = {
   captureFailureCount: 0,
   capturePaused: false,
   captureState: 'running',
+  // Epoch 0 keeps the heartbeat "fresh" against the small fake clocks used below.
+  lastHeartbeatAt: new Date(0).toISOString(),
   screenRecording: 'granted',
   syncBlocked: 0,
   syncFailed: 0,
@@ -94,5 +96,88 @@ describe('desktop health monitor', () => {
         .evaluate({ ...healthyStatus, syncBlocked: 1 }, 2)
         .newAlerts.map((alert) => alert.kind),
     ).toEqual(['sync_blocked']);
+  });
+
+  it('alerts when a running capture silently stops heartbeating, only after the grace period', () => {
+    const monitor = createDesktopHealthMonitor({
+      heartbeatStaleGraceMs: 60,
+      heartbeatStaleThresholdMs: 20,
+    });
+    const stalled = {
+      ...healthyStatus,
+      lastHeartbeatAt: new Date(0).toISOString(),
+    };
+
+    expect(monitor.evaluate(stalled, 100).newAlerts).toEqual([]);
+    expect(monitor.evaluate(stalled, 159).newAlerts).toEqual([]);
+    expect(monitor.evaluate(stalled, 160).newAlerts.map((alert) => alert.kind)).toEqual([
+      'capture_stalled',
+    ]);
+    expect(monitor.evaluate(stalled, 161).newAlerts).toEqual([]);
+  });
+
+  it('treats a missing heartbeat while running as pending stall, and clears after a fresh pulse', () => {
+    const monitor = createDesktopHealthMonitor({
+      heartbeatStaleGraceMs: 60,
+      heartbeatStaleThresholdMs: 20,
+    });
+    const silent = { ...healthyStatus, lastHeartbeatAt: undefined };
+
+    expect(monitor.evaluate(silent, 100).newAlerts).toEqual([]);
+    expect(monitor.evaluate(silent, 160).newAlerts.map((alert) => alert.kind)).toEqual([
+      'capture_stalled',
+    ]);
+    expect(
+      monitor.evaluate({ ...healthyStatus, lastHeartbeatAt: new Date(160).toISOString() }, 160)
+        .activeAlerts,
+    ).toEqual([]);
+  });
+
+  it('does not treat paused or stopped capture as a silent stall', () => {
+    const monitor = createDesktopHealthMonitor({
+      heartbeatStaleGraceMs: 10,
+      heartbeatStaleThresholdMs: 1,
+    });
+    const staleHeartbeat = new Date(0).toISOString();
+
+    expect(
+      monitor.evaluate(
+        {
+          ...healthyStatus,
+          capturePaused: true,
+          captureState: 'paused',
+          lastHeartbeatAt: staleHeartbeat,
+        },
+        100,
+      ).newAlerts,
+    ).toEqual([]);
+    expect(
+      monitor.evaluate(
+        { ...healthyStatus, captureState: 'stopped', lastHeartbeatAt: staleHeartbeat },
+        200,
+      ).newAlerts,
+    ).toEqual([]);
+  });
+
+  it('re-alerts for a silent stall only after the heartbeat recovers and stalls again', () => {
+    const monitor = createDesktopHealthMonitor({
+      heartbeatStaleGraceMs: 60,
+      heartbeatStaleThresholdMs: 20,
+    });
+    const stalled = { ...healthyStatus, lastHeartbeatAt: new Date(0).toISOString() };
+
+    expect(monitor.evaluate(stalled, 100).newAlerts).toEqual([]);
+    expect(monitor.evaluate(stalled, 160).newAlerts.map((alert) => alert.kind)).toEqual([
+      'capture_stalled',
+    ]);
+    expect(monitor.evaluate(stalled, 161).newAlerts).toEqual([]);
+    expect(
+      monitor.evaluate({ ...healthyStatus, lastHeartbeatAt: new Date(200).toISOString() }, 200)
+        .activeAlerts,
+    ).toEqual([]);
+    expect(monitor.evaluate(stalled, 300).newAlerts).toEqual([]);
+    expect(monitor.evaluate(stalled, 360).newAlerts.map((alert) => alert.kind)).toEqual([
+      'capture_stalled',
+    ]);
   });
 });

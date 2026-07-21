@@ -374,6 +374,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
                 }
               : {}),
             captureState: snapshot.status,
+            ...(snapshot.lastHeartbeatAt ? { lastHeartbeatAt: snapshot.lastHeartbeatAt } : {}),
             ...(lastError ? { lastErrorCode: lastError.code } : {}),
             ...(lastError ? { lastErrorMessage: lastError.message } : {}),
             screenRecording: permissions.screenRecording,
