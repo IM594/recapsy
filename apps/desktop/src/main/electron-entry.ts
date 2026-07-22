@@ -262,7 +262,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
   createServerApi: () =>
     createServerApiClient({
       accessTokenProvider: {
-        getAccessToken: async () => (await tokenStore.getTokens())?.accessToken ?? null,
+        getAccessToken: () => authClient.getAccessToken(),
       },
       endpoint: serverEndpoint,
       transport: fetchTransport,
@@ -271,7 +271,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
   createShell: (context) => {
     const acceptancePublisher = createDesktopAcceptancePublisher({
       accessTokenProvider: {
-        getAccessToken: async () => (await tokenStore.getTokens())?.accessToken ?? null,
+        getAccessToken: () => authClient.getAccessToken(),
       },
       endpoint: serverEndpoint,
       environment: process.env,

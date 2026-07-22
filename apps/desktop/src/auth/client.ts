@@ -1,6 +1,7 @@
 import {
   AuthLoginRequestSchema,
   AuthLoginResponseSchema,
+  AuthRefreshResponseSchema,
   AuthSessionResponseSchema,
 } from '@recapsy/contracts';
 import { redactLogPayload } from '../logging/redaction';
@@ -9,7 +10,7 @@ import type {
   ServerApiTransportRequest,
   ServerApiTransportResponse,
 } from '../server/index';
-import type { TokenStore } from './tokens';
+import type { AuthTokenSet, TokenStore } from './tokens';
 
 /**
  * Error codes this client can surface. Deliberately narrower than
@@ -78,6 +79,12 @@ export type AuthClientOptions = {
    * `server/tests/client.test.ts` / `tests/integration/server-http.test.ts`.
    */
   transport: ServerApiTransport;
+  /**
+   * Wall clock used to decide whether a stored access token still needs a
+   * silent refresh before sync / acceptance callers consume it. Defaults to
+   * `Date`.
+   */
+  now?: () => Date;
 };
 
 export type AuthClient = {
@@ -90,25 +97,209 @@ export type AuthClient = {
    */
   login(input: AuthLoginInput): Promise<AuthLoginResult>;
   /**
+   * Exchanges the stored refresh token via `POST /v1/auth/refresh` and writes
+   * the new token pair back. Concurrent callers share one in-flight refresh
+   * (single-flight). Unauthenticated / missing refresh clears the store;
+   * retryable network/server failures leave tokens untouched.
+   */
+  refresh(): Promise<AuthLoginResult>;
+  /**
    * Validates whatever tokens are currently in `tokenStore` against the real
-   * `/v1/auth/session` route. Returns `null` (and clears the token store)
-   * when there is no token or the server reports the session as
-   * unauthenticated/expired/revoked — the caller's cue to prompt login
-   * again. On success, also refreshes the stored `AuthTokenSet.workspaceId`
-   * to the value this call just confirmed, so it stays the most recently
-   * *confirmed* workspace id for later offline degradation (see
-   * `resolveWorkspaceId` in `main/runtime.ts`). Throws
+   * `/v1/auth/session` route. When access returns 401 and a refresh token is
+   * still stored, silently refreshes once and re-checks the session. Returns
+   * `null` (and clears the token store) only when there is no recoverable
+   * session — missing tokens, no refresh after access 401, or refresh itself
+   * rejected as unauthenticated. On success, also refreshes the stored
+   * `AuthTokenSet.workspaceId` to the value this call just confirmed, so it
+   * stays the most recently *confirmed* workspace id for later offline
+   * degradation (see `resolveWorkspaceId` in `main/runtime.ts`). Throws
    * `AuthClientError` for network/server failures, which the caller treats
    * the same as "cannot confirm a session right now" — not the same as a
    * confirmed-invalid session.
    */
   getActiveSession(): Promise<AuthActiveSession | null>;
+  /**
+   * Returns a usable access token for sync / acceptance. When the stored
+   * access token is past `expiresAt` and a refresh token exists, performs a
+   * single-flight silent refresh first. Returns `null` when there is no
+   * token, or when a required refresh fails as unauthenticated (tokens are
+   * cleared in that case). Retryable refresh failures rethrow.
+   */
+  getAccessToken(): Promise<string | null>;
 };
 
 export function createAuthClient(options: AuthClientOptions): AuthClient {
   const endpoint = normalizeEndpoint(options.endpoint);
+  const now = options.now ?? (() => new Date());
+  let refreshInFlight: Promise<AuthLoginResult> | null = null;
+
+  async function storeTokenPair(body: {
+    tokens: {
+      accessToken: string;
+      accessTokenExpiresAt: string;
+      refreshToken: string;
+    };
+    session: { currentWorkspace: { id: string } };
+  }): Promise<AuthLoginResult> {
+    const workspaceId = body.session.currentWorkspace.id;
+    await options.tokenStore.setTokens({
+      accessToken: body.tokens.accessToken,
+      expiresAt: body.tokens.accessTokenExpiresAt,
+      refreshToken: body.tokens.refreshToken,
+      workspaceId,
+    });
+    return { workspaceId };
+  }
+
+  async function performRefresh(tokens: AuthTokenSet): Promise<AuthLoginResult> {
+    const refreshToken = tokens.refreshToken;
+
+    if (!refreshToken) {
+      await options.tokenStore.clearTokens();
+      throw new AuthClientError({
+        code: 'unauthenticated',
+        retryable: false,
+        safeMessage: '会话已失效。',
+      });
+    }
+
+    let response: ServerApiTransportResponse;
+    try {
+      response = await options.transport({
+        body: { refreshToken },
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+        path: '/v1/auth/refresh',
+        query: {},
+        url: new URL('/v1/auth/refresh', endpoint),
+      });
+    } catch {
+      throw new AuthClientError({
+        code: 'offline',
+        retryable: true,
+        safeMessage: '网络不可用或已离线。',
+      });
+    }
+
+    if (response.status >= 400) {
+      const error = toAuthClientError(response);
+      if (error.code === 'unauthenticated') {
+        await options.tokenStore.clearTokens();
+      }
+      throw error;
+    }
+
+    const parsed = AuthRefreshResponseSchema.safeParse(response.body);
+
+    if (!parsed.success) {
+      throw new AuthClientError({
+        code: 'unknown',
+        retryable: false,
+        safeMessage: '刷新会话响应格式无效。',
+      });
+    }
+
+    return storeTokenPair(parsed.data);
+  }
+
+  async function refresh(): Promise<AuthLoginResult> {
+    if (refreshInFlight) {
+      return refreshInFlight;
+    }
+
+    refreshInFlight = (async () => {
+      const tokens = await options.tokenStore.getTokens();
+
+      if (!tokens) {
+        throw new AuthClientError({
+          code: 'unauthenticated',
+          retryable: false,
+          safeMessage: '会话已失效。',
+        });
+      }
+
+      return performRefresh(tokens);
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+
+    return refreshInFlight;
+  }
+
+  async function readSession(
+    accessToken: string,
+  ): Promise<
+    | { kind: 'ok'; workspaceId: string }
+    | { kind: 'unauthenticated' }
+    | { kind: 'error'; error: AuthClientError }
+  > {
+    let response: ServerApiTransportResponse;
+    try {
+      response = await options.transport({
+        headers: { authorization: `Bearer ${accessToken}` },
+        method: 'GET',
+        path: '/v1/auth/session',
+        query: {},
+        url: new URL('/v1/auth/session', endpoint),
+      });
+    } catch {
+      return {
+        kind: 'error',
+        error: new AuthClientError({
+          code: 'offline',
+          retryable: true,
+          safeMessage: '网络不可用或已离线。',
+        }),
+      };
+    }
+
+    if (response.status === 401) {
+      return { kind: 'unauthenticated' };
+    }
+
+    if (response.status >= 400) {
+      return { kind: 'error', error: toAuthClientError(response) };
+    }
+
+    const parsed = AuthSessionResponseSchema.safeParse(response.body);
+
+    if (!parsed.success) {
+      return {
+        kind: 'error',
+        error: new AuthClientError({
+          code: 'unknown',
+          retryable: false,
+          safeMessage: '会话响应格式无效。',
+        }),
+      };
+    }
+
+    return { kind: 'ok', workspaceId: parsed.data.session.currentWorkspace.id };
+  }
 
   return {
+    async getAccessToken() {
+      const tokens = await options.tokenStore.getTokens();
+
+      if (!tokens) {
+        return null;
+      }
+
+      if (!accessTokenNeedsRefresh(tokens, now())) {
+        return tokens.accessToken;
+      }
+
+      try {
+        await refresh();
+      } catch (error) {
+        if (error instanceof AuthClientError && error.code === 'unauthenticated') {
+          return null;
+        }
+        throw error;
+      }
+
+      return (await options.tokenStore.getTokens())?.accessToken ?? null;
+    },
     async getActiveSession() {
       const tokens = await options.tokenStore.getTokens();
 
@@ -116,43 +307,50 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
         return null;
       }
 
-      let response: ServerApiTransportResponse;
-      try {
-        response = await options.transport({
-          headers: { authorization: `Bearer ${tokens.accessToken}` },
-          method: 'GET',
-          path: '/v1/auth/session',
-          query: {},
-          url: new URL('/v1/auth/session', endpoint),
+      const first = await readSession(tokens.accessToken);
+
+      if (first.kind === 'error') {
+        throw first.error;
+      }
+
+      if (first.kind === 'unauthenticated') {
+        if (!tokens.refreshToken) {
+          await options.tokenStore.clearTokens();
+          return null;
+        }
+
+        try {
+          await refresh();
+        } catch (error) {
+          if (error instanceof AuthClientError && error.code === 'unauthenticated') {
+            return null;
+          }
+          throw error;
+        }
+
+        const refreshed = await options.tokenStore.getTokens();
+
+        if (!refreshed) {
+          return null;
+        }
+
+        const second = await readSession(refreshed.accessToken);
+
+        if (second.kind === 'error') {
+          throw second.error;
+        }
+
+        if (second.kind === 'unauthenticated') {
+          await options.tokenStore.clearTokens();
+          return null;
+        }
+
+        await options.tokenStore.setTokens({
+          ...refreshed,
+          workspaceId: second.workspaceId,
         });
-      } catch {
-        throw new AuthClientError({
-          code: 'offline',
-          retryable: true,
-          safeMessage: '网络不可用或已离线。',
-        });
+        return { workspaceId: second.workspaceId };
       }
-
-      if (response.status === 401) {
-        await options.tokenStore.clearTokens();
-        return null;
-      }
-
-      if (response.status >= 400) {
-        throw toAuthClientError(response);
-      }
-
-      const parsed = AuthSessionResponseSchema.safeParse(response.body);
-
-      if (!parsed.success) {
-        throw new AuthClientError({
-          code: 'unknown',
-          retryable: false,
-          safeMessage: '会话响应格式无效。',
-        });
-      }
-
-      const workspaceId = parsed.data.session.currentWorkspace.id;
 
       // `/v1/auth/session` does not re-issue tokens (see
       // `AuthSessionResponseSchema`), so the existing `tokens` fetched above
@@ -161,9 +359,9 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
       // (see `resolveWorkspaceId` in `main/runtime.ts`) rely on
       // this being kept current so an offline degradation later falls back
       // to the most recently *confirmed* workspace id, not a stale one.
-      await options.tokenStore.setTokens({ ...tokens, workspaceId });
+      await options.tokenStore.setTokens({ ...tokens, workspaceId: first.workspaceId });
 
-      return { workspaceId };
+      return { workspaceId: first.workspaceId };
     },
     async login(input) {
       const parsedRequest = AuthLoginRequestSchema.safeParse(input);
@@ -209,16 +407,24 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
         });
       }
 
-      await options.tokenStore.setTokens({
-        accessToken: parsed.data.tokens.accessToken,
-        expiresAt: parsed.data.tokens.accessTokenExpiresAt,
-        refreshToken: parsed.data.tokens.refreshToken,
-        workspaceId: parsed.data.session.currentWorkspace.id,
-      });
-
-      return { workspaceId: parsed.data.session.currentWorkspace.id };
+      return storeTokenPair(parsed.data);
     },
+    refresh,
   };
+}
+
+function accessTokenNeedsRefresh(tokens: AuthTokenSet, now: Date): boolean {
+  if (!tokens.refreshToken || !tokens.expiresAt) {
+    return false;
+  }
+
+  const expiresAtMs = Date.parse(tokens.expiresAt);
+
+  if (Number.isNaN(expiresAtMs)) {
+    return false;
+  }
+
+  return expiresAtMs <= now.getTime();
 }
 
 function normalizeEndpoint(endpoint: string): URL {
@@ -256,6 +462,10 @@ function mapErrorCode(code: string | undefined, status: number): AuthClientError
 
   if (code === 'validation.invalid_input') {
     return 'validation_failed';
+  }
+
+  if (status === 401) {
+    return 'unauthenticated';
   }
 
   if (status === 408 || status === 429 || status >= 500) {

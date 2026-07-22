@@ -272,7 +272,7 @@ describe('auth client getActiveSession', () => {
     });
   });
 
-  it('clears the token store and returns null on a 401 response', async () => {
+  it('clears the token store and returns null on a 401 response when no refresh token is stored', async () => {
     const tokenStore = createInMemoryTokenStore({ accessToken: 'stale-token' });
     const { transport } = fakeTransport(() => ({
       body: { error: { code: 'auth.session_expired' } },
@@ -281,6 +281,69 @@ describe('auth client getActiveSession', () => {
     const client = createAuthClient({ endpoint, tokenStore, transport });
 
     expect(await client.getActiveSession()).toBeNull();
+    expect(await tokenStore.getTokens()).toBeNull();
+  });
+
+  it('silently refreshes then re-checks the session when access returns 401 but a refresh token is stored', async () => {
+    const workspaceId = uuidFor('77');
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'expired-access',
+      expiresAt: '2026-07-08T00:15:00.000Z',
+      refreshToken: 'refresh-token-1',
+      workspaceId: uuidFor('11'),
+    });
+    const { transport, calls } = fakeTransport((request) => {
+      if (
+        request.path === '/v1/auth/session' &&
+        request.headers.authorization === 'Bearer expired-access'
+      ) {
+        return { body: { error: { code: 'auth.session_expired' } }, status: 401 };
+      }
+      if (request.path === '/v1/auth/refresh') {
+        return { body: loginResponseBody(workspaceId), status: 200 };
+      }
+      if (
+        request.path === '/v1/auth/session' &&
+        request.headers.authorization === 'Bearer access-token-1'
+      ) {
+        return { body: { session: loginResponseBody(workspaceId).session }, status: 200 };
+      }
+      return { body: { unexpected: true }, status: 500 };
+    });
+    const client = createAuthClient({ endpoint, tokenStore, transport });
+
+    expect(await client.getActiveSession()).toEqual({ workspaceId });
+    expect(calls.map((call) => call.path)).toEqual([
+      '/v1/auth/session',
+      '/v1/auth/refresh',
+      '/v1/auth/session',
+    ]);
+    expect(await tokenStore.getTokens()).toMatchObject({
+      accessToken: 'access-token-1',
+      refreshToken: 'refresh-token-1',
+      workspaceId,
+    });
+  });
+
+  it('clears tokens and returns null when access 401 refresh also fails as unauthenticated', async () => {
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'expired-access',
+      refreshToken: 'dead-refresh',
+      workspaceId: uuidFor('11'),
+    });
+    const { transport, calls } = fakeTransport((request) => {
+      if (request.path === '/v1/auth/session') {
+        return { body: { error: { code: 'auth.session_expired' } }, status: 401 };
+      }
+      return {
+        body: { error: { code: 'auth.session_revoked' } },
+        status: 401,
+      };
+    });
+    const client = createAuthClient({ endpoint, tokenStore, transport });
+
+    expect(await client.getActiveSession()).toBeNull();
+    expect(calls.map((call) => call.path)).toEqual(['/v1/auth/session', '/v1/auth/refresh']);
     expect(await tokenStore.getTokens()).toBeNull();
   });
 
@@ -315,5 +378,189 @@ describe('auth client getActiveSession', () => {
       retryable: true,
     });
     expect(await tokenStore.getTokens()).not.toBeNull();
+  });
+});
+
+describe('auth client refresh', () => {
+  it('exchanges the stored refresh token and writes the new token pair back', async () => {
+    const workspaceId = uuidFor('55');
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'old-access',
+      expiresAt: '2026-07-08T00:15:00.000Z',
+      refreshToken: 'refresh-token-1',
+      workspaceId: uuidFor('11'),
+    });
+    const { transport, calls } = fakeTransport((request) => {
+      expect(request.body).toEqual({ refreshToken: 'refresh-token-1' });
+      return { body: loginResponseBody(workspaceId), status: 200 };
+    });
+    const client = createAuthClient({ endpoint, tokenStore, transport });
+
+    expect(await client.refresh()).toEqual({ workspaceId });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.method).toBe('POST');
+    expect(calls[0]?.path).toBe('/v1/auth/refresh');
+    expect(await tokenStore.getTokens()).toEqual({
+      accessToken: 'access-token-1',
+      expiresAt: '2026-07-08T01:00:00.000Z',
+      refreshToken: 'refresh-token-1',
+      workspaceId,
+    });
+  });
+
+  it('clears tokens and throws unauthenticated when refresh is rejected', async () => {
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'old-access',
+      refreshToken: 'dead-refresh',
+    });
+    const { transport } = fakeTransport(() => ({
+      body: { error: { code: 'auth.session_revoked' } },
+      status: 401,
+    }));
+    const client = createAuthClient({ endpoint, tokenStore, transport });
+
+    await expect(client.refresh()).rejects.toMatchObject({
+      code: 'unauthenticated',
+      retryable: false,
+    });
+    expect(await tokenStore.getTokens()).toBeNull();
+  });
+
+  it('throws unauthenticated without a network call when no refresh token is stored', async () => {
+    const tokenStore = createInMemoryTokenStore({ accessToken: 'access-only' });
+    const { transport, calls } = fakeTransport(() => ({ status: 200 }));
+    const client = createAuthClient({ endpoint, tokenStore, transport });
+
+    await expect(client.refresh()).rejects.toMatchObject({
+      code: 'unauthenticated',
+      retryable: false,
+    });
+    expect(calls).toHaveLength(0);
+    expect(await tokenStore.getTokens()).toBeNull();
+  });
+
+  it('leaves tokens untouched on a retryable network failure', async () => {
+    const tokens = {
+      accessToken: 'old-access',
+      refreshToken: 'refresh-token-1',
+      workspaceId: uuidFor('11'),
+    };
+    const tokenStore = createInMemoryTokenStore(tokens);
+    const transport: ServerApiTransport = async () => {
+      throw new Error('ECONNREFUSED');
+    };
+    const client = createAuthClient({ endpoint, tokenStore, transport });
+
+    await expect(client.refresh()).rejects.toMatchObject({
+      code: 'offline',
+      retryable: true,
+    });
+    expect(await tokenStore.getTokens()).toEqual(tokens);
+  });
+});
+
+describe('auth client getAccessToken', () => {
+  it('returns the stored access token when it is still within its expiry window', async () => {
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'access-token-1',
+      expiresAt: '2026-07-08T01:00:00.000Z',
+      refreshToken: 'refresh-token-1',
+    });
+    const { transport, calls } = fakeTransport(() => ({ status: 200 }));
+    const client = createAuthClient({
+      endpoint,
+      now: () => new Date('2026-07-08T00:30:00.000Z'),
+      tokenStore,
+      transport,
+    });
+
+    expect(await client.getAccessToken()).toBe('access-token-1');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('refreshes once before returning when the stored access token is expired', async () => {
+    const workspaceId = uuidFor('88');
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'expired-access',
+      expiresAt: '2026-07-08T00:15:00.000Z',
+      refreshToken: 'refresh-token-1',
+    });
+    const { transport, calls } = fakeTransport(() => ({
+      body: loginResponseBody(workspaceId),
+      status: 200,
+    }));
+    const client = createAuthClient({
+      endpoint,
+      now: () => new Date('2026-07-08T00:20:00.000Z'),
+      tokenStore,
+      transport,
+    });
+
+    expect(await client.getAccessToken()).toBe('access-token-1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.path).toBe('/v1/auth/refresh');
+  });
+
+  it('coalesces concurrent refresh needs into a single refresh request', async () => {
+    const workspaceId = uuidFor('99');
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'expired-access',
+      expiresAt: '2026-07-08T00:15:00.000Z',
+      refreshToken: 'refresh-token-1',
+    });
+    let releaseRefresh: (() => void) | undefined;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let refreshCalls = 0;
+    const transport: ServerApiTransport = async (request) => {
+      if (request.path !== '/v1/auth/refresh') {
+        return { body: { unexpected: true }, status: 500 };
+      }
+      refreshCalls += 1;
+      await refreshGate;
+      return { body: loginResponseBody(workspaceId), status: 200 };
+    };
+    const client = createAuthClient({
+      endpoint,
+      now: () => new Date('2026-07-08T00:20:00.000Z'),
+      tokenStore,
+      transport,
+    });
+
+    const first = client.getAccessToken();
+    const second = client.getAccessToken();
+    const third = client.refresh();
+    await Promise.resolve();
+    expect(refreshCalls).toBe(1);
+    releaseRefresh?.();
+
+    expect(await Promise.all([first, second, third])).toEqual([
+      'access-token-1',
+      'access-token-1',
+      { workspaceId },
+    ]);
+    expect(refreshCalls).toBe(1);
+  });
+
+  it('returns null after clearing tokens when a required refresh is unauthenticated', async () => {
+    const tokenStore = createInMemoryTokenStore({
+      accessToken: 'expired-access',
+      expiresAt: '2026-07-08T00:15:00.000Z',
+      refreshToken: 'dead-refresh',
+    });
+    const { transport } = fakeTransport(() => ({
+      body: { error: { code: 'auth.session_expired' } },
+      status: 401,
+    }));
+    const client = createAuthClient({
+      endpoint,
+      now: () => new Date('2026-07-08T00:20:00.000Z'),
+      tokenStore,
+      transport,
+    });
+
+    expect(await client.getAccessToken()).toBeNull();
+    expect(await tokenStore.getTokens()).toBeNull();
   });
 });
