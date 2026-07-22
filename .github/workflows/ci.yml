@@ -102,7 +102,7 @@ jobs:
           DATABASE_URL: postgresql://recapsy_test:recapsy_test_password@localhost:5432/recapsy_test
         run: pnpm db:migrate
 
-      - name: Verify PostgreSQL lease recovery and capture retention
+      - name: Verify PostgreSQL integration gates
         env:
           RECAPSY_TEST_DATABASE_URL: postgresql://recapsy_test:recapsy_test_password@localhost:5432/recapsy_test
         run: pnpm --filter @recapsy/server run test:postgres
