@@ -129,7 +129,7 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
         throw new AuthClientError({
           code: 'offline',
           retryable: true,
-          safeMessage: 'Network is offline or unavailable.',
+          safeMessage: '网络不可用或已离线。',
         });
       }
 
@@ -148,7 +148,7 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
         throw new AuthClientError({
           code: 'unknown',
           retryable: false,
-          safeMessage: 'Server session response shape is invalid.',
+          safeMessage: '会话响应格式无效。',
         });
       }
 
@@ -173,7 +173,7 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
           code: 'validation_failed',
           details: redactLogPayload(parsedRequest.error.flatten()),
           retryable: false,
-          safeMessage: 'Email or password is invalid.',
+          safeMessage: '邮箱或密码无效。',
         });
       }
 
@@ -191,7 +191,7 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
         throw new AuthClientError({
           code: 'offline',
           retryable: true,
-          safeMessage: 'Network is offline or unavailable.',
+          safeMessage: '网络不可用或已离线。',
         });
       }
 
@@ -205,7 +205,7 @@ export function createAuthClient(options: AuthClientOptions): AuthClient {
         throw new AuthClientError({
           code: 'unknown',
           retryable: false,
-          safeMessage: 'Server login response shape is invalid.',
+          safeMessage: '登录响应格式无效。',
         });
       }
 
@@ -267,26 +267,26 @@ function mapErrorCode(code: string | undefined, status: number): AuthClientError
 
 function defaultSafeMessage(code: AuthClientErrorCode): string {
   if (code === 'invalid_credentials') {
-    return 'Email or password is incorrect.';
+    return '邮箱或密码不正确。';
   }
 
   if (code === 'unauthenticated') {
-    return 'Session is no longer valid.';
+    return '会话已失效。';
   }
 
   if (code === 'validation_failed') {
-    return 'Login request is invalid.';
+    return '登录请求无效。';
   }
 
   if (code === 'offline') {
-    return 'Network is offline or unavailable.';
+    return '网络不可用或已离线。';
   }
 
   if (code === 'server_unavailable') {
-    return 'Server is unavailable.';
+    return '服务不可用。';
   }
 
-  return 'Login failed.';
+  return '登录失败。';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

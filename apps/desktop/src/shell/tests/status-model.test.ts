@@ -26,7 +26,7 @@ describe('desktop shell status model', () => {
         syncLastErrorCode: 'provider_unavailable',
       }),
     ).toBe(
-      'Recapsy · running · Screen recording granted · processing 1 · pending 2 · oldest 42s · in 7/min · done 5/min · admission max_asset_bytes_reached · policy policy-primary · error provider_unavailable',
+      'Recapsy · 运行中 · 屏幕录制已授权 · 处理中 1 · 排队 2 · 最老 42秒 · 接收 7/分 · 完成 5/分 · 准入 max_asset_bytes_reached · 策略 policy-primary · 错误 provider_unavailable',
     );
 
     expect(
@@ -42,10 +42,10 @@ describe('desktop shell status model', () => {
         syncRetrying: 0,
       }),
     ).toContain(
-      'Catching up · Screen recording granted · processing 0 · pending 9 · oldest none · in 0/min · done 0/min · admission open · policy not applied · error none',
+      '追赶中 · 屏幕录制已授权 · 处理中 0 · 排队 9 · 最老 无 · 接收 0/分 · 完成 0/分 · 准入开放 · 策略未应用 · 错误无',
     );
 
-    expect(formatPermissionLabel('not_determined')).toBe('Not determined');
+    expect(formatPermissionLabel('not_determined')).toBe('未决定');
     expect(
       isCaptureBlockedByPermissions({
         accessibility: 'granted',

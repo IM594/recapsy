@@ -107,7 +107,7 @@ export function createLoginWindowPrompter(options: LoginWindowOptions): LoginPro
 
           if (!parsed.ok) {
             return {
-              error: { code: 'validation_failed', message: 'Email and password are required.' },
+              error: { code: 'validation_failed', message: '请填写邮箱和密码。' },
               ok: false,
             };
           }
@@ -174,7 +174,7 @@ function toSafeLoginError(error: unknown): { code: AuthClientErrorCode; message:
     return { code: error.code, message: error.safeMessage };
   }
 
-  return { code: 'unknown', message: 'Login failed.' };
+  return { code: 'unknown', message: '登录失败。' };
 }
 
 function isAuthClientErrorShape(

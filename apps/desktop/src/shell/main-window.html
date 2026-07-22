@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <title>Recapsy</title>
@@ -71,73 +71,72 @@
   </head>
   <body>
     <h1>Recapsy</h1>
-    <p class="muted">Capture status, sync queue, and macOS permission guidance.</p>
+    <p class="muted">采集状态、同步队列与 macOS 权限引导。</p>
 
     <section>
-      <h2>Capture</h2>
-      <div class="row"><span>State</span><strong id="capture-state">—</strong></div>
-      <div class="row"><span>Paused</span><strong id="capture-paused">—</strong></div>
-      <div class="row"><span>Admission</span><strong id="capture-admission">—</strong></div>
-      <div class="row"><span>Policy</span><strong id="capture-policy">—</strong></div>
-      <div class="row"><span>Last error</span><strong id="capture-error">None</strong></div>
+      <h2>采集</h2>
+      <div class="row"><span>状态</span><strong id="capture-state">—</strong></div>
+      <div class="row"><span>是否暂停</span><strong id="capture-paused">—</strong></div>
+      <div class="row"><span>准入</span><strong id="capture-admission">—</strong></div>
+      <div class="row"><span>策略</span><strong id="capture-policy">—</strong></div>
+      <div class="row"><span>最近错误</span><strong id="capture-error">无</strong></div>
       <div class="actions">
-        <button id="pause" type="button">Pause</button>
-        <button id="resume" type="button">Resume</button>
+        <button id="pause" type="button">暂停</button>
+        <button id="resume" type="button">继续</button>
       </div>
     </section>
 
     <section>
-      <h2>Local privacy</h2>
+      <h2>本地隐私</h2>
       <p class="muted">
-        Future captures from blocked apps do not persist an asset or enter the sync queue or OCR
-        pipeline.
+        被屏蔽应用的后续采集不会保存资源，也不会进入同步队列或 OCR 管线。
       </p>
       <div class="actions">
         <input
           id="privacy-bundle-id"
-          aria-label="Application bundle identifier"
+          aria-label="应用 Bundle Identifier"
           autocomplete="off"
           placeholder="com.example.SensitiveApp"
           spellcheck="false"
           type="text"
         />
-        <button id="privacy-block-bundle" type="button">Block app</button>
+        <button id="privacy-block-bundle" type="button">屏蔽应用</button>
       </div>
-      <ul id="privacy-rules" aria-label="Blocked applications"></ul>
+      <ul id="privacy-rules" aria-label="已屏蔽的应用"></ul>
     </section>
 
     <section>
-      <h2>Permissions</h2>
-      <div class="row"><span>Screen Recording</span><strong id="perm-screen">—</strong></div>
-      <div class="row"><span>Accessibility</span><strong id="perm-ax">—</strong></div>
+      <h2>权限</h2>
+      <div class="row"><span>屏幕录制</span><strong id="perm-screen">—</strong></div>
+      <div class="row"><span>辅助功能</span><strong id="perm-ax">—</strong></div>
       <div id="permission-guide" class="warn" hidden></div>
       <div class="actions">
-        <button id="request-screen" type="button">Request Screen Recording Access</button>
-        <button id="open-screen" type="button">Open Screen Recording Settings</button>
-        <button id="open-ax" type="button">Open Accessibility Settings</button>
-        <button id="refresh-perms" type="button">Refresh Permissions</button>
+        <button id="request-screen" type="button">请求屏幕录制权限</button>
+        <button id="open-screen" type="button">打开屏幕录制设置</button>
+        <button id="open-ax" type="button">打开辅助功能设置</button>
+        <button id="refresh-perms" type="button">刷新权限</button>
       </div>
     </section>
 
     <section>
-      <h2>Sync</h2>
-      <div class="row"><span>Input / min</span><strong id="sync-input-rate">—</strong></div>
-      <div class="row"><span>Completed / min</span><strong id="sync-completed-rate">—</strong></div>
-      <div class="row"><span>Processing</span><strong id="sync-processing">—</strong></div>
-      <div class="row"><span>Pending (total)</span><strong id="sync-pending">—</strong></div>
-      <div class="row"><span>Waiting to retry (included)</span><strong id="sync-retrying">—</strong></div>
-      <div class="row"><span>Failed</span><strong id="sync-failed">—</strong></div>
-      <div class="row"><span>Blocked</span><strong id="sync-blocked">—</strong></div>
-      <div class="row"><span>Oldest active</span><strong id="sync-oldest">—</strong></div>
-      <div class="row"><span>Workers</span><strong id="sync-workers">—</strong></div>
-      <div class="row"><span>Last sync error</span><strong id="sync-error">None</strong></div>
+      <h2>同步</h2>
+      <div class="row"><span>每分钟接收</span><strong id="sync-input-rate">—</strong></div>
+      <div class="row"><span>每分钟完成</span><strong id="sync-completed-rate">—</strong></div>
+      <div class="row"><span>处理中</span><strong id="sync-processing">—</strong></div>
+      <div class="row"><span>排队中（合计）</span><strong id="sync-pending">—</strong></div>
+      <div class="row"><span>等待重试（计入合计）</span><strong id="sync-retrying">—</strong></div>
+      <div class="row"><span>失败</span><strong id="sync-failed">—</strong></div>
+      <div class="row"><span>已阻塞</span><strong id="sync-blocked">—</strong></div>
+      <div class="row"><span>最老活跃任务</span><strong id="sync-oldest">—</strong></div>
+      <div class="row"><span>工作线程</span><strong id="sync-workers">—</strong></div>
+      <div class="row"><span>最近同步错误</span><strong id="sync-error">无</strong></div>
     </section>
 
     <section>
-      <h2>Local storage</h2>
-      <div class="row"><span>30-day review</span><strong id="retention-preview">—</strong></div>
+      <h2>本地存储</h2>
+      <div class="row"><span>30 天复审</span><strong id="retention-preview">—</strong></div>
       <div class="actions">
-        <button id="retention-clean" type="button">Clean reviewed assets</button>
+        <button id="retention-clean" type="button">清理已复审资源</button>
       </div>
     </section>
 
@@ -163,10 +162,19 @@
       }
 
       function permissionLabel(value) {
-        if (value === 'granted') return 'Granted';
-        if (value === 'denied') return 'Denied';
-        if (value === 'not_determined') return 'Not determined';
-        return 'Unknown';
+        if (value === 'granted') return '已授权';
+        if (value === 'denied') return '已拒绝';
+        if (value === 'not_determined') return '未决定';
+        return '未知';
+      }
+
+      function captureStateLabel(value) {
+        if (value === 'starting') return '启动中';
+        if (value === 'running') return '运行中';
+        if (value === 'paused') return '已暂停';
+        if (value === 'stopping') return '停止中';
+        if (value === 'stopped') return '已停止';
+        return value || '—';
       }
 
       function formatBytes(value) {
@@ -176,14 +184,14 @@
       }
 
       function formatAge(seconds) {
-        if (typeof seconds !== 'number') return 'None';
-        if (seconds < 60) return `${seconds}s`;
-        if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-        return `${Math.floor(seconds / 3600)}h`;
+        if (typeof seconds !== 'number') return '无';
+        if (seconds < 60) return `${seconds} 秒`;
+        if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟`;
+        return `${Math.floor(seconds / 3600)} 小时`;
       }
 
       function formatPolicy(policy) {
-        if (!policy) return 'Not applied';
+        if (!policy) return '未应用';
         return `${policy.version} · ${policy.hash.slice(0, 15)}…`;
       }
 
@@ -195,13 +203,13 @@
           bundle.textContent = rule.bundleId;
           const remove = document.createElement('button');
           remove.type = 'button';
-          remove.textContent = 'Remove';
+          remove.textContent = '移除';
           remove.addEventListener('click', async () => {
             try {
               await unwrap(api.captureRemoveLocalRule({ ruleId: rule.id }));
               await refreshAll();
             } catch (error) {
-              errorEl.textContent = error.message || 'Could not remove local privacy rule';
+              errorEl.textContent = error.message || '无法移除本地隐私规则';
             }
           });
           item.append(bundle, remove);
@@ -210,33 +218,33 @@
         if (rules.length === 0) {
           const empty = document.createElement('li');
           empty.className = 'muted';
-          empty.textContent = 'No user-defined app blocks.';
+          empty.textContent = '暂无用户自定义屏蔽。';
           privacyRules.append(empty);
         }
       }
 
       function renderShellStatus(status) {
-        setText('capture-state', status.captureState);
+        setText('capture-state', captureStateLabel(status.captureState));
         setText(
           'capture-paused',
           status.capturePauseReason === 'storage'
-            ? 'Storage protection'
+            ? '存储保护'
             : status.capturePauseReason === 'backpressure'
-              ? 'Catching up'
+              ? '追赶中'
             : status.capturePaused
-              ? 'Paused'
-              : 'Active',
+              ? '已暂停'
+              : '运行中',
         );
         setText(
           'capture-admission',
           status.capturePauseReason === 'storage'
-            ? `Storage protection (${(status.captureAdmission && status.captureAdmission.reasons.join(', ')) || 'local storage limit'})`
+            ? `存储保护（${(status.captureAdmission && status.captureAdmission.reasons.join(', ')) || '本地存储限额'}）`
             : status.captureAdmission && status.captureAdmission.active
-            ? `Catching up (${status.captureAdmission.reasons.join(', ')})`
-            : 'Accepting frames',
+            ? `追赶中（${status.captureAdmission.reasons.join(', ')}）`
+            : '正在接收帧',
         );
         setText('capture-policy', formatPolicy(status.capturePolicy));
-        setText('capture-error', status.lastErrorMessage || 'None');
+        setText('capture-error', status.lastErrorMessage || '无');
         setText('perm-screen', permissionLabel(status.screenRecording));
         setText('perm-ax', permissionLabel(status.accessibility));
         setText('sync-input-rate', String(status.syncInputPerMinute ?? 0));
@@ -250,19 +258,19 @@
         setText(
           'sync-workers',
           status.syncWorkerCapacity
-            ? `${status.syncWorkerCapacity.activeWorkers} active · server ${status.syncWorkerCapacity.serverMaxConcurrentOcr} · local ${status.syncWorkerCapacity.localMaxWorkers}`
-            : 'Waiting for policy',
+            ? `${status.syncWorkerCapacity.activeWorkers} 活跃 · 服务端 ${status.syncWorkerCapacity.serverMaxConcurrentOcr} · 本机 ${status.syncWorkerCapacity.localMaxWorkers}`
+            : '等待策略',
         );
         setText(
           'sync-error',
           status.syncLastErrorCode
             ? `${status.syncLastErrorCode}${status.syncLastErrorMessage ? ` · ${status.syncLastErrorMessage}` : ''}`
-            : 'None',
+            : '无',
         );
         if (status.retentionPreview) {
           setText(
             'retention-preview',
-            `${status.retentionPreview.eligibleAssets} items · ${formatBytes(status.retentionPreview.reclaimableBytes)}`,
+            `${status.retentionPreview.eligibleAssets} 项 · ${formatBytes(status.retentionPreview.reclaimableBytes)}`,
           );
         }
         pauseButton.disabled = status.capturePaused;
@@ -275,8 +283,8 @@
         if (needsScreen || needsAx) {
           guideEl.hidden = false;
           guideEl.textContent = needsScreen
-            ? 'Screen Recording is required. Request access to let macOS register Recapsy, or open System Settings if it was previously denied. Then refresh.'
-            : 'Accessibility is optional for capture but required for context metadata. Open System Settings, add Recapsy manually, enable it, then refresh.';
+            ? '需要屏幕录制权限。请先请求访问，让 macOS 注册 Recapsy；若此前被拒绝，请打开系统设置。完成后点刷新。'
+            : '辅助功能对采集可选，但对上下文元数据必需。请打开系统设置，手动添加 Recapsy 并启用，然后刷新。';
         } else {
           guideEl.hidden = true;
         }
@@ -285,14 +293,14 @@
       async function unwrap(promise) {
         const response = await promise;
         if (!response || !response.ok) {
-          throw new Error((response && response.error && response.error.message) || 'Request failed');
+          throw new Error((response && response.error && response.error.message) || '请求失败');
         }
         return response.data;
       }
 
       async function refreshAll() {
         errorEl.textContent = '';
-        statusEl.textContent = 'Refreshing…';
+        statusEl.textContent = '正在刷新…';
         const [capture, sync, permissions, retentionPreview, localRules] = await Promise.all([
           unwrap(api.captureGetStatus()),
           unwrap(api.syncGetSummary()),
@@ -323,7 +331,7 @@
           retentionPreview,
         });
         renderPrivacyRules(localRules.rules);
-        statusEl.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        statusEl.textContent = '已更新 ' + new Date().toLocaleTimeString();
       }
 
       document.getElementById('privacy-block-bundle').addEventListener('click', async () => {
@@ -334,7 +342,7 @@
           privacyBundleInput.value = '';
           await refreshAll();
         } catch (error) {
-          errorEl.textContent = error.message || 'Could not block application';
+          errorEl.textContent = error.message || '无法屏蔽应用';
         }
       });
 
@@ -343,7 +351,7 @@
           await unwrap(api.capturePause());
           await refreshAll();
         } catch (error) {
-          errorEl.textContent = error.message || 'Pause failed';
+          errorEl.textContent = error.message || '暂停失败';
         }
       });
 
@@ -352,7 +360,7 @@
           await unwrap(api.captureResume());
           await refreshAll();
         } catch (error) {
-          errorEl.textContent = error.message || 'Resume failed';
+          errorEl.textContent = error.message || '继续失败';
         }
       });
 
@@ -362,9 +370,9 @@
           retentionCleanButton.disabled = true;
           const result = await unwrap(api.diagnosticsRunRetention({ olderThanDays: 30 }));
           await refreshAll();
-          statusEl.textContent = `Cleaned ${result.cleanedAssets} assets`;
+          statusEl.textContent = `已清理 ${result.cleanedAssets} 个资源`;
         } catch (error) {
-          errorEl.textContent = error.message || 'Local asset cleanup failed';
+          errorEl.textContent = error.message || '本地资源清理失败';
         } finally {
           retentionCleanButton.disabled = false;
         }
@@ -376,14 +384,14 @@
         requestScreenButton.disabled = true;
         try {
           errorEl.textContent = '';
-          statusEl.textContent = 'Requesting Screen Recording access…';
+          statusEl.textContent = '正在请求屏幕录制权限…';
           const permissions = await unwrap(api.permissionsRequestScreenRecording());
           await refreshAll();
           statusEl.textContent = permissions.screenRecording === 'granted'
-            ? 'Screen Recording access is already enabled.'
-            : 'macOS did not grant access yet. Open Screen Recording Settings, enable Recapsy, then refresh.';
+            ? '屏幕录制权限已启用。'
+            : 'macOS 尚未授予权限。请打开屏幕录制设置，启用 Recapsy，然后刷新。';
         } catch (error) {
-          errorEl.textContent = error.message || 'Could not request Screen Recording access';
+          errorEl.textContent = error.message || '无法请求屏幕录制权限';
           requestScreenButton.disabled = false;
         } finally {
           screenRecordingRequestInFlight = false;
@@ -394,9 +402,9 @@
       document.getElementById('open-screen').addEventListener('click', async () => {
         try {
           await unwrap(api.permissionsOpenScreenRecordingSettings());
-          statusEl.textContent = 'Opened Screen Recording settings. Enable Recapsy, then refresh.';
+          statusEl.textContent = '已打开屏幕录制设置。请启用 Recapsy，然后刷新。';
         } catch (error) {
-          errorEl.textContent = error.message || 'Could not open settings';
+          errorEl.textContent = error.message || '无法打开设置';
         }
       });
 
@@ -404,9 +412,9 @@
         try {
           await unwrap(api.permissionsOpenAccessibilitySettings());
           statusEl.textContent =
-            'Opened Accessibility settings. Add Recapsy with +, enable it, then refresh.';
+            '已打开辅助功能设置。请用 + 添加 Recapsy，启用后再刷新。';
         } catch (error) {
-          errorEl.textContent = error.message || 'Could not open settings';
+          errorEl.textContent = error.message || '无法打开设置';
         }
       });
 
@@ -415,19 +423,19 @@
           await unwrap(api.permissionsRefresh());
           await refreshAll();
         } catch (error) {
-          errorEl.textContent = error.message || 'Refresh failed';
+          errorEl.textContent = error.message || '刷新失败';
         }
       });
 
       if (api.onStatusUpdated) {
         api.onStatusUpdated((status) => {
           renderShellStatus(status);
-          statusEl.textContent = 'Live update ' + new Date().toLocaleTimeString();
+          statusEl.textContent = '实时更新 ' + new Date().toLocaleTimeString();
         });
       }
 
       refreshAll().catch((error) => {
-        errorEl.textContent = error.message || 'Failed to load status';
+        errorEl.textContent = error.message || '无法加载状态';
       });
     </script>
   </body>

@@ -211,12 +211,12 @@ class DesktopShellController implements DesktopShell {
           this.runInBackground(() => this.showMainWindow());
         },
         kind: 'action',
-        label: 'Open Recapsy',
+        label: '打开 Recapsy',
       },
       ...activeAlerts.map<DesktopShellMenuItem>((alert) => ({
         enabled: false,
         kind: 'action',
-        label: `Attention: ${alert.trayLabel}`,
+        label: `注意：${alert.trayLabel}`,
       })),
       { kind: 'separator' },
       {
@@ -228,7 +228,7 @@ class DesktopShellController implements DesktopShell {
         },
         enabled: status.captureState === 'running' && !status.capturePaused,
         kind: 'action',
-        label: 'Pause Capture',
+        label: '暂停采集',
       },
       {
         click: () => {
@@ -243,7 +243,7 @@ class DesktopShellController implements DesktopShell {
           status.capturePauseReason !== 'backpressure' &&
           !blocked,
         kind: 'action',
-        label: 'Resume Capture',
+        label: '继续采集',
       },
       { kind: 'separator' },
       {
@@ -253,7 +253,7 @@ class DesktopShellController implements DesktopShell {
           );
         },
         kind: 'action',
-        label: `Screen Recording: ${formatPermissionLabel(status.screenRecording)}`,
+        label: `屏幕录制：${formatPermissionLabel(status.screenRecording)}`,
       },
       {
         click: () => {
@@ -262,7 +262,7 @@ class DesktopShellController implements DesktopShell {
           );
         },
         kind: 'action',
-        label: `Accessibility: ${formatPermissionLabel(status.accessibility)}`,
+        label: `辅助功能：${formatPermissionLabel(status.accessibility)}`,
       },
       {
         click: () => {
@@ -272,7 +272,7 @@ class DesktopShellController implements DesktopShell {
           });
         },
         kind: 'action',
-        label: 'Refresh Permissions',
+        label: '刷新权限',
       },
       { kind: 'separator' },
       {
@@ -282,7 +282,7 @@ class DesktopShellController implements DesktopShell {
           });
         },
         kind: 'action',
-        label: 'Quit Recapsy',
+        label: '退出 Recapsy',
       },
     ];
   }

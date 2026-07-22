@@ -19,9 +19,9 @@ describe('desktop shell', () => {
       'utf8',
     );
 
-    expect(source).toContain('Local privacy');
+    expect(source).toContain('本地隐私');
     expect(source.replace(/\s+/g, ' ')).toContain(
-      'Future captures from blocked apps do not persist an asset or enter the sync queue or OCR pipeline.',
+      '被屏蔽应用的后续采集不会保存资源，也不会进入同步队列或 OCR 管线。',
     );
     expect(source).toContain('id="privacy-bundle-id"');
     expect(source).toContain('captureBlockBundle');
@@ -109,9 +109,9 @@ describe('desktop shell', () => {
     });
 
     await shell.refresh();
-    expect(tooltip).toContain('Screen recording required');
+    expect(tooltip).toContain('需要屏幕录制权限');
     expect(
-      menuBuilds.at(-1)?.some((item) => item.kind === 'action' && item.label === 'Open Recapsy'),
+      menuBuilds.at(-1)?.some((item) => item.kind === 'action' && item.label === '打开 Recapsy'),
     ).toBe(true);
 
     await expect(shell.showMainWindow()).resolves.toEqual({ shown: true });
@@ -135,7 +135,7 @@ describe('desktop shell', () => {
     });
 
     await harness.shell.refresh();
-    findAction(harness.menuBuilds.at(-1), 'Screen Recording: Denied').click?.();
+    findAction(harness.menuBuilds.at(-1), '屏幕录制：已拒绝').click?.();
     await flushMicrotasks();
 
     expect(actions).toEqual(['open-settings']);
@@ -175,7 +175,7 @@ describe('desktop shell', () => {
     firstStatus.resolve(status({ syncPending: 2 }));
     await expect(firstRefresh).resolves.toEqual(status({ syncPending: 2 }));
     expect(harness.tooltipUpdates).toHaveLength(1);
-    expect(harness.tooltipUpdates[0]).toContain('pending 2');
+    expect(harness.tooltipUpdates[0]).toContain('排队 2');
 
     harness.shell.dispose();
   });
@@ -228,7 +228,7 @@ describe('desktop shell', () => {
       },
     });
     await readyHarness.shell.refresh();
-    findAction(readyHarness.menuBuilds.at(-1), 'Pause Capture').click?.();
+    findAction(readyHarness.menuBuilds.at(-1), '暂停采集').click?.();
     await flushMicrotasks();
 
     expect(safeErrors).toEqual([
@@ -256,7 +256,7 @@ describe('desktop shell', () => {
     });
 
     await harness.shell.refresh();
-    findAction(harness.menuBuilds.at(-1), 'Refresh Permissions').click?.();
+    findAction(harness.menuBuilds.at(-1), '刷新权限').click?.();
     await flushMicrotasks();
 
     expect(safeErrors).toEqual(['Desktop shell operation failed.']);
@@ -282,15 +282,15 @@ describe('desktop shell', () => {
 
     expect(harness.notifications).toEqual([
       {
-        body: 'Capture stopped unexpectedly. Open Recapsy to restore capture.',
-        title: 'Recapsy capture stopped',
+        body: '采集意外停止。请打开 Recapsy 恢复采集。',
+        title: 'Recapsy 采集已停止',
       },
     ]);
-    expect(harness.tooltipUpdates.at(-1)).toContain('Capture stopped');
+    expect(harness.tooltipUpdates.at(-1)).toContain('采集已停止');
     expect(
       harness.menuBuilds
         .at(-1)
-        ?.some((item) => item.kind === 'action' && item.label === 'Attention: Capture stopped'),
+        ?.some((item) => item.kind === 'action' && item.label === '注意：采集已停止'),
     ).toBe(true);
 
     harness.shell.dispose();
@@ -331,8 +331,8 @@ describe('desktop shell', () => {
     await harness.shell.refresh();
 
     const menu = harness.menuBuilds.at(-1);
-    expect(findAction(menu, 'Pause Capture').enabled).toBe(pauseEnabled);
-    expect(findAction(menu, 'Resume Capture').enabled).toBe(resumeEnabled);
+    expect(findAction(menu, '暂停采集').enabled).toBe(pauseEnabled);
+    expect(findAction(menu, '继续采集').enabled).toBe(resumeEnabled);
 
     harness.shell.dispose();
   });

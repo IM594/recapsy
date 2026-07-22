@@ -39,35 +39,33 @@ export function formatTrayTooltip(
   activeAlerts: readonly { trayLabel: string }[] = [],
 ): string {
   const permissionLabel =
-    status.screenRecording === 'granted' ? 'Screen recording granted' : 'Screen recording required';
+    status.screenRecording === 'granted' ? '屏幕录制已授权' : '需要屏幕录制权限';
   const syncLabels = [
-    `processing ${status.syncProcessing ?? 0}`,
-    `pending ${status.syncPending}`,
-    `oldest ${status.syncOldestActiveAgeSeconds === undefined ? 'none' : formatAge(status.syncOldestActiveAgeSeconds)}`,
+    `处理中 ${status.syncProcessing ?? 0}`,
+    `排队 ${status.syncPending}`,
+    `最老 ${status.syncOldestActiveAgeSeconds === undefined ? '无' : formatAge(status.syncOldestActiveAgeSeconds)}`,
   ];
 
   const captureLabel =
     status.capturePauseReason === 'storage'
-      ? 'Storage protection'
+      ? '存储保护'
       : status.capturePauseReason === 'backpressure'
-        ? 'Catching up'
+        ? '追赶中'
         : status.capturePaused
-          ? 'Paused'
-          : status.captureState;
-  const throughputLabel = `in ${status.syncInputPerMinute ?? 0}/min · done ${status.syncCompletedPerMinute ?? 0}/min`;
+          ? '已暂停'
+          : formatCaptureStateLabel(status.captureState);
+  const throughputLabel = `接收 ${status.syncInputPerMinute ?? 0}/分 · 完成 ${status.syncCompletedPerMinute ?? 0}/分`;
   const admissionLabel = status.captureAdmission?.active
-    ? `admission ${status.captureAdmission.reasons.length > 0 ? status.captureAdmission.reasons.join(',') : 'closed'}`
-    : 'admission open';
-  const policyLabel = status.capturePolicy
-    ? `policy ${status.capturePolicy.version}`
-    : 'policy not applied';
+    ? `准入 ${status.captureAdmission.reasons.length > 0 ? status.captureAdmission.reasons.join(',') : '关闭'}`
+    : '准入开放';
+  const policyLabel = status.capturePolicy ? `策略 ${status.capturePolicy.version}` : '策略未应用';
   const errorLabel =
     status.syncLastErrorCode || status.lastErrorCode
-      ? `error ${status.syncLastErrorCode ?? status.lastErrorCode}`
-      : 'error none';
+      ? `错误 ${status.syncLastErrorCode ?? status.lastErrorCode}`
+      : '错误无';
   const alertLabel =
     activeAlerts.length > 0
-      ? `Attention required: ${activeAlerts.map((alert) => alert.trayLabel).join(', ')}`
+      ? `需要注意：${activeAlerts.map((alert) => alert.trayLabel).join('、')}`
       : undefined;
   return [
     'Recapsy',
@@ -85,21 +83,38 @@ export function formatTrayTooltip(
 }
 
 function formatAge(seconds: number): string {
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  return `${Math.floor(seconds / 3600)}h`;
+  if (seconds < 60) return `${seconds}秒`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}分`;
+  return `${Math.floor(seconds / 3600)}时`;
+}
+
+export function formatCaptureStateLabel(state: string): string {
+  switch (state) {
+    case 'starting':
+      return '启动中';
+    case 'running':
+      return '运行中';
+    case 'paused':
+      return '已暂停';
+    case 'stopping':
+      return '停止中';
+    case 'stopped':
+      return '已停止';
+    default:
+      return state;
+  }
 }
 
 export function formatPermissionLabel(state: string): string {
   switch (state) {
     case 'granted':
-      return 'Granted';
+      return '已授权';
     case 'denied':
-      return 'Denied';
+      return '已拒绝';
     case 'not_determined':
-      return 'Not determined';
+      return '未决定';
     default:
-      return 'Unknown';
+      return '未知';
   }
 }
 

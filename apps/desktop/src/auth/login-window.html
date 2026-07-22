@@ -1,8 +1,8 @@
 <!doctype html>
-<html>
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>Recapsy sign in</title>
+    <title>Recapsy 登录</title>
   </head>
   <body>
     <!--
@@ -19,18 +19,18 @@
       `auth.login` IPC channel. The real HTTP request and token storage
       happen entirely in the Electron main process.
     -->
-    <h1>Recapsy sign in (dev)</h1>
-    <p>Development-only sign-in. No visual design; replaced by real product UI later.</p>
+    <h1>Recapsy 登录（开发）</h1>
+    <p>仅用于开发登录。无视觉设计；正式产品登录界面会替换本页。</p>
     <form id="login-form">
       <div>
-        <label for="email">Email</label>
+        <label for="email">邮箱</label>
         <input id="email" name="email" type="email" autocomplete="username" required />
       </div>
       <div>
-        <label for="password">Password</label>
+        <label for="password">密码</label>
         <input id="password" name="password" type="password" autocomplete="current-password" required />
       </div>
-      <button id="submit" type="submit">Sign in</button>
+      <button id="submit" type="submit">登录</button>
       <p id="status" role="status"></p>
     </form>
     <script>
@@ -44,20 +44,20 @@
         const password = document.getElementById('password').value;
 
         submitButton.disabled = true;
-        statusEl.textContent = 'Signing in…';
+        statusEl.textContent = '正在登录…';
 
         try {
           const response = await window.recapsyAuth.login(email, password);
 
           if (response && response.ok) {
-            statusEl.textContent = 'Signed in.';
+            statusEl.textContent = '已登录。';
             return;
           }
 
           statusEl.textContent =
-            (response && response.error && response.error.message) || 'Sign in failed.';
+            (response && response.error && response.error.message) || '登录失败。';
         } catch (error) {
-          statusEl.textContent = 'Sign in failed.';
+          statusEl.textContent = '登录失败。';
         } finally {
           submitButton.disabled = false;
         }

@@ -219,7 +219,7 @@ const loginPrompter = createLoginWindowPrompter({
     new BrowserWindow({
       height: 360,
       resizable: false,
-      title: 'Recapsy sign in',
+      title: 'Recapsy 登录',
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,

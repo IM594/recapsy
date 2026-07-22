@@ -49,7 +49,7 @@ describe('login window prompter', () => {
     const response = await invokeAuthLogin({ email: '', password: '' });
 
     expect(response).toEqual({
-      error: { code: 'validation_failed', message: 'Email and password are required.' },
+      error: { code: 'validation_failed', message: '请填写邮箱和密码。' },
       ok: false,
     });
     expect(window.closeCalls).toBe(0);
@@ -62,7 +62,7 @@ describe('login window prompter', () => {
         throw new AuthClientError({
           code: 'invalid_credentials',
           retryable: false,
-          safeMessage: 'Email or password is incorrect.',
+          safeMessage: '邮箱或密码不正确。',
         });
       },
     };
@@ -77,7 +77,7 @@ describe('login window prompter', () => {
     const response = await invokeAuthLogin({ email: 'person@example.test', password: 'wrong' });
 
     expect(response).toEqual({
-      error: { code: 'invalid_credentials', message: 'Email or password is incorrect.' },
+      error: { code: 'invalid_credentials', message: '邮箱或密码不正确。' },
       ok: false,
     });
     expect(window.closeCalls).toBe(0);
@@ -100,7 +100,7 @@ describe('login window prompter', () => {
     prompter.promptLogin().catch(() => {});
     const response = await invokeAuthLogin({ email: 'person@example.test', password: 'x' });
 
-    expect(response).toEqual({ error: { code: 'unknown', message: 'Login failed.' }, ok: false });
+    expect(response).toEqual({ error: { code: 'unknown', message: '登录失败。' }, ok: false });
   });
 
   it('rejects promptLogin when the window is closed before a successful login', async () => {
