@@ -77,6 +77,7 @@ export const ApiErrorCodeSchema = z.enum([
   'ocr.result_invalid',
   'ocr.operation_conflict',
   'ocr.operation_in_progress',
+  'ocr.concurrency_limited',
   'ocr.unknown',
   'timeline.event_not_found',
   'timeline.projection_failed',
