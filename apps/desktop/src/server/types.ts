@@ -62,6 +62,7 @@ export type ServerApiErrorCode =
   | 'provider_auth_failed'
   | 'provider_rate_limited'
   | 'provider_timeout'
+  | 'ocr_concurrency_limited'
   | 'operation_in_progress'
   | 'operation_conflict'
   | 'input_too_large'

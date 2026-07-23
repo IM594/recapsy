@@ -645,11 +645,13 @@ function mapNamespacedErrorCode(
     }
   }
 
-  // OCR proxy backpressure surfaces as `rate_limit.exceeded`; it is a retryable
-  // throttle, not a server outage, so it must not collapse to
-  // `server_unavailable`.
-  if (namespace === 'rate_limit' && normalized === 'exceeded') {
-    return 'provider_rate_limited';
+  // OCR proxy in-flight ceiling. Distinct from provider vendor rate limits so
+  // local capacity is not halved when the server is simply full.
+  if (
+    (namespace === 'ocr' && normalized === 'concurrency_limited') ||
+    (namespace === 'rate_limit' && normalized === 'exceeded')
+  ) {
+    return 'ocr_concurrency_limited';
   }
 
   // `workspace.forbidden` is a policy/authorization block on the workspace: a
@@ -674,6 +676,7 @@ function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
     'provider_auth_failed',
     'provider_rate_limited',
     'provider_timeout',
+    'ocr_concurrency_limited',
     'operation_in_progress',
     'operation_conflict',
     'input_too_large',
@@ -712,6 +715,10 @@ function defaultSafeMessage(code: ServerApiErrorCode): string {
 
   if (code === 'provider_rate_limited') {
     return 'Provider is rate limited.';
+  }
+
+  if (code === 'ocr_concurrency_limited') {
+    return 'Too many concurrent OCR requests.';
   }
 
   if (code === 'provider_timeout') {
@@ -772,6 +779,7 @@ function isRetryableCode(code: ServerApiErrorCode): boolean {
     code === 'provider_unavailable' ||
     code === 'provider_rate_limited' ||
     code === 'provider_timeout' ||
+    code === 'ocr_concurrency_limited' ||
     code === 'operation_in_progress'
   );
 }

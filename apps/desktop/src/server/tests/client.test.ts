@@ -611,7 +611,34 @@ describe('desktop server API client', () => {
     });
   });
 
-  it('maps proxy rate_limit.exceeded to a retryable throttle instead of a server outage', async () => {
+  it('maps OCR concurrency limits to a retryable throttle that is not a provider rate limit', async () => {
+    const calls: ServerApiTransportRequest[] = [];
+    const client = createClient(calls, async () => {
+      return createJsonResponse(
+        {
+          error: {
+            code: 'ocr.concurrency_limited',
+            message: 'Too many concurrent OCR requests for this user.',
+          },
+        },
+        429,
+      );
+    });
+
+    await expect(
+      client.runOcrProxy({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: 'image/webp',
+        operationKey: 'ocr-operation-1',
+        workspaceId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'ocr_concurrency_limited',
+      retryable: true,
+    });
+  });
+
+  it('still maps legacy rate_limit.exceeded to the OCR concurrency throttle', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const client = createClient(calls, async () => {
       return createJsonResponse(
@@ -633,7 +660,7 @@ describe('desktop server API client', () => {
         workspaceId,
       }),
     ).rejects.toMatchObject({
-      code: 'provider_rate_limited',
+      code: 'ocr_concurrency_limited',
       retryable: true,
     });
   });

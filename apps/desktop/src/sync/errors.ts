@@ -36,6 +36,7 @@ const SYNC_SAFE_MESSAGES: Record<string, string> = {
   provider_unavailable: 'Provider is unavailable.',
   provider_auth_failed: 'Provider authentication failed.',
   provider_rate_limited: 'Provider is rate limited.',
+  ocr_concurrency_limited: 'Too many concurrent OCR requests.',
   provider_timeout: 'OCR provider timed out.',
   operation_in_progress: 'OCR operation is still processing.',
   operation_conflict: 'OCR operation key conflicts with this image.',
@@ -98,7 +99,7 @@ export function toSyncPresentationError(
 ): NonNullable<SyncQueueSummary['lastError']> {
   const code = toPresentationErrorCode(error.code);
   const details =
-    code !== error.code && code !== 'unknown'
+    code !== error.code
       ? {
           safeCode: error.code,
         }

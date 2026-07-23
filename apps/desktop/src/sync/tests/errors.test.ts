@@ -145,6 +145,7 @@ describe('sync presentation errors', () => {
         code: 'unrecognized_internal_code',
         expected: {
           code: 'unknown',
+          details: { safeCode: 'unrecognized_internal_code' },
           message: 'Sync failed.',
         },
       },

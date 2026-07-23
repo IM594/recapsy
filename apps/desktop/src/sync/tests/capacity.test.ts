@@ -15,6 +15,22 @@ describe('sync worker capacity', () => {
     });
   });
 
+  it('does not reduce capacity on OCR concurrency backpressure', () => {
+    const capacity = createSyncWorkerCapacity({
+      localMaxWorkers: 4,
+      serverMaxConcurrentOcr: 4,
+    });
+
+    expect(capacity.observe({ code: undefined, processed: 1, status: 'retry_wait' })).toEqual({
+      activeWorkers: 4,
+      changed: false,
+    });
+
+    // Concurrency-limited results are retryable but must not be observed as
+    // provider_rate_limited, so capacity stays at the full ceiling.
+    expect(capacity.getStatus().activeWorkers).toBe(4);
+  });
+
   it('reduces capacity on provider rate limits and recovers gradually after successful work', () => {
     const capacity = createSyncWorkerCapacity({
       localMaxWorkers: 4,

@@ -14,7 +14,7 @@ import type {
 import { createSyncWorker } from './worker';
 
 const DEFAULT_SYNC_MAX_ATTEMPTS = 15;
-const DEFAULT_SYNC_LOCAL_MAX_WORKERS = 4;
+const DEFAULT_SYNC_LOCAL_MAX_WORKERS = 8;
 const DEFAULT_SYNC_RETRY_BACKOFF: RetryBackoffConfig = {
   baseMs: 2000,
   factor: 2,
