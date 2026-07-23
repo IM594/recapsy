@@ -36,7 +36,13 @@ public struct CaptureWindowInfo: Equatable {
 /// Pure rule that picks *which* window to capture, as a side-effect-free
 /// function over plain data (no ScreenCaptureKit dependency).
 ///
-/// Frontmost-app selection:
+/// Production selection uses **visual Z-order** (`selectTopmostCapturableWindowId`
+/// over a front-to-back `CGWindowList`), not `NSWorkspace.frontmostApplication`.
+/// Electron and other frameworks can keep reporting themselves as frontmost to
+/// Launch Services while keyboard focus and the topmost on-screen window belong
+/// to another app; trusting NSWorkspace alone falsely captures that host.
+///
+/// Legacy frontmost-app helpers remain for tests and diagnostics:
 ///   1. keep only windows that belong to the frontmost process, are on screen,
 ///      sit on the normal window layer (0), and are larger than a tiny 100×100
 ///      floor (drops shadows, status items, and off-screen scratch windows);
@@ -46,7 +52,7 @@ public struct CaptureWindowInfo: Equatable {
 ///
 /// When the primary enumeration lacks ownership metadata, callers may use a
 /// second enumeration only to nominate an id. The final ScreenCaptureKit
-/// window must still pass `verifyFinalWindowId` before any pixels are read.
+/// window must still pass verification before any pixels are read.
 public enum ActiveWindowSelector {
     public static let minimumWindowEdge: Double = 100
 
@@ -110,6 +116,24 @@ public enum ActiveWindowSelector {
             matches.count == 1,
             let window = matches.first,
             window.ownerProcessId == frontmostProcessId,
+            isCapturable(window)
+        else {
+            return nil
+        }
+        return window.windowId
+    }
+
+    /// Re-authorize a Z-order nominee against the final ScreenCaptureKit set.
+    /// Ownership must come from SCK for the selected id; do not re-bind to
+    /// `NSWorkspace.frontmostApplication`.
+    public static func verifySelectedWindowId(
+        selectedWindowId: Int,
+        finalWindows: [CaptureWindowInfo]
+    ) -> Int? {
+        let matches = finalWindows.filter { $0.windowId == selectedWindowId }
+        guard
+            matches.count == 1,
+            let window = matches.first,
             isCapturable(window)
         else {
             return nil

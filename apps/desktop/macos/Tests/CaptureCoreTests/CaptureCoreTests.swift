@@ -691,6 +691,31 @@ final class ActiveWindowSelectorTests: XCTestCase {
             3
         )
     }
+
+    func testSelectedWindowVerificationIgnoresFrontmostPid() {
+        XCTAssertEqual(
+            ActiveWindowSelector.verifySelectedWindowId(
+                selectedWindowId: 3,
+                finalWindows: [window(id: 2, pid: 999), window(id: 3, pid: 77)]
+            ),
+            3
+        )
+    }
+
+    func testSelectedWindowVerificationRejectsMissingOrDuplicateIds() {
+        XCTAssertNil(
+            ActiveWindowSelector.verifySelectedWindowId(
+                selectedWindowId: 3,
+                finalWindows: [window(id: 2, pid: 77)]
+            )
+        )
+        XCTAssertNil(
+            ActiveWindowSelector.verifySelectedWindowId(
+                selectedWindowId: 3,
+                finalWindows: [window(id: 3, pid: 77), window(id: 3, pid: 88)]
+            )
+        )
+    }
 }
 
 final class CaptureSourcePolicyTests: XCTestCase {

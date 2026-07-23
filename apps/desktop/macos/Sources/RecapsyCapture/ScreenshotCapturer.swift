@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import Darwin
 import ScreenCaptureKit
 import CaptureCore
 import CWebP
@@ -84,15 +85,14 @@ enum ScreenshotCapturer {
             throw ScreenshotError.permissionMissing
         }
 
-        guard let frontmostPid = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
-            // No frontmost app resolvable (rare, transient) — treat like "no
-            // window": skip this tick rather than emit a spurious error.
-            throw ScreenshotError.noActiveWindow
-        }
+        // Never trust NSWorkspace.frontmostApplication here: Electron hosts can
+        // stay "frontmost" in Launch Services while the user is clicking in
+        // another app. Selection uses CGWindowList Z-order instead.
+        let excludedOwnerProcessIds: Set<Int> = [Int(getpid())]
 
         return ScreenshotCaptureAttempt {
             await captureActiveWindow(
-                frontmostPid: Int(frontmostPid),
+                excludingOwnerProcessIds: excludedOwnerProcessIds,
                 policy: policy,
                 previousFingerprint: previousFingerprint
             )
@@ -114,7 +114,7 @@ enum ScreenshotCapturer {
     }
 
     private static func captureActiveWindow(
-        frontmostPid: Int,
+        excludingOwnerProcessIds: Set<Int>,
         policy: CaptureSourcePolicy,
         previousFingerprint: CaptureFrameFingerprint?
     ) async -> Result<EncodedScreenshot, ScreenshotError> {
@@ -129,7 +129,7 @@ enum ScreenshotCapturer {
             try Task.checkCancellation()
             var window = selectShareableWindow(
                 content: content,
-                frontmostPid: frontmostPid
+                excludingOwnerProcessIds: excludingOwnerProcessIds
             )
             if window == nil {
                 content = try await SCShareableContent.excludingDesktopWindows(
@@ -139,7 +139,7 @@ enum ScreenshotCapturer {
                 try Task.checkCancellation()
                 window = selectShareableWindow(
                     content: content,
-                    frontmostPid: frontmostPid
+                    excludingOwnerProcessIds: excludingOwnerProcessIds
                 )
             }
             guard let window else {
@@ -251,32 +251,29 @@ enum ScreenshotCapturer {
         }
     }
 
-    /// Resolve a verified `SCWindow` for this tick. A CGWindowList fallback may
-    /// fill ScreenCaptureKit ownership gaps, but the selected window must still
-    /// belong to the foreground process. Capturing another app's topmost window
-    /// would make any policy decision about the foreground app unsound.
+    /// Resolve a verified `SCWindow` for this tick from visual Z-order.
+    /// Nominate with front-to-back `CGWindowList`, then re-authorize the id
+    /// against ScreenCaptureKit ownership metadata before reading pixels.
     private static func selectShareableWindow(
         content: SCShareableContent,
-        frontmostPid: Int
+        excludingOwnerProcessIds: Set<Int>
     ) -> SCWindow? {
         let sckInfos = content.windows.map(captureWindowInfo(from:))
         let cgInfos = cgWindowInfos()
-        if let selectedId = ActiveWindowSelector.selectVerifiedWindowId(
-            primaryWindows: sckInfos,
-            fallbackWindows: cgInfos,
-            frontmostProcessId: frontmostPid
+        guard let selectedId = ActiveWindowSelector.selectTopmostCapturableWindowId(
+            windowsFrontToBack: cgInfos,
+            excludingOwnerProcessIds: excludingOwnerProcessIds
         ),
-            let verifiedId = ActiveWindowSelector.verifyFinalWindowId(
+            let verifiedId = ActiveWindowSelector.verifySelectedWindowId(
                 selectedWindowId: selectedId,
-                finalWindows: sckInfos,
-                frontmostProcessId: frontmostPid
+                finalWindows: sckInfos
             ),
             let window = content.windows.first(where: { Int($0.windowID) == verifiedId })
-        {
-            return window
+        else {
+            return nil
         }
 
-        return nil
+        return window
     }
 
     private static func captureWindowInfo(from window: SCWindow) -> CaptureWindowInfo {
