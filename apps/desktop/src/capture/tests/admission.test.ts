@@ -12,35 +12,29 @@ const backpressure: BackpressureConfig = {
 };
 
 describe('capture admission controller', () => {
-  it('pauses at a high water mark and resumes only after every low water mark is clear', async () => {
-    const store = new SnapshotStore({ assetBytes: 100, queuedJobs: 6, retryingJobs: 0 });
-    const controller = createCaptureAdmissionController({
-      backpressure,
-      store,
-    });
-
-    await controller.reconcile();
-    store.snapshot = { assetBytes: 400, queuedJobs: 2, retryingJobs: 0 };
-    await controller.reconcile();
-    store.snapshot = { assetBytes: 200, queuedJobs: 2, retryingJobs: 0 };
-    await controller.reconcile();
-
-    expect(controller.getStatus()).toEqual({ reasons: [] });
-  });
-
-  it('observes active retry-wait jobs independently and clears only at the retry low water mark', async () => {
-    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 1, retryingJobs: 3 });
+  it('pauses at a high asset-byte water mark and resumes only after the low water mark is clear', async () => {
+    const store = new SnapshotStore({ assetBytes: 600, queuedJobs: 6, retryingJobs: 0 });
     const controller = createCaptureAdmissionController({
       backpressure,
       store,
     });
 
     await expect(controller.reconcile()).resolves.toEqual({
-      reasons: ['max_retrying_jobs_reached'],
+      reasons: ['max_asset_bytes_reached'],
     });
-    store.snapshot = { assetBytes: 0, queuedJobs: 1, retryingJobs: 2 };
+    store.snapshot = { assetBytes: 400, queuedJobs: 6, retryingJobs: 0 };
     await controller.reconcile();
-    store.snapshot = { assetBytes: 0, queuedJobs: 1, retryingJobs: 1 };
+    store.snapshot = { assetBytes: 200, queuedJobs: 6, retryingJobs: 0 };
+    await expect(controller.reconcile()).resolves.toEqual({ reasons: [] });
+  });
+
+  it('does not pause capture when OCR/sync queue or retry pressure is high', async () => {
+    const store = new SnapshotStore({ assetBytes: 0, queuedJobs: 6, retryingJobs: 3 });
+    const controller = createCaptureAdmissionController({
+      backpressure,
+      store,
+    });
+
     await expect(controller.reconcile()).resolves.toEqual({ reasons: [] });
   });
 
@@ -384,7 +378,7 @@ describe('capture admission controller', () => {
 
     const snapshot = await controller.reconcile();
     expect(snapshot).toEqual({
-      reasons: ['max_queued_jobs_reached', 'min_available_storage_reached'],
+      reasons: ['min_available_storage_reached'],
     });
     expect(Object.isFrozen(snapshot)).toBeTrue();
     expect(Object.isFrozen(snapshot.reasons)).toBeTrue();
@@ -400,7 +394,7 @@ describe('capture admission controller', () => {
         acceptanceStarted = true;
         return accepted.promise;
       },
-      store: new SnapshotStore({ assetBytes: 0, queuedJobs: 6, retryingJobs: 0 }),
+      store: new SnapshotStore({ assetBytes: 600, queuedJobs: 6, retryingJobs: 0 }),
     });
 
     const reconciliation = controller.reconcile().then(() => {

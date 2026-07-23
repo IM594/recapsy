@@ -832,13 +832,13 @@ describe('electron main runtime wiring', () => {
     expect(capturedOptions?.onError).toBe(onSyncError);
   });
 
-  it('reconciles capture admission immediately after a sync worker changes the local queue', async () => {
+  it('does not pause capture admission when only the sync queue grows after a worker tick', async () => {
     const { app, ipcMain, helperClient, store } = harness();
     let capturedOptions: SyncLoopOptions | undefined;
     const handle = createElectronMainRuntime({
       ...baseOptions({ app, helperClient, ipcMain, store }),
       backpressure: {
-        maxAssetBytes: 1024,
+        maxAssetBytes: 1024 * 1024,
         maxQueuedJobs: 1,
         maxRetryingJobs: 1,
         resumeAssetBytes: 512,
@@ -867,7 +867,7 @@ describe('electron main runtime wiring', () => {
     await flushMicrotasks();
 
     expect(ready.control.getSnapshot().admission).toEqual({
-      reasons: ['max_queued_jobs_reached'],
+      reasons: [],
     });
   });
 });

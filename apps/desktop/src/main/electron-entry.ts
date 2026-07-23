@@ -20,7 +20,6 @@ import {
   createLoginWindowPrompter,
 } from '../auth/index';
 import {
-  DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
   createCaptureBundleClient,
   createNodeCaptureBundleValidationAdapter,
 } from '../capture/index';
@@ -423,7 +422,6 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
 
     return createSqliteStore({
       database: createNodeSqliteDatabase(sqlitePath),
-      maxActiveOutboxJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS,
     });
   },
   hideDockIcon: devVisibilityEnabled ? false : undefined,

@@ -81,9 +81,11 @@ type IntakeWriteHealth =
     };
 
 /**
- * Owns automatic capture admission. Queue volume, retry pressure, logical
- * asset bytes, and physical storage are independent latches: each enters at
- * its high-risk water mark and recovers only at its own low-risk water mark.
+ * Owns automatic capture admission. Logical asset bytes and physical storage
+ * can pause capture; OCR/sync queue depth must not. Screen data is more
+ * important than keeping the outbox small — queue pressure is a sync concern,
+ * while disk / configured asset-byte ceilings are the only capture stoppers
+ * besides permission, policy, and user pause.
  */
 export function createCaptureAdmissionController(
   options: CaptureAdmissionControllerOptions,
@@ -100,9 +102,7 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
   private nextAssetWriteFailureIdentity = 0;
   private nextIntakeWriteFailureIdentity = 0;
   private operationalSnapshotHealth: OperationalSnapshotHealth = healthy();
-  private queueHealth: WatermarkHealth = healthy();
   private reconciliationInFlight: Promise<CaptureAdmissionSnapshot> | undefined;
-  private retryHealth: WatermarkHealth = healthy();
   private status: CaptureAdmissionSnapshot = freezeSnapshot([]);
   private monitorEpoch = 0;
   private acceptingSamples = true;
@@ -219,16 +219,8 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
         this.intakeWriteHealth,
         intakeFailureIdentity,
       );
-      this.queueHealth = updateUpperWaterMark(
-        this.queueHealth,
-        decision.reasons.includes('max_queued_jobs_reached'),
-        snapshot.queuedJobs <= this.options.backpressure.resumeQueuedJobs,
-      );
-      this.retryHealth = updateUpperWaterMark(
-        this.retryHealth,
-        decision.reasons.includes('max_retrying_jobs_reached'),
-        snapshot.retryingJobs <= this.options.backpressure.resumeRetryingJobs,
-      );
+      // Queue / retry watermarks are intentionally ignored for capture pause.
+      // Only logical asset-byte ceiling participates in admission here.
       this.assetBytesHealth = updateUpperWaterMark(
         this.assetBytesHealth,
         decision.reasons.includes('max_asset_bytes_reached'),
@@ -317,8 +309,6 @@ class StoreBackedCaptureAdmissionController implements CaptureAdmissionControlle
       return;
     }
     const reasons: CaptureAdmissionReason[] = [
-      ...(this.queueHealth.state === 'blocked' ? (['max_queued_jobs_reached'] as const) : []),
-      ...(this.retryHealth.state === 'blocked' ? (['max_retrying_jobs_reached'] as const) : []),
       ...(this.assetBytesHealth.state === 'blocked' ? (['max_asset_bytes_reached'] as const) : []),
       ...(this.diskHealth.state === 'low_capacity'
         ? (['min_available_storage_reached'] as const)

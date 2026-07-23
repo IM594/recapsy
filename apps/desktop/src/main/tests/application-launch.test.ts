@@ -18,13 +18,14 @@ describe('desktop development launch', () => {
     expect(packageJson.scripts?.dev).toBe('pnpm run build && pnpm run start');
   });
 
-  it('passes the capture queue hard limit into the production SQLite store', async () => {
+  it('does not bind a production outbox job-count hard reject into the SQLite store', async () => {
     const entrySource = await readFile(
       path.join(desktopRoot, 'src', 'main', 'electron-entry.ts'),
       'utf8',
     );
 
-    expect(entrySource).toContain('maxActiveOutboxJobs: DEFAULT_CAPTURE_MAX_QUEUED_JOBS');
+    expect(entrySource).not.toContain('maxActiveOutboxJobs');
+    expect(entrySource).toContain('createSqliteStore({');
   });
 
   it('resolves the device identity after readiness and limits environment overrides to development', async () => {
