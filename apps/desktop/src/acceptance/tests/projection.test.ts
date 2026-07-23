@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { DevAcceptanceDesktopStatusSchema } from '@recapsy/contracts';
 import { projectDesktopAcceptanceStatus } from '../projection';
+import { deriveLocalStage, projectAcceptanceQueue } from '../queue-projection';
 import { acceptanceSnapshot } from './support';
 
 describe('desktop acceptance projection', () => {
-  test('projects the existing shell summary fields and preserves every capture pause reason', () => {
+  test('projects queue lifecycle fields for schema version 3', () => {
     const projection = projectDesktopAcceptanceStatus({
       runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
       workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
@@ -15,33 +16,10 @@ describe('desktop acceptance projection', () => {
     });
 
     expect(DevAcceptanceDesktopStatusSchema.parse(projection)).toEqual(projection);
-    expect(projection).toEqual({
-      schemaVersion: 2,
-      runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
-      workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
-      observedAt: '2026-07-18T08:00:00.000Z',
-      acceptedCaptureInputPerMinute: 7,
-      completedPerMinute: 5,
-      processing: 2,
-      pending: 3,
-      oldestActiveAgeSeconds: 42,
-      policyVersion: 'policy-primary',
-      safeErrorCode: 'provider_unavailable',
-      workerCapacity: {
-        activeWorkers: 2,
-        localMaxWorkers: 4,
-        serverMaxConcurrentOcr: 3,
-      },
-      capture: {
-        state: 'paused',
-        paused: true,
-        pauseReasons: ['user', 'backpressure', 'storage', 'policy', 'permission'],
-      },
-      admission: {
-        active: true,
-        reasons: ['max_asset_bytes_reached'],
-      },
-    });
+    expect(projection.schemaVersion).toBe(3);
+    expect(projection.queue.failed).toBe(2);
+    expect(projection.inFlight).toHaveLength(1);
+    expect(projection.queueHeads[0]?.safeErrorCode).toBe('provider_timeout');
   });
 
   test('uses null when the shared shell summary has no active queue age', () => {
@@ -68,7 +46,7 @@ describe('desktop acceptance projection', () => {
     ).toThrow();
   });
 
-  test('normalizes an internal error code outside the relay allowlist to unknown', () => {
+  test('drops free-form unsafe error strings instead of inventing opaque unknown', () => {
     const projection = projectDesktopAcceptanceStatus({
       runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
       workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
@@ -76,17 +54,118 @@ describe('desktop acceptance projection', () => {
       snapshot: acceptanceSnapshot({ safeErrorCode: '/private/path' }),
     });
 
-    expect(projection.safeErrorCode).toBe('unknown');
+    expect(projection.safeErrorCode).toBeNull();
+  });
+});
+
+describe('acceptance queue projection', () => {
+  test('derives local stages and splits in-flight from queue heads including failed', () => {
+    const now = Date.parse('2026-07-18T08:00:42.000Z');
+    const projection = projectAcceptanceQueue(
+      [
+        {
+          id: 'cap-1',
+          state: 'syncing',
+          attempt: 0,
+          createdAt: '2026-07-18T08:00:00.000Z',
+          updatedAt: '2026-07-18T08:00:10.000Z',
+          serverCaptureId: '11111111-1111-4111-8111-111111111111',
+          capture: { appName: 'Cursor' },
+        },
+        {
+          id: 'cap-2',
+          state: 'pending',
+          attempt: 1,
+          createdAt: '2026-07-18T07:59:00.000Z',
+          updatedAt: '2026-07-18T08:00:20.000Z',
+          nextRetryAt: '2026-07-18T08:01:00.000Z',
+          capture: { appName: 'Safari' },
+        },
+        {
+          id: 'cap-3',
+          state: 'failed',
+          attempt: 4,
+          createdAt: '2026-07-18T07:50:00.000Z',
+          updatedAt: '2026-07-18T08:00:30.000Z',
+          lastSafeError: {
+            code: 'provider_timeout',
+            message: 'OCR provider timed out.',
+            retryable: true,
+          },
+          capture: { appName: 'Notes' },
+        },
+      ],
+      now,
+    );
+
+    expect(
+      deriveLocalStage({
+        id: 'cap-x',
+        state: 'pending',
+        attempt: 0,
+        createdAt: '2026-07-18T08:00:00.000Z',
+        updatedAt: '2026-07-18T08:00:00.000Z',
+        nextRetryAt: '2026-07-18T08:01:00.000Z',
+        capture: { appName: 'X' },
+      }),
+    ).toBe('retry_wait');
+    expect(projection.inFlight).toEqual([
+      {
+        localJobId: 'cap-1',
+        serverCaptureId: '11111111-1111-4111-8111-111111111111',
+        appName: 'Cursor',
+        localStage: 'running_ocr',
+        attempt: 0,
+        ageSeconds: 42,
+        safeErrorCode: null,
+        createdAt: '2026-07-18T08:00:00.000Z',
+        updatedAt: '2026-07-18T08:00:10.000Z',
+        nextRetryAt: null,
+      },
+    ]);
+    expect(projection.queue).toEqual({
+      pending: 1,
+      syncing: 1,
+      resultPending: 0,
+      retrying: 1,
+      failed: 1,
+      blocked: 0,
+    });
+    expect(projection.queueHeads.map((item) => item.localJobId)).toEqual(['cap-3', 'cap-2']);
+    expect(projection.queueHeads[0]?.safeErrorCode).toBe('provider_timeout');
   });
 
-  test('drops a policy version outside the relay-safe format', () => {
-    const projection = projectDesktopAcceptanceStatus({
-      runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
-      workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
-      observedAt: '2026-07-18T08:00:00.000Z',
-      snapshot: acceptanceSnapshot({ capturePolicyVersion: '/Users/private/policy' }),
-    });
+  test('puts recently synced jobs first in queue heads so successes are visible', () => {
+    const now = Date.parse('2026-07-18T08:00:42.000Z');
+    const projection = projectAcceptanceQueue(
+      [
+        {
+          id: 'cap-ok',
+          state: 'synced',
+          attempt: 0,
+          createdAt: '2026-07-18T08:00:00.000Z',
+          updatedAt: '2026-07-18T08:00:40.000Z',
+          serverCaptureId: '11111111-1111-4111-8111-111111111111',
+          capture: { appName: 'Cursor' },
+        },
+        {
+          id: 'cap-fail',
+          state: 'failed',
+          attempt: 2,
+          createdAt: '2026-07-18T07:00:00.000Z',
+          updatedAt: '2026-07-18T08:00:30.000Z',
+          lastSafeError: {
+            code: 'provider_timeout',
+            message: 'OCR provider timed out.',
+            retryable: true,
+          },
+          capture: { appName: 'Safari' },
+        },
+      ],
+      now,
+    );
 
-    expect(projection.policyVersion).toBeNull();
+    expect(projection.queueHeads.map((item) => item.localJobId)).toEqual(['cap-ok', 'cap-fail']);
+    expect(projection.queueHeads[0]?.localStage).toBe('synced');
   });
 });

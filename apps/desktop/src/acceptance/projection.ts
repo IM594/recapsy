@@ -8,6 +8,11 @@ import {
   type DevAcceptanceSafeErrorCode,
   DevAcceptanceSafeErrorCodeSchema,
 } from '@recapsy/contracts';
+import {
+  type AcceptanceJobSummary,
+  type AcceptanceQueueProjection,
+  projectAcceptanceQueue,
+} from './queue-projection';
 
 export type DesktopAcceptanceSnapshot = {
   captureState: DevAcceptanceCaptureState;
@@ -29,6 +34,9 @@ export type DesktopAcceptanceSnapshot = {
     localMaxWorkers: number;
     serverMaxConcurrentOcr: number;
   };
+  queue?: AcceptanceQueueProjection['queue'];
+  inFlight?: AcceptanceJobSummary[];
+  queueHeads?: AcceptanceJobSummary[];
 };
 
 export type DesktopAcceptanceProjectionInput = {
@@ -41,8 +49,17 @@ export type DesktopAcceptanceProjectionInput = {
 export function projectDesktopAcceptanceStatus(
   input: DesktopAcceptanceProjectionInput,
 ): DevAcceptanceDesktopStatus {
+  const queue = input.snapshot.queue ?? {
+    pending: input.snapshot.syncPending,
+    syncing: input.snapshot.syncProcessing,
+    resultPending: 0,
+    retrying: 0,
+    failed: 0,
+    blocked: 0,
+  };
+
   return DevAcceptanceDesktopStatusSchema.parse({
-    schemaVersion: 2,
+    schemaVersion: 3,
     runtimeInstanceId: input.runtimeInstanceId,
     workspaceId: input.workspaceId,
     observedAt: input.observedAt,
@@ -63,13 +80,18 @@ export function projectDesktopAcceptanceStatus(
       active: input.snapshot.captureAdmission.active,
       reasons: [...input.snapshot.captureAdmission.reasons],
     },
+    queue,
+    inFlight: input.snapshot.inFlight ?? [],
+    queueHeads: input.snapshot.queueHeads ?? [],
   });
 }
+
+export { projectAcceptanceQueue };
 
 function toSafeErrorCode(value: string | undefined): DevAcceptanceSafeErrorCode | null {
   if (!value) return null;
   const parsed = DevAcceptanceSafeErrorCodeSchema.safeParse(value);
-  return parsed.success ? parsed.data : 'unknown';
+  return parsed.success ? parsed.data : null;
 }
 
 function toPolicyVersion(value: string | undefined): string | null {

@@ -13,8 +13,14 @@ export type {
   DesktopAcceptanceTransportRequest,
   DesktopAcceptanceTransportResponse,
 } from './publisher';
-export { projectDesktopAcceptanceStatus } from './projection';
+export { projectDesktopAcceptanceStatus, projectAcceptanceQueue } from './projection';
 export type {
   DesktopAcceptanceProjectionInput,
   DesktopAcceptanceSnapshot,
 } from './projection';
+export type {
+  AcceptanceJobSummary,
+  AcceptanceOutboxJob,
+  AcceptanceQueueProjection,
+} from './queue-projection';
+export { deriveLocalStage } from './queue-projection';

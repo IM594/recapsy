@@ -32,7 +32,7 @@ describe('desktop acceptance composition', () => {
     expect(statusSource).toContain('syncLastErrorCode: sync.lastError?.code');
     expect(statusSource).toContain('syncLastErrorMessage: sync.lastError?.message');
     expect(statusSource).toContain('capturePolicyVersion: helperStatus?.policyVersion');
-    expect(statusSource).toContain('safeErrorCode: sync.lastError?.code');
+    expect(statusSource).toContain('safeErrorCode: resolveAcceptanceSafeErrorCode');
     expect(statusSource).toContain('syncWorkerCapacity: sync.workerCapacity');
   });
 });

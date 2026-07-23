@@ -29,7 +29,7 @@
     "typecheck:tests": "tsc --noEmit -p tsconfig.test.json",
     "lint": "biome check scripts/ src/ tests/",
     "check": "biome check scripts/ src/ tests/",
-    "build": "bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron && bun build src/auth/login-preload.ts --outdir dist/auth --target node --format cjs --external electron && bun build src/shell/main-preload.ts --outdir dist/shell --target node --format cjs --external electron && mkdir -p dist/auth dist/shell && cp src/auth/login-window.html dist/auth/login-window.html && cp src/shell/main-window.html dist/shell/main-window.html",
+    "build": "bun build src/main/electron-entry.ts --outfile dist/main/electron-entry.cjs --target node --format cjs --external electron && bun build src/main/electron-entry.ts --outdir dist/main --target node --external electron && bun build src/auth/login-preload.ts --outdir dist/auth --target node --format cjs --external electron && bun build src/shell/main-preload.ts --outdir dist/shell --target node --format cjs --external electron && mkdir -p dist/auth dist/shell && cp src/auth/login-window.html dist/auth/login-window.html && cp src/shell/main-window.html dist/shell/main-window.html",
     "start": "electron .",
     "dev": "pnpm run build && pnpm run start"
   },

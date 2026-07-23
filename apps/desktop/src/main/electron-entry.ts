@@ -13,6 +13,7 @@ import {
 import {
   createDesktopAcceptanceHttpTransport,
   createDesktopAcceptancePublisher,
+  projectAcceptanceQueue,
 } from '../acceptance/index';
 import {
   createAuthClient,
@@ -391,6 +392,10 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             syncRetrying: sync.retrying,
             ...(sync.workerCapacity ? { syncWorkerCapacity: sync.workerCapacity } : {}),
           };
+          const outboxJobs = await context.store.listOutboxJobs({
+            workspaceId: context.workspaceId,
+          });
+          const queueProjection = projectAcceptanceQueue(outboxJobs, Date.now());
           void acceptancePublisher.tick({
             captureAdmission: {
               active: admission.reasons.length > 0,
@@ -402,13 +407,19 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             capturePolicyVersion: helperStatus?.policyVersion,
             syncInputPerMinute: sync.inputPerMinute,
             syncCompletedPerMinute: sync.completedPerMinute,
-            syncProcessing: sync.processing,
-            syncPending: sync.pending,
-            ...(sync.oldestActiveAgeSeconds !== undefined
-              ? { syncOldestActiveAgeSeconds: sync.oldestActiveAgeSeconds }
+            syncProcessing: queueProjection.processing,
+            syncPending: queueProjection.pending,
+            ...(queueProjection.oldestActiveAgeSeconds !== undefined
+              ? { syncOldestActiveAgeSeconds: queueProjection.oldestActiveAgeSeconds }
               : {}),
-            safeErrorCode: sync.lastError?.code ?? lastError?.code,
+            safeErrorCode: resolveAcceptanceSafeErrorCode(
+              sync.lastError,
+              queueProjection.safeErrorCode ?? lastError?.code,
+            ),
             syncWorkerCapacity: workerCapacity,
+            queue: queueProjection.queue,
+            inFlight: queueProjection.inFlight,
+            queueHeads: queueProjection.queueHeads,
           });
           return status;
         },
@@ -469,3 +480,14 @@ runtime?.ready.catch((error: unknown) => {
   console.error('[recapsy-desktop] desktop runtime failed to start', error);
   app.exit(1);
 });
+
+function resolveAcceptanceSafeErrorCode(
+  syncLastError: { code: string; details?: Record<string, unknown> } | undefined,
+  captureLastErrorCode: string | undefined,
+): string | undefined {
+  const remappedSafeCode =
+    syncLastError?.details && typeof syncLastError.details.safeCode === 'string'
+      ? syncLastError.details.safeCode
+      : undefined;
+  return remappedSafeCode ?? syncLastError?.code ?? captureLastErrorCode;
+}
