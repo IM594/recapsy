@@ -27,37 +27,52 @@ export const DevAcceptanceAdmissionReasonSchema = z.enum([
   'storage_state_unavailable',
 ]);
 
-export const DevAcceptanceSafeErrorCodeSchema = z.enum([
-  'asset_write_failed',
-  'capture_failed',
-  'cancelled',
-  'helper_start_failed',
-  'helper_unavailable',
-  'helper_unexpected_exit',
-  'input_too_large',
-  'offline',
-  'permission_missing',
-  'permission_revoked',
-  'policy_denied',
-  'policy_invalid_scope',
-  'policy_requires_unavailable_context',
-  'policy_stale',
-  'policy_unavailable',
-  'provider_not_configured',
-  'provider_unavailable',
-  'quota_exceeded',
-  'result_invalid',
-  'server_unavailable',
-  'unknown',
-  'unsupported_format',
-  'validation_failed',
-  'workspace_required',
-]);
+export const DevAcceptanceSafeErrorCodeSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9_]{0,63}$/)
+  .max(64);
 
 export const DevAcceptancePolicyVersionSchema = z
   .string()
   .regex(/^[A-Za-z0-9_.:-]+$/)
   .max(128);
+
+/** Local outbox lifecycle stage projected for the acceptance console. */
+export const DevAcceptanceLocalStageSchema = z.enum([
+  'queued',
+  'retry_wait',
+  'creating_capture',
+  'running_ocr',
+  'submitting_result',
+  'synced',
+  'failed',
+  'blocked',
+  'cancelled',
+]);
+
+export const DevAcceptanceJobIdSchema = z
+  .string()
+  .min(1)
+  .max(96)
+  .regex(/^[A-Za-z0-9._:-]+$/);
+
+/** App label for debug UX only — rejects path-like values. */
+export const DevAcceptanceAppNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(
+    (value) => {
+      if (/[\\/]/.test(value)) return false;
+      for (let index = 0; index < value.length; index += 1) {
+        if (value.charCodeAt(index) < 32) return false;
+      }
+      return true;
+    },
+    {
+      message: 'App name must not look like a path or contain control characters.',
+    },
+  );
 
 const WorkerCapacitySchema = z
   .object({
@@ -78,14 +93,41 @@ const WorkerCapacitySchema = z
     }
   });
 
+const QueueCountsSchema = z
+  .object({
+    pending: z.number().int().nonnegative(),
+    syncing: z.number().int().nonnegative(),
+    resultPending: z.number().int().nonnegative(),
+    retrying: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    blocked: z.number().int().nonnegative(),
+  })
+  .strict();
+
+const JobSummarySchema = z
+  .object({
+    localJobId: DevAcceptanceJobIdSchema,
+    serverCaptureId: IdSchema.nullable(),
+    appName: DevAcceptanceAppNameSchema.nullable(),
+    localStage: DevAcceptanceLocalStageSchema,
+    attempt: z.number().int().nonnegative(),
+    ageSeconds: z.number().int().nonnegative(),
+    safeErrorCode: DevAcceptanceSafeErrorCodeSchema.nullable(),
+    createdAt: IsoDateTimeSchema,
+    updatedAt: IsoDateTimeSchema,
+    nextRetryAt: IsoDateTimeSchema.nullable(),
+  })
+  .strict();
+
 export const DevAcceptanceDesktopStatusSchema = z
   .object({
-    schemaVersion: z.literal(2),
+    schemaVersion: z.literal(3),
     runtimeInstanceId: IdSchema,
     workspaceId: IdSchema,
     observedAt: IsoDateTimeSchema,
     acceptedCaptureInputPerMinute: z.number().int().nonnegative(),
     completedPerMinute: z.number().int().nonnegative(),
+    /** syncing + result_pending — kept for overall throughput badges. */
     processing: z.number().int().nonnegative(),
     pending: z.number().int().nonnegative(),
     oldestActiveAgeSeconds: z.number().int().nonnegative().nullable(),
@@ -105,6 +147,11 @@ export const DevAcceptanceDesktopStatusSchema = z
         reasons: z.array(DevAcceptanceAdmissionReasonSchema).max(7),
       })
       .strict(),
+    queue: QueueCountsSchema,
+    /** Currently executing jobs (syncing / result_pending), oldest first. */
+    inFlight: z.array(JobSummarySchema).max(8),
+    /** Queue heads: pending / retrying / failed / blocked, newest activity first. */
+    queueHeads: z.array(JobSummarySchema).max(24),
   })
   .strict();
 
@@ -115,11 +162,24 @@ export const DevAcceptanceDesktopStatusResponseSchema = z.discriminatedUnion('co
   z.object({ connection: z.literal('disconnected'), status: z.null() }).strict(),
 ]);
 
+export const DevAcceptanceCapturePipelineStatusSchema = z
+  .object({
+    captureId: IdSchema,
+    ocrStatus: z.enum(['not_requested', 'queued', 'running', 'succeeded', 'failed', 'blocked']),
+    embeddingStatus: z.enum(['not_requested', 'pending', 'indexed', 'failed']).nullable(),
+    indexStatus: z.enum(['not_indexed', 'pending', 'indexed', 'failed', 'stale']).nullable(),
+  })
+  .strict();
+
 export type DevAcceptanceCaptureState = z.infer<typeof DevAcceptanceCaptureStateSchema>;
 export type DevAcceptanceCapturePauseReason = z.infer<typeof DevAcceptanceCapturePauseReasonSchema>;
 export type DevAcceptanceAdmissionReason = z.infer<typeof DevAcceptanceAdmissionReasonSchema>;
 export type DevAcceptanceSafeErrorCode = z.infer<typeof DevAcceptanceSafeErrorCodeSchema>;
+export type DevAcceptanceLocalStage = z.infer<typeof DevAcceptanceLocalStageSchema>;
 export type DevAcceptanceDesktopStatus = z.infer<typeof DevAcceptanceDesktopStatusSchema>;
 export type DevAcceptanceDesktopStatusResponse = z.infer<
   typeof DevAcceptanceDesktopStatusResponseSchema
+>;
+export type DevAcceptanceCapturePipelineStatus = z.infer<
+  typeof DevAcceptanceCapturePipelineStatusSchema
 >;

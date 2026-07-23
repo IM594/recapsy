@@ -6,7 +6,7 @@ import {
 } from '../dev-acceptance';
 
 const status: DevAcceptanceDesktopStatus = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   runtimeInstanceId: '3ce54e1d-5a17-4cb5-a1bc-6f64e2025dd1',
   workspaceId: 'aa0d899f-64b5-41cb-a16f-65a1ea649db7',
   observedAt: '2026-07-18T08:00:00.000Z',
@@ -31,6 +31,42 @@ const status: DevAcceptanceDesktopStatus = {
     active: true,
     reasons: ['max_asset_bytes_reached'],
   },
+  queue: {
+    pending: 3,
+    syncing: 1,
+    resultPending: 1,
+    retrying: 1,
+    failed: 2,
+    blocked: 0,
+  },
+  inFlight: [
+    {
+      localJobId: 'cap-1780000000000-1',
+      serverCaptureId: '11111111-1111-4111-8111-111111111111',
+      appName: 'Cursor',
+      localStage: 'running_ocr',
+      attempt: 1,
+      ageSeconds: 12,
+      safeErrorCode: null,
+      createdAt: '2026-07-18T07:59:48.000Z',
+      updatedAt: '2026-07-18T08:00:00.000Z',
+      nextRetryAt: null,
+    },
+  ],
+  queueHeads: [
+    {
+      localJobId: 'cap-1780000000000-2',
+      serverCaptureId: null,
+      appName: 'Safari',
+      localStage: 'failed',
+      attempt: 3,
+      ageSeconds: 90,
+      safeErrorCode: 'provider_timeout',
+      createdAt: '2026-07-18T07:58:30.000Z',
+      updatedAt: '2026-07-18T08:00:00.000Z',
+      nextRetryAt: null,
+    },
+  ],
 };
 
 describe('development acceptance desktop status contract', () => {
@@ -50,97 +86,63 @@ describe('development acceptance desktop status contract', () => {
     ).toEqual({ connection: 'disconnected', status: null });
   });
 
-  test('rejects every forbidden top-level disclosure field', () => {
-    const forbiddenFields = [
-      'hostname',
-      'stableDeviceId',
-      'path',
-      'app',
-      'bundleId',
-      'captureAsset',
-      'asset',
-      'ocr',
-      'errorMessage',
-      'policyHash',
-      'policyVersionHash',
-      'token',
-    ];
-
-    for (const field of forbiddenFields) {
-      expect(
-        DevAcceptanceDesktopStatusSchema.safeParse({ ...status, [field]: 'forbidden' }).success,
-      ).toBe(false);
-    }
-  });
-
-  test('rejects unknown nested fields and free-form reason messages', () => {
+  test('rejects free-form unsafe fields in the relay projection', () => {
     expect(
       DevAcceptanceDesktopStatusSchema.safeParse({
         ...status,
-        workerCapacity: { ...status.workerCapacity, hostname: 'desktop.local' },
+        policyVersion: '/Users/private/policy',
       }).success,
     ).toBe(false);
     expect(
       DevAcceptanceDesktopStatusSchema.safeParse({
         ...status,
-        capture: { ...status.capture, errorMessage: 'private failure details' },
+        safeErrorCode: 'Not A Code',
       }).success,
     ).toBe(false);
     expect(
       DevAcceptanceDesktopStatusSchema.safeParse({
         ...status,
-        capture: { ...status.capture, pauseReasons: ['private free-form text'] },
+        capture: { ...status.capture, pauseReasons: ['private error message'] },
       }).success,
     ).toBe(false);
     expect(
       DevAcceptanceDesktopStatusSchema.safeParse({
         ...status,
-        admission: { ...status.admission, policyHash: 'sha256:private' },
+        inFlight: [{ ...status.inFlight[0], appName: '/Users/secret' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      DevAcceptanceDesktopStatusSchema.safeParse({
+        ...status,
+        inFlight: [{ ...status.inFlight[0], localJobId: 'bad id with spaces' }],
       }).success,
     ).toBe(false);
   });
 
-  test('accepts every bounded queue and storage admission reason', () => {
+  test('rejects worker capacity that exceeds an effective limit', () => {
+    expect(
+      DevAcceptanceDesktopStatusSchema.safeParse({
+        ...status,
+        workerCapacity: {
+          activeWorkers: 5,
+          localMaxWorkers: 4,
+          serverMaxConcurrentOcr: 3,
+        },
+      }).success,
+    ).toBe(false);
+  });
+
+  test('passes through snake_case operational safe error codes on queue heads', () => {
     expect(
       DevAcceptanceDesktopStatusSchema.parse({
         ...status,
-        admission: {
-          active: true,
-          reasons: [
-            'asset_write_failed',
-            'max_queued_jobs_reached',
-            'max_asset_bytes_reached',
-            'max_retrying_jobs_reached',
-            'min_available_storage_reached',
-            'queue_state_unavailable',
-            'storage_state_unavailable',
-          ],
-        },
-      }).admission.reasons,
-    ).toHaveLength(7);
-  });
-
-  test('rejects invalid counters, timestamps, identities, and impossible capacity', () => {
-    const invalidStatuses = [
-      { ...status, schemaVersion: 1 },
-      { ...status, runtimeInstanceId: 'stable-device-id' },
-      { ...status, workspaceId: 'workspace-from-path' },
-      { ...status, observedAt: 'yesterday' },
-      { ...status, acceptedCaptureInputPerMinute: -1 },
-      { ...status, completedPerMinute: -1 },
-      { ...status, processing: -1 },
-      { ...status, pending: -1 },
-      { ...status, oldestActiveAgeSeconds: -1 },
-      { ...status, policyVersion: '/Users/private/policy' },
-      { ...status, safeErrorCode: 'private message' },
-      {
-        ...status,
-        workerCapacity: { ...status.workerCapacity, activeWorkers: 4 },
-      },
-    ];
-
-    for (const invalid of invalidStatuses) {
-      expect(DevAcceptanceDesktopStatusSchema.safeParse(invalid).success).toBe(false);
-    }
+        queueHeads: [
+          {
+            ...status.queueHeads[0],
+            safeErrorCode: 'local_asset_missing',
+          },
+        ],
+      }).queueHeads[0]?.safeErrorCode,
+    ).toBe('local_asset_missing');
   });
 });
