@@ -168,4 +168,42 @@ describe('acceptance queue projection', () => {
     expect(projection.queueHeads.map((item) => item.localJobId)).toEqual(['cap-ok', 'cap-fail']);
     expect(projection.queueHeads[0]?.localStage).toBe('synced');
   });
+
+  test('does not surface historical lastSafeError from synced jobs as current abnormality', () => {
+    const now = Date.parse('2026-07-18T08:00:42.000Z');
+    const projection = projectAcceptanceQueue(
+      [
+        {
+          id: 'cap-ok',
+          state: 'synced',
+          attempt: 2,
+          createdAt: '2026-07-18T08:00:00.000Z',
+          updatedAt: '2026-07-18T08:00:40.000Z',
+          serverCaptureId: '11111111-1111-4111-8111-111111111111',
+          lastSafeError: {
+            code: 'provider_timeout',
+            message: 'OCR provider timed out.',
+            retryable: true,
+          },
+          capture: { appName: 'Cursor' },
+        },
+        {
+          id: 'cap-running',
+          state: 'syncing',
+          attempt: 0,
+          createdAt: '2026-07-18T08:00:30.000Z',
+          updatedAt: '2026-07-18T08:00:35.000Z',
+          serverCaptureId: '22222222-2222-4222-8222-222222222222',
+          capture: { appName: 'Safari' },
+        },
+      ],
+      now,
+    );
+
+    expect(projection.safeErrorCode).toBeUndefined();
+    expect(projection.queueHeads.find((item) => item.localJobId === 'cap-ok')?.safeErrorCode).toBe(
+      null,
+    );
+    expect(projection.inFlight[0]?.safeErrorCode).toBeNull();
+  });
 });

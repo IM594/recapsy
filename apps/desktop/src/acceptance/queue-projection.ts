@@ -83,7 +83,13 @@ export function projectAcceptanceQueue(
     .map((job) => Date.parse(job.createdAt))
     .filter((value) => Number.isFinite(value));
 
-  const lastSafeError = [...jobs].reverse().find((job) => job.lastSafeError)?.lastSafeError?.code;
+  // Top-level safeErrorCode is "current abnormality" only: failed / blocked /
+  // retrying / in-flight jobs. Synced jobs often retain lastSafeError from a
+  // prior retry and must not paint the acceptance basics card red forever.
+  const currentAbnormalJobs = [...failed, ...blocked, ...retrying, ...syncing, ...resultPending];
+  const currentSafeError = sortByUpdatedDesc(currentAbnormalJobs)
+    .map((job) => job.lastSafeError?.code)
+    .find((code): code is string => Boolean(code));
 
   return {
     queue: {
@@ -106,7 +112,7 @@ export function projectAcceptanceQueue(
           ),
         }
       : {}),
-    ...(lastSafeError ? { safeErrorCode: lastSafeError } : {}),
+    ...(currentSafeError ? { safeErrorCode: currentSafeError } : {}),
   };
 }
 
@@ -138,18 +144,20 @@ function toSummary(job: AcceptanceOutboxJob, nowMs: number): AcceptanceJobSummar
   const ageSeconds = Number.isFinite(anchor) ? Math.max(0, Math.floor((nowMs - anchor) / 1000)) : 0;
   const localJobId = DevAcceptanceJobIdSchema.safeParse(job.id).success ? job.id : 'job:invalid';
   const appNameParsed = DevAcceptanceAppNameSchema.safeParse(job.capture?.appName ?? '');
+  const localStage = deriveLocalStage(job);
   const safeError = job.lastSafeError?.code
     ? DevAcceptanceSafeErrorCodeSchema.safeParse(job.lastSafeError.code)
     : null;
+  const retainError = localStage !== 'synced' && localStage !== 'cancelled';
 
   return {
     localJobId,
     serverCaptureId: job.serverCaptureId ?? null,
     appName: appNameParsed.success ? appNameParsed.data : null,
-    localStage: deriveLocalStage(job),
+    localStage,
     attempt: Math.max(0, job.attempt),
     ageSeconds,
-    safeErrorCode: safeError?.success ? safeError.data : null,
+    safeErrorCode: retainError && safeError?.success ? safeError.data : null,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     nextRetryAt: job.nextRetryAt ?? null,

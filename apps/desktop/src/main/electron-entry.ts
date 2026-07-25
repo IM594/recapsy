@@ -412,10 +412,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             ...(queueProjection.oldestActiveAgeSeconds !== undefined
               ? { syncOldestActiveAgeSeconds: queueProjection.oldestActiveAgeSeconds }
               : {}),
-            safeErrorCode: resolveAcceptanceSafeErrorCode(
-              sync.lastError,
-              queueProjection.safeErrorCode ?? lastError?.code,
-            ),
+            safeErrorCode: queueProjection.safeErrorCode,
             syncWorkerCapacity: workerCapacity,
             queue: queueProjection.queue,
             inFlight: queueProjection.inFlight,
@@ -480,14 +477,3 @@ runtime?.ready.catch((error: unknown) => {
   console.error('[recapsy-desktop] desktop runtime failed to start', error);
   app.exit(1);
 });
-
-function resolveAcceptanceSafeErrorCode(
-  syncLastError: { code: string; details?: Record<string, unknown> } | undefined,
-  captureLastErrorCode: string | undefined,
-): string | undefined {
-  const remappedSafeCode =
-    syncLastError?.details && typeof syncLastError.details.safeCode === 'string'
-      ? syncLastError.details.safeCode
-      : undefined;
-  return remappedSafeCode ?? syncLastError?.code ?? captureLastErrorCode;
-}
