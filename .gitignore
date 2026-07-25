@@ -53,3 +53,7 @@ bun.lockb
 
 # Git worktrees
 .worktrees/
+
+# Temp / generated
+pi-session-*.html
+ui-*.html
