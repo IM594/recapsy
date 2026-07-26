@@ -23,6 +23,7 @@ export function acceptanceSnapshot(
       localMaxWorkers: 4,
       serverMaxConcurrentOcr: 3,
     },
+    syncGate: { state: 'open' },
     queue: {
       pending: 3,
       syncing: 1,

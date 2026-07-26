@@ -424,6 +424,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
               : {}),
             safeErrorCode: queueProjection.safeErrorCode,
             syncWorkerCapacity: workerCapacity,
+            syncGate,
             queue: queueProjection.queue,
             inFlight: queueProjection.inFlight,
             queueHeads: queueProjection.queueHeads,

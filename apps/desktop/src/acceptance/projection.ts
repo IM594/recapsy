@@ -7,6 +7,7 @@ import {
   DevAcceptancePolicyVersionSchema,
   type DevAcceptanceSafeErrorCode,
   DevAcceptanceSafeErrorCodeSchema,
+  type DevAcceptanceSyncGate,
 } from '@recapsy/contracts';
 import {
   type AcceptanceJobSummary,
@@ -34,6 +35,7 @@ export type DesktopAcceptanceSnapshot = {
     localMaxWorkers: number;
     serverMaxConcurrentOcr: number;
   };
+  syncGate: DevAcceptanceSyncGate;
   queue?: AcceptanceQueueProjection['queue'];
   inFlight?: AcceptanceJobSummary[];
   queueHeads?: AcceptanceJobSummary[];
@@ -71,6 +73,7 @@ export function projectDesktopAcceptanceStatus(
     policyVersion: toPolicyVersion(input.snapshot.capturePolicyVersion),
     safeErrorCode: toSafeErrorCode(input.snapshot.safeErrorCode),
     workerCapacity: { ...input.snapshot.syncWorkerCapacity },
+    syncGate: { ...input.snapshot.syncGate },
     capture: {
       state: input.snapshot.captureState,
       paused: input.snapshot.capturePaused,

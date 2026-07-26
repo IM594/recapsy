@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 describe('desktop development launch', () => {
-  it('starts Electron from the Desktop package root after building the declared main entry', async () => {
+  it('starts Electron with the acceptance relay only from the development entry', async () => {
     const packageSource = await readFile(path.join(desktopRoot, 'package.json'), 'utf8');
     const packageJson = JSON.parse(packageSource) as {
       main?: unknown;
@@ -15,7 +15,11 @@ describe('desktop development launch', () => {
 
     expect(packageJson.main).toBe('dist/main/electron-entry.js');
     expect(packageJson.scripts?.start).toBe('electron .');
-    expect(packageJson.scripts?.dev).toBe('pnpm run build && pnpm run start');
+    expect(packageJson.scripts?.dev).toBe(
+      'pnpm run build && RECAPSY_DESKTOP_DEV_ACCEPTANCE=1 pnpm run start',
+    );
+    expect(packageJson.scripts?.start).not.toContain('RECAPSY_DESKTOP_DEV_ACCEPTANCE');
+    expect(packageJson.scripts?.['package:macos']).not.toContain('RECAPSY_DESKTOP_DEV_ACCEPTANCE');
   });
 
   it('does not bind a production outbox job-count hard reject into the SQLite store', async () => {

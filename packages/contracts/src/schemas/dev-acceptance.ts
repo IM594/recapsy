@@ -93,6 +93,26 @@ const WorkerCapacitySchema = z
     }
   });
 
+export const DevAcceptanceSyncGateSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('open') }).strict(),
+  z
+    .object({
+      state: z.literal('paused'),
+      reason: z.literal('provider_auth_failed'),
+      pausedAt: IsoDateTimeSchema,
+      nextProbeAt: IsoDateTimeSchema,
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal('half_open'),
+      reason: z.literal('provider_auth_failed'),
+      pausedAt: IsoDateTimeSchema,
+      nextProbeAt: IsoDateTimeSchema,
+    })
+    .strict(),
+]);
+
 const QueueCountsSchema = z
   .object({
     pending: z.number().int().nonnegative(),
@@ -134,6 +154,7 @@ export const DevAcceptanceDesktopStatusSchema = z
     policyVersion: DevAcceptancePolicyVersionSchema.nullable(),
     safeErrorCode: DevAcceptanceSafeErrorCodeSchema.nullable(),
     workerCapacity: WorkerCapacitySchema,
+    syncGate: DevAcceptanceSyncGateSchema,
     capture: z
       .object({
         state: DevAcceptanceCaptureStateSchema,
@@ -175,6 +196,7 @@ export type DevAcceptanceCaptureState = z.infer<typeof DevAcceptanceCaptureState
 export type DevAcceptanceCapturePauseReason = z.infer<typeof DevAcceptanceCapturePauseReasonSchema>;
 export type DevAcceptanceAdmissionReason = z.infer<typeof DevAcceptanceAdmissionReasonSchema>;
 export type DevAcceptanceSafeErrorCode = z.infer<typeof DevAcceptanceSafeErrorCodeSchema>;
+export type DevAcceptanceSyncGate = z.infer<typeof DevAcceptanceSyncGateSchema>;
 export type DevAcceptanceLocalStage = z.infer<typeof DevAcceptanceLocalStageSchema>;
 export type DevAcceptanceDesktopStatus = z.infer<typeof DevAcceptanceDesktopStatusSchema>;
 export type DevAcceptanceDesktopStatusResponse = z.infer<

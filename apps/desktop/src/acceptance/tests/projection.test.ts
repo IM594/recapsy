@@ -17,6 +17,7 @@ describe('desktop acceptance projection', () => {
 
     expect(DevAcceptanceDesktopStatusSchema.parse(projection)).toEqual(projection);
     expect(projection.schemaVersion).toBe(3);
+    expect(projection.syncGate).toEqual({ state: 'open' });
     expect(projection.queue.failed).toBe(2);
     expect(projection.inFlight).toHaveLength(1);
     expect(projection.queueHeads[0]?.safeErrorCode).toBe('provider_timeout');

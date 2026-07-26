@@ -22,6 +22,12 @@ const status: DevAcceptanceDesktopStatus = {
     localMaxWorkers: 4,
     serverMaxConcurrentOcr: 3,
   },
+  syncGate: {
+    nextProbeAt: '2026-07-18T08:01:00.000Z',
+    pausedAt: '2026-07-18T08:00:00.000Z',
+    reason: 'provider_auth_failed',
+    state: 'paused',
+  },
   capture: {
     state: 'paused',
     paused: true,
@@ -128,6 +134,15 @@ describe('development acceptance desktop status contract', () => {
           localMaxWorkers: 4,
           serverMaxConcurrentOcr: 3,
         },
+      }).success,
+    ).toBe(false);
+  });
+
+  test('rejects unbounded provider gate reasons', () => {
+    expect(
+      DevAcceptanceDesktopStatusSchema.safeParse({
+        ...status,
+        syncGate: { reason: 'private provider response', state: 'paused' },
       }).success,
     ).toBe(false);
   });
