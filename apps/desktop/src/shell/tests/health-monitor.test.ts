@@ -11,6 +11,7 @@ const healthyStatus: DesktopShellStatus = {
   lastHeartbeatAt: new Date(0).toISOString(),
   screenRecording: 'granted',
   syncBlocked: 0,
+  syncGate: { state: 'open' },
   syncFailed: 0,
   syncPending: 0,
   syncRetrying: 0,
@@ -96,6 +97,25 @@ describe('desktop health monitor', () => {
         .evaluate({ ...healthyStatus, syncBlocked: 1 }, 2)
         .newAlerts.map((alert) => alert.kind),
     ).toEqual(['sync_blocked']);
+  });
+
+  it('alerts once when provider authentication pauses all workspace sync', () => {
+    const monitor = createDesktopHealthMonitor();
+    const paused = {
+      ...healthyStatus,
+      syncGate: {
+        nextProbeAt: '2026-07-27T00:01:00.000Z',
+        pausedAt: '2026-07-27T00:00:00.000Z',
+        reason: 'provider_auth_failed' as const,
+        state: 'paused' as const,
+      },
+    };
+
+    expect(monitor.evaluate(paused, 0).newAlerts.map((alert) => alert.kind)).toEqual([
+      'sync_paused',
+    ]);
+    expect(monitor.evaluate(paused, 1).newAlerts).toEqual([]);
+    expect(monitor.evaluate(healthyStatus, 2).activeAlerts).toEqual([]);
   });
 
   it('alerts when a running capture silently stops heartbeating, only after the grace period', () => {

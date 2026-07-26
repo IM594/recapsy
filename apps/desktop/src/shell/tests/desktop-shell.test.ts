@@ -85,6 +85,7 @@ describe('desktop shell', () => {
       lastHeartbeatAt: new Date().toISOString(),
       screenRecording: 'not_determined',
       syncBlocked: 0,
+      syncGate: { state: 'open' },
       syncFailed: 0,
       syncPending: 1,
       syncRetrying: 0,
@@ -96,7 +97,11 @@ describe('desktop shell', () => {
         async openScreenRecordingSettings() {},
         async pauseCapture() {},
         async refreshPermissions() {},
+        async requeueTerminalJobs() {
+          return 0;
+        },
         async resumeCapture() {},
+        async resumeProviderSync() {},
       },
       adapters,
       mainWindowHtmlPath: '/tmp/main-window.html',
@@ -298,6 +303,40 @@ describe('desktop shell', () => {
     harness.shell.dispose();
   });
 
+  it('exposes provider-sync resume and terminal recovery as explicit tray actions', async () => {
+    const actions: string[] = [];
+    const harness = createShellHarness({
+      actions: {
+        async requeueTerminalJobs() {
+          actions.push('requeue');
+          return 2;
+        },
+        async resumeProviderSync() {
+          actions.push('resume');
+        },
+      },
+      status: status({
+        syncFailed: 2,
+        syncGate: {
+          nextProbeAt: '2026-07-27T00:01:00.000Z',
+          pausedAt: '2026-07-27T00:00:00.000Z',
+          reason: 'provider_auth_failed',
+          state: 'paused',
+        },
+      }),
+    });
+
+    await harness.shell.refresh();
+    const menu = harness.menuBuilds.at(-1);
+    findAction(menu, '恢复同步').click?.();
+    findAction(menu, '重新处理失败项').click?.();
+    await flushMicrotasks();
+
+    expect(actions).toEqual(['resume', 'requeue']);
+    expect(harness.tooltipUpdates.at(-1)).toContain('同步已暂停');
+    harness.shell.dispose();
+  });
+
   it.each([
     {
       name: 'running capture without Screen Recording permission',
@@ -352,8 +391,10 @@ function createShellHarness(
       pauseCapture(): Promise<void>;
       resumeCapture(): Promise<void>;
       refreshPermissions(): Promise<void>;
+      requeueTerminalJobs(): Promise<number>;
       openScreenRecordingSettings(): Promise<void>;
       openAccessibilitySettings(): Promise<void>;
+      resumeProviderSync(): Promise<void>;
     }>;
     onSafeError?(message: string): void;
     status?: DesktopShellStatus;
@@ -407,8 +448,14 @@ function createShellHarness(
         refreshPermissionCalls += 1;
         await options.actions?.refreshPermissions?.();
       },
+      async requeueTerminalJobs() {
+        return (await options.actions?.requeueTerminalJobs?.()) ?? 0;
+      },
       async resumeCapture() {
         await options.actions?.resumeCapture?.();
+      },
+      async resumeProviderSync() {
+        await options.actions?.resumeProviderSync?.();
       },
     },
     adapters,
@@ -497,6 +544,7 @@ function status(overrides: Partial<DesktopShellStatus> = {}): DesktopShellStatus
     lastHeartbeatAt: new Date().toISOString(),
     screenRecording: 'granted',
     syncBlocked: 0,
+    syncGate: { state: 'open' },
     syncFailed: 0,
     syncPending: 0,
     syncRetrying: 0,

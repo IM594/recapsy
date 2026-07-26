@@ -129,7 +129,12 @@
       <div class="row"><span>已阻塞</span><strong id="sync-blocked">—</strong></div>
       <div class="row"><span>最老活跃任务</span><strong id="sync-oldest">—</strong></div>
       <div class="row"><span>工作线程</span><strong id="sync-workers">—</strong></div>
+      <div class="row"><span>Provider 同步</span><strong id="sync-gate">—</strong></div>
       <div class="row"><span>最近同步错误</span><strong id="sync-error">无</strong></div>
+      <div class="actions">
+        <button id="sync-resume" type="button">恢复同步</button>
+        <button id="sync-requeue-terminal" type="button">重新处理失败项</button>
+      </div>
     </section>
 
     <section>
@@ -154,6 +159,8 @@
       const privacyBundleInput = document.getElementById('privacy-bundle-id');
       const privacyRules = document.getElementById('privacy-rules');
       const retentionCleanButton = document.getElementById('retention-clean');
+      const syncResumeButton = document.getElementById('sync-resume');
+      const syncRequeueTerminalButton = document.getElementById('sync-requeue-terminal');
       let screenRecordingRequestInFlight = false;
       let screenRecordingRequired = true;
 
@@ -267,6 +274,15 @@
             ? `${status.syncLastErrorCode}${status.syncLastErrorMessage ? ` · ${status.syncLastErrorMessage}` : ''}`
             : '无',
         );
+        setText(
+          'sync-gate',
+          status.syncGate && status.syncGate.state !== 'open'
+            ? status.syncGate.state === 'half_open'
+              ? '正在探测恢复'
+              : '凭据异常，已暂停'
+            : '正常',
+        );
+        syncResumeButton.disabled = !status.syncGate || status.syncGate.state === 'open';
         if (status.retentionPreview) {
           setText(
             'retention-preview',
@@ -328,6 +344,7 @@
           syncWorkerCapacity: sync.workerCapacity,
           syncLastErrorCode: sync.lastError && sync.lastError.code,
           syncLastErrorMessage: sync.lastError && sync.lastError.message,
+          syncGate: sync.gate,
           retentionPreview,
         });
         renderPrivacyRules(localRules.rules);
@@ -361,6 +378,25 @@
           await refreshAll();
         } catch (error) {
           errorEl.textContent = error.message || '继续失败';
+        }
+      });
+
+      syncResumeButton.addEventListener('click', async () => {
+        try {
+          await unwrap(api.syncResume());
+          await refreshAll();
+        } catch (error) {
+          errorEl.textContent = error.message || '恢复同步失败';
+        }
+      });
+
+      syncRequeueTerminalButton.addEventListener('click', async () => {
+        try {
+          const result = await unwrap(api.syncRequeueTerminal());
+          await refreshAll();
+          statusEl.textContent = `已重新排队 ${result.requeuedJobs} 项`;
+        } catch (error) {
+          errorEl.textContent = error.message || '重新处理失败项失败';
         }
       });
 

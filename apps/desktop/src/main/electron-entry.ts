@@ -305,8 +305,12 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             client: context.commandClient,
           });
         },
+        requeueTerminalJobs: () => context.syncRuntime.requeueTerminalJobs(),
         resumeCapture: async () => {
           await context.control.resume();
+        },
+        resumeProviderSync: async () => {
+          context.syncRuntime.resumeProviderSync();
         },
       },
       adapters: {
@@ -351,6 +355,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
           const snapshot = context.control.getSnapshot();
           const permissions = snapshot.permissions;
           const workerCapacity = context.syncRuntime.getCapacityStatus();
+          const syncGate = context.syncRuntime.getGateStatus();
           const sync = await createSyncQueueSummary(context.store, context.workspaceId, {
             now: new Date().toISOString(),
             workerCapacity,
@@ -383,6 +388,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             ...(lastError ? { lastErrorMessage: lastError.message } : {}),
             screenRecording: permissions.screenRecording,
             syncBlocked: sync.blocked,
+            syncGate,
             syncCompletedPerMinute: sync.completedPerMinute,
             syncFailed: sync.failed,
             syncInputPerMinute: sync.inputPerMinute,

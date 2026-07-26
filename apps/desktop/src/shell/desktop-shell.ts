@@ -65,6 +65,8 @@ export type DesktopShellActions = {
   openScreenRecordingSettings(): Promise<void>;
   openAccessibilitySettings(): Promise<void>;
   refreshPermissions(): Promise<void>;
+  requeueTerminalJobs(): Promise<number>;
+  resumeProviderSync(): Promise<void>;
 };
 
 export type DesktopShellOptions = {
@@ -245,6 +247,29 @@ class DesktopShellController implements DesktopShell {
           !blocked,
         kind: 'action',
         label: '继续采集',
+      },
+      { kind: 'separator' },
+      {
+        click: () => {
+          this.runInBackground(async () => {
+            await this.options.actions.resumeProviderSync();
+            await this.refresh();
+          });
+        },
+        enabled: status.syncGate.state !== 'open',
+        kind: 'action',
+        label: '恢复同步',
+      },
+      {
+        click: () => {
+          this.runInBackground(async () => {
+            await this.options.actions.requeueTerminalJobs();
+            await this.refresh();
+          });
+        },
+        enabled: status.syncFailed + status.syncBlocked > 0,
+        kind: 'action',
+        label: '重新处理失败项',
       },
       { kind: 'separator' },
       {

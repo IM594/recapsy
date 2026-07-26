@@ -62,6 +62,20 @@ export type SyncQueueSummaryDto = {
   };
   nextRetryAt?: string;
   lastError?: IpcError;
+  gate: SyncGateStatusDto;
+};
+
+export type SyncGateStatusDto =
+  | { state: 'open' }
+  | {
+      state: 'paused' | 'half_open';
+      reason: 'provider_auth_failed';
+      pausedAt: string;
+      nextProbeAt: string;
+    };
+
+export type SyncTerminalRecoveryDto = {
+  requeuedJobs: number;
 };
 
 export type RetentionPreviewDto = {

@@ -8,6 +8,7 @@ export type DesktopHealthAlertKind =
   | 'capture_failures'
   | 'sync_blocked'
   | 'sync_failed'
+  | 'sync_paused'
   | 'sync_backlog';
 
 export type DesktopHealthAlert = {
@@ -87,6 +88,12 @@ const ALERTS: Readonly<Record<DesktopHealthAlertKind, DesktopHealthAlert>> = {
     kind: 'sync_failed',
     title: `${productIdentity.displayName} 同步失败`,
     trayLabel: '同步失败',
+  },
+  sync_paused: {
+    body: `Provider 凭据验证失败，同步已暂停。请在修复配置后打开 ${productIdentity.displayName} 恢复同步。`,
+    kind: 'sync_paused',
+    title: `${productIdentity.displayName} 同步已暂停`,
+    trayLabel: '同步已暂停',
   },
   sync_backlog: {
     body: `采集同步已积压数分钟。请打开 ${productIdentity.displayName} 查看队列。`,
@@ -237,6 +244,9 @@ function activeAlertKinds(
   }
   if (status.syncFailed > 0) {
     active.push('sync_failed');
+  }
+  if (status.syncGate.state !== 'open') {
+    active.push('sync_paused');
   }
   if (
     status.syncPending >= options.syncBacklogThreshold &&

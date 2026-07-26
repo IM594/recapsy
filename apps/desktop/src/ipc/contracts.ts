@@ -5,7 +5,9 @@ import type {
   PrivacySettingsOpenResultDto,
   RetentionExecutionDto,
   RetentionPreviewDto,
+  SyncGateStatusDto,
   SyncQueueSummaryDto,
+  SyncTerminalRecoveryDto,
 } from './dto';
 import { type IpcErrorEnvelope, createIpcErrorEnvelope } from './errors';
 
@@ -79,6 +81,20 @@ export const IPC_CHANNEL_REGISTRY = [
     channel: 'sync.getSummary',
     description: 'Returns the local sync queue summary.',
     methodName: 'syncGetSummary',
+    namespace: 'sync',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, SyncGateStatusDto>({
+    channel: 'sync.resume',
+    description: 'Explicitly reopens provider sync after an operator fixes credentials.',
+    methodName: 'syncResume',
+    namespace: 'sync',
+    request: validateEmptyRequest,
+  }),
+  defineChannel<EmptyRequest, SyncTerminalRecoveryDto>({
+    channel: 'sync.requeueTerminal',
+    description: 'Requeues failed and blocked jobs in the active workspace.',
+    methodName: 'syncRequeueTerminal',
     namespace: 'sync',
     request: validateEmptyRequest,
   }),

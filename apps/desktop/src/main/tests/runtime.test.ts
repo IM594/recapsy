@@ -1054,6 +1054,7 @@ class FakeDesktopShell implements DesktopShell {
       captureState: 'running',
       screenRecording: 'granted',
       syncBlocked: 0,
+      syncGate: { state: 'open' as const },
       syncFailed: 0,
       syncPending: 0,
       syncRetrying: 0,

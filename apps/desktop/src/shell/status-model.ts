@@ -1,4 +1,5 @@
 import productIdentity from '../product-identity.json';
+import type { SyncGateStatus } from '../sync/index';
 
 export type DesktopShellStatus = {
   captureState: string;
@@ -11,6 +12,7 @@ export type DesktopShellStatus = {
   syncRetrying: number;
   syncFailed: number;
   syncBlocked: number;
+  syncGate: SyncGateStatus;
   syncInputPerMinute?: number;
   syncCompletedPerMinute?: number;
   syncLastErrorCode?: string;
@@ -65,6 +67,7 @@ export function formatTrayTooltip(
     status.syncLastErrorCode || status.lastErrorCode
       ? `错误 ${status.syncLastErrorCode ?? status.lastErrorCode}`
       : '错误无';
+  const syncGateLabel = status.syncGate.state === 'open' ? undefined : '同步已暂停';
   const alertLabel =
     activeAlerts.length > 0
       ? `需要注意：${activeAlerts.map((alert) => alert.trayLabel).join('、')}`
@@ -78,6 +81,7 @@ export function formatTrayTooltip(
     admissionLabel,
     policyLabel,
     errorLabel,
+    syncGateLabel,
     alertLabel,
   ]
     .filter((value): value is string => Boolean(value))

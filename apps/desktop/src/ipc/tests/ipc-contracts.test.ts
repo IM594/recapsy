@@ -36,6 +36,8 @@ describe('desktop ipc contracts', () => {
       'capture.pause',
       'capture.resume',
       'sync.getSummary',
+      'sync.resume',
+      'sync.requeueTerminal',
       'diagnostics.previewRetention',
       'diagnostics.runRetention',
       'permissions.getStatus',
@@ -79,6 +81,8 @@ describe('desktop ipc contracts', () => {
       'capturePause',
       'captureResume',
       'syncGetSummary',
+      'syncResume',
+      'syncRequeueTerminal',
       'diagnosticsPreviewRetention',
       'diagnosticsRunRetention',
       'permissionsGetStatus',
@@ -101,6 +105,16 @@ describe('desktop ipc contracts', () => {
 
     expect(renderer).toContain('id="retention-clean"');
     expect(renderer).toContain('api.diagnosticsRunRetention({ olderThanDays: 30 })');
+  });
+
+  it('keeps provider-sync recovery actions reachable from the current renderer', async () => {
+    const renderer = await readFile(
+      new URL('../../shell/main-window.html', import.meta.url),
+      'utf8',
+    );
+
+    expect(renderer).toContain('api.syncResume()');
+    expect(renderer).toContain('api.syncRequeueTerminal()');
   });
 
   it('rejects renderer DTOs with token, path, or raw helper payload fields', () => {

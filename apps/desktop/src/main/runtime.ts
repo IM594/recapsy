@@ -43,6 +43,7 @@ import {
   type SyncLoopOptions,
   type SyncQueueStore,
   type SyncRunResult,
+  type SyncRuntime,
   type SyncServerApi,
   createCoverageSyncDriver,
   createSyncIpcHandlers,
@@ -74,7 +75,7 @@ export type DesktopShellFactoryContext = {
   commandClient: CaptureHelperCommandClient;
   control: CaptureControl;
   store: DesktopStore;
-  syncRuntime: SyncLoop & { getCapacityStatus(): import('../sync/index').SyncWorkerCapacityStatus };
+  syncRuntime: SyncRuntime;
   workspaceId: string;
   workspaceIdVerified: boolean;
 };
@@ -259,8 +260,11 @@ export function createElectronMainRuntime(
           workspaceId,
         }),
         ...createSyncIpcHandlers({
+          getGateStatus: () => syncRuntime.getGateStatus(),
           getWorkerCapacity: () => syncRuntime.getCapacityStatus(),
           now,
+          requeueTerminalJobs: () => syncRuntime.requeueTerminalJobs(),
+          resumeProviderSync: () => syncRuntime.resumeProviderSync(),
           store,
           workspaceId,
         }),
