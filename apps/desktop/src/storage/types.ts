@@ -165,10 +165,23 @@ export type RecoverInterruptedOutboxJobInput = {
   leaseToken?: string;
 };
 
+export type ReleaseOutboxJobInput = {
+  id: string;
+  lastSafeError: SafeOperationalError;
+  leaseToken?: string;
+  now: string;
+};
+
 export type ClaimRetryableOutboxJobInput = {
   workspaceId: string;
   now: string;
   maxAttempts: number;
+};
+
+/** Recovery outlet for jobs stranded in `failed` or `blocked`; `cancelled` stays terminal. */
+export type RequeueTerminalOutboxJobsInput = {
+  workspaceId: string;
+  now: string;
 };
 
 export type OutboxJobListFilter = {

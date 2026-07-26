@@ -5,6 +5,7 @@ import type {
   OutboxJobStateUpdate,
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
+  ReleaseOutboxJobInput,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
   StoredOcrResult,
@@ -46,6 +47,7 @@ export type SyncJobStore = {
     id: string,
     input: OutboxSafeErrorInput,
   ): Promise<OperationalStoreResult<OutboxJob>>;
+  releaseOutboxJob(input: ReleaseOutboxJobInput): Promise<OperationalStoreResult<OutboxJob>>;
   updateOutboxJobState(
     id: string,
     update: OutboxJobStateUpdate,
@@ -318,7 +320,28 @@ async function handleSyncError(
     };
   }
 
-  await recordSafeError(options, job, classified);
+  if (classified.code === 'provider_auth_failed') {
+    await requireOutboxWrite(
+      options.store.releaseOutboxJob({
+        id: job.id,
+        lastSafeError: {
+          code: classified.code,
+          message: syncSafeMessage(classified.code),
+          retryable: true,
+        },
+        leaseToken: job.leaseToken,
+        now: options.clock.now(),
+      }),
+    );
+    return {
+      code: 'provider_auth_failed',
+      jobId: job.id,
+      processed: 1,
+      status: 'retry_wait',
+    };
+  }
+
+  const updatedJob = await recordSafeError(options, job, classified);
   return {
     ...(classified.code === 'offline' || classified.code === 'provider_rate_limited'
       ? { code: classified.code }
@@ -326,7 +349,7 @@ async function handleSyncError(
     jobId: job.id,
     processed: 1,
     ...(classified.code === 'provider_rate_limited' ? { providerOutcome: 'rate_limited' } : {}),
-    status: classified.retryable ? 'retry_wait' : 'failed',
+    status: updatedJob.state === 'failed' ? 'failed' : 'retry_wait',
   };
 }
 
@@ -377,17 +400,18 @@ async function recordSafeError(
   options: SyncJobExecutorOptions,
   job: OutboxJob,
   error: { code: string; retryable: boolean },
-): Promise<void> {
+  maxAttempts = options.maxAttempts,
+): Promise<OutboxJob> {
   const retryBase = options.clock.now();
   const delayMs = computeRetryBackoffDelayMs(
     options.retryBackoff,
     job.attempt,
     options.jitterRandom ?? Math.random,
   );
-  await requireOutboxWrite(
+  return await requireOutboxWrite(
     options.store.recordOutboxSafeError(job.id, {
       code: error.code,
-      maxAttempts: options.maxAttempts,
+      maxAttempts,
       leaseToken: job.leaseToken,
       message: syncSafeMessage(error.code),
       now: options.clock.now(),
@@ -406,9 +430,9 @@ class OutboxLeaseLostError extends Error {
 
 async function requireOutboxWrite(
   result: Promise<OperationalStoreResult<OutboxJob>>,
-): Promise<void> {
+): Promise<OutboxJob> {
   const settled = await result;
-  if (settled.ok) return;
+  if (settled.ok) return settled.value;
   if (settled.error.code === 'outbox_lease_lost') {
     throw new OutboxLeaseLostError();
   }

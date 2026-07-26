@@ -45,6 +45,8 @@ import type {
   RecoverHangingCoverageSegmentInput,
   RecoverInterruptedOutboxJobInput,
   RecoverPendingAssetCleanupInput,
+  ReleaseOutboxJobInput,
+  RequeueTerminalOutboxJobsInput,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
   SetAssetCleanupStateInput,
@@ -393,6 +395,55 @@ class InMemoryOperationalStore {
     this.outboxJobs.set(id, updated);
 
     return success(cloneOutboxJob(updated));
+  }
+
+  async releaseOutboxJob(input: ReleaseOutboxJobInput): Promise<OperationalStoreResult<OutboxJob>> {
+    const job = this.outboxJobs.get(input.id);
+    if (!job) {
+      return failure(notFound('outbox_job_not_found', 'Outbox job was not found.'));
+    }
+    if (isTerminalOutboxState(job.state)) {
+      return failure(terminalTransitionConflict());
+    }
+    if (!leaseMatches(job, input.leaseToken)) {
+      return failure(leaseLost());
+    }
+
+    const updated: OutboxJob = {
+      ...job,
+      lastSafeError: { ...input.lastSafeError },
+      leaseExpiresAt: undefined,
+      leaseToken: undefined,
+      lockedAt: undefined,
+      nextRetryAt: input.now,
+      state: 'pending',
+      terminalReason: undefined,
+      updatedAt: input.now,
+    };
+    this.outboxJobs.set(input.id, updated);
+    return success(cloneOutboxJob(updated));
+  }
+
+  async requeueTerminalOutboxJobs(input: RequeueTerminalOutboxJobsInput): Promise<number> {
+    let requeued = 0;
+    for (const [id, job] of this.outboxJobs) {
+      if (job.workspaceId !== input.workspaceId) continue;
+      if (job.state !== 'failed' && job.state !== 'blocked') continue;
+      this.outboxJobs.set(id, {
+        ...job,
+        attempt: 0,
+        lastSafeError: undefined,
+        leaseExpiresAt: undefined,
+        leaseToken: undefined,
+        lockedAt: undefined,
+        nextRetryAt: input.now,
+        state: 'pending',
+        terminalReason: undefined,
+        updatedAt: input.now,
+      });
+      requeued += 1;
+    }
+    return requeued;
   }
 
   async recoverInterruptedOutboxJob(

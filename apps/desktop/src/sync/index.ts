@@ -16,6 +16,14 @@ export type {
 } from './reconciliation';
 export { createSyncWorker } from './worker';
 export type { SyncWorkerOptions, SyncWorkerStore } from './worker';
+export { createSyncGate } from './gate';
+export type {
+  SyncGate,
+  SyncGateOptions,
+  SyncGateReason,
+  SyncGateState,
+  SyncGateStatus,
+} from './gate';
 export { recoverSyncQueue } from './recovery';
 export type { SyncRecoveryOptions, SyncRecoverySummary } from './recovery';
 export { createSyncLoop } from './loop';

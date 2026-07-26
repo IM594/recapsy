@@ -345,19 +345,33 @@ describe('memory operational store', () => {
       workspaceId: 'workspace_1',
     });
 
-    const stale = await store.markOutboxJobTerminal('job_lease', {
+    const staleRelease = await store.releaseOutboxJob({
+      id: 'job_lease',
+      lastSafeError: {
+        code: 'provider_auth_failed',
+        message: 'Provider authentication failed.',
+        retryable: true,
+      },
       leaseToken: first?.leaseToken,
       now: '2026-07-06T00:00:02.000Z',
+    });
+    const stale = await store.markOutboxJobTerminal('job_lease', {
+      leaseToken: first?.leaseToken,
+      now: '2026-07-06T00:00:03.000Z',
       reason: 'ocr_synced',
       state: 'synced',
     });
     const current = await store.markOutboxJobTerminal('job_lease', {
       leaseToken: second?.leaseToken,
-      now: '2026-07-06T00:00:03.000Z',
+      now: '2026-07-06T00:00:04.000Z',
       reason: 'ocr_synced',
       state: 'synced',
     });
 
+    expect(staleRelease).toMatchObject({
+      error: { code: 'outbox_lease_lost' },
+      ok: false,
+    });
     expect(stale).toEqual({
       error: {
         code: 'outbox_lease_lost',
@@ -406,6 +420,71 @@ describe('memory operational store', () => {
       state: 'failed',
       terminalReason: 'server_unavailable',
     });
+  });
+
+  it('requeues terminal jobs into a claimable pending state without reviving cancelled work', async () => {
+    const store = createMemoryStore();
+    await store.createOutboxJob(createJob({ id: 'job_failed' }));
+    await store.createOutboxJob(createJob({ id: 'job_blocked', idempotencyKey: 'idem_2' }));
+    await store.createOutboxJob(createJob({ id: 'job_cancelled', idempotencyKey: 'idem_3' }));
+    await store.recordOutboxSafeError('job_failed', {
+      code: 'provider_auth_failed',
+      maxAttempts: 1,
+      message: 'Provider authentication failed.',
+      now: '2026-07-06T00:00:05.000Z',
+      retryable: false,
+    });
+    await store.markOutboxJobTerminal('job_blocked', {
+      now: '2026-07-06T00:00:06.000Z',
+      reason: 'local_asset_missing',
+      state: 'blocked',
+    });
+    await store.markOutboxJobTerminal('job_cancelled', {
+      now: '2026-07-06T00:00:07.000Z',
+      reason: 'user_cancelled',
+      state: 'cancelled',
+    });
+
+    const requeued = await store.requeueTerminalOutboxJobs({
+      now: '2026-07-06T00:10:00.000Z',
+      workspaceId: 'workspace_1',
+    });
+
+    expect(requeued).toBe(2);
+    expect(await store.getOutboxJob('job_failed')).toMatchObject({
+      attempt: 0,
+      nextRetryAt: '2026-07-06T00:10:00.000Z',
+      state: 'pending',
+      terminalReason: undefined,
+    });
+    expect(await store.getOutboxJob('job_blocked')).toMatchObject({
+      attempt: 0,
+      state: 'pending',
+    });
+    expect(await store.getOutboxJob('job_cancelled')).toMatchObject({ state: 'cancelled' });
+  });
+
+  it('requeues only the requested workspace', async () => {
+    const store = createMemoryStore();
+    await store.createOutboxJob(createJob({ id: 'job_mine' }));
+    await store.createOutboxJob(
+      createJob({ id: 'job_other', idempotencyKey: 'idem_2', workspaceId: 'workspace_2' }),
+    );
+    for (const id of ['job_mine', 'job_other']) {
+      await store.markOutboxJobTerminal(id, {
+        now: '2026-07-06T00:00:06.000Z',
+        reason: 'provider_auth_failed',
+        state: 'failed',
+      });
+    }
+
+    expect(
+      await store.requeueTerminalOutboxJobs({
+        now: '2026-07-06T00:10:00.000Z',
+        workspaceId: 'workspace_1',
+      }),
+    ).toBe(1);
+    expect(await store.getOutboxJob('job_other')).toMatchObject({ state: 'failed' });
   });
 
   it('treats cancelled as terminal and never revives it through retry or state update', async () => {

@@ -27,6 +27,8 @@ import type {
   RecoverHangingCoverageSegmentInput,
   RecoverInterruptedOutboxJobInput,
   RecoverPendingAssetCleanupInput,
+  ReleaseOutboxJobInput,
+  RequeueTerminalOutboxJobsInput,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
   SetAssetCleanupStateInput,
@@ -247,6 +249,14 @@ class SqliteOperationalStore {
     input: RecoverInterruptedOutboxJobInput,
   ): Promise<OperationalStoreResult<OutboxJob>> {
     return this.outbox.recoverInterrupted(input);
+  }
+
+  releaseOutboxJob(input: ReleaseOutboxJobInput): Promise<OperationalStoreResult<OutboxJob>> {
+    return this.outbox.release(input);
+  }
+
+  requeueTerminalOutboxJobs(input: RequeueTerminalOutboxJobsInput): Promise<number> {
+    return this.outbox.requeueTerminal(input);
   }
 
   upsertAssetCacheRef(asset: AssetCacheRef): Promise<AssetCacheRef> {

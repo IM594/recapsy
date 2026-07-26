@@ -538,13 +538,13 @@ describe('electron main runtime wiring', () => {
     app.triggerReady();
     await handle.ready;
 
-    expect(syncLoop.startCalls).toBe(2);
+    expect(syncLoop.startCalls).toBe(1);
     expect(syncLoop.stopCalls).toBe(0);
 
     app.emitBeforeQuit(new FakeQuitEvent());
     await flushMicrotasks();
 
-    expect(syncLoop.stopCalls).toBe(2);
+    expect(syncLoop.stopCalls).toBe(1);
   });
 
   it('keeps the tray shell available when the capture helper fails during startup', async () => {
@@ -609,7 +609,7 @@ describe('electron main runtime wiring', () => {
     await flushMicrotasks();
     expect(shell.disposeCalls).toBe(1);
     expect(helperClient.stopCalls).toBe(1);
-    expect(syncLoop.stopCalls).toBe(2);
+    expect(syncLoop.stopCalls).toBe(1);
   });
 
   it('routes native asset write failures into storage admission without dropping accepted work', async () => {
@@ -703,7 +703,7 @@ describe('electron main runtime wiring', () => {
 
     expect(failingShell.disposeCalls).toBe(1);
     expect(helperClient.stopCalls).toBe(1);
-    expect(syncLoop.stopCalls).toBe(2);
+    expect(syncLoop.stopCalls).toBe(1);
     expect(app.exitCalls).toEqual([0]);
   });
 

@@ -1,5 +1,6 @@
 import { createSyncWorkerCapacity } from './capacity';
 import type { SyncWorkerCapacity, SyncWorkerCapacityStatus } from './capacity';
+import { type SyncGateStatus, createSyncGate } from './gate';
 import { createSyncJobExecutor } from './job';
 import { createSyncLoop as createRealSyncLoop } from './loop';
 import type { SyncLoop, SyncLoopOptions } from './loop';
@@ -14,7 +15,7 @@ import type {
 import { createSyncWorker } from './worker';
 
 const DEFAULT_SYNC_MAX_ATTEMPTS = 15;
-const DEFAULT_SYNC_LOCAL_MAX_WORKERS = 8;
+const DEFAULT_SYNC_LOCAL_MAX_WORKERS = 1;
 const DEFAULT_SYNC_RETRY_BACKOFF: RetryBackoffConfig = {
   baseMs: 2000,
   factor: 2,
@@ -40,6 +41,7 @@ export type SyncRuntimeOptions = {
   activeDelayMs?: number;
   localMaxWorkers?: number;
   maxAttempts?: number;
+  providerProbeDelayMs?: number;
   now(): string;
   onError?(error: unknown): void;
   onResult?(result: SyncRunResult): void;
@@ -52,12 +54,16 @@ export type SyncRuntimeOptions = {
 
 export type SyncRuntime = SyncLoop & {
   getCapacityStatus(): SyncWorkerCapacityStatus;
+  getGateStatus(): SyncGateStatus;
   recover(): Promise<void>;
+  requeueTerminalJobs(): Promise<number>;
+  resumeProviderSync(): void;
   updateServerMaxConcurrentOcr(value: number): void;
 };
 
 export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
   const localMaxWorkers = positiveInteger(options.localMaxWorkers, DEFAULT_SYNC_LOCAL_MAX_WORKERS);
+  const gate = createSyncGate({ probeDelayMs: options.providerProbeDelayMs });
   let capacity: SyncWorkerCapacity | undefined;
   let serverMaxConcurrentOcr = getServerMaxConcurrentOcr();
   let loops: SyncLoop[] = [];
@@ -118,6 +124,7 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
     const worker = createSyncWorker({
       clock,
       executeJob,
+      gate,
       maxAttempts,
       store: options.store,
       workspace,
@@ -128,6 +135,7 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
       idleDelayMs: options.idleDelayMs,
       onError: options.onError,
       onResult: (result) => {
+        gate.observe(result, options.now());
         const change = capacity?.observe(result);
         options.onResult?.(result);
         if (change?.changed) {
@@ -149,6 +157,16 @@ export function createSyncRuntime(options: SyncRuntimeOptions): SyncRuntime {
       });
     },
     getCapacityStatus,
+    getGateStatus: () => gate.getStatus(),
+    async requeueTerminalJobs() {
+      return await options.store.requeueTerminalOutboxJobs({
+        now: options.now(),
+        workspaceId: options.workspaceId,
+      });
+    },
+    resumeProviderSync() {
+      gate.resume();
+    },
     start() {
       if (running) {
         return;

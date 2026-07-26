@@ -1,9 +1,38 @@
 import { describe, expect, it } from 'bun:test';
+import { createMemoryStore } from '../../storage';
+import type { OutboxJobCreateInput } from '../../storage';
 import type { SyncLoop, SyncLoopOptions } from '../loop';
 import { createSyncRuntime } from '../runtime';
 import type { SyncQueueStore, SyncRunResult, SyncServerApi } from '../types';
 
 describe('sync runtime worker pool', () => {
+  it('starts one worker by default for deterministic local diagnosis', async () => {
+    const loops: ControlledLoop[] = [];
+    const runtime = createSyncRuntime({
+      createLoop(options) {
+        const loop = new ControlledLoop(options);
+        loops.push(loop);
+        return loop;
+      },
+      createServerApi: () => unusedServerApi,
+      now: () => '2026-07-19T00:00:00.000Z',
+      resolveServerMaxConcurrentOcr: () => 8,
+      store: unusedStore,
+      workspaceId: 'workspace-1',
+    });
+
+    runtime.start();
+    await waitForActiveLoops(loops, 1);
+
+    expect(runtime.getCapacityStatus()).toEqual({
+      activeWorkers: 1,
+      localMaxWorkers: 1,
+      serverMaxConcurrentOcr: 8,
+    });
+
+    await runtime.stop();
+  });
+
   it('shrinks real loops on throttle, recovers within policy and local limits, and stops every loop', async () => {
     const loops: ControlledLoop[] = [];
     const runtime = createSyncRuntime({
@@ -57,6 +86,48 @@ describe('sync runtime worker pool', () => {
 
     expect(activeLoops(loops)).toHaveLength(0);
     expect(loops.every((loop) => loop.stopCalls === 1)).toBe(true);
+  });
+
+  it('publishes the shared provider gate and exposes explicit resume and terminal recovery', async () => {
+    const loops: ControlledLoop[] = [];
+    const store = createMemoryStore();
+    await store.createOutboxJob(createJob());
+    await store.markOutboxJobTerminal('job_1', {
+      now: '2026-07-27T00:00:00.000Z',
+      reason: 'provider_auth_failed',
+      state: 'failed',
+    });
+    const runtime = createSyncRuntime({
+      createLoop(options) {
+        const loop = new ControlledLoop(options);
+        loops.push(loop);
+        return loop;
+      },
+      createServerApi: () => unusedServerApi,
+      now: () => '2026-07-27T00:00:00.000Z',
+      store,
+      workspaceId: 'workspace_1',
+    });
+
+    runtime.start();
+    await waitForActiveLoops(loops, 1);
+    activeLoop(loops).emit({
+      code: 'provider_auth_failed',
+      processed: 1,
+      status: 'retry_wait',
+    });
+
+    expect(runtime.getGateStatus()).toMatchObject({
+      reason: 'provider_auth_failed',
+      state: 'paused',
+    });
+    expect(await runtime.requeueTerminalJobs()).toBe(1);
+    expect(await store.getOutboxJob('job_1')).toMatchObject({ attempt: 0, state: 'pending' });
+
+    runtime.resumeProviderSync();
+    expect(runtime.getGateStatus()).toEqual({ state: 'open' });
+
+    await runtime.stop();
   });
 });
 
@@ -127,3 +198,28 @@ async function flushMicrotasks(): Promise<void> {
 
 const unusedServerApi = {} as SyncServerApi;
 const unusedStore = {} as SyncQueueStore;
+
+function createJob(): OutboxJobCreateInput {
+  const now = '2026-07-27T00:00:00.000Z';
+  return {
+    assetRefId: 'asset_1',
+    capture: {
+      appName: 'Code',
+      captureType: 'screen',
+      capturedAt: now,
+      observedAt: now,
+      privacyDecision: {
+        action: 'allow',
+        decidedAt: now,
+        policyVersion: 'policy_1',
+        reasons: [],
+      },
+    },
+    createdAt: now,
+    deviceId: 'device_1',
+    id: 'job_1',
+    idempotencyKey: 'idem_1',
+    payloadHash: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    workspaceId: 'workspace_1',
+  };
+}

@@ -330,6 +330,46 @@ describe('desktop sync job executor', () => {
     });
   });
 
+  it('releases provider auth failures without consuming the job attempt budget', async () => {
+    const authApi = createApi({
+      async runOcrProxy() {
+        throw new ServerApiError({
+          code: 'provider_auth_failed',
+          retryable: false,
+          safeMessage: 'Provider authentication failed.',
+        });
+      },
+    });
+    const store = createMemoryStore();
+    await seedPendingCapture(store);
+    await store.recordOutboxSafeError('job_1', {
+      code: 'provider_unavailable',
+      maxAttempts: 15,
+      message: 'Provider is unavailable.',
+      now,
+      retryable: true,
+    });
+    const runner = createJobRunner({
+      api: authApi,
+      maxAttempts: 15,
+      store,
+    });
+
+    expect(await runner.runOnce()).toMatchObject({
+      code: 'provider_auth_failed',
+      status: 'retry_wait',
+    });
+    const released = await store.getOutboxJob('job_1');
+    expect(released).toMatchObject({
+      attempt: 1,
+      lastSafeError: { code: 'provider_auth_failed', retryable: true },
+      state: 'pending',
+    });
+    expect(released?.nextRetryAt).toBe(released?.updatedAt);
+    expect(released?.leaseToken).toBeUndefined();
+    expect(released?.terminalReason).toBeUndefined();
+  });
+
   it('fails a job when the proxy rejects the input as too large', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
@@ -856,14 +896,16 @@ async function seedPendingCapture(
 function createJobRunner(input: {
   api: SyncServerApi;
   getWorkspaceId?: () => Promise<string | null>;
+  maxAttempts?: number;
   readAssetBytes?: (localAccessKey: string) => Promise<Uint8Array>;
   store: ReturnType<typeof createMemoryStore>;
   workspaceId?: string | null;
 }) {
+  const maxAttempts = input.maxAttempts ?? 3;
   const executeJob = createSyncJobExecutor({
     api: input.api,
     clock: createClock(),
-    maxAttempts: 3,
+    maxAttempts,
     readAssetBytes: input.readAssetBytes ?? (async () => new Uint8Array([1, 2, 3, 4])),
     retryBackoff: { baseMs: 60_000, factor: 2, jitterRatio: 0, maxMs: 300_000 },
     store: input.store,
@@ -877,7 +919,7 @@ function createJobRunner(input: {
   return {
     async runOnce() {
       const job = await input.store.claimNextRetryableOutboxJob({
-        maxAttempts: 3,
+        maxAttempts,
         now,
         workspaceId: 'workspace_1',
       });

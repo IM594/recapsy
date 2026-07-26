@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createMemoryStore } from '../../storage';
 import type { OutboxJob, OutboxJobCreateInput } from '../../storage';
+import { createSyncGate } from '../gate';
 import { createSyncQueueSummary } from '../summary';
 import { createSyncWorker } from '../worker';
 
@@ -60,6 +61,47 @@ describe('desktop sync worker', () => {
       state: 'syncing',
       workspaceId: 'workspace_1',
     });
+  });
+
+  it('does not claim while provider sync is paused and permits one half-open probe', async () => {
+    const store = createMemoryStore();
+    await seedJob(store);
+    const gate = createSyncGate({ probeDelayMs: 60_000 });
+    gate.pause('provider_auth_failed', now);
+    let currentTime = now;
+    let executeCalls = 0;
+    const worker = createSyncWorker({
+      clock: { now: () => currentTime },
+      executeJob: async (job) => {
+        executeCalls += 1;
+        return {
+          code: 'provider_auth_failed',
+          jobId: job.id,
+          processed: 1,
+          status: 'retry_wait',
+        };
+      },
+      gate,
+      maxAttempts: 3,
+      store,
+      workspace: { getActiveWorkspaceId: async () => 'workspace_1' },
+    });
+
+    expect(await worker.runOnce()).toEqual({
+      code: 'sync_paused',
+      processed: 0,
+      status: 'skipped',
+    });
+    expect(executeCalls).toBe(0);
+    expect(await store.getOutboxJob('job_1')).toMatchObject({ state: 'pending' });
+
+    currentTime = '2026-07-06T00:01:00.000Z';
+    expect(await worker.runOnce()).toMatchObject({
+      code: 'provider_auth_failed',
+      status: 'retry_wait',
+    });
+    expect(executeCalls).toBe(1);
+    expect(gate.getStatus()).toMatchObject({ state: 'paused' });
   });
 
   it('cancels a syncing job as a purely local terminal state', async () => {

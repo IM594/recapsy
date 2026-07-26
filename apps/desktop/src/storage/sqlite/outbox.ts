@@ -14,6 +14,8 @@ import type {
   OutboxTerminalState,
   OutboxTerminalUpdate,
   RecoverInterruptedOutboxJobInput,
+  ReleaseOutboxJobInput,
+  RequeueTerminalOutboxJobsInput,
   StoredOcrResult,
 } from '../types';
 import type { SqliteDatabase, SqliteRow } from './driver';
@@ -412,6 +414,56 @@ export class SqliteOutboxPersistence {
             message: 'Only interrupted outbox jobs can be recovered at startup.',
           }),
         );
+  }
+
+  async release(input: ReleaseOutboxJobInput): Promise<OperationalStoreResult<OutboxJob>> {
+    const row = this.database
+      .prepare<OutboxJobRow>(
+        `UPDATE outbox_jobs
+         SET state = 'pending',
+             updated_at = $updatedAt,
+             next_retry_at = $updatedAt,
+             locked_at = NULL,
+             lease_token = NULL,
+             lease_expires_at = NULL,
+             last_safe_error_json = $lastSafeErrorJson,
+             terminal_reason = NULL
+         WHERE id = $id
+           AND state NOT IN ('synced', 'blocked', 'failed', 'cancelled')
+           AND (($leaseToken IS NULL AND lease_token IS NULL) OR lease_token = $leaseToken)
+         RETURNING *`,
+      )
+      .get({
+        $id: input.id,
+        $lastSafeErrorJson: JSON.stringify(input.lastSafeError),
+        $leaseToken: input.leaseToken ?? null,
+        $updatedAt: input.now,
+      });
+
+    return row
+      ? success(outboxJobFromRow(row))
+      : failure(this.missingOrTerminalError(input.id, terminalTransitionConflict()));
+  }
+
+  async requeueTerminal(input: RequeueTerminalOutboxJobsInput): Promise<number> {
+    const rows = this.database
+      .prepare<{ id: string }>(
+        `UPDATE outbox_jobs
+         SET state = 'pending',
+             attempt = 0,
+             updated_at = $updatedAt,
+             next_retry_at = $updatedAt,
+             locked_at = NULL,
+             lease_token = NULL,
+             lease_expires_at = NULL,
+             last_safe_error_json = NULL,
+             terminal_reason = NULL
+         WHERE workspace_id = $workspaceId
+           AND state IN ('failed', 'blocked')
+         RETURNING id`,
+      )
+      .all({ $updatedAt: input.now, $workspaceId: input.workspaceId });
+    return rows.length;
   }
 
   capacityReached(): boolean {

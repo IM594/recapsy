@@ -965,6 +965,101 @@ describe('SQLite operational store', () => {
     });
   });
 
+  it('requeues failed and blocked jobs for one workspace without reviving cancelled work', async () => {
+    const store = await createTempStore();
+    await store.createOutboxJob(createJob({ id: 'job_failed' }));
+    await store.createOutboxJob(createJob({ id: 'job_blocked', idempotencyKey: 'idem_blocked' }));
+    await store.createOutboxJob(
+      createJob({ id: 'job_cancelled', idempotencyKey: 'idem_cancelled' }),
+    );
+    await store.createOutboxJob(
+      createJob({
+        id: 'job_other_workspace',
+        idempotencyKey: 'idem_other_workspace',
+        workspaceId: 'workspace_2',
+      }),
+    );
+
+    await store.recordOutboxSafeError('job_failed', {
+      code: 'provider_auth_failed',
+      maxAttempts: 1,
+      message: 'Provider authentication failed.',
+      now: '2026-07-06T00:00:05.000Z',
+      retryable: false,
+    });
+    for (const [id, state, reason] of [
+      ['job_blocked', 'blocked', 'local_asset_missing'],
+      ['job_cancelled', 'cancelled', 'user_cancelled'],
+      ['job_other_workspace', 'failed', 'provider_auth_failed'],
+    ] as const) {
+      await store.markOutboxJobTerminal(id, {
+        now: '2026-07-06T00:00:06.000Z',
+        reason,
+        state,
+      });
+    }
+
+    expect(
+      await store.requeueTerminalOutboxJobs({
+        now: '2026-07-06T00:10:00.000Z',
+        workspaceId: 'workspace_1',
+      }),
+    ).toBe(2);
+    expect(await store.getOutboxJob('job_failed')).toMatchObject({
+      attempt: 0,
+      nextRetryAt: '2026-07-06T00:10:00.000Z',
+      state: 'pending',
+    });
+    expect((await store.getOutboxJob('job_failed'))?.lastSafeError).toBeUndefined();
+    expect((await store.getOutboxJob('job_failed'))?.terminalReason).toBeUndefined();
+    expect(await store.getOutboxJob('job_blocked')).toMatchObject({
+      attempt: 0,
+      state: 'pending',
+    });
+    expect(await store.getOutboxJob('job_cancelled')).toMatchObject({ state: 'cancelled' });
+    expect(await store.getOutboxJob('job_other_workspace')).toMatchObject({ state: 'failed' });
+
+    const claimed = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now: '2026-07-06T00:10:00.000Z',
+      workspaceId: 'workspace_1',
+    });
+    expect(['job_failed', 'job_blocked']).toContain(claimed?.id ?? 'missing');
+  });
+
+  it('releases a claimed job without incrementing attempts when the provider gate closes', async () => {
+    const store = await createTempStore();
+    await store.createOutboxJob(createJob());
+    const claimed = await store.claimNextRetryableOutboxJob({
+      maxAttempts: 3,
+      now,
+      workspaceId: 'workspace_1',
+    });
+
+    const released = await store.releaseOutboxJob({
+      id: 'job_1',
+      lastSafeError: {
+        code: 'provider_auth_failed',
+        message: 'Provider authentication failed.',
+        retryable: true,
+      },
+      leaseToken: claimed?.leaseToken,
+      now: '2026-07-06T00:00:05.000Z',
+    });
+
+    expect(released).toMatchObject({
+      ok: true,
+      value: {
+        attempt: 0,
+        lastSafeError: { code: 'provider_auth_failed', retryable: true },
+        nextRetryAt: '2026-07-06T00:00:05.000Z',
+        state: 'pending',
+      },
+    });
+    expect(released.ok ? released.value.leaseToken : 'unexpected failure').toBeUndefined();
+    expect(released.ok ? released.value.terminalReason : 'unexpected failure').toBeUndefined();
+  });
+
   it('uses lease-token compare-and-set so an old worker cannot overwrite a reclaimed job', async () => {
     const store = await createTempStore();
     await store.createOutboxJob(createJob({ id: 'job_lease', idempotencyKey: 'idem_lease' }));
@@ -991,19 +1086,30 @@ describe('SQLite operational store', () => {
       workspaceId: 'workspace_1',
     });
 
-    const stale = await store.markOutboxJobTerminal('job_lease', {
+    const staleRelease = await store.releaseOutboxJob({
+      id: 'job_lease',
+      lastSafeError: {
+        code: 'provider_auth_failed',
+        message: 'Provider authentication failed.',
+        retryable: true,
+      },
       leaseToken: first?.leaseToken,
       now: '2026-07-06T00:00:02.000Z',
+    });
+    const stale = await store.markOutboxJobTerminal('job_lease', {
+      leaseToken: first?.leaseToken,
+      now: '2026-07-06T00:00:03.000Z',
       reason: 'ocr_synced',
       state: 'synced',
     });
     const current = await store.markOutboxJobTerminal('job_lease', {
       leaseToken: second?.leaseToken,
-      now: '2026-07-06T00:00:03.000Z',
+      now: '2026-07-06T00:00:04.000Z',
       reason: 'ocr_synced',
       state: 'synced',
     });
 
+    expect(staleRelease).toMatchObject({ ok: false, error: { code: 'outbox_lease_lost' } });
     expect(stale).toMatchObject({ ok: false, error: { code: 'outbox_lease_lost' } });
     expect(current).toMatchObject({ ok: true, value: { state: 'synced' } });
   });

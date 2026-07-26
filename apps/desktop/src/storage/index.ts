@@ -85,6 +85,8 @@ export type {
   RecoverHangingCoverageSegmentInput,
   RecoverInterruptedOutboxJobInput,
   RecoverPendingAssetCleanupInput,
+  ReleaseOutboxJobInput,
+  RequeueTerminalOutboxJobsInput,
   RendererSafeAssetRef,
   SafeOperationalError,
   ServerCaptureSettlement,

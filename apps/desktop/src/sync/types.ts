@@ -17,6 +17,8 @@ import type {
   OutboxSafeErrorInput,
   OutboxTerminalUpdate,
   RecoverInterruptedOutboxJobInput,
+  ReleaseOutboxJobInput,
+  RequeueTerminalOutboxJobsInput,
   ServerCaptureSettlement,
   ServerCaptureSettlementInput,
 } from '../storage/index';
@@ -80,6 +82,8 @@ export type SyncQueueStore = {
   recoverInterruptedOutboxJob(
     input: RecoverInterruptedOutboxJobInput,
   ): Promise<OperationalStoreResult<OutboxJob>>;
+  releaseOutboxJob(input: ReleaseOutboxJobInput): Promise<OperationalStoreResult<OutboxJob>>;
+  requeueTerminalOutboxJobs(input: RequeueTerminalOutboxJobsInput): Promise<number>;
   updateOutboxJobState(
     id: string,
     update: OutboxJobStateUpdate,
@@ -134,7 +138,9 @@ export type SyncRunResult = {
     | 'backpressure_active'
     | 'offline'
     | 'server_unavailable'
+    | 'provider_auth_failed'
     | 'provider_rate_limited'
+    | 'sync_paused'
     | 'lease_lost';
   providerOutcome?: 'not_attempted' | 'succeeded' | 'rate_limited';
 };

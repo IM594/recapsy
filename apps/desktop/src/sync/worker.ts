@@ -4,6 +4,7 @@ import type {
   OutboxJob,
   OutboxTerminalUpdate,
 } from '../storage/index';
+import { type SyncGate, createSyncGate } from './gate';
 import type { SyncJobExecutor } from './job';
 import type { SyncCancelResult, SyncClock, SyncRunResult, SyncWorkspaceProvider } from './types';
 
@@ -19,12 +20,14 @@ export type SyncWorkerStore = {
 export type SyncWorkerOptions = {
   clock: SyncClock;
   executeJob: SyncJobExecutor;
+  gate?: SyncGate;
   maxAttempts: number;
   store: SyncWorkerStore;
   workspace: SyncWorkspaceProvider;
 };
 
 export function createSyncWorker(options: SyncWorkerOptions) {
+  const gate = options.gate ?? createSyncGate();
   return {
     async cancel(jobId: string, reason: string): Promise<SyncCancelResult> {
       const job = await options.store.getOutboxJob(jobId);
@@ -68,6 +71,14 @@ export function createSyncWorker(options: SyncWorkerOptions) {
         };
       }
 
+      if (!gate.tryEnter(options.clock.now())) {
+        return {
+          code: 'sync_paused',
+          processed: 0,
+          status: 'skipped',
+        };
+      }
+
       const job = await options.store.claimNextRetryableOutboxJob({
         maxAttempts: options.maxAttempts,
         now: options.clock.now(),
@@ -75,13 +86,17 @@ export function createSyncWorker(options: SyncWorkerOptions) {
       });
 
       if (!job) {
-        return {
+        const result: SyncRunResult = {
           processed: 0,
           status: 'idle',
         };
+        gate.observe(result, options.clock.now());
+        return result;
       }
 
-      return options.executeJob(job);
+      const result = await options.executeJob(job);
+      gate.observe(result, options.clock.now());
+      return result;
     },
   };
 }
