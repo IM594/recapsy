@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { makeUniversalApp } from '@electron/universal';
+import productIdentity from '../src/product-identity.json';
 
 const execFileAsync = promisify(execFile);
 const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -84,9 +85,16 @@ async function stageArchitecture() {
       RECAPSY_CAPTURE_SIGN_IDENTITY: identity,
     },
   });
-  const sourceApplication = path.join(releaseRoot, `Recapsy-darwin-${architecture}`, 'Recapsy.app');
+  const sourceApplication = path.join(
+    releaseRoot,
+    `${productIdentity.displayName}-darwin-${architecture}`,
+    `${productIdentity.displayName}.app`,
+  );
   await assertDirectory(sourceApplication, 'Packaged application');
-  const stagedApplication = path.join(releaseInputsRoot, `Recapsy-${architecture}.app`);
+  const stagedApplication = path.join(
+    releaseInputsRoot,
+    `${productIdentity.displayName}-${architecture}.app`,
+  );
   await rm(stagedApplication, { force: true, recursive: true });
   await mkdir(releaseInputsRoot, { recursive: true });
   await cp(sourceApplication, stagedApplication, { preserveTimestamps: true, recursive: true });
@@ -100,8 +108,11 @@ async function assembleUniversalApplication() {
   const identity = requireDeveloperIdIdentity();
   const version = await requireReleaseVersion();
   const previousVersion = requireVersion('RECAPSY_RELEASE_PREVIOUS_VERSION');
-  const universalApplication = path.join(distributionRoot, 'Recapsy.app');
-  const archive = path.join(distributionRoot, `Recapsy-${version}-universal.zip`);
+  const universalApplication = path.join(distributionRoot, `${productIdentity.displayName}.app`);
+  const archive = path.join(
+    distributionRoot,
+    `${productIdentity.displayName}-${version}-universal.zip`,
+  );
 
   await rm(universalApplication, { force: true, recursive: true });
   await rm(archive, { force: true });
@@ -109,7 +120,7 @@ async function assembleUniversalApplication() {
   await makeUniversalApp({
     arm64AppPath: arm64Application,
     force: true,
-    infoPlistsToIgnore: 'Contents/Frameworks/RecapsyCapture.app/Contents/Info.plist',
+    infoPlistsToIgnore: `Contents/Frameworks/${productIdentity.captureBundleDirectoryName}/Contents/Info.plist`,
     mergeASARs: true,
     outAppPath: universalApplication,
     x64AppPath: x64Application,
@@ -130,9 +141,15 @@ async function assembleUniversalApplication() {
 async function notarizeDistribution() {
   const version = await requireReleaseVersion();
   const previousVersion = requireVersion('RECAPSY_RELEASE_PREVIOUS_VERSION');
-  const archive = path.join(distributionRoot, `Recapsy-${version}-universal.zip`);
-  const universalApplication = path.join(distributionRoot, 'Recapsy.app');
-  const diskImage = path.join(distributionRoot, `Recapsy-${version}-universal.dmg`);
+  const archive = path.join(
+    distributionRoot,
+    `${productIdentity.displayName}-${version}-universal.zip`,
+  );
+  const universalApplication = path.join(distributionRoot, `${productIdentity.displayName}.app`);
+  const diskImage = path.join(
+    distributionRoot,
+    `${productIdentity.displayName}-${version}-universal.dmg`,
+  );
   const key = await requireAbsoluteFile('APPLE_NOTARY_KEY');
   const keyId = requireEnvironment('APPLE_NOTARY_KEY_ID');
   const issuer = requireEnvironment('APPLE_NOTARY_ISSUER_ID');
@@ -162,7 +179,7 @@ async function notarizeDistribution() {
     '-srcfolder',
     universalApplication,
     '-volname',
-    `Recapsy ${version}`,
+    `${productIdentity.displayName} ${version}`,
     diskImage,
   ]);
   await verifySignedApplication(universalApplication, requireDeveloperIdIdentity(), 'universal');
@@ -186,9 +203,15 @@ async function notarizeDistribution() {
 
 async function verifyDistribution() {
   const version = await requireReleaseVersion();
-  const universalApplication = path.join(distributionRoot, 'Recapsy.app');
-  const diskImage = path.join(distributionRoot, `Recapsy-${version}-universal.dmg`);
-  const manifest = path.join(distributionRoot, `Recapsy-${version}-release.json`);
+  const universalApplication = path.join(distributionRoot, `${productIdentity.displayName}.app`);
+  const diskImage = path.join(
+    distributionRoot,
+    `${productIdentity.displayName}-${version}-universal.dmg`,
+  );
+  const manifest = path.join(
+    distributionRoot,
+    `${productIdentity.displayName}-${version}-release.json`,
+  );
   await verifySignedApplication(universalApplication, requireDeveloperIdIdentity(), 'universal');
   await assertFile(diskImage, 'Notarized disk image');
   await assertFile(manifest, 'Release manifest');
@@ -277,21 +300,21 @@ async function assertApplicationArchitectures(
   expected: 'arm64' | 'x64' | 'universal',
 ) {
   const executables = [
-    path.join(application, 'Contents', 'MacOS', 'Recapsy'),
+    path.join(application, 'Contents', 'MacOS', productIdentity.displayName),
     path.join(
       application,
       'Contents',
       'Frameworks',
-      'RecapsyCapture.app',
+      productIdentity.captureBundleDirectoryName,
       'Contents',
       'MacOS',
-      'Recapsy',
+      productIdentity.captureExecutableName,
     ),
     path.join(
       application,
       'Contents',
       'Frameworks',
-      'RecapsyCapture.app',
+      productIdentity.captureBundleDirectoryName,
       'Contents',
       'MacOS',
       'CaptureLauncher',
@@ -344,7 +367,7 @@ async function writeReleaseManifest(input: {
   previousVersion: string;
 }) {
   await writeFile(
-    path.join(distributionRoot, `Recapsy-${input.version}-release.json`),
+    path.join(distributionRoot, `${productIdentity.displayName}-${input.version}-release.json`),
     `${JSON.stringify(
       {
         artifacts: {

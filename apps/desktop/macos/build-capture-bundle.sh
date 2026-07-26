@@ -2,11 +2,11 @@
 #
 # Builds and code-signs the Recapsy macOS capture bundle (ADR 0009).
 #
-# Produces a stable, gitignored `Recapsy.app` under `macos/build/` — never under
+# Produces a stable, gitignored capture app under `macos/build/` — never under
 # a system temp directory, because macOS refuses to persist accessibility grants
 # for bundles living in /tmp (ADR 0009 约束①). The bundle contains:
-#   Contents/MacOS/Recapsy          — the capture executable (renamed so the
-#                                      privacy panel shows "Recapsy", ADR 约束③)
+#   Contents/MacOS/<product name>   — the capture executable (renamed so the
+#                                      privacy panel shows the product identity)
 #   Contents/MacOS/CaptureLauncher  — the disclaim launcher Electron spawns
 #   Contents/Info.plist             — frozen bundle identity
 #
@@ -16,9 +16,25 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PRODUCT_IDENTITY_PATH="${SCRIPT_DIR}/../src/product-identity.json"
 BUILD_CONFIG="release"
 BUILD_DIR="${SCRIPT_DIR}/build"
-APP_DIR="${BUILD_DIR}/Recapsy.app"
+
+read_product_identity() {
+	node -e '
+		const fs = require("node:fs");
+		const identity = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+		const value = identity[process.argv[2]];
+		if (typeof value !== "string" || value.length === 0) process.exit(1);
+		process.stdout.write(value);
+	' "${PRODUCT_IDENTITY_PATH}" "$1"
+}
+
+CAPTURE_BUNDLE_DIRECTORY_NAME="$(read_product_identity captureBundleDirectoryName)"
+CAPTURE_BUNDLE_ID="$(read_product_identity captureBundleId)"
+CAPTURE_DISPLAY_NAME="$(read_product_identity captureDisplayName)"
+CAPTURE_EXECUTABLE_NAME="$(read_product_identity captureExecutableName)"
+APP_DIR="${BUILD_DIR}/${CAPTURE_BUNDLE_DIRECTORY_NAME}"
 MACOS_DIR="${APP_DIR}/Contents/MacOS"
 
 # The arm64 helper must run on 2018 Macs running macOS 14. Homebrew bottles are
@@ -77,20 +93,30 @@ done
 echo "==> assembling ${APP_DIR}"
 rm -rf "${APP_DIR}"
 mkdir -p "${MACOS_DIR}"
-# CFBundleExecutable is "Recapsy", so the capture binary must be named Recapsy.
-cp "${CAPTURE_BIN}" "${MACOS_DIR}/Recapsy"
+cp "${CAPTURE_BIN}" "${MACOS_DIR}/${CAPTURE_EXECUTABLE_NAME}"
 cp "${LAUNCHER_BIN}" "${MACOS_DIR}/CaptureLauncher"
 cp "${SCRIPT_DIR}/Resources/Info.plist" "${APP_DIR}/Contents/Info.plist"
+plutil -replace CFBundleIdentifier -string "${CAPTURE_BUNDLE_ID}" "${APP_DIR}/Contents/Info.plist"
+plutil -replace CFBundleName -string "${CAPTURE_DISPLAY_NAME}" "${APP_DIR}/Contents/Info.plist"
+plutil -replace CFBundleDisplayName -string "${CAPTURE_DISPLAY_NAME}" "${APP_DIR}/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string "${CAPTURE_EXECUTABLE_NAME}" "${APP_DIR}/Contents/Info.plist"
 mkdir -p "${APP_DIR}/Contents/Resources/ThirdPartyNotices"
 cp "${WEBP_PREFIX}/share/doc/libwebp/COPYING" "${APP_DIR}/Contents/Resources/ThirdPartyNotices/libwebp.txt"
 
-# Fail loudly if the plist is malformed or the frozen id drifted.
+# Fail loudly if the generated plist is malformed or drifted from product identity.
 plutil -lint "${APP_DIR}/Contents/Info.plist" >/dev/null
-BUNDLE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${APP_DIR}/Contents/Info.plist")"
-if [[ "${BUNDLE_ID}" != "one.recapsy.desktop.capture" ]]; then
-	echo "error: bundle id drifted to '${BUNDLE_ID}'" >&2
-	exit 1
-fi
+for key in CFBundleIdentifier CFBundleName CFBundleDisplayName CFBundleExecutable; do
+	case "${key}" in
+		CFBundleIdentifier) expected="${CAPTURE_BUNDLE_ID}" ;;
+		CFBundleName | CFBundleDisplayName) expected="${CAPTURE_DISPLAY_NAME}" ;;
+		CFBundleExecutable) expected="${CAPTURE_EXECUTABLE_NAME}" ;;
+	esac
+	actual="$(plutil -extract "${key}" raw -o - "${APP_DIR}/Contents/Info.plist")"
+	if [[ "${actual}" != "${expected}" ]]; then
+		echo "error: ${key} drifted to '${actual}'" >&2
+		exit 1
+	fi
+done
 
 echo "==> codesign (identity: ${SIGN_IDENTITY})"
 # Sign inside-out: nested launcher first, then the whole bundle (which signs the
@@ -105,4 +131,4 @@ codesign --verify --deep --strict --verbose=2 "${APP_DIR}"
 echo ""
 echo "capture bundle:   ${APP_DIR}"
 echo "launcher path:    ${MACOS_DIR}/CaptureLauncher"
-echo "capture path:     ${MACOS_DIR}/Recapsy"
+echo "capture path:     ${MACOS_DIR}/${CAPTURE_EXECUTABLE_NAME}"

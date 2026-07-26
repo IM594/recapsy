@@ -47,7 +47,7 @@ describe('capture helper subprocess (real cross-process transport)', () => {
     expect(captureResult.payload.assets[0]?.role).toBe('screenshot');
     expect(captureResult.payload.context.app).toEqual({
       bundleId: 'one.recapsy.desktop.dev-helper',
-      name: 'Recapsy Dev Helper',
+      name: 'Recapsy Preview Dev Helper',
     });
     expect(captureResult.payload.context.policy.decision).toBe('allow');
 

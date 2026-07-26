@@ -27,6 +27,7 @@
  *   - A standard POSIX facility every spawned child already supports, with
  *     no extra IPC plumbing required.
  */
+import productIdentity from '../product-identity.json';
 import { createSafeCaptureResultPayload } from './capture-result';
 import { HelperNdjsonLineParser, encodeHelperEnvelope } from './protocol/codec';
 import {
@@ -196,7 +197,7 @@ export function createDevHelperRuntime(options: DevHelperRuntimeOptions): DevHel
       const payload = createSafeCaptureResultPayload({
         application: {
           bundleId: 'one.recapsy.desktop.dev-helper',
-          name: 'Recapsy Dev Helper',
+          name: `${productIdentity.displayName} Dev Helper`,
         },
         captureId,
         hash: `sha256:${captureSequence.toString(16).padStart(64, '0')}`,

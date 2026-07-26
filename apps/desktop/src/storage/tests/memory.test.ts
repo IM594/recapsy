@@ -176,6 +176,7 @@ describe('memory operational store', () => {
       ok: true,
       value: {
         capture: {
+          appName: 'Recapsy Preview',
           observedAt: now,
           privacyDecision: {
             decidedAt: now,

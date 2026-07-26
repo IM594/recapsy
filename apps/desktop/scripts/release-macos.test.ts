@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url';
 
 const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const releaseScript = path.join(scriptsDirectory, 'release-macos.ts');
+const packageScript = path.join(scriptsDirectory, 'package-macos.ts');
+const packagedCaptureTestScript = path.join(scriptsDirectory, 'test-packaged-capture-bundle.ts');
+const captureBuildScript = path.resolve(scriptsDirectory, '../macos/build-capture-bundle.sh');
 
 describe('macOS external release contract', () => {
   test('declares signed dual-architecture, notarization, and rollback stages', async () => {
@@ -38,6 +41,21 @@ describe('macOS external release contract', () => {
     expect(result.stderr).toContain('RECAPSY_RELEASE_X64_APP is required');
   });
 
+  test('sources macOS artifact names from the shared product identity', async () => {
+    for (const script of [releaseScript, packageScript, packagedCaptureTestScript]) {
+      const source = await readFile(script, 'utf8');
+      expect(source).toContain('product-identity.json');
+      expect(source).toContain('productIdentity.displayName');
+      expect(source).not.toContain("'Recapsy.app'");
+      expect(source).not.toContain("'RecapsyCapture.app'");
+    }
+
+    const captureBuildSource = await readFile(captureBuildScript, 'utf8');
+    expect(captureBuildSource).toContain('src/product-identity.json');
+    expect(captureBuildSource).toContain('JSON.parse');
+    expect(captureBuildSource).toContain('RECAPSY_CAPTURE_SIGN_IDENTITY:-Recapsy Developer');
+  });
+
   test('keeps external signing, notarization, and rollback behind a manual workflow', async () => {
     const workflow = await readFile(
       path.resolve(scriptsDirectory, '../../../.github/workflows/external-macos-release.yml'),
@@ -54,6 +72,10 @@ describe('macOS external release contract', () => {
     expect(workflow).toContain('release:verify-rollback');
     expect(workflow).toContain('APPLE_NOTARY_KEY_P8');
     expect(workflow).toContain('gh release download');
+    expect(workflow).toContain('product-identity.json');
+    expect(workflow).toContain('steps.product-identity.outputs.display_name');
+    expect(workflow).not.toContain('release-input/Recapsy-arm64.app');
+    expect(workflow).not.toContain('release-input/Recapsy-x64.app');
   });
 });
 

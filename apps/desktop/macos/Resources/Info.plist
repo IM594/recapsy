@@ -6,18 +6,18 @@
 	  Source of truth for the capture bundle's identity (ADR 0009). The bundle
 	  id is permanently frozen; changing it orphans the TCC grant and creates a
 	  duplicate entry in the privacy panel. CFBundleName / CFBundleExecutable are
-	  deliberately the product name "Recapsy" (not just CFBundleDisplayName),
+	  deliberately the capture product name (not just CFBundleDisplayName),
 	  because the screen-recording / accessibility panels display the executable
 	  / bundle name, not the display name (ADR 0009 约束③).
 	-->
 	<key>CFBundleIdentifier</key>
 	<string>one.recapsy.desktop.capture</string>
 	<key>CFBundleName</key>
-	<string>Recapsy</string>
+	<string>Recapsy Preview Capture</string>
 	<key>CFBundleDisplayName</key>
-	<string>Recapsy</string>
+	<string>Recapsy Preview Capture</string>
 	<key>CFBundleExecutable</key>
-	<string>Recapsy</string>
+	<string>Recapsy Preview Capture</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -37,13 +37,13 @@
 	  naming rules and ADR 0009 用户可见性约束.
 	-->
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Recapsy captures screenshots to build your private, searchable activity timeline.</string>
+	<string>Recapsy Preview captures screenshots to build your private, searchable activity timeline.</string>
 	<!--
 	  Accessibility is used only for focused-window / context metadata sampling,
 	  never for uploading AX subtree text. The usage string must stay product-
 	  facing and must not invent implementation words.
 	-->
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Recapsy uses Accessibility to identify the active window and app context for your private timeline.</string>
+	<string>Recapsy Preview uses Accessibility to identify the active window and app context for your private timeline.</string>
 </dict>
 </plist>

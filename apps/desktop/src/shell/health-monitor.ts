@@ -1,3 +1,4 @@
+import productIdentity from '../product-identity.json';
 import type { DesktopShellStatus } from './status-model';
 
 export type DesktopHealthAlertKind =
@@ -52,45 +53,45 @@ const DEFAULT_SYNC_BACKLOG_THRESHOLD = 20;
 
 const ALERTS: Readonly<Record<DesktopHealthAlertKind, DesktopHealthAlert>> = {
   capture_unavailable: {
-    body: '采集意外停止。请打开 Recapsy 恢复采集。',
+    body: `采集意外停止。请打开 ${productIdentity.displayName} 恢复采集。`,
     kind: 'capture_unavailable',
-    title: 'Recapsy 采集已停止',
+    title: `${productIdentity.displayName} 采集已停止`,
     trayLabel: '采集已停止',
   },
   capture_stalled: {
-    body: '采集似乎已静默停止。请打开 Recapsy 恢复采集。',
+    body: `采集似乎已静默停止。请打开 ${productIdentity.displayName} 恢复采集。`,
     kind: 'capture_stalled',
-    title: 'Recapsy 采集已卡住',
+    title: `${productIdentity.displayName} 采集已卡住`,
     trayLabel: '采集已卡住',
   },
   screen_recording_required: {
-    body: '需要屏幕录制权限。请打开 Recapsy 恢复采集。',
+    body: `需要屏幕录制权限。请打开 ${productIdentity.displayName} 恢复采集。`,
     kind: 'screen_recording_required',
-    title: 'Recapsy 需要屏幕录制权限',
+    title: `${productIdentity.displayName} 需要屏幕录制权限`,
     trayLabel: '需要屏幕录制权限',
   },
   capture_failures: {
-    body: '近期采集反复失败。请打开 Recapsy 检查采集状态。',
+    body: `近期采集反复失败。请打开 ${productIdentity.displayName} 检查采集状态。`,
     kind: 'capture_failures',
-    title: 'Recapsy 采集失败',
+    title: `${productIdentity.displayName} 采集失败`,
     trayLabel: '采集反复失败',
   },
   sync_blocked: {
-    body: '部分采集无法同步。请打开 Recapsy 查看队列。',
+    body: `部分采集无法同步。请打开 ${productIdentity.displayName} 查看队列。`,
     kind: 'sync_blocked',
-    title: 'Recapsy 同步已阻塞',
+    title: `${productIdentity.displayName} 同步已阻塞`,
     trayLabel: '同步已阻塞',
   },
   sync_failed: {
-    body: '部分采集同步失败。请打开 Recapsy 查看队列。',
+    body: `部分采集同步失败。请打开 ${productIdentity.displayName} 查看队列。`,
     kind: 'sync_failed',
-    title: 'Recapsy 同步失败',
+    title: `${productIdentity.displayName} 同步失败`,
     trayLabel: '同步失败',
   },
   sync_backlog: {
-    body: '采集同步已积压数分钟。请打开 Recapsy 查看队列。',
+    body: `采集同步已积压数分钟。请打开 ${productIdentity.displayName} 查看队列。`,
     kind: 'sync_backlog',
-    title: 'Recapsy 同步延迟',
+    title: `${productIdentity.displayName} 同步延迟`,
     trayLabel: '同步积压',
   },
 };

@@ -36,7 +36,10 @@ import { createNodeSqliteDatabase } from '../storage/node';
 import { type SyncAssetReader, createSyncQueueSummary } from '../sync/index';
 import { startDesktopSingleInstance } from './application-instance';
 import { resolveDesktopApplicationPaths } from './application-layout';
-import { configureDesktopApplicationProfile } from './application-profile';
+import {
+  DESKTOP_APPLICATION_NAME,
+  configureDesktopApplicationProfile,
+} from './application-profile';
 import {
   createLocalAssetAvailabilityResolver,
   createLocalAssetReader,
@@ -46,6 +49,7 @@ import { createAuthStorage } from './auth-storage';
 import { createDevVisibility } from './dev-visibility';
 import { resolveDesktopDeviceId } from './device-identity';
 import { createHttpTransport } from './http-transport';
+import { prepareOperationalDatabase } from './operational-database';
 import { type ElectronMainRuntimeOptions, createElectronMainRuntime } from './runtime';
 import { createSafeStorageSecretStore } from './safe-storage';
 import {
@@ -219,7 +223,7 @@ const loginPrompter = createLoginWindowPrompter({
     new BrowserWindow({
       height: 360,
       resizable: false,
-      title: 'Recapsy 登录',
+      title: `${DESKTOP_APPLICATION_NAME} 登录`,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -326,7 +330,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             minHeight: 420,
             minWidth: 420,
             show: false,
-            title: 'Recapsy',
+            title: DESKTOP_APPLICATION_NAME,
             webPreferences: {
               contextIsolation: true,
               nodeIntegration: false,
@@ -424,9 +428,10 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
     });
   },
   createStore: () => {
-    const sqlitePath =
-      process.env.RECAPSY_DESKTOP_SQLITE_PATH ??
-      path.join(app.getPath('userData'), 'recapsy-desktop-dev.sqlite3');
+    const sqlitePath = prepareOperationalDatabase({
+      directory: app.getPath('userData'),
+      overridePath: process.env.RECAPSY_DESKTOP_SQLITE_PATH,
+    });
 
     return createSqliteStore({
       database: createNodeSqliteDatabase(sqlitePath),

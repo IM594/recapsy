@@ -22,15 +22,16 @@ describe('capture bundle layout', () => {
     expect(
       resolveCaptureBundlePaths({
         isPackaged: true,
-        packageRoot: '/Applications/Recapsy.app/Contents/Resources/app.asar',
-        resourcesPath: '/Applications/Recapsy.app/Contents/Resources',
+        packageRoot: '/Applications/Recapsy Preview.app/Contents/Resources/app.asar',
+        resourcesPath: '/Applications/Recapsy Preview.app/Contents/Resources',
       }),
     ).toEqual({
-      bundlePath: '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app',
+      bundlePath:
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app',
       capturePath:
-        '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app/Contents/MacOS/Recapsy',
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture',
       launcherPath:
-        '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app/Contents/MacOS/CaptureLauncher',
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher',
     });
   });
 
@@ -42,10 +43,11 @@ describe('capture bundle layout', () => {
         resourcesPath: '/electron/Resources',
       }),
     ).toEqual({
-      bundlePath: '/workspace/apps/desktop/macos/build/Recapsy.app',
-      capturePath: '/workspace/apps/desktop/macos/build/Recapsy.app/Contents/MacOS/Recapsy',
+      bundlePath: '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app',
+      capturePath:
+        '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture',
       launcherPath:
-        '/workspace/apps/desktop/macos/build/Recapsy.app/Contents/MacOS/CaptureLauncher',
+        '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher',
     });
   });
 });
@@ -58,17 +60,23 @@ describe('capture bundle client', () => {
     await client.start(discardTransportEvents);
 
     expect(harness.validationCalls).toEqual([
-      ['bundle-id', '/workspace/apps/desktop/macos/build/Recapsy.app'],
+      ['bundle-id', '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app'],
       [
         'executable',
-        '/workspace/apps/desktop/macos/build/Recapsy.app/Contents/MacOS/CaptureLauncher',
+        '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher',
       ],
-      ['executable', '/workspace/apps/desktop/macos/build/Recapsy.app/Contents/MacOS/Recapsy'],
-      ['signature', '/workspace/apps/desktop/macos/build/Recapsy.app'],
+      [
+        'executable',
+        '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture',
+      ],
+      ['signature', '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app'],
     ]);
     expect(harness.processOptions).toEqual({
-      args: ['/workspace/apps/desktop/macos/build/Recapsy.app/Contents/MacOS/Recapsy'],
-      command: '/workspace/apps/desktop/macos/build/Recapsy.app/Contents/MacOS/CaptureLauncher',
+      args: [
+        '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture',
+      ],
+      command:
+        '/workspace/apps/desktop/macos/build/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher',
       env: { RECAPSY_CAPTURE_ASSET_ROOT: '/assets' },
     });
     expect(harness.processClient.startCalls).toBe(1);
@@ -81,17 +89,23 @@ describe('capture bundle client', () => {
     await client.start(discardTransportEvents);
 
     expect(harness.validationCalls).toEqual([
-      ['bundle-id', '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app'],
       [
-        'executable',
-        '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app/Contents/MacOS/CaptureLauncher',
+        'bundle-id',
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app',
       ],
       [
         'executable',
-        '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app/Contents/MacOS/Recapsy',
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher',
       ],
-      ['signature', '/Applications/Recapsy.app/Contents/Frameworks/RecapsyCapture.app'],
-      ['signature', '/Applications/Recapsy.app'],
+      [
+        'executable',
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture',
+      ],
+      [
+        'signature',
+        '/Applications/Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app',
+      ],
+      ['signature', '/Applications/Recapsy Preview.app'],
     ]);
   });
 
@@ -247,10 +261,10 @@ function createHarness(overrides: HarnessOverrides = {}) {
       isPackaged: overrides.isPackaged ?? false,
       override: overrides.override,
       packageRoot: overrides.isPackaged
-        ? '/Applications/Recapsy.app/Contents/Resources/app.asar'
+        ? '/Applications/Recapsy Preview.app/Contents/Resources/app.asar'
         : '/workspace/apps/desktop',
       resourcesPath: overrides.isPackaged
-        ? '/Applications/Recapsy.app/Contents/Resources'
+        ? '/Applications/Recapsy Preview.app/Contents/Resources'
         : '/electron/Resources',
       validationAdapter,
     },

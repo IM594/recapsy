@@ -1,3 +1,4 @@
+import productIdentity from '../product-identity.json';
 import {
   type DesktopHealthAlert,
   type DesktopHealthMonitor,
@@ -211,7 +212,7 @@ class DesktopShellController implements DesktopShell {
           this.runInBackground(() => this.showMainWindow());
         },
         kind: 'action',
-        label: '打开 Recapsy',
+        label: `打开 ${productIdentity.displayName}`,
       },
       ...activeAlerts.map<DesktopShellMenuItem>((alert) => ({
         enabled: false,
@@ -282,7 +283,7 @@ class DesktopShellController implements DesktopShell {
           });
         },
         kind: 'action',
-        label: '退出 Recapsy',
+        label: `退出 ${productIdentity.displayName}`,
       },
     ];
   }

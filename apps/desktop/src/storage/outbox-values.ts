@@ -1,3 +1,4 @@
+import productIdentity from '../product-identity.json';
 import type { OutboxJob, OutboxJobCreateInput, StoredOcrResult } from './types';
 
 export function createPendingOutboxJob(job: OutboxJobCreateInput): OutboxJob {
@@ -19,7 +20,7 @@ export function createPendingOutboxJob(job: OutboxJobCreateInput): OutboxJob {
 
 export function normalizeCapturePayload(job: OutboxJobCreateInput): OutboxJob['capture'] {
   return {
-    appName: job.capture?.appName ?? 'Recapsy Desktop',
+    appName: job.capture?.appName ?? productIdentity.displayName,
     capturedAt: job.capture?.capturedAt ?? job.createdAt,
     captureType: job.capture?.captureType ?? 'screen',
     observedAt: job.capture?.observedAt ?? job.createdAt,

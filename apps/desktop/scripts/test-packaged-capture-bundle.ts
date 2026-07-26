@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import productIdentity from '../src/product-identity.json';
 
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const packageArchitecture = process.arch === 'arm64' ? 'arm64' : 'x64';
@@ -8,11 +9,11 @@ const captureBundlePath = path.join(
   desktopRoot,
   'dist',
   'release',
-  `Recapsy-darwin-${packageArchitecture}`,
-  'Recapsy.app',
+  `${productIdentity.displayName}-darwin-${packageArchitecture}`,
+  `${productIdentity.displayName}.app`,
   'Contents',
   'Frameworks',
-  'RecapsyCapture.app',
+  productIdentity.captureBundleDirectoryName,
 );
 
 if (!existsSync(captureBundlePath)) {

@@ -214,7 +214,7 @@ describe('dev helper runtime', () => {
     expect(envelope.type).toBe('capture.result');
     expect(envelope.payload.context.app).toEqual({
       bundleId: 'one.recapsy.desktop.dev-helper',
-      name: 'Recapsy Dev Helper',
+      name: 'Recapsy Preview Dev Helper',
     });
     expect(envelope.payload.context.policy.version).toBe('policy_v7');
     expect(envelope.payload.assets).toEqual([

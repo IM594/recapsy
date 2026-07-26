@@ -1,3 +1,5 @@
+import productIdentity from '../product-identity.json';
+
 export type DesktopShellStatus = {
   captureState: string;
   capturePaused: boolean;
@@ -68,7 +70,7 @@ export function formatTrayTooltip(
       ? `需要注意：${activeAlerts.map((alert) => alert.trayLabel).join('、')}`
       : undefined;
   return [
-    'Recapsy',
+    productIdentity.displayName,
     captureLabel,
     permissionLabel,
     ...syncLabels,

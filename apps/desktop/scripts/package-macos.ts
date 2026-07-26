@@ -5,12 +5,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { packager } from '@electron/packager';
+import productIdentity from '../src/product-identity.json';
 
 const scriptsDirectory = path.dirname(fileURLToPath(import.meta.url));
 const desktopRoot = path.resolve(scriptsDirectory, '..');
 const stagingRoot = path.join(desktopRoot, 'dist', 'application-package');
 const releaseRoot = path.join(desktopRoot, 'dist', 'release');
-const captureBundlePath = path.join(desktopRoot, 'macos', 'build', 'Recapsy.app');
+const captureBundlePath = path.join(
+  desktopRoot,
+  'macos',
+  'build',
+  productIdentity.captureBundleDirectoryName,
+);
 const configuredSignIdentity = process.env.RECAPSY_CAPTURE_SIGN_IDENTITY;
 const execFileAsync = promisify(execFile);
 const packagerSignIdentity = configuredSignIdentity ?? '-';
@@ -29,15 +35,15 @@ try {
   // `overwrite` does not reliably replace an existing signed application bundle.
   await rm(releaseRoot, { force: true, recursive: true });
   outputPaths = await packager({
-    appBundleId: 'one.recapsy.desktop',
+    appBundleId: productIdentity.bundleId,
     arch: targetArchitecture,
     asar: true,
     dir: stagingRoot,
     electronVersion: electronPackage.version,
     electronZipDir,
-    executableName: 'Recapsy',
+    executableName: productIdentity.displayName,
     extraResource: [captureBundlePath],
-    name: 'Recapsy',
+    name: productIdentity.displayName,
     out: releaseRoot,
     overwrite: true,
     platform: 'darwin',
@@ -55,10 +61,14 @@ try {
     afterComplete: [
       (buildPath, _electronVersion, platform, _arch, callback) => {
         if (platform !== 'darwin') {
-          callback(new Error('The Recapsy application can only be signed for macOS.'));
+          callback(
+            new Error(
+              `The ${productIdentity.displayName} application can only be signed for macOS.`,
+            ),
+          );
           return;
         }
-        const applicationPath = path.join(buildPath, 'Recapsy.app');
+        const applicationPath = path.join(buildPath, `${productIdentity.displayName}.app`);
         void finalizeApplicationSignature(applicationPath).then(
           () => callback(),
           (error: unknown) =>
@@ -69,7 +79,11 @@ try {
     afterCopyExtraResources: [
       (buildPath, _electronVersion, platform, _arch, callback) => {
         if (platform !== 'darwin') {
-          callback(new Error('The Recapsy capture bundle can only be packaged for macOS.'));
+          callback(
+            new Error(
+              `The ${productIdentity.captureDisplayName} bundle can only be packaged for macOS.`,
+            ),
+          );
           return;
         }
 
@@ -126,7 +140,7 @@ async function prepareMinimalApplication(): Promise<void> {
         main: 'dist/main/electron-entry.js',
         name: 'recapsy-desktop',
         private: true,
-        productName: 'Recapsy',
+        productName: productIdentity.displayName,
         type: 'module',
         version: desktopPackage.version,
       },
@@ -138,10 +152,14 @@ async function prepareMinimalApplication(): Promise<void> {
 }
 
 async function moveCaptureBundleIntoNestedCodeDirectory(buildPath: string): Promise<void> {
-  const contentsPath = path.join(buildPath, 'Recapsy.app', 'Contents');
-  const copiedBundlePath = path.join(contentsPath, 'Resources', 'Recapsy.app');
+  const contentsPath = path.join(buildPath, `${productIdentity.displayName}.app`, 'Contents');
+  const copiedBundlePath = path.join(
+    contentsPath,
+    'Resources',
+    productIdentity.captureBundleDirectoryName,
+  );
   const frameworksPath = path.join(contentsPath, 'Frameworks');
-  const nestedBundlePath = path.join(frameworksPath, 'RecapsyCapture.app');
+  const nestedBundlePath = path.join(frameworksPath, productIdentity.captureBundleDirectoryName);
 
   await mkdir(frameworksPath, { recursive: true });
   await rename(copiedBundlePath, nestedBundlePath);
@@ -170,8 +188,11 @@ async function finalizeApplicationSignature(applicationPath: string): Promise<vo
 
 async function restoreDevelopmentCaptureSignature(applicationPath: string): Promise<void> {
   const frameworksPath = path.join(applicationPath, 'Contents', 'Frameworks');
-  const nestedBundlePath = path.join(frameworksPath, 'RecapsyCapture.app');
-  const replacementBundlePath = path.join(frameworksPath, 'RecapsyCapture.replacement.app');
+  const nestedBundlePath = path.join(frameworksPath, productIdentity.captureBundleDirectoryName);
+  const replacementBundlePath = path.join(
+    frameworksPath,
+    `${productIdentity.captureDisplayName}.replacement.app`,
+  );
   await rm(replacementBundlePath, { force: true, recursive: true });
   await cp(captureBundlePath, replacementBundlePath, { recursive: true });
   await rm(nestedBundlePath, { force: true, recursive: true });

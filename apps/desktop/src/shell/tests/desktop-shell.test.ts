@@ -111,7 +111,9 @@ describe('desktop shell', () => {
     await shell.refresh();
     expect(tooltip).toContain('需要屏幕录制权限');
     expect(
-      menuBuilds.at(-1)?.some((item) => item.kind === 'action' && item.label === '打开 Recapsy'),
+      menuBuilds
+        .at(-1)
+        ?.some((item) => item.kind === 'action' && item.label === '打开 Recapsy Preview'),
     ).toBe(true);
 
     await expect(shell.showMainWindow()).resolves.toEqual({ shown: true });
@@ -282,8 +284,8 @@ describe('desktop shell', () => {
 
     expect(harness.notifications).toEqual([
       {
-        body: '采集意外停止。请打开 Recapsy 恢复采集。',
-        title: 'Recapsy 采集已停止',
+        body: '采集意外停止。请打开 Recapsy Preview 恢复采集。',
+        title: 'Recapsy Preview 采集已停止',
       },
     ]);
     expect(harness.tooltipUpdates.at(-1)).toContain('采集已停止');

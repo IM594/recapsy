@@ -10,7 +10,7 @@ SwiftPM 包(`Package.swift`,macOS 14+ target):
 | --- | --- | --- |
 | `CaptureCore` | Swift library | 纯逻辑:相对键生成、资产落盘路径拼接、活跃窗口选择规则、NDJSON envelope 编码、SHA-256 内容哈希、capture id 生成。全部有单测,且完全不依赖 libwebp / ScreenCaptureKit。 |
 | `CWebP` | system library shim | 把 libwebp 的 C 编码 API(`webp/encode.h`)以 `CWebP` 模块暴露给 Swift。头/库路径**不写死**,由 `build-libwebp-static.sh` 构建的固定源码产物传入。 |
-| `RecapsyCapture` | Swift executable | 采集体:按 `CGWindowList` 前后序取顶层可截窗口（不信任 `NSWorkspace.frontmostApplication`，避免 Electron 等宿主谎报前台）→ `SCShareableContent` 校验 ownership → `SCContentFilter(desktopIndependentWindow:)` 只截该窗口 → CGImage 转 RGBA → libwebp `WebPEncodeRGBA` 有损编码(压后约 100–800KB)→ 写资产根 → NDJSON stdio 主循环。组装进 bundle 时**重命名为 `Recapsy`**(隐私面板显示名,ADR 约束③)。 |
+| `RecapsyCapture` | Swift executable | 采集体:按 `CGWindowList` 前后序取顶层可截窗口（不信任 `NSWorkspace.frontmostApplication`，避免 Electron 等宿主谎报前台）→ `SCShareableContent` 校验 ownership → `SCContentFilter(desktopIndependentWindow:)` 只截该窗口 → CGImage 转 RGBA → libwebp `WebPEncodeRGBA` 有损编码(压后约 100–800KB)→ 写资产根 → NDJSON stdio 主循环。组装进 bundle 时按 `product-identity.json` 重命名为 `Recapsy Preview Capture`（隐私面板显示名，ADR 约束③）。 |
 | `CaptureLauncher` | C executable | 极小 disclaim supervisor：`posix_spawn` + `responsibility_spawnattrs_setdisclaim`，转发 `SIGTERM` / `SIGINT`，严格 `waitpid` 并镜像采集体退出码；Electron 超时强退时终止 launcher 与采集体共享的专用进程组。 |
 
 前台无可截窗口时(如 Finder 桌面、无窗口应用),采集体**静默跳过本次 tick**:不发 `capture.result`、不发 `capture.error`(仅 stderr 记一行),下个 interval 再试。
@@ -36,17 +36,17 @@ brew install cmake
 pnpm run build:capture
 ```
 
-该脚本先构建并验证上述 arm64/macOS 14 libwebp 归档，再以对应 include / 静态归档 flag 执行 `swift build -c release`，组装并**用 `Recapsy Developer` 自签名证书**签整个 bundle。产物落在 gitignored 的 `apps/desktop/macos/build/Recapsy.app`（绝不落系统临时目录 —— macOS 拒绝为 `/tmp` 下的 bundle 持久化授权，ADR 0009 约束①）。签名身份可用环境变量 `RECAPSY_CAPTURE_SIGN_IDENTITY` 覆盖。
+该脚本先构建并验证上述 arm64/macOS 14 libwebp 归档，再以对应 include / 静态归档 flag 执行 `swift build -c release`，组装并**用 `Recapsy Developer` 自签名证书**签整个 bundle。产物落在 gitignored 的 `apps/desktop/macos/build/Recapsy Preview Capture.app`（绝不落系统临时目录 —— macOS 拒绝为 `/tmp` 下的 bundle 持久化授权，ADR 0009 约束①）。签名身份可用环境变量 `RECAPSY_CAPTURE_SIGN_IDENTITY` 覆盖。
 
 产物路径:
 
-- 启动器:`build/Recapsy.app/Contents/MacOS/CaptureLauncher`
-- 采集体:`build/Recapsy.app/Contents/MacOS/Recapsy`
+- 启动器：`build/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher`
+- 采集体：`build/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture`
 
 复验签名:
 
 ```bash
-codesign -dv --verbose=4 macos/build/Recapsy.app
+codesign -dv --verbose=4 "macos/build/Recapsy Preview Capture.app"
 # 应看到 Identifier=one.recapsy.desktop.capture、Authority=Recapsy Developer
 ```
 
@@ -60,12 +60,12 @@ pnpm run package:macos
 
 命令先构建真实 capture bundle 与 Electron main / preload，再由
 `@electron/packager` 生成宿主机架构的
-`dist/release/Recapsy-darwin-<arch>/Recapsy.app`。应用代码来自最小 staging，
+`dist/release/Recapsy Preview-darwin-<arch>/Recapsy Preview.app`。应用代码来自最小 staging，
 `app.asar` 只包含 `dist/main/electron-entry.js`、login preload / HTML、shell
 main preload / HTML 和最小 manifest；源码、tests、SwiftPM `.build` 与 package
 `node_modules` 不会进入产物。
 采集 bundle 位于标准 nested-code 路径
-`Recapsy.app/Contents/Frameworks/RecapsyCapture.app`，`Contents/Resources` 不保留
+`Recapsy Preview.app/Contents/Frameworks/Recapsy Preview Capture.app`，`Contents/Resources` 不保留
 重复副本。
 
 签名渠道分为三种。未设置 `RECAPSY_CAPTURE_SIGN_IDENTITY` 时是本机开发渠道：
@@ -112,8 +112,8 @@ pnpm run test:capture-bundle-process
    不需要手工设置启动命令。只有明确调试自定义进程时才设置以下覆盖项：
 
    ```bash
-   export RECAPSY_DESKTOP_HELPER_COMMAND="$PWD/macos/build/Recapsy.app/Contents/MacOS/CaptureLauncher"
-   export RECAPSY_DESKTOP_HELPER_ARGS="$PWD/macos/build/Recapsy.app/Contents/MacOS/Recapsy"
+   export RECAPSY_DESKTOP_HELPER_COMMAND="$PWD/macos/build/Recapsy Preview Capture.app/Contents/MacOS/CaptureLauncher"
+   export RECAPSY_DESKTOP_HELPER_ARGS="$PWD/macos/build/Recapsy Preview Capture.app/Contents/MacOS/Recapsy Preview Capture"
    ```
 
    `RECAPSY_DESKTOP_HELPER_ARGS` 是单个 argv 值，因此路径可以包含空格。该覆盖只在
@@ -126,7 +126,7 @@ pnpm run test:capture-bundle-process
 
    系统设置 → 隐私与安全性 → **屏幕录制** → 确认存在一条名为 **`Recapsy`** 的条目并**勾选启用**。
 
-   > 关键复验:显示名必须是 `Recapsy`(取自可执行名 `Recapsy` / `CFBundleName`,不是只靠 `CFBundleDisplayName`,ADR 约束③)。若显示成别的名字,说明可执行名或 bundle 装配错了。
+   > 关键复验：过渡期显示名必须是 `Recapsy Preview Capture`（取自同名可执行文件与 `CFBundleName`，不是只靠 `CFBundleDisplayName`，ADR 约束③）。若显示成别的名字，说明可执行名或 bundle 装配错了。
 
 5. **辅助功能**:Tray / 主窗口可打开「辅助功能」设置面板。采集体通过 `AXIsProcessTrusted()` 探测并上报 `granted` / `not_determined`;用户须手动 `+` 添加并启用 **Recapsy**(ADR 约束②)。辅助功能不影响截图,但缺少时 context metadata 无法采样。
 
@@ -140,4 +140,4 @@ pnpm run test:capture-bundle-process
 
 ### 关于 disclaim 身份的诚实边界
 
-ADR 0009 的 spike 已在 macOS 15 实测确认 disclaim 生效(责任进程翻转为采集进程自身、授权按其 bundle 身份归属)。本启动器使用同一私有 API(`responsibility_spawnattrs_setdisclaim`),`swift build` / 运行时均无报错(setdisclaim 返回 0)。但在**当前开发机的调用链已持有屏幕录制授权**的前提下,`CGPreflightScreenCaptureAccess()` 对「disclaim 后按自身身份」与「未 disclaim 借用祖先授权」两种情况都返回 `granted`,单凭权限探测**无法就地区分**。要确证授权是绑定到新 bundle 身份 `one.recapsy.desktop.capture`(而非借用父链),须以上面第 4 步「屏幕录制面板出现名为 Recapsy 的条目」为准。
+ADR 0009 的 spike 已在 macOS 15 实测确认 disclaim 生效(责任进程翻转为采集进程自身、授权按其 bundle 身份归属)。本启动器使用同一私有 API(`responsibility_spawnattrs_setdisclaim`),`swift build` / 运行时均无报错(setdisclaim 返回 0)。但在**当前开发机的调用链已持有屏幕录制授权**的前提下,`CGPreflightScreenCaptureAccess()` 对「disclaim 后按自身身份」与「未 disclaim 借用祖先授权」两种情况都返回 `granted`,单凭权限探测**无法就地区分**。要确证授权是绑定到新 bundle 身份 `one.recapsy.desktop.capture`(而非借用父链),须以上面第 4 步「屏幕录制面板出现名为 Recapsy Preview Capture 的条目」为准。

@@ -11,8 +11,9 @@ import type {
   CaptureHelperCommandClient,
   CaptureHelperTransportObserver,
 } from '../helper/index';
+import productIdentity from '../product-identity.json';
 
-export const CAPTURE_BUNDLE_IDENTIFIER = 'one.recapsy.desktop.capture';
+export const CAPTURE_BUNDLE_IDENTIFIER = productIdentity.captureBundleId;
 
 export type CaptureBundlePaths = {
   bundlePath: string;
@@ -69,12 +70,17 @@ export class CaptureBundleError extends Error {
  */
 export function resolveCaptureBundlePaths(options: CaptureBundleLayoutOptions): CaptureBundlePaths {
   const bundlePath = options.isPackaged
-    ? path.resolve(options.resourcesPath, '..', 'Frameworks', 'RecapsyCapture.app')
-    : path.join(options.packageRoot, 'macos', 'build', 'Recapsy.app');
+    ? path.resolve(
+        options.resourcesPath,
+        '..',
+        'Frameworks',
+        productIdentity.captureBundleDirectoryName,
+      )
+    : path.join(options.packageRoot, 'macos', 'build', productIdentity.captureBundleDirectoryName);
 
   return {
     bundlePath,
-    capturePath: path.join(bundlePath, 'Contents', 'MacOS', 'Recapsy'),
+    capturePath: path.join(bundlePath, 'Contents', 'MacOS', productIdentity.captureExecutableName),
     launcherPath: path.join(bundlePath, 'Contents', 'MacOS', 'CaptureLauncher'),
   };
 }

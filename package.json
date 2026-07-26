@@ -15,7 +15,7 @@
     "test": "pnpm --filter @recapsy/contracts test && pnpm --filter @recapsy/desktop test && pnpm --filter @recapsy/server test",
     "typecheck": "turbo typecheck",
     "quality:changed-diff": "node scripts/check-changed-diff.mjs",
-    "verify:goal": "git diff --check && pnpm quality:changed-diff && pnpm lint && pnpm typecheck && pnpm architecture:check && pnpm test && pnpm build",
+    "verify:goal": "git --no-pager diff --check && pnpm quality:changed-diff && pnpm lint && pnpm typecheck && pnpm architecture:check && pnpm test && pnpm build",
     "verify:goal:macos": "pnpm --filter @recapsy/desktop run test:macos",
     "format": "biome format --write .",
     "check": "biome check .",

@@ -24,6 +24,7 @@ import {
   type HelperToMainType,
   createHelperProcessClient,
 } from '../../src/helper/index';
+import productIdentity from '../../src/product-identity.json';
 import { createServerApiClient } from '../../src/server/index';
 import { createSqliteStore } from '../../src/storage/index';
 import { createBunSqliteDatabase } from '../../src/storage/sqlite/bun';
@@ -51,7 +52,12 @@ import { createBunSqliteDatabase } from '../../src/storage/sqlite/bun';
 const desktopRoot = fileURLToPath(new URL('../../', import.meta.url));
 const captureBundle = resolveCaptureBundlePath(process.env.RECAPSY_CAPTURE_BUNDLE);
 const launcherPath = path.join(captureBundle.path, 'Contents', 'MacOS', 'CaptureLauncher');
-const captureBinaryPath = path.join(captureBundle.path, 'Contents', 'MacOS', 'Recapsy');
+const captureBinaryPath = path.join(
+  captureBundle.path,
+  'Contents',
+  'MacOS',
+  productIdentity.captureExecutableName,
+);
 const launcherSourcePath = fileURLToPath(
   new URL('../../macos/Sources/CaptureLauncher/main.c', import.meta.url),
 );
@@ -119,7 +125,7 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
       path.join('Contents', 'MacOS', 'CaptureLauncher'),
     );
     expect(path.relative(captureBundle.path, captureBinaryPath)).toBe(
-      path.join('Contents', 'MacOS', 'Recapsy'),
+      path.join('Contents', 'MacOS', productIdentity.captureExecutableName),
     );
   });
 
@@ -341,11 +347,13 @@ describe('capture bundle subprocess (real signed Swift bundle via disclaim launc
         receiptPath,
         JSON.stringify({
           captureId,
+          capturedAt: '2026-07-18T00:00:00.100Z',
           decision: 'allow',
           deviceId: 'device_1',
+          frameQuality: { luminanceBucket: 8, marginal: false },
           observedAt: '2026-07-18T00:00:00.000Z',
           policy: { hash: capturePolicy().policyHash, version: 'bundle-policy-1' },
-          schemaVersion: 2,
+          schemaVersion: 3,
           screenshot: {
             hash,
             mimeType: 'image/webp',
@@ -703,7 +711,8 @@ type LibwebpBuildProvenance = {
 
 function resolveCaptureBundlePath(configuredPath: string | undefined): CaptureBundleSelection {
   const selection = configuredPath ? 'configured' : 'default';
-  const requestedPath = configuredPath ?? path.join('macos', 'build', 'Recapsy.app');
+  const requestedPath =
+    configuredPath ?? path.join('macos', 'build', productIdentity.captureBundleDirectoryName);
   const resolvedPath = path.resolve(desktopRoot, requestedPath);
 
   if (!isPathInside(desktopRoot, resolvedPath) || path.extname(resolvedPath) !== '.app') {

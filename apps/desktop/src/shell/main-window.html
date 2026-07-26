@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>Recapsy</title>
+    <title>Recapsy Preview</title>
     <style>
       :root {
         color-scheme: light dark;
@@ -70,7 +70,7 @@
     </style>
   </head>
   <body>
-    <h1>Recapsy</h1>
+    <h1>Recapsy Preview</h1>
     <p class="muted">采集状态、同步队列与 macOS 权限引导。</p>
 
     <section>
@@ -283,8 +283,8 @@
         if (needsScreen || needsAx) {
           guideEl.hidden = false;
           guideEl.textContent = needsScreen
-            ? '需要屏幕录制权限。请先请求访问，让 macOS 注册 Recapsy；若此前被拒绝，请打开系统设置。完成后点刷新。'
-            : '辅助功能对采集可选，但对上下文元数据必需。请打开系统设置，手动添加 Recapsy 并启用，然后刷新。';
+            ? '需要屏幕录制权限。请先请求访问，让 macOS 注册 Recapsy Preview Capture；若此前被拒绝，请打开系统设置。完成后点刷新。'
+            : '辅助功能对采集可选，但对上下文元数据必需。请打开系统设置，手动添加 Recapsy Preview Capture 并启用，然后刷新。';
         } else {
           guideEl.hidden = true;
         }
@@ -389,7 +389,7 @@
           await refreshAll();
           statusEl.textContent = permissions.screenRecording === 'granted'
             ? '屏幕录制权限已启用。'
-            : 'macOS 尚未授予权限。请打开屏幕录制设置，启用 Recapsy，然后刷新。';
+            : 'macOS 尚未授予权限。请打开屏幕录制设置，启用 Recapsy Preview Capture，然后刷新。';
         } catch (error) {
           errorEl.textContent = error.message || '无法请求屏幕录制权限';
           requestScreenButton.disabled = false;
@@ -402,7 +402,8 @@
       document.getElementById('open-screen').addEventListener('click', async () => {
         try {
           await unwrap(api.permissionsOpenScreenRecordingSettings());
-          statusEl.textContent = '已打开屏幕录制设置。请启用 Recapsy，然后刷新。';
+          statusEl.textContent =
+            '已打开屏幕录制设置。请启用 Recapsy Preview Capture，然后刷新。';
         } catch (error) {
           errorEl.textContent = error.message || '无法打开设置';
         }
@@ -412,7 +413,7 @@
         try {
           await unwrap(api.permissionsOpenAccessibilitySettings());
           statusEl.textContent =
-            '已打开辅助功能设置。请用 + 添加 Recapsy，启用后再刷新。';
+            '已打开辅助功能设置。请用 + 添加 Recapsy Preview Capture，启用后再刷新。';
         } catch (error) {
           errorEl.textContent = error.message || '无法打开设置';
         }

@@ -10,9 +10,9 @@ import PackageDescription
 //   - CWebP           : system-library shim exposing libwebp's C encoder API.
 //                       Header/library paths are supplied at build time by the
 //                       pinned macOS-14 source build — see `Sources/CWebP/shim.h`.
-//   - RecapsyCapture  : the capture executable. Physically renamed to `Recapsy`
-//                       when assembled into `Recapsy.app` so the screen-recording
-//                       privacy panel shows the product name (ADR 0009 约束③).
+//   - RecapsyCapture  : the capture executable. Physically renamed from the
+//                       shared product identity when assembled so the privacy
+//                       panel shows the transition product name (ADR 0009 约束③).
 //   - CaptureLauncher : a minimal C launcher that posix_spawns the capture
 //                       executable with `responsibility_spawnattrs_setdisclaim`
 //                       so the capture process becomes its own TCC responsible

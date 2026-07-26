@@ -45,6 +45,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Read product identity
+        id: product-identity
+        run: |
+          display_name="$(node -p "require('./apps/desktop/src/product-identity.json').displayName")"
+          printf 'display_name=%s\n' "$display_name" >> "$GITHUB_OUTPUT"
+
       - name: Stage Developer ID signed architecture
         env:
           RECAPSY_RELEASE_ARCH: ${{ matrix.arch }}
@@ -55,7 +61,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: recapsy-macos-${{ matrix.arch }}
-          path: apps/desktop/dist/release/release-input/Recapsy-${{ matrix.arch }}.app
+          path: apps/desktop/dist/release/release-input/${{ steps.product-identity.outputs.display_name }}-${{ matrix.arch }}.app
           if-no-files-found: error
 
   assemble-notarize-and-verify:
@@ -85,6 +91,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Read product identity
+        id: product-identity
+        run: |
+          display_name="$(node -p "require('./apps/desktop/src/product-identity.json').displayName")"
+          printf 'display_name=%s\n' "$display_name" >> "$GITHUB_OUTPUT"
+
       - name: Download signed architecture applications
         uses: actions/download-artifact@v4
         with:
@@ -101,11 +113,11 @@ jobs:
 
       - name: Assemble signed universal application
         env:
-          RECAPSY_RELEASE_ARM64_APP: ${{ github.workspace }}/apps/desktop/dist/release/release-input/Recapsy-arm64.app
+          RECAPSY_RELEASE_ARM64_APP: ${{ github.workspace }}/apps/desktop/dist/release/release-input/${{ steps.product-identity.outputs.display_name }}-arm64.app
           RECAPSY_RELEASE_PREVIOUS_VERSION: ${{ inputs.previous_version }}
           RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
           RECAPSY_RELEASE_VERSION: ${{ inputs.version }}
-          RECAPSY_RELEASE_X64_APP: ${{ github.workspace }}/apps/desktop/dist/release/release-input/Recapsy-x64.app
+          RECAPSY_RELEASE_X64_APP: ${{ github.workspace }}/apps/desktop/dist/release/release-input/${{ steps.product-identity.outputs.display_name }}-x64.app
         run: pnpm --filter @recapsy/desktop run release:assemble
 
       - name: Notarize and create distribution DMG
@@ -129,12 +141,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >-
           gh release download "v${{ inputs.previous_version }}"
-          --pattern "Recapsy-${{ inputs.previous_version }}-universal.dmg"
+          --pattern "${{ steps.product-identity.outputs.display_name }}-${{ inputs.previous_version }}-universal.dmg"
           --dir "$RUNNER_TEMP/recapsy-rollback"
 
       - name: Verify rollback artifact
         env:
-          RECAPSY_RELEASE_ROLLBACK_DMG: ${{ runner.temp }}/recapsy-rollback/Recapsy-${{ inputs.previous_version }}-universal.dmg
+          RECAPSY_RELEASE_ROLLBACK_DMG: ${{ runner.temp }}/recapsy-rollback/${{ steps.product-identity.outputs.display_name }}-${{ inputs.previous_version }}-universal.dmg
           RECAPSY_RELEASE_SIGN_IDENTITY: ${{ secrets.RECAPSY_RELEASE_SIGN_IDENTITY }}
         run: pnpm --filter @recapsy/desktop run release:verify-rollback
 

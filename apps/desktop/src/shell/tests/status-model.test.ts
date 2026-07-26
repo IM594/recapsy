@@ -26,7 +26,7 @@ describe('desktop shell status model', () => {
         syncLastErrorCode: 'provider_unavailable',
       }),
     ).toBe(
-      'Recapsy · 运行中 · 屏幕录制已授权 · 处理中 1 · 排队 2 · 最老 42秒 · 接收 7/分 · 完成 5/分 · 准入 max_asset_bytes_reached · 策略 policy-primary · 错误 provider_unavailable',
+      'Recapsy Preview · 运行中 · 屏幕录制已授权 · 处理中 1 · 排队 2 · 最老 42秒 · 接收 7/分 · 完成 5/分 · 准入 max_asset_bytes_reached · 策略 policy-primary · 错误 provider_unavailable',
     );
 
     expect(

@@ -1,0 +1,12 @@
+{
+  "bundleId": "one.recapsy.desktop",
+  "captureBundleDirectoryName": "Recapsy Preview Capture.app",
+  "captureBundleId": "one.recapsy.desktop.capture",
+  "captureDisplayName": "Recapsy Preview Capture",
+  "captureExecutableName": "Recapsy Preview Capture",
+  "displayName": "Recapsy Preview",
+  "legacyOperationalDatabaseFilename": "recapsy-desktop-dev.sqlite3",
+  "legacyProfileDirectoryName": "Recapsy",
+  "operationalDatabaseFilename": "operational.sqlite3",
+  "profileDirectoryName": "one.recapsy.desktop"
+}
