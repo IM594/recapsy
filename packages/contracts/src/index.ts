@@ -10,6 +10,7 @@ export * from './schemas/dev-acceptance.js';
 export * from './schemas/invite.js';
 export * from './schemas/ocr.js';
 export * from './schemas/policy.js';
+export * from './schemas/profile.js';
 export * from './schemas/provider-settings.js';
 export * from './schemas/search.js';
 export * from './schemas/session.js';
