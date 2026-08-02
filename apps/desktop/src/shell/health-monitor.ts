@@ -90,7 +90,7 @@ const ALERTS: Readonly<Record<DesktopHealthAlertKind, DesktopHealthAlert>> = {
     trayLabel: '同步失败',
   },
   sync_paused: {
-    body: `Provider 凭据验证失败，同步已暂停。请在修复配置后打开 ${productIdentity.displayName} 恢复同步。`,
+    body: `Provider 凭据或 OCR 模型配置验证失败，同步已暂停。请在修复配置后打开 ${productIdentity.displayName} 恢复同步。`,
     kind: 'sync_paused',
     title: `${productIdentity.displayName} 同步已暂停`,
     trayLabel: '同步已暂停',

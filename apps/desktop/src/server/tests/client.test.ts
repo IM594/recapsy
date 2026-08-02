@@ -577,6 +577,35 @@ describe('desktop server API client', () => {
     });
   });
 
+  it('maps OCR provider configuration failures without exposing provider details', async () => {
+    const client = createClient([], async () =>
+      createJsonResponse(
+        {
+          error: {
+            code: 'ocr.provider_configuration_invalid',
+            message: 'generic public message',
+            details: { providerStatusCategory: 'resource_not_found', retryable: false },
+          },
+        },
+        422,
+      ),
+    );
+
+    await expect(
+      client.runOcrProxy({
+        bytes: new Uint8Array([1, 2, 3]),
+        mimeType: 'image/webp',
+        operationKey: 'ocr-operation-invalid-model',
+        workspaceId,
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider_configuration_invalid',
+      details: { providerStatusCategory: 'resource_not_found', retryable: false },
+      retryable: false,
+      safeMessage: 'Provider configuration is invalid.',
+    });
+  });
+
   it('runs the OCR proxy with raw bytes and validates the normalized response', async () => {
     const calls: ServerApiTransportRequest[] = [];
     const client = createClient(calls, async (request) => {

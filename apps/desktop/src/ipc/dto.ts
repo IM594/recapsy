@@ -69,7 +69,7 @@ export type SyncGateStatusDto =
   | { state: 'open' }
   | {
       state: 'paused' | 'half_open';
-      reason: 'provider_auth_failed';
+      reason: 'provider_auth_failed' | 'provider_configuration_invalid';
       pausedAt: string;
       nextProbeAt: string;
     };

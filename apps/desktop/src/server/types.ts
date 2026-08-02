@@ -60,6 +60,7 @@ export type ServerApiErrorCode =
   | 'provider_not_configured'
   | 'provider_unavailable'
   | 'provider_auth_failed'
+  | 'provider_configuration_invalid'
   | 'provider_rate_limited'
   | 'provider_timeout'
   | 'ocr_concurrency_limited'

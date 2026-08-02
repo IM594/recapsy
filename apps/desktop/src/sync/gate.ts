@@ -1,6 +1,6 @@
 import type { SyncRunResult } from './types';
 
-export type SyncGateReason = 'provider_auth_failed';
+export type SyncGateReason = 'provider_auth_failed' | 'provider_configuration_invalid';
 export type SyncGateState = 'open' | 'paused' | 'half_open';
 
 export type SyncGateStatus =
@@ -48,9 +48,12 @@ export function createSyncGate(options: SyncGateOptions = {}): SyncGate {
       return { ...status };
     },
     observe(result, now) {
-      if (result.code === 'provider_auth_failed') {
+      if (
+        result.code === 'provider_auth_failed' ||
+        result.code === 'provider_configuration_invalid'
+      ) {
         if (status.state !== 'paused') {
-          pause('provider_auth_failed', now);
+          pause(result.code, now);
         }
         return;
       }

@@ -30,6 +30,8 @@ export type AcceptanceJobSummary = {
   createdAt: string;
   updatedAt: string;
   nextRetryAt: string | null;
+  model?: string;
+  providerName?: string;
 };
 
 export type AcceptanceQueueProjection = {
@@ -161,6 +163,8 @@ function toSummary(job: AcceptanceOutboxJob, nowMs: number): AcceptanceJobSummar
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     nextRetryAt: job.nextRetryAt ?? null,
+    ...(job.ocrResult?.model ? { model: job.ocrResult.model } : {}),
+    ...(job.ocrResult?.providerName ? { providerName: job.ocrResult.providerName } : {}),
   };
 }
 

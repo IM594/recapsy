@@ -139,7 +139,11 @@ export type SyncRunResult = {
     | 'offline'
     | 'server_unavailable'
     | 'provider_auth_failed'
+    | 'provider_configuration_invalid'
     | 'provider_rate_limited'
+    | 'provider_timeout'
+    | 'provider_unavailable'
+    | 'unknown'
     | 'sync_paused'
     | 'lease_lost';
   providerOutcome?: 'not_attempted' | 'succeeded' | 'rate_limited';
@@ -158,6 +162,7 @@ export type SyncPresentationErrorCode =
   | 'policy_denied'
   | 'quota_exceeded'
   | 'provider_not_configured'
+  | 'provider_configuration_invalid'
   | 'provider_unavailable'
   | 'input_too_large'
   | 'unsupported_format'

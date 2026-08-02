@@ -645,6 +645,10 @@ function mapNamespacedErrorCode(
     }
   }
 
+  if (namespace === 'ocr' && normalized === 'provider_configuration_invalid') {
+    return 'provider_configuration_invalid';
+  }
+
   // OCR proxy in-flight ceiling. Distinct from provider vendor rate limits so
   // local capacity is not halved when the server is simply full.
   if (
@@ -674,6 +678,7 @@ function isKnownServerErrorCode(code: string): code is ServerApiErrorCode {
     'provider_not_configured',
     'provider_unavailable',
     'provider_auth_failed',
+    'provider_configuration_invalid',
     'provider_rate_limited',
     'provider_timeout',
     'ocr_concurrency_limited',
@@ -711,6 +716,10 @@ function defaultSafeMessage(code: ServerApiErrorCode): string {
 
   if (code === 'provider_auth_failed') {
     return 'Provider authentication failed.';
+  }
+
+  if (code === 'provider_configuration_invalid') {
+    return 'Provider configuration is invalid.';
   }
 
   if (code === 'provider_rate_limited') {
@@ -790,6 +799,7 @@ function isRetryableByStatus(code: ServerApiErrorCode): boolean {
     'input_too_large',
     'policy_denied',
     'provider_auth_failed',
+    'provider_configuration_invalid',
     'provider_not_configured',
     'quota_exceeded',
     'result_invalid',

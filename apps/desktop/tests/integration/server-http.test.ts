@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AiRuntime, RunVisionTextFailureReason } from '../../../server/src/ai/index';
+import { projectAcceptanceQueue } from '../../src/acceptance/index';
 import { type ServerApiTransport, createServerApiClient } from '../../src/server/index';
 import {
   type AssetCacheRef,
@@ -15,6 +16,7 @@ import { createBunSqliteDatabase } from '../../src/storage/sqlite/bun';
 import {
   type SyncQueueStore,
   type SyncServerApi,
+  createSyncGate,
   createSyncJobExecutor,
   createSyncWorker,
 } from '../../src/sync/index';
@@ -30,6 +32,7 @@ const leakedProviderMessage =
 
 const activeHarnesses: ServerHttpHarness[] = [];
 const activeTempDirs: string[] = [];
+const activeProviders: Array<ReturnType<typeof Bun.serve>> = [];
 
 afterEach(() => {
   const stopErrors: unknown[] = [];
@@ -37,6 +40,14 @@ afterEach(() => {
   for (const harness of activeHarnesses.splice(0)) {
     try {
       harness.stop();
+    } catch (error) {
+      stopErrors.push(error);
+    }
+  }
+
+  for (const provider of activeProviders.splice(0)) {
+    try {
+      provider.stop(true);
     } catch (error) {
       stopErrors.push(error);
     }
@@ -269,6 +280,140 @@ describe('desktop server sync over real HTTP', () => {
     expect(harness.captureSnapshot().searchDocuments).toHaveLength(0);
   });
 
+  it('pauses an invalid provider model and drains the original SQLite job through one half-open probe', async () => {
+    const secret = 'provider-e2e-secret-should-not-leak';
+    const providerBody =
+      'private provider failure /Users/private/capture.webp sensitive prompt should-not-leak';
+    const requests: Array<{ authorization: string | null; model: string | null }> = [];
+    let rejectPreviouslyValidatedModel = false;
+    const provider = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      async fetch(request) {
+        const body = (await request.json()) as { model?: unknown };
+        const model = typeof body.model === 'string' ? body.model : null;
+        requests.push({ authorization: request.headers.get('authorization'), model });
+        if (rejectPreviouslyValidatedModel && model === 'validated-vision-model') {
+          return new Response(providerBody, { status: 404 });
+        }
+        return new Response(
+          `data: ${JSON.stringify({
+            id: 'provider-e2e-success',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model,
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content:
+                    '{"screenText":{"text":"Recovered OCR text","blocks":[{"text":"Recovered OCR text","order":0,"kind":"line"}]}}',
+                },
+                finish_reason: 'stop',
+              },
+            ],
+          })}\n\ndata: [DONE]\n\n`,
+          { headers: { 'Content-Type': 'text/event-stream' } },
+        );
+      },
+    });
+    activeProviders.push(provider);
+    const harness = await startHarness({ useAppDefaultOcrRunner: true });
+    const user = await harness.bootstrapUser('desktop-provider-gate@example.test');
+    const createSetting = await fetch(`${harness.endpoint}/v1/admin/provider-settings`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${user.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        service: 'ocr',
+        provider: 'openai-compatible',
+        endpoint: `${provider.url.toString().replace(/\/$/, '')}/v1`,
+        model: 'validated-vision-model',
+        secret,
+      }),
+    });
+    expect(createSetting.status).toBe(201);
+    const setting = (await createSetting.json()) as { setting: { id: string } };
+    expect(requests).toHaveLength(1);
+    rejectPreviouslyValidatedModel = true;
+    const bytes = new Uint8Array([31, 32, 33, 34]);
+    const store = await createSqliteTestStore();
+    await seedPendingCapture(store, user.workspaceId, bytes);
+    const client = createHttpClient(harness.endpoint, user.accessToken);
+    const gate = createSyncGate({ probeDelayMs: 60_000 });
+    let clockNowMs = Date.parse(now);
+    const worker = createWorker(store, client, user.workspaceId, bytes, undefined, gate, () =>
+      new Date(clockNowMs).toISOString(),
+    );
+
+    expect(await worker.runOnce()).toMatchObject({
+      code: 'provider_configuration_invalid',
+      status: 'retry_wait',
+    });
+    const pausedJob = await store.getOutboxJob('job_1');
+    expect(pausedJob).toMatchObject({
+      attempt: 0,
+      lastSafeError: { code: 'provider_configuration_invalid', retryable: true },
+      state: 'pending',
+    });
+    expect(gate.getStatus()).toMatchObject({
+      reason: 'provider_configuration_invalid',
+      state: 'paused',
+    });
+    expect(await worker.runOnce()).toMatchObject({ code: 'sync_paused', processed: 0 });
+    expect(requests).toHaveLength(2);
+
+    const updateSetting = await fetch(
+      `${harness.endpoint}/v1/admin/provider-settings/${setting.setting.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          authorization: `Bearer ${user.accessToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ model: 'replacement-vision-model' }),
+      },
+    );
+    const updateBody = await updateSetting.text();
+    expect(updateSetting.status).toBe(200);
+    expect(requests).toHaveLength(3);
+
+    clockNowMs += 60_000;
+    const probeResults = await Promise.all([worker.runOnce(), worker.runOnce()]);
+    expect(probeResults).toContainEqual({
+      jobId: 'job_1',
+      processed: 1,
+      providerOutcome: 'succeeded',
+      status: 'synced',
+    });
+    expect(probeResults).toContainEqual({ code: 'sync_paused', processed: 0, status: 'skipped' });
+    expect(gate.getStatus()).toEqual({ state: 'open' });
+    expect(await store.getOutboxJob('job_1')).toMatchObject({
+      attempt: 0,
+      state: 'synced',
+      terminalReason: 'ocr_synced',
+    });
+    expect(requests).toHaveLength(4);
+    expect(requests.map((request) => request.model)).toEqual([
+      'validated-vision-model',
+      'validated-vision-model',
+      'replacement-vision-model',
+      'replacement-vision-model',
+    ]);
+    expect(requests.every((request) => request.authorization === `Bearer ${secret}`)).toBe(true);
+
+    const projection = projectAcceptanceQueue(
+      [pausedJob as NonNullable<typeof pausedJob>],
+      Date.parse('2026-07-06T00:01:00.000Z'),
+    );
+    const persisted = JSON.stringify({ pausedJob, projection, updateBody });
+    for (const unsafe of [secret, providerBody, '/Users/private', 'sensitive prompt']) {
+      expect(persisted).not.toContain(unsafe);
+    }
+  });
+
   it('cancels an in-flight job as a purely local terminal state with no server OCR result', async () => {
     const bytes = new Uint8Array([13, 14, 15, 16]);
     const harness = await startHarness({
@@ -368,10 +513,12 @@ function createWorker(
   workspaceId: string,
   bytes: Uint8Array,
   readAssetBytes: () => Promise<Uint8Array> = async () => bytes,
+  gate?: ReturnType<typeof createSyncGate>,
+  nowSource?: () => string,
 ) {
   let tick = 0;
   const clock = {
-    now: () => `2026-07-06T00:00:0${tick++}.000Z`,
+    now: () => nowSource?.() ?? `2026-07-06T00:00:0${tick++}.000Z`,
   };
   const workspace = {
     getActiveWorkspaceId: async () => workspaceId,
@@ -388,6 +535,7 @@ function createWorker(
   return createSyncWorker({
     clock,
     executeJob,
+    ...(gate ? { gate } : {}),
     maxAttempts: 3,
     store,
     workspace,

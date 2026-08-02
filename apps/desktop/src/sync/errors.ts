@@ -35,6 +35,7 @@ const SYNC_SAFE_MESSAGES: Record<string, string> = {
   provider_not_configured: 'Provider is not configured.',
   provider_unavailable: 'Provider is unavailable.',
   provider_auth_failed: 'Provider authentication failed.',
+  provider_configuration_invalid: 'Provider configuration is invalid.',
   provider_rate_limited: 'Provider is rate limited.',
   ocr_concurrency_limited: 'Too many concurrent OCR requests.',
   provider_timeout: 'OCR provider timed out.',
@@ -164,6 +165,7 @@ function isSyncPresentationErrorCode(code: string): code is SyncPresentationErro
     case 'policy_denied':
     case 'quota_exceeded':
     case 'provider_not_configured':
+    case 'provider_configuration_invalid':
     case 'provider_unavailable':
     case 'input_too_large':
     case 'unsupported_format':

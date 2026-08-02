@@ -320,7 +320,10 @@ async function handleSyncError(
     };
   }
 
-  if (classified.code === 'provider_auth_failed') {
+  if (
+    classified.code === 'provider_auth_failed' ||
+    classified.code === 'provider_configuration_invalid'
+  ) {
     await requireOutboxWrite(
       options.store.releaseOutboxJob({
         id: job.id,
@@ -334,7 +337,7 @@ async function handleSyncError(
       }),
     );
     return {
-      code: 'provider_auth_failed',
+      code: classified.code,
       jobId: job.id,
       processed: 1,
       status: 'retry_wait',

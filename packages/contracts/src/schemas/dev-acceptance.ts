@@ -98,7 +98,7 @@ export const DevAcceptanceSyncGateSchema = z.discriminatedUnion('state', [
   z
     .object({
       state: z.literal('paused'),
-      reason: z.literal('provider_auth_failed'),
+      reason: z.enum(['provider_auth_failed', 'provider_configuration_invalid']),
       pausedAt: IsoDateTimeSchema,
       nextProbeAt: IsoDateTimeSchema,
     })
@@ -106,7 +106,7 @@ export const DevAcceptanceSyncGateSchema = z.discriminatedUnion('state', [
   z
     .object({
       state: z.literal('half_open'),
-      reason: z.literal('provider_auth_failed'),
+      reason: z.enum(['provider_auth_failed', 'provider_configuration_invalid']),
       pausedAt: IsoDateTimeSchema,
       nextProbeAt: IsoDateTimeSchema,
     })
@@ -136,6 +136,8 @@ const JobSummarySchema = z
     createdAt: IsoDateTimeSchema,
     updatedAt: IsoDateTimeSchema,
     nextRetryAt: IsoDateTimeSchema.nullable(),
+    model: z.string().min(1).max(256).optional(),
+    providerName: z.string().min(1).max(128).optional(),
   })
   .strict();
 

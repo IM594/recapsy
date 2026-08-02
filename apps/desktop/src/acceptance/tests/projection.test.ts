@@ -207,4 +207,48 @@ describe('acceptance queue projection', () => {
     );
     expect(projection.inFlight[0]?.safeErrorCode).toBeNull();
   });
+
+  test('projects persisted OCR identity and never invents identity for jobs without a result', () => {
+    const projection = projectAcceptanceQueue(
+      [
+        {
+          id: 'cap-with-result',
+          state: 'synced',
+          attempt: 0,
+          createdAt: '2026-07-18T08:00:00.000Z',
+          updatedAt: '2026-07-18T08:00:40.000Z',
+          ocrResult: {
+            durationMs: 10,
+            model: 'model-at-execution',
+            providerName: 'provider-at-execution',
+            qualityFlags: [],
+            screenText: {
+              blocks: [],
+              readingOrder: 'top_to_bottom_left_to_right',
+              source: 'image_ocr',
+            },
+            sourceAssetHash: 'sha256:persisted',
+          },
+        },
+        {
+          id: 'cap-without-result',
+          state: 'failed',
+          attempt: 1,
+          createdAt: '2026-07-18T07:59:00.000Z',
+          updatedAt: '2026-07-18T08:00:30.000Z',
+        },
+      ],
+      Date.parse('2026-07-18T08:01:00.000Z'),
+    );
+
+    expect(projection.queueHeads.find((job) => job.localJobId === 'cap-with-result')).toMatchObject(
+      {
+        model: 'model-at-execution',
+        providerName: 'provider-at-execution',
+      },
+    );
+    expect(
+      projection.queueHeads.find((job) => job.localJobId === 'cap-without-result'),
+    ).not.toHaveProperty('model');
+  });
 });

@@ -160,4 +160,32 @@ describe('development acceptance desktop status contract', () => {
       }).queueHeads[0]?.safeErrorCode,
     ).toBe('local_asset_missing');
   });
+
+  test('carries only persisted OCR execution identity and accepts legacy jobs without it', () => {
+    const current = DevAcceptanceDesktopStatusSchema.parse({
+      ...status,
+      syncGate: {
+        nextProbeAt: '2026-07-18T08:01:00.000Z',
+        pausedAt: '2026-07-18T08:00:00.000Z',
+        reason: 'provider_configuration_invalid',
+        state: 'paused',
+      },
+      queueHeads: [
+        {
+          ...status.queueHeads[0],
+          model: 'ocr-model-at-execution',
+          providerName: 'openai-compatible',
+          safeErrorCode: 'provider_configuration_invalid',
+        },
+      ],
+    });
+    expect(current.queueHeads[0]).toMatchObject({
+      model: 'ocr-model-at-execution',
+      providerName: 'openai-compatible',
+    });
+
+    const legacy = DevAcceptanceDesktopStatusSchema.parse(status);
+    expect(legacy.queueHeads[0]).not.toHaveProperty('model');
+    expect(legacy.queueHeads[0]).not.toHaveProperty('providerName');
+  });
 });

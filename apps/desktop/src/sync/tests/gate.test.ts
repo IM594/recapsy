@@ -72,4 +72,23 @@ describe('sync provider gate', () => {
     expect(gate.getStatus()).toEqual({ state: 'open' });
     expect(gate.tryEnter('2026-07-27T00:00:01.000Z')).toBe(true);
   });
+
+  it('pauses on provider configuration failures but not unknown, timeout, offline, or 5xx failures', () => {
+    const gate = createSyncGate({ probeDelayMs: 60_000 });
+
+    gate.observe(
+      { code: 'provider_configuration_invalid', processed: 1, status: 'retry_wait' },
+      startedAt,
+    );
+    expect(gate.getStatus()).toMatchObject({
+      reason: 'provider_configuration_invalid',
+      state: 'paused',
+    });
+
+    for (const code of ['unknown', 'provider_timeout', 'offline', 'server_unavailable'] as const) {
+      const unaffected = createSyncGate({ probeDelayMs: 60_000 });
+      unaffected.observe({ code, processed: 1, status: 'retry_wait' }, startedAt);
+      expect(unaffected.getStatus()).toEqual({ state: 'open' });
+    }
+  });
 });

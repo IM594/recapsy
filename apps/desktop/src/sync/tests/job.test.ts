@@ -370,6 +370,45 @@ describe('desktop sync job executor', () => {
     expect(released?.terminalReason).toBeUndefined();
   });
 
+  it('releases provider configuration failures without consuming the job attempt budget', async () => {
+    const store = createMemoryStore();
+    await seedPendingCapture(store);
+    await store.recordOutboxSafeError('job_1', {
+      code: 'provider_unavailable',
+      maxAttempts: 15,
+      message: 'Provider is unavailable.',
+      now,
+      retryable: true,
+    });
+    const runner = createJobRunner({
+      api: createApi({
+        async runOcrProxy() {
+          throw new ServerApiError({
+            code: 'provider_configuration_invalid',
+            retryable: false,
+            safeMessage: 'Provider configuration is invalid.',
+          });
+        },
+      }),
+      maxAttempts: 15,
+      store,
+    });
+
+    expect(await runner.runOnce()).toMatchObject({
+      code: 'provider_configuration_invalid',
+      status: 'retry_wait',
+    });
+    const released = await store.getOutboxJob('job_1');
+    expect(released).toMatchObject({
+      attempt: 1,
+      lastSafeError: { code: 'provider_configuration_invalid', retryable: true },
+      state: 'pending',
+    });
+    expect(released?.nextRetryAt).toBe(released?.updatedAt);
+    expect(released?.leaseToken).toBeUndefined();
+    expect(released?.terminalReason).toBeUndefined();
+  });
+
   it('fails a job when the proxy rejects the input as too large', async () => {
     const store = createMemoryStore();
     await seedPendingCapture(store);
