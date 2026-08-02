@@ -1,6 +1,15 @@
 import { expect, test } from 'bun:test';
 import { ApiErrorCodeSchema, ApiErrorSchema, PaginationSchema } from '../common.js';
 
+test('API error contracts accept the safe OCR provider configuration code', () => {
+  expect(ApiErrorCodeSchema.parse('ocr.provider_configuration_invalid')).toBe(
+    'ocr.provider_configuration_invalid',
+  );
+  expect(ApiErrorCodeSchema.parse('providerSettings.capability_invalid')).toBe(
+    'providerSettings.capability_invalid',
+  );
+});
+
 test('API error contracts reject retired temporary-upload errors', () => {
   const retiredCode = ['storage', 'temporary_upload_expired'].join('.');
 
