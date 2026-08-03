@@ -322,4 +322,88 @@ final class CaptureContextPrivacyTests: XCTestCase {
             .allow
         )
     }
+
+    func testAppDomainAndDomainFamilyBlocksHappenBeforePixelsAndUnblockedSourceResumes() throws {
+        let chromeApplication = CaptureApplicationPayload(
+            name: "Google Chrome",
+            bundleId: "com.google.Chrome"
+        )
+        let chrome = CaptureSourceIdentity(
+            applicationName: "Google Chrome",
+            bundleId: "com.google.Chrome"
+        )
+        let privacyPolicy = policy(rules: [
+            rule(
+                id: "block-chatgpt-app",
+                kind: "bundle_id",
+                pattern: "com.example.ChatGPT",
+                action: .blockCapture
+            ),
+            rule(
+                id: "block-github-domain",
+                kind: "domain",
+                pattern: "github.com",
+                action: .blockCapture
+            ),
+            rule(
+                id: "block-openrouter-family",
+                kind: "domain_family",
+                pattern: "openrouter.ai",
+                action: .blockCapture
+            ),
+        ])
+        let blockedApp = CaptureSourceIdentity(
+            applicationName: "ChatGPT",
+            bundleId: "com.example.ChatGPT"
+        )
+        let github = try XCTUnwrap(CaptureSourceContext.make(
+            application: chromeApplication,
+            document: nil,
+            url: "https://github.com/recapsy/issues",
+            windowTitle: "Issues"
+        ))
+        let openRouterChild = try XCTUnwrap(CaptureSourceContext.make(
+            application: chromeApplication,
+            document: nil,
+            url: "https://chat.openrouter.ai/playground",
+            windowTitle: "Playground"
+        ))
+        let unblocked = try XCTUnwrap(CaptureSourceContext.make(
+            application: chromeApplication,
+            document: nil,
+            url: "https://example.com/notes",
+            windowTitle: "Notes"
+        ))
+
+        let appDecision = CaptureSourcePolicyEvaluator.decide(
+            policy: privacyPolicy,
+            source: blockedApp
+        )
+        XCTAssertEqual(appDecision.action, CaptureSourcePolicyAction.blockCapture)
+        XCTAssertEqual(appDecision.matchedRuleIds, ["block-chatgpt-app"])
+
+        let domainDecision = CaptureSourcePolicyEvaluator.decide(
+            policy: privacyPolicy,
+            source: chrome,
+            context: github
+        )
+        XCTAssertEqual(domainDecision.action, CaptureSourcePolicyAction.blockCapture)
+        XCTAssertEqual(domainDecision.matchedRuleIds, ["block-github-domain"])
+
+        let familyDecision = CaptureSourcePolicyEvaluator.decide(
+            policy: privacyPolicy,
+            source: chrome,
+            context: openRouterChild
+        )
+        XCTAssertEqual(familyDecision.action, CaptureSourcePolicyAction.blockCapture)
+        XCTAssertEqual(familyDecision.matchedRuleIds, ["block-openrouter-family"])
+
+        let restoredDecision = CaptureSourcePolicyEvaluator.decide(
+            policy: privacyPolicy,
+            source: chrome,
+            context: unblocked
+        )
+        XCTAssertEqual(restoredDecision.action, CaptureSourcePolicyAction.allow)
+        XCTAssertEqual(restoredDecision.matchedRuleIds, [String]())
+    }
 }

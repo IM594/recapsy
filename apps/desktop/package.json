@@ -10,7 +10,7 @@
   "scripts": {
     "test": "pnpm run test:unit && pnpm run test:integration",
     "test:unit": "bun test --max-concurrency 1 scripts/release-macos.test.ts src tests/architecture-boundaries.test.ts tests/support/loopback-http-server.test.ts",
-    "test:integration": "bun test tests/integration/server-http.test.ts tests/integration/auth-login-sync.test.ts tests/integration/capture-process.test.ts",
+    "test:integration": "bun test tests/integration/server-http.test.ts tests/integration/auth-login-sync.test.ts tests/integration/capture-process.test.ts tests/integration/privacy-policy.test.ts",
     "test:server-http": "bun test tests/integration/server-http.test.ts",
     "test:auth-login-sync": "bun test tests/integration/auth-login-sync.test.ts",
     "test:capture-process": "bun test tests/integration/capture-process.test.ts",
