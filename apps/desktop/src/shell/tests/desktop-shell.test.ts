@@ -189,6 +189,50 @@ describe('desktop shell', () => {
     expect(confirmations[0]).toContain('www.github.com');
   });
 
+  it('shows an active website-family block and refreshes the tray after blocking', async () => {
+    let current = status({
+      source: {
+        applicationName: 'Google Chrome',
+        bundleId: 'com.google.Chrome',
+        domain: 'linux.do',
+        observedAt: new Date().toISOString(),
+      },
+      privacyRules: [],
+    });
+    const harness = createShellHarness({
+      actions: {
+        async addLocalRule(input) {
+          current = {
+            ...current,
+            privacyRules: [{ enabled: true, kind: input.kind, pattern: input.pattern }],
+          };
+        },
+      },
+      adapters: {
+        async confirm() {
+          return true;
+        },
+      },
+      statusSource: {
+        async getStatus() {
+          return current;
+        },
+      },
+    });
+
+    await harness.shell.refresh();
+    findAction(harness.menuBuilds.at(-1), '屏蔽整个网站 · linux.do 及其子网站').click?.();
+    await flushMicrotasks();
+
+    expect(findAction(harness.menuBuilds.at(-1), '当前网站已屏蔽 · linux.do')).toMatchObject({
+      enabled: false,
+    });
+    expect(
+      findAction(harness.menuBuilds.at(-1), '整个网站已屏蔽 · linux.do 及其子网站'),
+    ).toMatchObject({ enabled: false });
+    harness.shell.dispose();
+  });
+
   it('refreshes the tray immediately when the status source announces a change', async () => {
     let current = status();
     let notifySourceChanged: (() => void) | undefined;

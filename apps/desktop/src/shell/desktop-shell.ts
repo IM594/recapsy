@@ -343,11 +343,20 @@ class DesktopShellController implements DesktopShell {
 
     const items: DesktopShellMenuItem[] = [
       {
-        click: () => {
-          this.runInBackground(() => addLocalRule({ kind: 'bundle_id', pattern: source.bundleId }));
-        },
+        ...(this.hasActivePrivacyRule(status, 'bundle_id', source.bundleId)
+          ? { enabled: false }
+          : {
+              click: () => {
+                this.runInBackground(async () => {
+                  await addLocalRule({ kind: 'bundle_id', pattern: source.bundleId });
+                  await this.refresh();
+                });
+              },
+            }),
         kind: 'action',
-        label: `屏蔽当前应用 · ${source.applicationName}`,
+        label: this.hasActivePrivacyRule(status, 'bundle_id', source.bundleId)
+          ? `当前应用已屏蔽 · ${source.applicationName}`
+          : `屏蔽当前应用 · ${source.applicationName}`,
       },
     ];
     if (!source.domain) return items;
@@ -355,28 +364,59 @@ class DesktopShellController implements DesktopShell {
 
     items.push(
       {
-        click: () => {
-          this.runInBackground(() => addLocalRule({ kind: 'domain', pattern: domain }));
-        },
+        ...(this.hasActivePrivacyRule(status, 'domain', domain) ||
+        this.hasActivePrivacyRule(status, 'domain_family', domain)
+          ? { enabled: false }
+          : {
+              click: () => {
+                this.runInBackground(async () => {
+                  await addLocalRule({ kind: 'domain', pattern: domain });
+                  await this.refresh();
+                });
+              },
+            }),
         kind: 'action',
-        label: `屏蔽当前网站 · ${domain}`,
+        label:
+          this.hasActivePrivacyRule(status, 'domain', domain) ||
+          this.hasActivePrivacyRule(status, 'domain_family', domain)
+            ? `当前网站已屏蔽 · ${domain}`
+            : `屏蔽当前网站 · ${domain}`,
       },
       {
-        click: () => {
-          this.runInBackground(async () => {
-            const confirmed =
-              (await this.options.adapters.confirm?.(
-                `将屏蔽 ${domain} 及其子站点，例如 www.${domain}、api.${domain}。`,
-              )) ?? false;
-            if (!confirmed) return;
-            await addLocalRule({ kind: 'domain_family', pattern: domain });
-          });
-        },
+        ...(this.hasActivePrivacyRule(status, 'domain_family', domain)
+          ? { enabled: false }
+          : {
+              click: () => {
+                this.runInBackground(async () => {
+                  const confirmed =
+                    (await this.options.adapters.confirm?.(
+                      `将屏蔽 ${domain} 及其子站点，例如 www.${domain}、api.${domain}。`,
+                    )) ?? false;
+                  if (!confirmed) return;
+                  await addLocalRule({ kind: 'domain_family', pattern: domain });
+                  await this.refresh();
+                });
+              },
+            }),
         kind: 'action',
-        label: `屏蔽整个网站 · ${domain} 及其子网站`,
+        label: this.hasActivePrivacyRule(status, 'domain_family', domain)
+          ? `整个网站已屏蔽 · ${domain} 及其子网站`
+          : `屏蔽整个网站 · ${domain} 及其子网站`,
       },
     );
     return items;
+  }
+
+  private hasActivePrivacyRule(
+    status: DesktopShellStatus,
+    kind: DesktopShellLocalRuleKind,
+    pattern: string,
+  ): boolean {
+    return (
+      status.privacyRules?.some(
+        (rule) => rule.enabled && rule.kind === kind && rule.pattern === pattern,
+      ) ?? false
+    );
   }
 
   private async openPrivacySettings(openSettings: () => Promise<void>): Promise<void> {

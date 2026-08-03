@@ -3,7 +3,7 @@ export {
   formatTrayTooltip,
   isCaptureBlockedByPermissions,
 } from './status-model';
-export type { DesktopShellStatus } from './status-model';
+export type { DesktopShellPrivacyRule, DesktopShellStatus } from './status-model';
 export { createTrayIconPngBuffer } from './tray-icon';
 export { createDesktopHealthMonitor } from './health-monitor';
 export type {

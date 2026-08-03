@@ -1,6 +1,12 @@
 import productIdentity from '../product-identity.json';
 import type { SyncGateStatus } from '../sync/index';
 
+export type DesktopShellPrivacyRule = {
+  kind: 'bundle_id' | 'domain' | 'domain_family';
+  pattern: string;
+  enabled: boolean;
+};
+
 export type DesktopShellStatus = {
   captureState: string;
   capturePaused: boolean;
@@ -32,6 +38,7 @@ export type DesktopShellStatus = {
     version: string;
   };
   captureFailureCount?: number;
+  privacyRules?: readonly DesktopShellPrivacyRule[];
   /** ISO timestamp of the latest helper heartbeat; absent until the first pulse. */
   lastHeartbeatAt?: string;
   lastErrorCode?: string;

@@ -394,6 +394,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
           const admission = snapshot.admission;
           const helperStatus = snapshot.captureHelper;
           const capturePauseReason = snapshot.pauseReasons?.[0];
+          const privacyRules = await context.policy.listLocalRules();
 
           const status: DesktopShellStatus = {
             accessibility: permissions.accessibility,
@@ -417,6 +418,11 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             ...(lastError ? { lastErrorCode: lastError.code } : {}),
             ...(lastError ? { lastErrorMessage: lastError.message } : {}),
             screenRecording: permissions.screenRecording,
+            privacyRules: privacyRules.map(({ enabled, kind, pattern }) => ({
+              enabled,
+              kind,
+              pattern,
+            })),
             ...(snapshot.source ? { source: { ...snapshot.source } } : {}),
             syncBlocked: sync.blocked,
             syncGate,
