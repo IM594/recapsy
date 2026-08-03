@@ -696,6 +696,9 @@ async function startHarness(options: ServerHttpHarnessOptions = {}): Promise<Ser
 
 function visionRuntimeReturning(text: string): AiRuntime {
   return {
+    async runText() {
+      throw new Error('Unexpected AI text request in vision test harness.');
+    },
     async runVisionText() {
       return {
         blocks: [{ kind: 'line', order: 0, text }],
@@ -726,6 +729,9 @@ function visionRuntimeFailing(
   safeMessage: string,
 ): AiRuntime {
   return {
+    async runText() {
+      throw new Error('Unexpected AI text request in vision test harness.');
+    },
     async runVisionText() {
       return { reason, retryable, safeMessage, success: false };
     },
