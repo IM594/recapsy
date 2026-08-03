@@ -2,9 +2,9 @@ import ApplicationServices
 import CaptureCore
 import Foundation
 
-/// Reads only direct attributes from the active process's focused window and
-/// focused element. It deliberately never asks Accessibility to enumerate
-/// children, text, selections or page contents.
+/// Reads only direct attributes from the selected process window and focused
+/// element. It deliberately never asks Accessibility to enumerate children,
+/// text, selections or page contents.
 enum AccessibilityContextSampler {
     // ApplicationServices does not import the C constant into this Swift
     // overlay, but this is the documented direct AX window-number attribute.
@@ -20,23 +20,59 @@ enum AccessibilityContextSampler {
         }
 
         let process = AXUIElementCreateApplication(processId)
-        guard
-            let focusedWindow = elementAttribute(process, kAXFocusedWindowAttribute),
-            integerAttribute(focusedWindow, windowNumberAttribute) == windowId
-        else {
+        let focusedWindow = elementAttribute(process, kAXFocusedWindowAttribute)
+        let matchedWindow = matchingWindow(process, windowId: windowId)
+        let selectedWindow = matchedWindow ?? focusedWindow
+        guard let selectedWindow else {
             // A context sampled from another window of the same app would be
             // misleading. Keep the app-level result, but omit all AX context.
             return nil
         }
-        let focusedElement = elementAttribute(process, kAXFocusedUIElementAttribute)
+        // Some Chromium builds do not expose AXWindowNumber on the focused
+        // window. The focused-window relation is still the safest available
+        // context anchor in that case; when the number is exposed, retain the
+        // strict selected-window match.
+        if let selectedWindowNumber = integerAttribute(selectedWindow, windowNumberAttribute),
+           selectedWindowNumber != windowId {
+            return nil
+        }
+        // The focused element belongs to the focused window, not necessarily
+        // the selected ScreenCaptureKit window. Only use it when no distinct
+        // matching AX window was found.
+        let focusedElement = matchedWindow == nil
+            ? elementAttribute(process, kAXFocusedUIElementAttribute)
+            : nil
 
         return CaptureSourceContext.make(
             application: application,
-            document: documentAttribute(focusedWindow),
+            document: documentAttribute(selectedWindow),
             url: urlAttribute(focusedElement, kAXURLAttribute)
-                ?? urlAttribute(focusedWindow, kAXURLAttribute),
-            windowTitle: stringAttribute(focusedWindow, kAXTitleAttribute)
+                ?? urlAttribute(selectedWindow, kAXURLAttribute)
+                ?? urlAttribute(selectedWindow, kAXDocumentAttribute),
+            windowTitle: stringAttribute(selectedWindow, kAXTitleAttribute)
         )
+    }
+
+    private static func matchingWindow(_ process: AXUIElement, windowId: Int) -> AXUIElement? {
+        guard
+            let value = attributeValue(process, kAXWindowsAttribute),
+            CFGetTypeID(value) == CFArrayGetTypeID()
+        else {
+            return nil
+        }
+
+        let windows = unsafeBitCast(value, to: CFArray.self)
+        for index in 0..<CFArrayGetCount(windows) {
+            guard
+                let rawWindow = CFArrayGetValueAtIndex(windows, index),
+                let window = Optional(unsafeBitCast(rawWindow, to: AXUIElement.self)),
+                integerAttribute(window, windowNumberAttribute) == windowId
+            else {
+                continue
+            }
+            return window
+        }
+        return nil
     }
 
     private static func elementAttribute(_ element: AXUIElement, _ attribute: String) -> AXUIElement? {

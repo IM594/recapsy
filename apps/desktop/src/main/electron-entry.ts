@@ -5,6 +5,7 @@ import {
   Notification,
   Tray,
   app,
+  dialog,
   ipcMain,
   nativeImage,
   safeStorage,
@@ -25,6 +26,7 @@ import {
   createNodeCaptureBundleValidationAdapter,
 } from '../capture/index';
 import { createPrivacySettingsOpener, refreshCapturePermissions } from '../permissions/index';
+import productIdentity from '../product-identity.json';
 import { createServerApiClient } from '../server/index';
 import {
   type DesktopShellStatus,
@@ -109,6 +111,15 @@ const devVisibilityEnabled = process.env.RECAPSY_DESKTOP_DEV_VISIBILITY === '1';
  * same variable.
  */
 const CAPTURE_ASSET_ROOT_ENV = 'RECAPSY_CAPTURE_ASSET_ROOT';
+const CAPTURE_EXCLUDED_BUNDLE_IDS_ENV = 'RECAPSY_CAPTURE_EXCLUDED_BUNDLE_IDS';
+
+function resolveCaptureExcludedBundleIds(): string {
+  const bundleIds = [productIdentity.bundleId, productIdentity.captureBundleId];
+  if (!app.isPackaged) {
+    bundleIds.push('com.github.Electron', 'com.github.Electron.helper');
+  }
+  return bundleIds.join(',');
+}
 
 /**
  * Single source of truth for the local asset root, derived from Electron's
@@ -251,7 +262,10 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
   authClient,
   createHelperClient: () =>
     createCaptureBundleClient({
-      captureEnvironment: { [CAPTURE_ASSET_ROOT_ENV]: resolveCaptureAssetRoot() },
+      captureEnvironment: {
+        [CAPTURE_ASSET_ROOT_ENV]: resolveCaptureAssetRoot(),
+        [CAPTURE_EXCLUDED_BUNDLE_IDS_ENV]: resolveCaptureExcludedBundleIds(),
+      },
       isPackaged: app.isPackaged,
       override: helperCommandOverride
         ? {
@@ -291,6 +305,9 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
 
     return createDesktopShell({
       actions: {
+        addLocalRule: async (input) => {
+          await context.policy.addLocalRule(input);
+        },
         openAccessibilitySettings: async () => {
           await privacySettings.open('accessibility');
         },
@@ -343,6 +360,18 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             width: 480,
           }),
         quit: () => app.quit(),
+        confirm: async (message) => {
+          const result = await dialog.showMessageBox({
+            buttons: ['取消', '屏蔽'],
+            cancelId: 0,
+            defaultId: 0,
+            detail: '之后可以在 Recapsy Preview 的本地隐私设置中移除这条规则。',
+            message,
+            noLink: true,
+            type: 'question',
+          });
+          return result.response === 1;
+        },
         showNotification: ({ body, title }) => {
           if (Notification.isSupported()) {
             new Notification({ body, title }).show();
@@ -351,6 +380,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
       },
       mainWindowHtmlPath,
       statusSource: {
+        subscribe: (listener) => context.control.subscribeSource?.(listener) ?? (() => {}),
         async getStatus(): Promise<DesktopShellStatus> {
           const snapshot = context.control.getSnapshot();
           const permissions = snapshot.permissions;
@@ -387,6 +417,7 @@ const runtimeOptions: ElectronMainRuntimeOptions = {
             ...(lastError ? { lastErrorCode: lastError.code } : {}),
             ...(lastError ? { lastErrorMessage: lastError.message } : {}),
             screenRecording: permissions.screenRecording,
+            ...(snapshot.source ? { source: { ...snapshot.source } } : {}),
             syncBlocked: sync.blocked,
             syncGate,
             syncCompletedPerMinute: sync.completedPerMinute,

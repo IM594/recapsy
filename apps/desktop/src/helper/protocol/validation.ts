@@ -21,6 +21,7 @@ const HELPER_TO_MAIN_TYPES: readonly HelperToMainType[] = [
   'helper.policy_applied',
   'permission.status',
   'capture.result',
+  'capture.source',
   'capture.coverage',
   'capture.error',
   'helper.heartbeat',
@@ -128,6 +129,8 @@ function isPayloadForType(type: HelperMessageType, payload: unknown): boolean {
       return isPermissionStatusPayload(payload);
     case 'capture.result':
       return isCaptureResultPayload(payload);
+    case 'capture.source':
+      return isCaptureSourcePayload(payload);
     case 'capture.coverage':
       return isCaptureCoveragePayload(payload);
     case 'capture.error':
@@ -228,6 +231,28 @@ function isCaptureResultPayload(payload: unknown): boolean {
     payload.assets.length === 1 &&
     isCaptureAssetPayload(payload.assets[0], payload.captureId) &&
     isSafeCaptureContextPayload(payload.context, payload.observedAt)
+  );
+}
+
+function isCaptureSourcePayload(payload: unknown): boolean {
+  return (
+    isRecord(payload) &&
+    hasOnlyKeys(payload, ['observedAt', 'source']) &&
+    isString(payload.observedAt) &&
+    optionalCaptureSource(payload.source)
+  );
+}
+
+function optionalCaptureSource(payload: unknown): boolean {
+  return payload === undefined || isCaptureSource(payload);
+}
+
+function isCaptureSource(payload: unknown): boolean {
+  return (
+    isRecord(payload) &&
+    hasOnlyKeys(payload, ['app', 'website']) &&
+    isApp(payload.app) &&
+    isOptionalWebsite(payload.website)
   );
 }
 
@@ -379,6 +404,7 @@ function isHelperCapturePolicyRule(payload: unknown): boolean {
       'app_name',
       'bundle_id',
       'domain',
+      'domain_family',
       'document_path',
       'window_title',
     ]) &&

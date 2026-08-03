@@ -127,6 +127,106 @@ describe('capture control', () => {
     expect(harness.control.getSnapshot().lastSafeError).toBeUndefined();
   });
 
+  it('keeps the latest safe capture source available for the tray privacy actions', async () => {
+    const harness = createControlHarness();
+
+    await harness.control.recordHelperObservation({
+      observedAt: '2026-07-19T08:00:02.000Z',
+      source: {
+        applicationName: 'Safari',
+        bundleId: 'com.apple.Safari',
+        domain: 'github.com',
+        observedAt: '2026-07-19T08:00:02.000Z',
+      },
+      type: 'capture_result',
+    });
+
+    expect(harness.control.getSnapshot()).toMatchObject({
+      source: {
+        applicationName: 'Safari',
+        bundleId: 'com.apple.Safari',
+        domain: 'github.com',
+        observedAt: '2026-07-19T08:00:02.000Z',
+      },
+    });
+  });
+
+  it('updates the tray source before a frame is durably produced', async () => {
+    const harness = createControlHarness();
+
+    await harness.control.recordHelperObservation({
+      observedAt: '2026-07-19T08:00:03.000Z',
+      source: {
+        applicationName: 'Google Chrome',
+        bundleId: 'com.google.Chrome',
+        domain: 'github.com',
+        observedAt: '2026-07-19T08:00:03.000Z',
+      },
+      type: 'capture_source',
+    });
+
+    expect(harness.control.getSnapshot().source).toEqual({
+      applicationName: 'Google Chrome',
+      bundleId: 'com.google.Chrome',
+      domain: 'github.com',
+      observedAt: '2026-07-19T08:00:03.000Z',
+    });
+  });
+
+  it('notifies the shell immediately when the active source changes', async () => {
+    const harness = createControlHarness();
+    let notifications = 0;
+    const unsubscribe = harness.control.subscribeSource?.(() => {
+      notifications += 1;
+    });
+
+    await harness.control.recordHelperObservation({
+      observedAt: '2026-07-19T08:00:04.000Z',
+      source: {
+        applicationName: 'Google Chrome',
+        bundleId: 'com.google.Chrome',
+        observedAt: '2026-07-19T08:00:04.000Z',
+      },
+      type: 'capture_source',
+    });
+
+    expect(notifications).toBe(1);
+    unsubscribe?.();
+  });
+
+  it('does not notify the shell for a source timestamp refresh and clears stale source state', async () => {
+    const harness = createControlHarness();
+    let notifications = 0;
+    const unsubscribe = harness.control.subscribeSource?.(() => {
+      notifications += 1;
+    });
+    const source = {
+      applicationName: 'Google Chrome',
+      bundleId: 'com.google.Chrome',
+      domain: 'github.com',
+      observedAt: '2026-07-19T08:00:05.000Z',
+    } as const;
+
+    await harness.control.recordHelperObservation({
+      source,
+      type: 'capture_source',
+      observedAt: source.observedAt,
+    });
+    await harness.control.recordHelperObservation({
+      source: { ...source, observedAt: '2026-07-19T08:00:06.000Z' },
+      type: 'capture_source',
+      observedAt: '2026-07-19T08:00:06.000Z',
+    });
+    await harness.control.recordHelperObservation({
+      observedAt: '2026-07-19T08:00:07.000Z',
+      type: 'capture_source',
+    });
+
+    expect(notifications).toBe(2);
+    expect(harness.control.getSnapshot().source).toBeUndefined();
+    unsubscribe?.();
+  });
+
   it('keeps consecutive capture failures until a durable result', async () => {
     const harness = createControlHarness();
 
@@ -969,6 +1069,9 @@ function createPolicyDouble(
     return result;
   };
   return {
+    async addLocalRule() {
+      throw new Error('local rules are outside this control test double');
+    },
     activate() {
       activeSession ??= {};
       return queue(false);

@@ -267,4 +267,59 @@ final class CaptureContextPrivacyTests: XCTestCase {
             .allow
         )
     }
+
+    func testDomainFamilyMatchesTheParentHostAndDotBoundarySubdomainsOnly() throws {
+        let familyPolicy = policy(rules: [
+            rule(
+                id: "github-family",
+                kind: "domain_family",
+                pattern: "github.com",
+                action: .blockCapture
+            ),
+        ])
+
+        let parent = try XCTUnwrap(CaptureSourceContext.make(
+            application: application,
+            document: nil,
+            url: "https://github.com/settings",
+            windowTitle: nil
+        ))
+        let child = try XCTUnwrap(CaptureSourceContext.make(
+            application: application,
+            document: nil,
+            url: "https://gist.github.com/example",
+            windowTitle: nil
+        ))
+        let lookalike = try XCTUnwrap(CaptureSourceContext.make(
+            application: application,
+            document: nil,
+            url: "https://notgithub.com",
+            windowTitle: nil
+        ))
+
+        XCTAssertEqual(
+            CaptureSourcePolicyEvaluator.decide(
+                policy: familyPolicy,
+                source: source,
+                context: parent
+            ).action,
+            .blockCapture
+        )
+        XCTAssertEqual(
+            CaptureSourcePolicyEvaluator.decide(
+                policy: familyPolicy,
+                source: source,
+                context: child
+            ).action,
+            .blockCapture
+        )
+        XCTAssertEqual(
+            CaptureSourcePolicyEvaluator.decide(
+                policy: familyPolicy,
+                source: source,
+                context: lookalike
+            ).action,
+            .allow
+        )
+    }
 }

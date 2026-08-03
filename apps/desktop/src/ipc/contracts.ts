@@ -1,3 +1,4 @@
+import type { LocalCapturePolicyRuleKind } from '@recapsy/contracts';
 import type {
   CaptureStatusDto,
   LocalCapturePolicyRulesDto,
@@ -44,7 +45,7 @@ export const IPC_CHANNEL_REGISTRY = [
   }),
   defineChannel<EmptyRequest, LocalCapturePolicyRulesDto>({
     channel: 'capture.listLocalRules',
-    description: 'Returns device-profile bundle blocks without filesystem or capture content.',
+    description: 'Returns device-profile application and website blocks without capture content.',
     methodName: 'captureListLocalRules',
     namespace: 'capture',
     request: validateEmptyRequest,
@@ -55,6 +56,13 @@ export const IPC_CHANNEL_REGISTRY = [
     methodName: 'captureBlockBundle',
     namespace: 'capture',
     request: validateBundleIdentifierRequest,
+  }),
+  defineChannel<{ kind: LocalCapturePolicyRuleKind; pattern: string }, LocalCapturePolicyRulesDto>({
+    channel: 'capture.addLocalRule',
+    description: 'Stores one exact application, exact-domain, or website-family capture block.',
+    methodName: 'captureAddLocalRule',
+    namespace: 'capture',
+    request: validateLocalCapturePolicyRuleRequest,
   }),
   defineChannel<{ ruleId: string }, LocalCapturePolicyRulesDto>({
     channel: 'capture.removeLocalRule',
@@ -238,6 +246,42 @@ function validateBundleIdentifierRequest(
   return { ok: true, value: { bundleId: payload.bundleId } };
 }
 
+function validateLocalCapturePolicyRuleRequest(
+  payload: unknown,
+): RequestValidationResult<{ kind: LocalCapturePolicyRuleKind; pattern: string }> {
+  if (
+    !isRecord(payload) ||
+    Object.keys(payload).some((key) => key !== 'kind' && key !== 'pattern')
+  ) {
+    return { issues: ['request must contain only kind and pattern'], ok: false };
+  }
+
+  if (
+    payload.kind !== 'bundle_id' &&
+    payload.kind !== 'domain' &&
+    payload.kind !== 'domain_family'
+  ) {
+    return { issues: ['kind must be bundle_id, domain, or domain_family'], ok: false };
+  }
+  if (typeof payload.pattern !== 'string' || payload.pattern.length === 0) {
+    return { issues: ['pattern must be a non-empty string'], ok: false };
+  }
+  if (payload.kind === 'bundle_id' && !isBundleIdentifier(payload.pattern)) {
+    return { issues: ['pattern must be an exact application bundle identifier'], ok: false };
+  }
+  if (
+    (payload.kind === 'domain' || payload.kind === 'domain_family') &&
+    !isDomainPattern(payload.pattern)
+  ) {
+    return { issues: ['pattern must be a hostname without a URL or path'], ok: false };
+  }
+
+  return {
+    ok: true,
+    value: { kind: payload.kind, pattern: payload.pattern },
+  };
+}
+
 function validateLocalRuleRequest(payload: unknown): RequestValidationResult<{ ruleId: string }> {
   if (
     !isRecord(payload) ||
@@ -248,6 +292,27 @@ function validateLocalRuleRequest(payload: unknown): RequestValidationResult<{ r
     return { issues: ['ruleId must be an opaque local rule id'], ok: false };
   }
   return { ok: true, value: { ruleId: payload.ruleId } };
+}
+
+function isBundleIdentifier(value: string): boolean {
+  return (
+    value.length <= 255 && /^[A-Za-z0-9][A-Za-z0-9-]*(?:[.][A-Za-z0-9][A-Za-z0-9-]*)+$/.test(value)
+  );
+}
+
+function isDomainPattern(value: string): boolean {
+  if (value !== value.trim() || value.length > 253 || value.includes('\u0000')) return false;
+  if (value.includes('/') || value.includes(':') || value.includes('?') || value.includes('#')) {
+    return false;
+  }
+
+  return value.split('.').every((label) => {
+    return (
+      label.length >= 1 &&
+      label.length <= 63 &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+    );
+  });
 }
 
 function validateRetentionPreviewRequest(

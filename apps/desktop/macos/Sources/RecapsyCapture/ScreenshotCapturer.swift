@@ -33,6 +33,27 @@ enum ScreenshotError: Error, Sendable {
     case encodeFailed
 }
 
+enum CurrentSourceProbeError: Error, Sendable {
+    case permissionMissing
+    case noActiveWindow
+    case failed
+}
+
+struct CurrentSourceSnapshot: Sendable {
+    let source: CaptureWindowIdentity
+    let context: CaptureSourceContext?
+    let payload: CaptureSourcePayload
+
+    var fingerprint: String {
+        [
+            source.ownerProcessId.description,
+            source.windowId.description,
+            payload.app.bundleId,
+            payload.website?.host ?? "",
+        ].joined(separator: "\u{1f}")
+    }
+}
+
 /// Owns one asynchronous ScreenCaptureKit attempt. The worker can report a
 /// timeout and request cancellation, but it must keep waiting for this attempt
 /// to finish before beginning another one.
@@ -60,6 +81,27 @@ final class ScreenshotCaptureAttempt {
     }
 }
 
+final class CurrentSourceProbeAttempt {
+    private let resultGate = CaptureAsyncResultGate<Result<CurrentSourceSnapshot, CurrentSourceProbeError>>()
+    private let task: Task<Void, Never>
+
+    init(excludingOwnerProcessIds: Set<Int>, excludingBundleIds: Set<String>) {
+        let resultGate = resultGate
+        task = Task {
+            resultGate.complete(
+                await ScreenshotCapturer.probeCurrentSource(
+                    excludingOwnerProcessIds: excludingOwnerProcessIds,
+                    excludingBundleIds: excludingBundleIds
+                )
+            )
+        }
+    }
+
+    func waitUntilFinished() -> Result<CurrentSourceSnapshot, CurrentSourceProbeError> {
+        resultGate.waitUntilFinished()
+    }
+}
+
 /// Captures a single image of the *current active window* via ScreenCaptureKit
 /// and encodes it to a WebP whose size lands in the product's ~100–800KB target
 /// band. ScreenCaptureKit work is owned by `ScreenshotCaptureAttempt`, which
@@ -72,6 +114,28 @@ enum ScreenshotCapturer {
     private static let webpQualities: [Float] = [80, 65, 50, 35, 25]
     private static let maxTargetBytes = 800 * 1024
     static let captureTimeout: TimeInterval = 5
+
+    static func probeCurrentSource(
+        excludingOwnerProcessIds: Set<Int>,
+        excludingBundleIds: Set<String>
+    ) async -> Result<CurrentSourceSnapshot, CurrentSourceProbeError> {
+        guard ScreenCaptureAuthorization.probe({ CGPreflightScreenCaptureAccess() }) else {
+            return .failure(.permissionMissing)
+        }
+
+        do {
+            return .success(
+                try await resolveCurrentSource(
+                    excludingOwnerProcessIds: excludingOwnerProcessIds,
+                    excludingBundleIds: excludingBundleIds
+                ).snapshot
+            )
+        } catch ScreenshotError.noActiveWindow {
+            return .failure(.noActiveWindow)
+        } catch {
+            return .failure(.failed)
+        }
+    }
 
     static func beginCapture(
         policy: CaptureSourcePolicy,
@@ -89,10 +153,12 @@ enum ScreenshotCapturer {
         // stay "frontmost" in Launch Services while the user is clicking in
         // another app. Selection uses CGWindowList Z-order instead.
         let excludedOwnerProcessIds: Set<Int> = [Int(getpid())]
+        let excludedBundleIds = configuredExcludedBundleIds()
 
         return ScreenshotCaptureAttempt {
             await captureActiveWindow(
                 excludingOwnerProcessIds: excludedOwnerProcessIds,
+                excludingBundleIds: excludedBundleIds,
                 policy: policy,
                 previousFingerprint: previousFingerprint
             )
@@ -115,50 +181,20 @@ enum ScreenshotCapturer {
 
     private static func captureActiveWindow(
         excludingOwnerProcessIds: Set<Int>,
+        excludingBundleIds: Set<String>,
         policy: CaptureSourcePolicy,
         previousFingerprint: CaptureFrameFingerprint?
     ) async -> Result<EncodedScreenshot, ScreenshotError> {
         do {
             try Task.checkCancellation()
-                // Prefer on-screen-only first; if selection still fails, retry
-                // with the broader SCK enumeration before giving up.
-            var content = try await SCShareableContent.excludingDesktopWindows(
-                false,
-                onScreenWindowsOnly: true
+            let resolved = try await resolveCurrentSource(
+                excludingOwnerProcessIds: excludingOwnerProcessIds,
+                excludingBundleIds: excludingBundleIds
             )
-            try Task.checkCancellation()
-            var window = selectShareableWindow(
-                content: content,
-                excludingOwnerProcessIds: excludingOwnerProcessIds
-            )
-            if window == nil {
-                content = try await SCShareableContent.excludingDesktopWindows(
-                    false,
-                    onScreenWindowsOnly: false
-                )
-                try Task.checkCancellation()
-                window = selectShareableWindow(
-                    content: content,
-                    excludingOwnerProcessIds: excludingOwnerProcessIds
-                )
-            }
-            guard let window else {
-                return .failure(.noActiveWindow)
-            }
-            guard let application = CaptureApplicationPayload.fromRuntimeMetadata(
-                name: window.owningApplication?.applicationName,
-                bundleId: window.owningApplication?.bundleIdentifier
-            ) else {
-                return .failure(.policyDenied)
-            }
-            guard let ownerProcessId = window.owningApplication?.processID, ownerProcessId > 0 else {
-                return .failure(.policyDenied)
-            }
-            let source = CaptureWindowIdentity(
-                application: application,
-                windowId: Int(window.windowID),
-                ownerProcessId: Int(ownerProcessId)
-            )
+            let window = resolved.window
+            let source = resolved.snapshot.source
+            let application = source.application
+            let sourceContext = resolved.snapshot.context
             let sourceIdentity = CaptureSourceIdentity(
                 applicationName: application.name,
                 bundleId: application.bundleId
@@ -174,11 +210,6 @@ enum ScreenshotCapturer {
             // Domain policy is intentionally evaluated only after a direct AX
             // sample produced a sanitized host. A missing Accessibility grant or
             // URL therefore omits metadata instead of blocking unrelated apps.
-            let sourceContext = AccessibilityContextSampler.sample(
-                processId: Int32(ownerProcessId),
-                application: application,
-                windowId: Int(window.windowID)
-            )
             let policyDecision = CaptureSourcePolicyEvaluator.decide(
                 policy: policy,
                 source: sourceIdentity,
@@ -251,18 +282,98 @@ enum ScreenshotCapturer {
         }
     }
 
+    private struct ResolvedCurrentSource {
+        let window: SCWindow
+        let snapshot: CurrentSourceSnapshot
+    }
+
+    private static func resolveCurrentSource(
+        excludingOwnerProcessIds: Set<Int>,
+        excludingBundleIds: Set<String>
+    ) async throws -> ResolvedCurrentSource {
+        // Prefer on-screen-only first; if selection still fails, retry with the
+        // broader SCK enumeration before giving up. This same resolver serves
+        // the source probe and the screenshot path, so they cannot disagree on
+        // which foreground window is current.
+        var content = try await SCShareableContent.excludingDesktopWindows(
+            false,
+            onScreenWindowsOnly: true
+        )
+        try Task.checkCancellation()
+        var window = selectShareableWindow(
+            content: content,
+            excludingOwnerProcessIds: excludingOwnerProcessIds,
+            excludingBundleIds: excludingBundleIds
+        )
+        if window == nil {
+            content = try await SCShareableContent.excludingDesktopWindows(
+                false,
+                onScreenWindowsOnly: false
+            )
+            try Task.checkCancellation()
+            window = selectShareableWindow(
+                content: content,
+                excludingOwnerProcessIds: excludingOwnerProcessIds,
+                excludingBundleIds: excludingBundleIds
+            )
+        }
+        guard let window else {
+            throw ScreenshotError.noActiveWindow
+        }
+        guard let application = CaptureApplicationPayload.fromRuntimeMetadata(
+            name: window.owningApplication?.applicationName,
+            bundleId: window.owningApplication?.bundleIdentifier
+        ) else {
+            throw ScreenshotError.policyDenied
+        }
+        guard let ownerProcessId = window.owningApplication?.processID, ownerProcessId > 0 else {
+            throw ScreenshotError.policyDenied
+        }
+
+        let source = CaptureWindowIdentity(
+            application: application,
+            windowId: Int(window.windowID),
+            ownerProcessId: Int(ownerProcessId)
+        )
+        let context = AccessibilityContextSampler.sample(
+            processId: Int32(ownerProcessId),
+            application: application,
+            windowId: Int(window.windowID)
+        )
+        let payload = CaptureSourcePayload(
+            app: application,
+            website: context?.website.map {
+                CaptureWebsitePayload(origin: $0.origin, host: $0.host)
+            }
+        )
+        return ResolvedCurrentSource(
+            window: window,
+            snapshot: CurrentSourceSnapshot(source: source, context: context, payload: payload)
+        )
+    }
+
     /// Resolve a verified `SCWindow` for this tick from visual Z-order.
     /// Nominate with front-to-back `CGWindowList`, then re-authorize the id
     /// against ScreenCaptureKit ownership metadata before reading pixels.
     private static func selectShareableWindow(
         content: SCShareableContent,
-        excludingOwnerProcessIds: Set<Int>
+        excludingOwnerProcessIds: Set<Int>,
+        excludingBundleIds: Set<String>
     ) -> SCWindow? {
+        let bundleExcludedProcessIds = content.windows.compactMap { window -> Int? in
+            guard
+                let bundleId = window.owningApplication?.bundleIdentifier.lowercased(),
+                excludingBundleIds.contains(bundleId)
+            else {
+                return nil
+            }
+            return Int(window.owningApplication?.processID ?? -1)
+        }
         let sckInfos = content.windows.map(captureWindowInfo(from:))
         let cgInfos = cgWindowInfos()
         guard let selectedId = ActiveWindowSelector.selectTopmostCapturableWindowId(
             windowsFrontToBack: cgInfos,
-            excludingOwnerProcessIds: excludingOwnerProcessIds
+            excludingOwnerProcessIds: excludingOwnerProcessIds.union(bundleExcludedProcessIds)
         ),
             let verifiedId = ActiveWindowSelector.verifySelectedWindowId(
                 selectedWindowId: selectedId,
@@ -274,6 +385,15 @@ enum ScreenshotCapturer {
         }
 
         return window
+    }
+
+    static func configuredExcludedBundleIds() -> Set<String> {
+        let raw = ProcessInfo.processInfo.environment["RECAPSY_CAPTURE_EXCLUDED_BUNDLE_IDS"] ?? ""
+        return Set(
+            raw.split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+        )
     }
 
     private static func captureWindowInfo(from window: SCWindow) -> CaptureWindowInfo {

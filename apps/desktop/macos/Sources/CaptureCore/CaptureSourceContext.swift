@@ -107,7 +107,8 @@ public struct CaptureSourceContext: Codable, Equatable, Sendable {
     }
 
     /// Domain rules use hostnames only. Pattern syntax, ports, subdomain globs,
-    /// whitespace and trailing dots are not normalized into a match.
+    /// whitespace and trailing dots are not normalized into a match. The
+    /// `domain_family` policy kind applies the dot-boundary subdomain check.
     public static func normalizedDomainPattern(_ pattern: String) -> String? {
         guard pattern == pattern.trimmingCharacters(in: .whitespacesAndNewlines) else {
             return nil

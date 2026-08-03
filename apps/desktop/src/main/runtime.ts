@@ -8,6 +8,7 @@ import {
   type CaptureAdmissionController,
   type CaptureControl,
   type CaptureHistoryReader,
+  type CapturePolicyController,
   type CaptureRuntimeStore,
   type CaptureStorageAdmissionOptions,
   createCaptureIpcHandlers,
@@ -74,6 +75,7 @@ export type DesktopStore = StoreLifecycle &
 export type DesktopShellFactoryContext = {
   commandClient: CaptureHelperCommandClient;
   control: CaptureControl;
+  policy: CapturePolicyController;
   store: DesktopStore;
   syncRuntime: SyncRuntime;
   workspaceId: string;
@@ -210,6 +212,7 @@ export function createElectronMainRuntime(
       ? await options.createShell({
           commandClient: captureRuntime.commandClient,
           control: captureRuntime.control,
+          policy: captureRuntime.policy,
           store,
           syncRuntime,
           workspaceId,

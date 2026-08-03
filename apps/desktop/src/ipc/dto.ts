@@ -1,3 +1,4 @@
+import type { LocalCapturePolicyRuleKind } from '@recapsy/contracts';
 import type { IpcError } from './errors';
 
 export type CaptureStatusDto = {
@@ -33,7 +34,8 @@ export type PrivacySettingsOpenResultDto = {
 
 export type LocalCapturePolicyRuleDto = {
   id: string;
-  bundleId: string;
+  kind: LocalCapturePolicyRuleKind;
+  pattern: string;
   enabled: boolean;
 };
 

@@ -215,7 +215,7 @@ public struct CaptureWindowPayload: Codable, Equatable {
     }
 }
 
-public struct CaptureWebsitePayload: Codable, Equatable {
+public struct CaptureWebsitePayload: Codable, Equatable, Sendable {
     public let origin: String
     public let host: String
 
@@ -233,7 +233,7 @@ public struct CaptureDocumentPayload: Codable, Equatable {
     }
 }
 
-public struct CaptureApplicationPayload: Codable, Equatable {
+public struct CaptureApplicationPayload: Codable, Equatable, Sendable {
     public let name: String
     public let bundleId: String
 
@@ -301,6 +301,29 @@ public struct CaptureApplicationPayload: Codable, Equatable {
             options.insert(.caseInsensitive)
         }
         return value.range(of: pattern, options: options) != nil
+    }
+}
+
+/// Safe source identity emitted by the independent current-source probe. A
+/// missing source clears the previous foreground window without producing a
+/// screenshot or a capture result.
+public struct CaptureSourcePayload: Encodable, Sendable {
+    public let app: CaptureApplicationPayload
+    public let website: CaptureWebsitePayload?
+
+    public init(app: CaptureApplicationPayload, website: CaptureWebsitePayload? = nil) {
+        self.app = app
+        self.website = website
+    }
+}
+
+public struct CaptureSourceObservationPayload: Encodable {
+    public let observedAt: String
+    public let source: CaptureSourcePayload?
+
+    public init(observedAt: String, source: CaptureSourcePayload? = nil) {
+        self.observedAt = observedAt
+        self.source = source
     }
 }
 

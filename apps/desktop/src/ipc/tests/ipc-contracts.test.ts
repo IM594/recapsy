@@ -32,6 +32,7 @@ describe('desktop ipc contracts', () => {
       'capture.getStatus',
       'capture.listLocalRules',
       'capture.blockBundle',
+      'capture.addLocalRule',
       'capture.removeLocalRule',
       'capture.pause',
       'capture.resume',
@@ -77,6 +78,7 @@ describe('desktop ipc contracts', () => {
       'captureGetStatus',
       'captureListLocalRules',
       'captureBlockBundle',
+      'captureAddLocalRule',
       'captureRemoveLocalRule',
       'capturePause',
       'captureResume',
@@ -198,6 +200,39 @@ describe('desktop ipc contracts', () => {
       ok: true,
       value: { ruleId: 'local:abc123' },
     });
+  });
+
+  it('accepts exact-domain and website-family blocks without accepting URLs or paths', () => {
+    expect(
+      validateIpcRequest('capture.addLocalRule', {
+        kind: 'domain',
+        pattern: 'github.com',
+      }),
+    ).toEqual({
+      ok: true,
+      value: { kind: 'domain', pattern: 'github.com' },
+    });
+    expect(
+      validateIpcRequest('capture.addLocalRule', {
+        kind: 'domain',
+        pattern: 'https://github.com/private',
+      }),
+    ).toMatchObject({ ok: false });
+    expect(
+      validateIpcRequest('capture.addLocalRule', {
+        kind: 'domain_family',
+        pattern: 'github.com',
+      }),
+    ).toEqual({
+      ok: true,
+      value: { kind: 'domain_family', pattern: 'github.com' },
+    });
+    expect(
+      validateIpcRequest('capture.addLocalRule', {
+        kind: 'url_path_prefix',
+        pattern: 'github.com/private',
+      }),
+    ).toMatchObject({ ok: false });
   });
 
   it('keeps error envelopes constrained to typed codes', () => {

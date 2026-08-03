@@ -1,6 +1,6 @@
 import type { SqliteDatabase } from './driver';
 
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 12;
 
 export function migrateSqliteStore(database: SqliteDatabase): void {
   database.run('PRAGMA foreign_keys = ON');
@@ -17,6 +17,8 @@ export function migrateSqliteStore(database: SqliteDatabase): void {
   ensureOutboxLeaseColumns(database);
   migratePolicyCacheToWorkspaceDevice(database);
   ensurePolicyCacheDeliveryCapacityColumn(database);
+  ensureLocalCapturePolicyRuleSchema(database);
+  database.run(LOCAL_CAPTURE_POLICY_RULES_INDEX_STATEMENT);
   ensureOperationalStoreStatistics(database);
 
   database.run(
@@ -156,6 +158,46 @@ function ensurePolicyCacheDeliveryCapacityColumn(database: SqliteDatabase): void
        ADD COLUMN max_concurrent_ocr INTEGER NOT NULL DEFAULT 1
        CHECK (max_concurrent_ocr BETWEEN 1 AND 32)`,
     );
+  }
+}
+
+function ensureLocalCapturePolicyRuleSchema(database: SqliteDatabase): void {
+  const table = database
+    .prepare<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'local_capture_policy_rules'",
+    )
+    .get();
+  const sql = table?.sql ?? '';
+  if (
+    sql.includes("kind IN ('bundle_id', 'domain', 'domain_family')") &&
+    sql.includes('UNIQUE(kind, pattern)')
+  ) {
+    return;
+  }
+
+  let transactionOpen = false;
+  try {
+    database.run('BEGIN IMMEDIATE');
+    transactionOpen = true;
+    database.run(buildLocalCapturePolicyRulesTable('local_capture_policy_rules__v2', false));
+    database.run(
+      `INSERT INTO local_capture_policy_rules__v2 (
+        id, kind, pattern, action, enabled, reason, created_at, updated_at
+      )
+      SELECT
+        id, kind, pattern, action, enabled, reason, created_at, updated_at
+      FROM local_capture_policy_rules`,
+    );
+    database.run(
+      'ALTER TABLE local_capture_policy_rules RENAME TO local_capture_policy_rules__legacy',
+    );
+    database.run('ALTER TABLE local_capture_policy_rules__v2 RENAME TO local_capture_policy_rules');
+    database.run('DROP TABLE local_capture_policy_rules__legacy');
+    database.run('COMMIT');
+    transactionOpen = false;
+  } catch (error) {
+    if (transactionOpen) database.run('ROLLBACK');
+    throw error;
   }
 }
 
@@ -429,6 +471,24 @@ function buildPolicyCacheTable(tableName: string, ifNotExists: boolean): string 
   )`;
 }
 
+function buildLocalCapturePolicyRulesTable(tableName: string, ifNotExists: boolean): string {
+  return `CREATE TABLE ${ifNotExists ? 'IF NOT EXISTS ' : ''}${tableName} (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL CHECK (kind IN ('bundle_id', 'domain', 'domain_family')),
+    pattern TEXT NOT NULL,
+    action TEXT NOT NULL CHECK (action = 'block_capture'),
+    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+    reason TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(kind, pattern)
+  )`;
+}
+
+const LOCAL_CAPTURE_POLICY_RULES_INDEX_STATEMENT = `CREATE INDEX IF NOT EXISTS
+  idx_local_capture_policy_rules_enabled_pattern
+  ON local_capture_policy_rules(enabled, kind, pattern)`;
+
 const schemaStatements = [
   `CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -471,18 +531,7 @@ const schemaStatements = [
   `CREATE INDEX IF NOT EXISTS idx_asset_cache_refs_workspace
     ON asset_cache_refs(workspace_id, cleanup_state, created_at)`,
   buildPolicyCacheTable('policy_cache', true),
-  `CREATE TABLE IF NOT EXISTS local_capture_policy_rules (
-    id TEXT PRIMARY KEY,
-    kind TEXT NOT NULL CHECK (kind = 'bundle_id'),
-    pattern TEXT NOT NULL UNIQUE,
-    action TEXT NOT NULL CHECK (action = 'block_capture'),
-    enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
-    reason TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  )`,
-  `CREATE INDEX IF NOT EXISTS idx_local_capture_policy_rules_enabled_pattern
-    ON local_capture_policy_rules(enabled, pattern)`,
+  buildLocalCapturePolicyRulesTable('local_capture_policy_rules', true),
   `CREATE TABLE IF NOT EXISTS sync_cursors (
     workspace_id TEXT NOT NULL,
     kind TEXT NOT NULL CHECK (kind IN ('timeline', 'search', 'settings', 'capabilities')),

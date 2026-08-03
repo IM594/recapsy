@@ -15,7 +15,7 @@ public struct CapturePolicyIdentity: Codable, Equatable {
 /// Application metadata is retained because it is the only source context
 /// currently allowed on the helper wire; the numeric ids bind the receipt to
 /// the selected window rather than a later frontmost-app lookup.
-public struct CaptureWindowIdentity: Codable, Equatable {
+public struct CaptureWindowIdentity: Codable, Equatable, Sendable {
     public let application: CaptureApplicationPayload
     public let windowId: Int
     public let ownerProcessId: Int

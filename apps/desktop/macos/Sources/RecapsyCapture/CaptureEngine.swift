@@ -42,6 +42,7 @@ final class CaptureEngine {
 
     static let helperVersion = "recapsy-capture/0.1.0"
     private static let defaultCaptureIntervalMs = 3000
+    private static let sourceProbeIntervalMs = 500
     private static let heartbeatIntervalMs = 1000
 
     private let emitter: LineEmitter
@@ -49,6 +50,7 @@ final class CaptureEngine {
 
     private let stateQueue = DispatchQueue(label: "one.recapsy.capture.state")
     private let captureQueue = DispatchQueue(label: "one.recapsy.capture.work", qos: .userInitiated)
+    private let sourceProbeQueue = DispatchQueue(label: "one.recapsy.capture.source", qos: .utility)
     // `emit` is reached from both `stateQueue` (heartbeat/status/command replies)
     // and `captureQueue` (inside `performCapture`), so the message-sequence bump
     // and envelope construction must be serialized independently of either queue.
@@ -63,6 +65,11 @@ final class CaptureEngine {
     private var frameHistory = CaptureFrameHistory()
     private var captureIntervalMs = CaptureEngine.defaultCaptureIntervalMs
     private var captureInFlight = false
+    private var sourceProbeInFlight = false
+    private var sourceProbeAttempt: CurrentSourceProbeAttempt?
+    private var sourceProbeGeneration = 0
+    private var lastSourceFingerprint: String?
+    private var sourceStatePublished = false
     // Edge-tracks the "no capturable active window" condition so a long stretch
     // of windowless ticks logs one line on entry and one on recovery, instead of
     // dribbling a line every tick. Only ever touched inside `performCapture`,
@@ -70,6 +77,7 @@ final class CaptureEngine {
     private var skippingNoActiveWindow = false
 
     private var captureTimer: DispatchSourceTimer?
+    private var sourceProbeTimer: DispatchSourceTimer?
     private var heartbeatTimer: DispatchSourceTimer?
 
     init(emitter: LineEmitter, assetRoot: URL?) {
@@ -131,6 +139,7 @@ final class CaptureEngine {
                 captureSession = nil
                 state = .paused
                 stopCaptureTimer()
+                clearCurrentSource(force: true)
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
@@ -162,6 +171,7 @@ final class CaptureEngine {
             else {
                 state = .paused
                 stopCaptureTimer()
+                clearCurrentSource(force: true)
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
@@ -176,6 +186,7 @@ final class CaptureEngine {
             let reason = payload["reason"] as? String
             emitStatus(status: "paused", reason: reason)
             stopCaptureTimer()
+            clearCurrentSource(force: true)
         case "capture.resume":
             guard
                 let policy = configuredPolicy,
@@ -185,6 +196,7 @@ final class CaptureEngine {
             else {
                 state = .paused
                 stopCaptureTimer()
+                clearCurrentSource(force: true)
                 emitStatus(status: "paused", reason: "policy_unavailable")
                 return
             }
@@ -192,6 +204,7 @@ final class CaptureEngine {
                 policy: CapturePolicyIdentity(hash: policy.hash, version: policy.version)
             )
             frameHistory.resetForNewSession()
+            lastSourceFingerprint = nil
             state = .ready
             let reason = payload["reason"] as? String
             emitStatus(status: "ready", reason: reason)
@@ -238,6 +251,7 @@ final class CaptureEngine {
 
     private func startCaptureTimer() {
         stopCaptureTimer()
+        startSourceProbeTimer()
         let timer = DispatchSource.makeTimerSource(queue: stateQueue)
         let intervalMs = captureIntervalMs
         timer.schedule(
@@ -254,6 +268,28 @@ final class CaptureEngine {
     private func stopCaptureTimer() {
         captureTimer?.cancel()
         captureTimer = nil
+        stopSourceProbeTimer()
+    }
+
+    private func startSourceProbeTimer() {
+        stopSourceProbeTimer()
+        sourceProbeInFlight = false
+        let timer = DispatchSource.makeTimerSource(queue: stateQueue)
+        timer.schedule(
+            deadline: .now(),
+            repeating: .milliseconds(CaptureEngine.sourceProbeIntervalMs)
+        )
+        timer.setEventHandler { [weak self] in
+            self?.onSourceProbeTick()
+        }
+        sourceProbeTimer = timer
+        timer.resume()
+    }
+
+    private func stopSourceProbeTimer() {
+        sourceProbeGeneration += 1
+        sourceProbeTimer?.cancel()
+        sourceProbeTimer = nil
     }
 
     private func startHeartbeatTimer() {
@@ -276,6 +312,75 @@ final class CaptureEngine {
     }
 
     // MARK: - Capture orchestration (state queue)
+
+    private func onSourceProbeTick() {
+        guard state == .ready, configuredPolicy != nil, !sourceProbeInFlight else {
+            return
+        }
+        sourceProbeInFlight = true
+        let generation = sourceProbeGeneration
+        let observedAt = CaptureEngine.iso8601(Date())
+        let excludedOwnerProcessIds: Set<Int> = [Int(getpid())]
+        let excludedBundleIds = ScreenshotCapturer.configuredExcludedBundleIds()
+        let attempt = CurrentSourceProbeAttempt(
+            excludingOwnerProcessIds: excludedOwnerProcessIds,
+            excludingBundleIds: excludedBundleIds
+        )
+        sourceProbeAttempt = attempt
+        sourceProbeQueue.async { [weak self] in
+            let result = attempt.waitUntilFinished()
+            self?.stateQueue.async {
+                self?.sourceProbeAttempt = nil
+                self?.finishSourceProbe(result, observedAt: observedAt, generation: generation)
+            }
+        }
+    }
+
+    private func finishSourceProbe(
+        _ result: Result<CurrentSourceSnapshot, CurrentSourceProbeError>,
+        observedAt: String,
+        generation: Int
+    ) {
+        guard generation == sourceProbeGeneration else {
+            return
+        }
+        sourceProbeInFlight = false
+        guard state == .ready else {
+            return
+        }
+        switch result {
+        case let .success(snapshot):
+            guard snapshot.fingerprint != lastSourceFingerprint else {
+                return
+            }
+            lastSourceFingerprint = snapshot.fingerprint
+            sourceStatePublished = true
+            emit(
+                type: "capture.source",
+                payload: CaptureSourceObservationPayload(
+                    observedAt: observedAt,
+                    source: snapshot.payload
+                )
+            )
+        case .failure:
+            clearCurrentSource(observedAt: observedAt)
+        }
+    }
+
+    private func clearCurrentSource(
+        observedAt: String = CaptureEngine.iso8601(Date()),
+        force: Bool = false
+    ) {
+        guard force || lastSourceFingerprint != nil || !sourceStatePublished else {
+            return
+        }
+        lastSourceFingerprint = nil
+        sourceStatePublished = true
+        emit(
+            type: "capture.source",
+            payload: CaptureSourceObservationPayload(observedAt: observedAt, source: nil)
+        )
+    }
 
     private func onCaptureTick() {
         guard state == .ready, let configuredPolicy, let captureSession, !captureInFlight else {
@@ -853,7 +958,7 @@ final class CaptureEngine {
         }
 
         private static func isKind(_ value: String) -> Bool {
-            return ["pause", "app_name", "bundle_id", "domain", "document_path", "window_title"].contains(value)
+            return ["pause", "app_name", "bundle_id", "domain", "domain_family", "document_path", "window_title"].contains(value)
         }
 
         private static func isScope(_ value: String) -> Bool {

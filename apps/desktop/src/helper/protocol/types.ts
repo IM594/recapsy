@@ -35,7 +35,14 @@ export type HelperCapturePolicyAction = 'allow' | 'block_capture' | 'redact_cont
 
 export type HelperCapturePolicyRule = {
   id: string;
-  kind: 'pause' | 'app_name' | 'bundle_id' | 'domain' | 'document_path' | 'window_title';
+  kind:
+    | 'pause'
+    | 'app_name'
+    | 'bundle_id'
+    | 'domain'
+    | 'domain_family'
+    | 'document_path'
+    | 'window_title';
   scope: 'hard' | 'local_user' | 'workspace_default';
   pattern: string;
   action: HelperCapturePolicyAction;
@@ -66,6 +73,12 @@ export type SafeCaptureContextPayload = {
     version: string;
     decision: 'allow' | 'redact_context' | 'block_ocr';
   };
+};
+
+/** Safe current-window identity emitted independently from screenshot ticks. */
+export type CaptureSourcePayload = {
+  app: { name: string; bundleId: string };
+  website?: { origin: string; host: string };
 };
 
 // Mirrors `@recapsy/contracts`' `CaptureCoverageStateSchema` values. Declared
@@ -125,6 +138,10 @@ export type HelperToMainPayloadByType = {
     observedAt: string;
   };
   'capture.result': CaptureResultPayload;
+  'capture.source': {
+    observedAt: string;
+    source?: CaptureSourcePayload;
+  };
   /**
    * A tick produced no frame; `state` is the reason, recorded as a coverage
    * fact rather than discarded (see `capture/coverage-aggregator.ts`). Shares

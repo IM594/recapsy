@@ -20,11 +20,13 @@ export type {
   CaptureHelperObservation,
   CapturePauseCause,
   CapturePermissionSnapshot,
+  CaptureSourceSnapshot,
   CaptureStartupRecovery,
 } from './control';
 export { createCaptureIpcHandlers } from './handlers';
 export type { CaptureIpcHandlerOptions } from './handlers';
 export { compileCapturePolicy, createCapturePolicyController } from './policy';
+export type { CapturePolicyController } from './policy';
 export {
   CAPTURE_BUNDLE_IDENTIFIER,
   CaptureBundleError,

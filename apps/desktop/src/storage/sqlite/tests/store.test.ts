@@ -116,7 +116,99 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get(),
-    ).toEqual({ version: 10 });
+    ).toEqual({ version: 12 });
+    database.close();
+  });
+
+  it('upgrades the legacy bundle-only local rule table without losing existing rules', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    database.run(`
+      CREATE TABLE local_capture_policy_rules (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL CHECK (kind = 'bundle_id'),
+        pattern TEXT NOT NULL UNIQUE,
+        action TEXT NOT NULL CHECK (action = 'block_capture'),
+        enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    database.run(
+      `INSERT INTO local_capture_policy_rules (
+        id, kind, pattern, action, enabled, reason, created_at, updated_at
+      ) VALUES (
+        $id, $kind, $pattern, $action, $enabled, $reason, $createdAt, $updatedAt
+      )`,
+      {
+        $action: 'block_capture',
+        $createdAt: now,
+        $enabled: 1,
+        $id: 'local-legacy-app',
+        $kind: 'bundle_id',
+        $pattern: 'com.example.LegacyApp',
+        $reason: null,
+        $updatedAt: now,
+      },
+    );
+
+    migrateSqliteStore(database);
+    const store = createSqliteStore({ database });
+    await store.upsertLocalCapturePolicyRule({
+      action: 'block_capture',
+      createdAt: now,
+      enabled: true,
+      id: 'local-github-domain',
+      kind: 'domain',
+      pattern: 'github.com',
+      scope: 'local_user',
+      updatedAt: now,
+    });
+
+    expect(await store.listLocalCapturePolicyRules()).toEqual([
+      {
+        action: 'block_capture',
+        createdAt: now,
+        enabled: true,
+        id: 'local-legacy-app',
+        kind: 'bundle_id',
+        pattern: 'com.example.LegacyApp',
+        scope: 'local_user',
+        updatedAt: now,
+      },
+      {
+        action: 'block_capture',
+        createdAt: now,
+        enabled: true,
+        id: 'local-github-domain',
+        kind: 'domain',
+        pattern: 'github.com',
+        scope: 'local_user',
+        updatedAt: now,
+      },
+    ]);
+    database.close();
+  });
+
+  it('accepts a website-family local rule after the local rule schema migration', async () => {
+    const database = createBunSqliteDatabase(tempDatabasePath());
+    migrateSqliteStore(database);
+    const store = createSqliteStore({ database });
+
+    await store.upsertLocalCapturePolicyRule({
+      action: 'block_capture',
+      createdAt: now,
+      enabled: true,
+      id: 'local-github-family',
+      kind: 'domain_family',
+      pattern: 'github.com',
+      scope: 'local_user',
+      updatedAt: now,
+    });
+
+    expect(await store.listLocalCapturePolicyRules()).toEqual([
+      expect.objectContaining({ kind: 'domain_family', pattern: 'github.com' }),
+    ]);
     database.close();
   });
 
@@ -160,7 +252,7 @@ describe('SQLite operational store', () => {
     expect(
       database.prepare<{ version: number }>('SELECT version FROM schema_migrations').get(),
     ).toEqual({
-      version: 10,
+      version: 12,
     });
     expect(
       database.prepare<{ count: number }>('SELECT COUNT(*) AS count FROM settings_cache').get()
@@ -413,7 +505,7 @@ describe('SQLite operational store', () => {
       database
         .prepare<{ version: number }>('SELECT MAX(version) AS version FROM schema_migrations')
         .get()?.version,
-    ).toBe(10);
+    ).toBe(12);
 
     const rowById = (id: string) =>
       database

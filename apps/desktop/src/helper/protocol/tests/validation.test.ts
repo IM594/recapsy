@@ -283,6 +283,26 @@ describe('helper protocol direction validation', () => {
     }
   });
 
+  it('accepts a source observation without a screenshot result', () => {
+    expect(
+      validateHelperToMainEnvelope(
+        envelope('capture.source', {
+          observedAt: sentAt,
+          source: {
+            app: { bundleId: 'com.apple.Safari', name: 'Safari' },
+            website: { host: 'example.com', origin: 'https://example.com' },
+          },
+        }),
+      ).ok,
+    ).toBe(true);
+  });
+
+  it('accepts a source observation that clears the current source', () => {
+    expect(
+      validateHelperToMainEnvelope(envelope('capture.source', { observedAt: sentAt })).ok,
+    ).toBe(true);
+  });
+
   it('accepts a capture result carrying capturedAt alongside observedAt', () => {
     const payload = { ...captureResultPayload(), capturedAt: sentAt };
 
@@ -322,6 +342,10 @@ function helperToMainEnvelopes(): unknown[] {
       screenCapture: 'granted',
     }),
     envelope('capture.result', captureResultPayload()),
+    envelope('capture.source', {
+      observedAt: sentAt,
+      source: { app: { bundleId: 'com.apple.Safari', name: 'Safari' } },
+    }),
     envelope('capture.coverage', { captureId: 'cap_1', observedAt: sentAt, state: 'paused' }),
     envelope('capture.error', { captureId: 'cap_1', code: 'capture_failed', message: 'Failed.' }),
     envelope('helper.heartbeat', { sequence: 1, status: 'ready' }),

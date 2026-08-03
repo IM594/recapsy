@@ -18,6 +18,7 @@ export type {
   DesktopShell,
   DesktopShellActions,
   DesktopShellAdapters,
+  DesktopShellLocalRuleKind,
   DesktopShellMenu,
   DesktopShellMenuItem,
   DesktopShellNotification,

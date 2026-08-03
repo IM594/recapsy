@@ -12,9 +12,11 @@ export const CapturePolicyRuleKindSchema = z.enum([
   'app_name',
   'bundle_id',
   'domain',
+  'domain_family',
   'document_path',
   'window_title',
 ]);
+export const LocalCapturePolicyRuleKindSchema = z.enum(['bundle_id', 'domain', 'domain_family']);
 export const CapturePolicyRuleScopeSchema = z.enum(['local_user', 'workspace_default']);
 export const StorageDeleteBehaviorSchema = z.enum(['delete_reference', 'delete_source_when_owned']);
 export const StorageQuotaScopeSchema = z.enum(['workspace']);
@@ -137,6 +139,7 @@ export const AxAllowlistResponseSchema = z
 
 export type CapturePolicyAction = z.infer<typeof CapturePolicyActionSchema>;
 export type CapturePolicyRuleKind = z.infer<typeof CapturePolicyRuleKindSchema>;
+export type LocalCapturePolicyRuleKind = z.infer<typeof LocalCapturePolicyRuleKindSchema>;
 export type CapturePolicyRuleScope = z.infer<typeof CapturePolicyRuleScopeSchema>;
 export type StorageDeleteBehavior = z.infer<typeof StorageDeleteBehaviorSchema>;
 export type StorageQuotaScope = z.infer<typeof StorageQuotaScopeSchema>;

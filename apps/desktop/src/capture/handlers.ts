@@ -1,3 +1,4 @@
+import type { LocalCapturePolicyRuleKind } from '@recapsy/contracts';
 import type { CaptureHelperState } from '../helper/index';
 import {
   type CaptureStatusDto,
@@ -38,6 +39,11 @@ export function createCaptureIpcHandlers(options: CaptureIpcHandlerOptions): Ipc
       await options.policy.blockBundle((payload as { bundleId: string }).bundleId);
       return createRendererSafeSuccess(await buildLocalRulesDto(options.policy));
     },
+    'capture.addLocalRule': async (payload: unknown) => {
+      const input = payload as { kind: LocalCapturePolicyRuleKind; pattern: string };
+      await options.policy.addLocalRule(input);
+      return createRendererSafeSuccess(await buildLocalRulesDto(options.policy));
+    },
     'capture.removeLocalRule': async (payload: unknown) => {
       await options.policy.removeLocalRule((payload as { ruleId: string }).ruleId);
       return createRendererSafeSuccess(await buildLocalRulesDto(options.policy));
@@ -50,9 +56,10 @@ async function buildLocalRulesDto(
 ): Promise<LocalCapturePolicyRulesDto> {
   return {
     rules: (await policy.listLocalRules()).map((rule) => ({
-      bundleId: rule.pattern,
       enabled: rule.enabled,
       id: rule.id,
+      kind: rule.kind,
+      pattern: rule.pattern,
     })),
   };
 }

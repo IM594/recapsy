@@ -96,6 +96,96 @@ describe('capture helper event handler', () => {
     ]);
   });
 
+  it('publishes only the safe latest app and website source for tray privacy actions', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+    const observations: unknown[] = [];
+    handler.subscribeToObservation((observation) => {
+      if (observation.type === 'capture_result') observations.push(observation);
+    });
+
+    await handler.handleEnvelope(captureResultEnvelope());
+
+    expect(observations).toEqual([
+      {
+        observedAt,
+        source: {
+          applicationName: 'Safari',
+          bundleId: 'com.apple.Safari',
+          domain: 'example.test',
+          observedAt,
+        },
+        type: 'capture_result',
+      },
+    ]);
+  });
+
+  it('publishes a source observation before coverage when no frame is produced', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+    const observations: unknown[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation);
+    });
+
+    await handler.handleEnvelope(
+      helperEnvelope('capture.source', {
+        observedAt,
+        source: {
+          app: { bundleId: 'com.apple.Safari', name: 'Safari' },
+          website: { host: 'example.test', origin: 'https://example.test' },
+        },
+      }),
+    );
+
+    expect(observations).toEqual([
+      {
+        observedAt,
+        source: {
+          applicationName: 'Safari',
+          bundleId: 'com.apple.Safari',
+          domain: 'example.test',
+          observedAt,
+        },
+        type: 'capture_source',
+      },
+    ]);
+  });
+
+  it('clears the current source when the helper reports no active window', async () => {
+    const store = createMemoryStore();
+    const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');
+    const handler = createCaptureHelperEventHandler({
+      client,
+      deviceId,
+      now: () => observedAt,
+      store,
+      workspaceId,
+    });
+    const observations: unknown[] = [];
+    handler.subscribeToObservation((observation) => {
+      observations.push(observation);
+    });
+
+    await handler.handleEnvelope(helperEnvelope('capture.source', { observedAt }));
+
+    expect(observations).toEqual([{ observedAt, type: 'capture_source' }]);
+  });
+
   it('acks capture.result only after asset refs and outbox jobs are durably recorded', async () => {
     const store = createMemoryStore();
     const client = new RecordingCaptureHelperCommandClient(store, 'capture_1');

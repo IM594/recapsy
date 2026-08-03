@@ -1,6 +1,10 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import type { CaptureDefaultPolicy, CapturePolicyRule } from '@recapsy/contracts';
+import type {
+  CaptureDefaultPolicy,
+  CapturePolicyRule,
+  LocalCapturePolicyRuleKind,
+} from '@recapsy/contracts';
 import type { HelperCapturePolicy, HelperCapturePolicyRule } from '../helper/index';
 import type { CapturePoliciesResult } from '../server/index';
 import type { LocalCapturePolicyRule, PolicyCacheEntry } from '../storage/index';
@@ -47,6 +51,10 @@ export type CapturePolicyIdentity = {
 };
 
 export type CapturePolicyController = {
+  addLocalRule(input: {
+    kind: LocalCapturePolicyRuleKind;
+    pattern: string;
+  }): Promise<LocalCapturePolicyRule>;
   activate(): Promise<CapturePolicyConfiguration>;
   blockBundle(bundleId: string): Promise<LocalCapturePolicyRule>;
   deactivate(): void;
@@ -85,6 +93,7 @@ export class CapturePolicyError extends Error {
       | 'policy_invalid_scope'
       | 'policy_invalid_fields'
       | 'invalid_bundle_id'
+      | 'invalid_domain'
       | 'policy_unavailable'
       | 'policy_requires_unavailable_context',
   ) {
@@ -93,13 +102,15 @@ export class CapturePolicyError extends Error {
         ? 'Capture policy cache is unavailable.'
         : code === 'invalid_bundle_id'
           ? 'A valid application bundle identifier is required.'
-          : code === 'policy_invalid_scope'
-            ? 'Capture policy contains a rule with an invalid ownership scope.'
-            : code === 'policy_invalid_fields'
-              ? 'Capture policy contains unsupported control characters.'
-              : code === 'policy_requires_unavailable_context'
-                ? 'Capture policy requires unavailable local context.'
-                : 'Capture policy is unavailable.',
+          : code === 'invalid_domain'
+            ? 'A valid hostname without a URL or path is required.'
+            : code === 'policy_invalid_scope'
+              ? 'Capture policy contains a rule with an invalid ownership scope.'
+              : code === 'policy_invalid_fields'
+                ? 'Capture policy contains unsupported control characters.'
+                : code === 'policy_requires_unavailable_context'
+                  ? 'Capture policy requires unavailable local context.'
+                  : 'Capture policy is unavailable.',
     );
   }
 }
@@ -132,25 +143,30 @@ class StoreBackedCapturePolicyController implements CapturePolicyController {
     return this.queueRefresh(this.activeSession);
   }
 
-  blockBundle(input: string): Promise<LocalCapturePolicyRule> {
-    const bundleId = input.trim();
-    if (!isBundleIdentifier(bundleId)) {
-      return Promise.reject(new CapturePolicyError('invalid_bundle_id'));
+  addLocalRule(input: {
+    kind: LocalCapturePolicyRuleKind;
+    pattern: string;
+  }): Promise<LocalCapturePolicyRule> {
+    const pattern = normalizeLocalRulePattern(input.kind, input.pattern);
+    if (!pattern) {
+      return Promise.reject(
+        new CapturePolicyError(input.kind === 'bundle_id' ? 'invalid_bundle_id' : 'invalid_domain'),
+      );
     }
     const session = this.activeSession;
 
     return this.enqueue(async () => {
       const existing = (await this.options.store.listLocalCapturePolicyRules()).find(
-        (rule) => rule.pattern === bundleId,
+        (rule) => rule.kind === input.kind && rule.pattern === pattern,
       );
       const timestamp = this.options.now();
       const rule = await this.options.store.upsertLocalCapturePolicyRule({
         action: 'block_capture',
         createdAt: existing?.createdAt ?? timestamp,
         enabled: true,
-        id: existing?.id ?? localRuleId(bundleId),
-        kind: 'bundle_id',
-        pattern: bundleId,
+        id: existing?.id ?? localRuleId(input.kind, pattern),
+        kind: input.kind,
+        pattern,
         scope: 'local_user',
         updatedAt: timestamp,
       });
@@ -160,6 +176,10 @@ class StoreBackedCapturePolicyController implements CapturePolicyController {
       }
       return cloneLocalRule(rule);
     });
+  }
+
+  blockBundle(input: string): Promise<LocalCapturePolicyRule> {
+    return this.addLocalRule({ kind: 'bundle_id', pattern: input });
   }
 
   deactivate(): void {
@@ -491,15 +511,38 @@ function isBundleIdentifier(value: string): boolean {
   );
 }
 
-function localRuleId(bundleId: string): string {
-  return `local:${createHash('sha256').update(bundleId, 'utf8').digest('hex').slice(0, 24)}`;
+function isDomainPattern(value: string): boolean {
+  if (value.length === 0 || value.length > 253 || value.includes('\u0000')) return false;
+  if (value.includes('/') || value.includes(':') || value.includes('?') || value.includes('#')) {
+    return false;
+  }
+
+  return value.split('.').every((label) => {
+    return (
+      label.length >= 1 &&
+      label.length <= 63 &&
+      /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+    );
+  });
+}
+
+function normalizeLocalRulePattern(kind: LocalCapturePolicyRuleKind, input: string): string | null {
+  if (typeof input !== 'string') return null;
+  const pattern = input.trim();
+  if (kind === 'bundle_id') return isBundleIdentifier(pattern) ? pattern : null;
+  return isDomainPattern(pattern) ? pattern.toLowerCase() : null;
+}
+
+function localRuleId(kind: LocalCapturePolicyRuleKind, pattern: string): string {
+  const hashInput = kind === 'bundle_id' ? pattern : `${kind}\u0000${pattern}`;
+  return `local:${createHash('sha256').update(hashInput, 'utf8').digest('hex').slice(0, 24)}`;
 }
 
 function requiresUnavailableContext(rule: CompiledCapturePolicyRule): boolean {
   return (
     rule.enabled &&
     rule.action !== 'allow' &&
-    !['app_name', 'bundle_id', 'domain', 'pause'].includes(rule.kind)
+    !['app_name', 'bundle_id', 'domain', 'domain_family', 'pause'].includes(rule.kind)
   );
 }
 

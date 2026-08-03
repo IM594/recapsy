@@ -16,6 +16,88 @@ const fetchedAt = '2026-07-18T00:00:00.000Z';
 const acknowledgePolicy = async (): Promise<void> => undefined;
 
 describe('capture policy activation', () => {
+  it('normalizes and persists a whole-domain local rule through the policy controller', async () => {
+    const store = createMemoryStore();
+    const configured: unknown[] = [];
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy();
+        },
+      },
+      async configure(policy) {
+        configured.push(policy);
+      },
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    await controller.activate();
+    const rule = await controller.addLocalRule({ kind: 'domain', pattern: ' GitHub.COM ' });
+
+    expect(rule).toMatchObject({
+      action: 'block_capture',
+      kind: 'domain',
+      pattern: 'github.com',
+      scope: 'local_user',
+    });
+    expect(await store.listLocalCapturePolicyRules()).toEqual([rule]);
+    expect(configured.at(-1)).toMatchObject({
+      rules: expect.arrayContaining([expect.objectContaining({ pattern: 'github.com' })]),
+    });
+  });
+
+  it('rejects a domain rule that is a URL instead of a hostname', async () => {
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy();
+        },
+      },
+      configure: acknowledgePolicy,
+      deviceId,
+      now: () => fetchedAt,
+      store: createMemoryStore(),
+      workspaceId,
+    });
+
+    await expect(
+      controller.addLocalRule({ kind: 'domain', pattern: 'https://github.com/private' }),
+    ).rejects.toMatchObject({ code: 'invalid_domain' });
+  });
+
+  it('normalizes and persists a website-family local rule', async () => {
+    const store = createMemoryStore();
+    const controller = createCapturePolicyController({
+      api: {
+        async getCapturePolicies(): Promise<CapturePoliciesResult> {
+          return remotePolicy();
+        },
+      },
+      configure: acknowledgePolicy,
+      deviceId,
+      now: () => fetchedAt,
+      store,
+      workspaceId,
+    });
+
+    await controller.activate();
+    const rule = await controller.addLocalRule({
+      kind: 'domain_family',
+      pattern: ' GitHub.COM ',
+    });
+
+    expect(rule).toMatchObject({
+      action: 'block_capture',
+      kind: 'domain_family',
+      pattern: 'github.com',
+      scope: 'local_user',
+    });
+    expect(await store.listLocalCapturePolicyRules()).toEqual([rule]);
+  });
+
   it('matches the shared UTF-8 canonical policy fixture', () => {
     const fixture = JSON.parse(
       readFileSync(

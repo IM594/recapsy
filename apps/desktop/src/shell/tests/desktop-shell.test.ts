@@ -21,10 +21,12 @@ describe('desktop shell', () => {
 
     expect(source).toContain('本地隐私');
     expect(source.replace(/\s+/g, ' ')).toContain(
-      '被屏蔽应用的后续采集不会保存资源，也不会进入同步队列或 OCR 管线。',
+      '被屏蔽应用或网站的后续采集不会保存资源，也不会进入同步队列或 OCR 管线。',
     );
     expect(source).toContain('id="privacy-bundle-id"');
     expect(source).toContain('captureBlockBundle');
+    expect(source).toContain('屏蔽当前网站');
+    expect(source).toContain('屏蔽整个网站');
     expect(source).toContain('captureRemoveLocalRule');
     expect(source).toContain('status.syncLastErrorCode');
     expect(source).toContain('status.syncLastErrorMessage');
@@ -127,6 +129,99 @@ describe('desktop shell', () => {
 
     shell.dispose();
     expect(destroyed).toBe(true);
+  });
+
+  it('opens the tray menu instead of the main window when the tray is clicked', async () => {
+    const harness = createShellHarness();
+    await harness.shell.refresh();
+
+    harness.emitTrayClick();
+    await flushMicrotasks();
+
+    expect(harness.popUpContextMenuCalls).toBe(1);
+    expect(harness.window.events).not.toContain('load');
+    expect(harness.window.events).not.toContain('show');
+    harness.shell.dispose();
+  });
+
+  it('offers plain-language app, website, and website-family privacy actions for the latest source', async () => {
+    const blocked: unknown[] = [];
+    const confirmations: string[] = [];
+    const harness = createShellHarness({
+      actions: {
+        async addLocalRule(input) {
+          blocked.push(input);
+        },
+      },
+      adapters: {
+        async confirm(message) {
+          confirmations.push(message);
+          return true;
+        },
+      },
+      status: {
+        ...status(),
+        source: {
+          applicationName: 'Safari',
+          bundleId: 'com.apple.Safari',
+          domain: 'github.com',
+          observedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    await harness.shell.refresh();
+    const menu = harness.menuBuilds.at(-1);
+    const app = findAction(menu, '屏蔽当前应用 · Safari');
+    const exact = findAction(menu, '屏蔽当前网站 · github.com');
+    const family = findAction(menu, '屏蔽整个网站 · github.com 及其子网站');
+    app.click?.();
+    exact.click?.();
+    family.click?.();
+    await flushMicrotasks();
+
+    expect(blocked).toEqual([
+      { kind: 'bundle_id', pattern: 'com.apple.Safari' },
+      { kind: 'domain', pattern: 'github.com' },
+      { kind: 'domain_family', pattern: 'github.com' },
+    ]);
+    expect(confirmations[0]).toContain('github.com');
+    expect(confirmations[0]).toContain('www.github.com');
+  });
+
+  it('refreshes the tray immediately when the status source announces a change', async () => {
+    let current = status();
+    let notifySourceChanged: (() => void) | undefined;
+    const harness = createShellHarness({
+      statusSource: {
+        async getStatus() {
+          return current;
+        },
+        subscribe(listener) {
+          notifySourceChanged = listener;
+          return () => {
+            notifySourceChanged = undefined;
+          };
+        },
+      },
+    });
+
+    await harness.shell.refresh();
+    const initialBuildCount = harness.menuBuilds.length;
+    current = status({
+      source: {
+        applicationName: 'Safari',
+        bundleId: 'com.apple.Safari',
+        domain: 'github.com',
+        observedAt: new Date().toISOString(),
+      },
+    });
+    notifySourceChanged?.();
+    await flushMicrotasks();
+
+    expect(harness.menuBuilds.length).toBeGreaterThan(initialBuildCount);
+    expect(findAction(harness.menuBuilds.at(-1), '屏蔽当前网站 · github.com')).toBeDefined();
+    harness.shell.dispose();
   });
 
   it('waits for the main window to regain focus before refreshing permissions after opening Screen Recording settings', async () => {
@@ -388,6 +483,10 @@ describe('desktop shell', () => {
 function createShellHarness(
   options: {
     actions?: Partial<{
+      addLocalRule(input: {
+        kind: 'bundle_id' | 'domain' | 'domain_family';
+        pattern: string;
+      }): Promise<void>;
       pauseCapture(): Promise<void>;
       resumeCapture(): Promise<void>;
       refreshPermissions(): Promise<void>;
@@ -396,15 +495,21 @@ function createShellHarness(
       openAccessibilitySettings(): Promise<void>;
       resumeProviderSync(): Promise<void>;
     }>;
+    adapters?: Partial<Pick<DesktopShellAdapters, 'confirm'>>;
     onSafeError?(message: string): void;
     status?: DesktopShellStatus;
-    statusSource?: { getStatus(): Promise<DesktopShellStatus> };
+    statusSource?: {
+      getStatus(): Promise<DesktopShellStatus>;
+      subscribe?(listener: () => void): () => void;
+    };
   } = {},
 ) {
   const menuBuilds: DesktopShellMenuItem[][] = [];
   const notifications: Array<{ body: string; title: string }> = [];
   const sent: unknown[] = [];
   const tooltipUpdates: string[] = [];
+  const trayListeners: Partial<Record<'click', () => void>> = {};
+  let popUpContextMenuCalls = 0;
   let trayDestroyed = false;
   let refreshPermissionCalls = 0;
   const window = new FakeWindow(sent);
@@ -413,7 +518,12 @@ function createShellHarness(
     destroy() {
       trayDestroyed = true;
     },
-    on() {},
+    on(event, listener) {
+      if (event === 'click') trayListeners.click = listener;
+    },
+    popUpContextMenu() {
+      popUpContextMenuCalls += 1;
+    },
     setContextMenu() {},
     setToolTip(value) {
       tooltipUpdates.push(value);
@@ -428,6 +538,7 @@ function createShellHarness(
     createTray: () => tray,
     createWindow: () => window,
     quit() {},
+    ...(options.adapters ?? {}),
     showNotification(notification) {
       notifications.push(notification);
     },
@@ -435,6 +546,9 @@ function createShellHarness(
 
   const shell = createDesktopShell({
     actions: {
+      async addLocalRule(input) {
+        await options.actions?.addLocalRule?.(input);
+      },
       async openAccessibilitySettings() {
         await options.actions?.openAccessibilitySettings?.();
       },
@@ -472,6 +586,9 @@ function createShellHarness(
   return {
     menuBuilds,
     notifications,
+    emitTrayClick() {
+      trayListeners.click?.();
+    },
     get refreshPermissionCalls() {
       return refreshPermissionCalls;
     },
@@ -480,6 +597,9 @@ function createShellHarness(
     tooltipUpdates,
     get trayDestroyed() {
       return trayDestroyed;
+    },
+    get popUpContextMenuCalls() {
+      return popUpContextMenuCalls;
     },
     window,
   };

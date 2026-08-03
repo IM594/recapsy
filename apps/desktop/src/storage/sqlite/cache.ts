@@ -247,7 +247,7 @@ type PolicyCacheRow = SqliteRow & {
 
 type LocalCapturePolicyRuleRow = SqliteRow & {
   id: string;
-  kind: 'bundle_id';
+  kind: 'bundle_id' | 'domain' | 'domain_family';
   pattern: string;
   action: 'block_capture';
   enabled: number;
@@ -291,7 +291,7 @@ function localCapturePolicyRuleFromRow(row: LocalCapturePolicyRuleRow): LocalCap
     createdAt: row.created_at,
     enabled: row.enabled === 1,
     id: row.id,
-    kind: 'bundle_id',
+    kind: row.kind,
     pattern: row.pattern,
     scope: 'local_user',
     updatedAt: row.updated_at,

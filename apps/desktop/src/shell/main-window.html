@@ -89,7 +89,7 @@
     <section>
       <h2>本地隐私</h2>
       <p class="muted">
-        被屏蔽应用的后续采集不会保存资源，也不会进入同步队列或 OCR 管线。
+        被屏蔽应用或网站的后续采集不会保存资源，也不会进入同步队列或 OCR 管线。
       </p>
       <div class="actions">
         <input
@@ -102,7 +102,20 @@
         />
         <button id="privacy-block-bundle" type="button">屏蔽应用</button>
       </div>
-      <ul id="privacy-rules" aria-label="已屏蔽的应用"></ul>
+      <div class="actions">
+        <input
+          id="privacy-domain"
+          aria-label="网站域名"
+          autocomplete="off"
+          placeholder="github.com"
+          spellcheck="false"
+          type="text"
+        />
+        <button id="privacy-block-domain" type="button">屏蔽当前网站</button>
+        <button id="privacy-block-domain-family" type="button">屏蔽整个网站</button>
+      </div>
+      <p class="muted">第二个选项还会屏蔽 www、api 等以该域名结尾的子站点。</p>
+      <ul id="privacy-rules" aria-label="已屏蔽的应用或网站"></ul>
     </section>
 
     <section>
@@ -157,6 +170,7 @@
       const requestScreenButton = document.getElementById('request-screen');
       const resumeButton = document.getElementById('resume');
       const privacyBundleInput = document.getElementById('privacy-bundle-id');
+      const privacyDomainInput = document.getElementById('privacy-domain');
       const privacyRules = document.getElementById('privacy-rules');
       const retentionCleanButton = document.getElementById('retention-clean');
       const syncResumeButton = document.getElementById('sync-resume');
@@ -206,8 +220,15 @@
         privacyRules.replaceChildren();
         for (const rule of rules) {
           const item = document.createElement('li');
-          const bundle = document.createElement('code');
-          bundle.textContent = rule.bundleId;
+          const kind = document.createElement('span');
+          kind.className = 'muted';
+          kind.textContent = rule.kind === 'domain_family'
+            ? '网站及子站点'
+            : rule.kind === 'domain'
+              ? '网站全部页面'
+              : '应用';
+          const pattern = document.createElement('code');
+          pattern.textContent = rule.pattern;
           const remove = document.createElement('button');
           remove.type = 'button';
           remove.textContent = '移除';
@@ -219,7 +240,7 @@
               errorEl.textContent = error.message || '无法移除本地隐私规则';
             }
           });
-          item.append(bundle, remove);
+          item.append(kind, pattern, remove);
           privacyRules.append(item);
         }
         if (rules.length === 0) {
@@ -361,6 +382,33 @@
         } catch (error) {
           errorEl.textContent = error.message || '无法屏蔽应用';
         }
+      });
+
+      async function blockDomain(kind, confirmationMessage) {
+        try {
+          errorEl.textContent = '';
+          const pattern = privacyDomainInput.value.trim();
+          if (!pattern) {
+            errorEl.textContent = '请输入网站域名';
+            return;
+          }
+          if (kind === 'domain_family' && !window.confirm(confirmationMessage(pattern))) return;
+          await unwrap(api.captureAddLocalRule({ kind, pattern }));
+          privacyDomainInput.value = '';
+          await refreshAll();
+        } catch (error) {
+          errorEl.textContent = error.message || '无法屏蔽网站';
+        }
+      }
+
+      document.getElementById('privacy-block-domain').addEventListener('click', () => {
+          void blockDomain('domain', (domain) => `将屏蔽当前网站：${domain}。`);
+      });
+      document.getElementById('privacy-block-domain-family').addEventListener('click', () => {
+        void blockDomain(
+          'domain_family',
+          (domain) => `将屏蔽整个网站：${domain} 及其子网站，例如 www.${domain}、api.${domain}。`,
+        );
       });
 
       document.getElementById('pause').addEventListener('click', async () => {

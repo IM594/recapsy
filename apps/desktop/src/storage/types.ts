@@ -4,6 +4,7 @@ import type {
   CaptureDefaultPolicy,
   CapturePolicyRule,
   DeviceCaptureDesiredState,
+  LocalCapturePolicyRuleKind,
   OcrQualityFlag,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -278,7 +279,7 @@ export type PolicyCacheReadOptions = {
  * pretends to understand. */
 export type LocalCapturePolicyRule = Omit<CapturePolicyRule, 'action' | 'kind' | 'scope'> & {
   action: 'block_capture';
-  kind: 'bundle_id';
+  kind: LocalCapturePolicyRuleKind;
   scope: 'local_user';
   createdAt: string;
   updatedAt: string;

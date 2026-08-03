@@ -145,6 +145,19 @@ public enum CaptureSourcePolicyEvaluator {
                 return .notMatched
             }
             return pattern.caseInsensitiveCompare(host) == .orderedSame ? .matched : .notMatched
+        case "domain_family":
+            guard
+                let host = context?.website?.host,
+                let pattern = CaptureSourceContext.normalizedDomainPattern(rule.pattern)
+            else {
+                return .notMatched
+            }
+            let normalizedHost = host.lowercased()
+            let normalizedPattern = pattern.lowercased()
+            return normalizedHost == normalizedPattern ||
+                normalizedHost.hasSuffix("." + normalizedPattern)
+                ? .matched
+                : .notMatched
         case "document_path", "window_title":
             return rule.action == .allow ? .notMatched : .unobservableNonAllow
         default:

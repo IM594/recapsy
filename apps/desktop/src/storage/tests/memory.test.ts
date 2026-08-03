@@ -70,6 +70,46 @@ describe('memory operational store', () => {
     expect(await store.listLocalCapturePolicyRules()).toEqual([rule]);
   });
 
+  it('stores a whole-domain local capture rule with the same lifecycle as an app rule', async () => {
+    const store = createMemoryStore();
+    const rule = {
+      action: 'block_capture' as const,
+      createdAt: now,
+      enabled: true,
+      id: 'local-github-domain',
+      kind: 'domain' as const,
+      pattern: 'github.com',
+      scope: 'local_user' as const,
+      updatedAt: now,
+    };
+
+    await store.upsertLocalCapturePolicyRule(rule);
+
+    expect(await store.listLocalCapturePolicyRules()).toEqual([rule]);
+    expect(await store.deleteLocalCapturePolicyRule(rule.id)).toBe(true);
+    expect(await store.listLocalCapturePolicyRules()).toEqual([]);
+  });
+
+  it('stores a website-family local capture rule with the same lifecycle as an app rule', async () => {
+    const store = createMemoryStore();
+    const rule = {
+      action: 'block_capture' as const,
+      createdAt: now,
+      enabled: true,
+      id: 'local-github-family',
+      kind: 'domain_family' as const,
+      pattern: 'github.com',
+      scope: 'local_user' as const,
+      updatedAt: now,
+    };
+
+    await store.upsertLocalCapturePolicyRule(rule);
+
+    expect(await store.listLocalCapturePolicyRules()).toEqual([rule]);
+    expect(await store.deleteLocalCapturePolicyRule(rule.id)).toBe(true);
+    expect(await store.listLocalCapturePolicyRules()).toEqual([]);
+  });
+
   it('creates, lists, reads, and updates outbox jobs', async () => {
     const store = createMemoryStore();
 

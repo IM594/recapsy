@@ -93,6 +93,9 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         case 'capture.result':
           await this.handleCaptureResult(narrowHelperEnvelope(envelope, 'capture.result'));
           return;
+        case 'capture.source':
+          await this.handleCaptureSource(narrowHelperEnvelope(envelope, 'capture.source'));
+          return;
         case 'capture.coverage':
           await this.handleCaptureCoverage(narrowHelperEnvelope(envelope, 'capture.coverage'));
           return;
@@ -182,7 +185,17 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
       return;
     }
 
-    await this.notifyObservation({ observedAt: envelope.sentAt, type: 'capture_result' });
+    const source = envelope.payload.context;
+    await this.notifyObservation({
+      observedAt: envelope.sentAt,
+      source: {
+        applicationName: source.app.name,
+        bundleId: source.app.bundleId,
+        ...(source.website?.host ? { domain: source.website.host } : {}),
+        observedAt: source.observedAt,
+      },
+      type: 'capture_result',
+    });
     try {
       await this.sendCommand(envelope, 'capture.ack', {
         captureId,
@@ -194,6 +207,24 @@ class StoreBackedCaptureHelperEventHandler implements CaptureHelperEventHandler 
         type: 'capture_error',
       });
     }
+  }
+
+  private async handleCaptureSource(envelope: HelperEnvelope<'capture.source'>): Promise<void> {
+    const source = envelope.payload.source;
+    await this.notifyObservation({
+      observedAt: envelope.payload.observedAt,
+      ...(source
+        ? {
+            source: {
+              applicationName: source.app.name,
+              bundleId: source.app.bundleId,
+              ...(source.website?.host ? { domain: source.website.host } : {}),
+              observedAt: envelope.payload.observedAt,
+            },
+          }
+        : {}),
+      type: 'capture_source',
+    });
   }
 
   private async handleCaptureCoverage(envelope: HelperEnvelope<'capture.coverage'>): Promise<void> {

@@ -36,7 +36,16 @@ export type CaptureHelperObservation =
       observedAt: string;
       type: 'capture_error';
     }
-  | { observedAt: string; type: 'capture_result' }
+  | {
+      observedAt: string;
+      source?: CaptureSourceSnapshot;
+      type: 'capture_result';
+    }
+  | {
+      observedAt: string;
+      source?: CaptureSourceSnapshot;
+      type: 'capture_source';
+    }
   | { observedAt: string; reason: CaptureHelperExitReason; type: 'helper_exit' }
   | { observedAt: string; type: 'heartbeat' }
   | { observedAt: string; type: 'protocol_error' };
@@ -51,10 +60,19 @@ export type CaptureControlSnapshot = {
   menuBarActive: boolean;
   pauseReasons?: CapturePauseCause[];
   captureHelper?: CaptureHelperStatus;
+  source?: CaptureSourceSnapshot;
+};
+
+export type CaptureSourceSnapshot = {
+  applicationName: string;
+  bundleId: string;
+  domain?: string;
+  observedAt: string;
 };
 
 export type CaptureControl = {
   getSnapshot(): CaptureControlSnapshot;
+  subscribeSource?(listener: () => void): () => void;
   start(): Promise<void>;
   pause(): Promise<void>;
   resume(): Promise<void>;
@@ -124,12 +142,25 @@ type StopEffect = {
   promise: Promise<void>;
 };
 
+function sameSource(
+  left: CaptureSourceSnapshot | undefined,
+  right: CaptureSourceSnapshot | undefined,
+): boolean {
+  return (
+    left?.applicationName === right?.applicationName &&
+    left?.bundleId === right?.bundleId &&
+    left?.domain === right?.domain
+  );
+}
+
 class CaptureControlActor implements CaptureControl {
   private captureHelper: CaptureHelperMetadata | undefined;
   private captureFailureCount = 0;
   private admission: CaptureAdmissionSnapshot = Object.freeze({ reasons: [] });
   private permissions: CapturePermissionSnapshot;
   private lastHeartbeatAt: string | undefined;
+  private source: CaptureSourceSnapshot | undefined;
+  private readonly sourceListeners = new Set<() => void>();
   private desiredState: DesiredCaptureState = 'stopped';
   private menuBarActive = false;
   private state: ControlState = { kind: 'stopped' };
@@ -182,8 +213,14 @@ class CaptureControlActor implements CaptureControl {
       menuBarActive: this.menuBarActive,
       permissions: { ...this.permissions },
       ...(pauseReasons.length > 0 ? { pauseReasons } : {}),
+      ...(this.source ? { source: { ...this.source } } : {}),
       status: visibleStatus(this.state),
     };
+  }
+
+  subscribeSource(listener: () => void): () => void {
+    this.sourceListeners.add(listener);
+    return () => this.sourceListeners.delete(listener);
   }
 
   recordHelperObservation(observation: CaptureHelperObservation): Promise<void> {
@@ -206,6 +243,10 @@ class CaptureControlActor implements CaptureControl {
         case 'capture_result':
           this.captureFailureCount = 0;
           this.captureHelper = clearSafeError(this.captureHelper);
+          if (observation.source) this.updateSource(observation.source);
+          return;
+        case 'capture_source':
+          this.updateSource(observation.source);
           return;
         case 'helper_exit':
           this.options.coverage.handleHelperExit(observation.observedAt);
@@ -239,6 +280,20 @@ class CaptureControlActor implements CaptureControl {
           return;
       }
     });
+  }
+
+  private updateSource(source: CaptureSourceSnapshot | undefined): void {
+    const nextSource = source ? { ...source } : undefined;
+    const changed = !sameSource(this.source, nextSource);
+    this.source = nextSource;
+    if (!changed) return;
+    for (const listener of this.sourceListeners) {
+      try {
+        listener();
+      } catch {
+        // A shell refresh observer must never break the control state update.
+      }
+    }
   }
 
   start(): Promise<void> {

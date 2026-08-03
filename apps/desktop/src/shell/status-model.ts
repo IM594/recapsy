@@ -36,6 +36,12 @@ export type DesktopShellStatus = {
   lastHeartbeatAt?: string;
   lastErrorCode?: string;
   lastErrorMessage?: string;
+  source?: {
+    applicationName: string;
+    bundleId: string;
+    domain?: string;
+    observedAt: string;
+  };
 };
 
 export function formatTrayTooltip(

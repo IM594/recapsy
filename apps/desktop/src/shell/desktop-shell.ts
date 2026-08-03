@@ -41,6 +41,8 @@ export type DesktopShellMenuItem =
       click?(): void;
     };
 
+export type DesktopShellLocalRuleKind = 'bundle_id' | 'domain' | 'domain_family';
+
 export type DesktopShellMenu = unknown;
 
 export type DesktopShellNotification = {
@@ -54,13 +56,16 @@ export type DesktopShellAdapters = {
   buildMenu(items: DesktopShellMenuItem[]): DesktopShellMenu;
   quit(): void;
   showNotification?(notification: DesktopShellNotification): void;
+  confirm?(message: string): Promise<boolean>;
 };
 
 export type DesktopShellStatusSource = {
   getStatus(): Promise<DesktopShellStatus>;
+  subscribe?(listener: () => void): () => void;
 };
 
 export type DesktopShellActions = {
+  addLocalRule?(input: { kind: DesktopShellLocalRuleKind; pattern: string }): Promise<void>;
   pauseCapture(): Promise<void>;
   resumeCapture(): Promise<void>;
   openScreenRecordingSettings(): Promise<void>;
@@ -89,6 +94,7 @@ export type DesktopShell = {
 
 const STATUS_PUSH_CHANNEL = 'shell.statusUpdated';
 const DEFAULT_REFRESH_INTERVAL_MS = 3000;
+const SOURCE_CONTEXT_MAX_AGE_MS = 30_000;
 const SAFE_SHELL_OPERATION_ERROR = 'Desktop shell operation failed.' as const;
 const SHELL_UNAVAILABLE_ERROR = 'Desktop shell is unavailable.';
 
@@ -102,6 +108,7 @@ class DesktopShellController implements DesktopShell {
   private disposed = false;
   private lastStatus: DesktopShellStatus | undefined;
   private readonly refreshInterval: ReturnType<typeof setInterval>;
+  private readonly unsubscribeStatusSource: (() => void) | undefined;
   private refreshInFlight: Promise<DesktopShellStatus> | undefined;
   private permissionRefreshPending = false;
   private permissionRefreshToken = 0;
@@ -116,6 +123,9 @@ class DesktopShellController implements DesktopShell {
     this.refreshInterval = setInterval(() => {
       this.runInBackground(() => this.refresh());
     }, options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS);
+    this.unsubscribeStatusSource = options.statusSource.subscribe?.(() => {
+      this.runInBackground(() => this.refresh());
+    });
     this.runInBackground(() => this.refresh());
   }
 
@@ -197,6 +207,7 @@ class DesktopShellController implements DesktopShell {
     this.permissionRefreshPending = false;
     this.permissionRefreshToken += 1;
     clearInterval(this.refreshInterval);
+    this.unsubscribeStatusSource?.();
     try {
       this.tray.destroy();
     } catch {
@@ -223,6 +234,8 @@ class DesktopShellController implements DesktopShell {
         label: `注意：${alert.trayLabel}`,
       })),
       { kind: 'separator' },
+      ...this.buildPrivacyMenuItems(status),
+      ...(this.hasPrivacyMenu(status) ? [{ kind: 'separator' as const }] : []),
       {
         click: () => {
           this.runInBackground(async () => {
@@ -312,6 +325,58 @@ class DesktopShellController implements DesktopShell {
         label: `退出 ${productIdentity.displayName}`,
       },
     ];
+  }
+
+  private hasPrivacyMenu(status: DesktopShellStatus): boolean {
+    return Boolean(
+      status.source &&
+        this.options.actions.addLocalRule &&
+        Date.parse(status.source.observedAt) >=
+          (this.options.now?.() ?? Date.now()) - SOURCE_CONTEXT_MAX_AGE_MS,
+    );
+  }
+
+  private buildPrivacyMenuItems(status: DesktopShellStatus): DesktopShellMenuItem[] {
+    const source = status.source;
+    const addLocalRule = this.options.actions.addLocalRule;
+    if (!source || !addLocalRule || !this.hasPrivacyMenu(status)) return [];
+
+    const items: DesktopShellMenuItem[] = [
+      {
+        click: () => {
+          this.runInBackground(() => addLocalRule({ kind: 'bundle_id', pattern: source.bundleId }));
+        },
+        kind: 'action',
+        label: `屏蔽当前应用 · ${source.applicationName}`,
+      },
+    ];
+    if (!source.domain) return items;
+    const domain = source.domain;
+
+    items.push(
+      {
+        click: () => {
+          this.runInBackground(() => addLocalRule({ kind: 'domain', pattern: domain }));
+        },
+        kind: 'action',
+        label: `屏蔽当前网站 · ${domain}`,
+      },
+      {
+        click: () => {
+          this.runInBackground(async () => {
+            const confirmed =
+              (await this.options.adapters.confirm?.(
+                `将屏蔽 ${domain} 及其子站点，例如 www.${domain}、api.${domain}。`,
+              )) ?? false;
+            if (!confirmed) return;
+            await addLocalRule({ kind: 'domain_family', pattern: domain });
+          });
+        },
+        kind: 'action',
+        label: `屏蔽整个网站 · ${domain} 及其子网站`,
+      },
+    );
+    return items;
   }
 
   private async openPrivacySettings(openSettings: () => Promise<void>): Promise<void> {
