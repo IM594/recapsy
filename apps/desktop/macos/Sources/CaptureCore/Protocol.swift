@@ -333,6 +333,9 @@ public struct CaptureContextPayload: Codable {
     public let window: CaptureWindowPayload?
     public let website: CaptureWebsitePayload?
     public let document: CaptureDocumentPayload?
+    /// Opaque, stable identity for comparing safe contexts. It is omitted
+    /// when context is redacted and never contains the source URL or path.
+    public let contextFingerprint: String?
     public let policy: CapturePolicyPayload
 
     public init(
@@ -341,6 +344,7 @@ public struct CaptureContextPayload: Codable {
         window: CaptureWindowPayload? = nil,
         website: CaptureWebsitePayload? = nil,
         document: CaptureDocumentPayload? = nil,
+        contextFingerprint: String? = nil,
         policy: CapturePolicyPayload
     ) {
         self.app = app
@@ -348,6 +352,7 @@ public struct CaptureContextPayload: Codable {
         self.window = window
         self.website = website
         self.document = document
+        self.contextFingerprint = contextFingerprint
         self.policy = policy
     }
 }

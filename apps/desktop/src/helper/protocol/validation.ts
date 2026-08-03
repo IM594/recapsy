@@ -282,13 +282,22 @@ function isCaptureAssetPayload(payload: unknown, captureId: string): boolean {
 function isSafeCaptureContextPayload(payload: unknown, observedAt?: string): boolean {
   return (
     isRecord(payload) &&
-    hasOnlyKeys(payload, ['observedAt', 'app', 'window', 'website', 'document', 'policy']) &&
+    hasOnlyKeys(payload, [
+      'observedAt',
+      'app',
+      'window',
+      'website',
+      'document',
+      'contextFingerprint',
+      'policy',
+    ]) &&
     isString(payload.observedAt) &&
     (observedAt === undefined || payload.observedAt === observedAt) &&
     isApp(payload.app) &&
     isOptionalWindow(payload.window) &&
     isOptionalWebsite(payload.website) &&
     isOptionalDocument(payload.document) &&
+    (payload.contextFingerprint === undefined || isPolicyHash(payload.contextFingerprint)) &&
     isRecord(payload.policy) &&
     hasOnlyKeys(payload.policy, ['version', 'decision']) &&
     isString(payload.policy.version) &&

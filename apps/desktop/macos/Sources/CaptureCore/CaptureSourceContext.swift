@@ -35,8 +35,9 @@ public struct CaptureSourceContext: Codable, Equatable, Sendable {
     public let window: Window?
     public let website: Website?
     public let document: Document?
-    /// Stable local-only identity for context comparison. It is deliberately
-    /// not added to the capture-result wire contract.
+    /// Stable opaque identity for context comparison. It is safe to carry on
+    /// the capture-result wire when context is allowed, but is omitted when
+    /// the policy redacts context.
     public let fingerprint: String
 
     private init(
@@ -102,6 +103,7 @@ public struct CaptureSourceContext: Codable, Equatable, Sendable {
                 ? normalized?.website.map { CaptureWebsitePayload(origin: $0.origin, host: $0.host) }
                 : nil,
             document: exposesContext ? normalized?.document.map { CaptureDocumentPayload(name: $0.name) } : nil,
+            contextFingerprint: exposesContext ? normalized?.fingerprint : nil,
             policy: policy
         )
     }

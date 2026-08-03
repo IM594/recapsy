@@ -65,6 +65,7 @@ final class CaptureContextPrivacyTests: XCTestCase {
         XCTAssertEqual(payload.window?.title, "Quarterly Planning")
         XCTAssertEqual(payload.website?.origin, "https://portal.example.test")
         XCTAssertEqual(payload.document?.name, "Quarterly Plan.md")
+        XCTAssertEqual(payload.contextFingerprint, context.fingerprint)
     }
 
     func testUnsafeAccessibilityValuesAreOmittedInsteadOfBeingProjected() throws {
@@ -185,6 +186,7 @@ final class CaptureContextPrivacyTests: XCTestCase {
         XCTAssertNil(payload.context.window)
         XCTAssertNil(payload.context.website)
         XCTAssertNil(payload.context.document)
+        XCTAssertNil(payload.context.contextFingerprint)
 
         let encoded = try JSONEncoder().encode(payload)
         let root = try XCTUnwrap(

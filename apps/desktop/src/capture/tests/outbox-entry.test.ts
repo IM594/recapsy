@@ -90,6 +90,26 @@ describe('capture outbox entry projection', () => {
     expect(result.createdAt).toBe(observedAt);
   });
 
+  it('persists the opaque context fingerprint without persisting raw context paths', () => {
+    const contextFingerprint = `sha256:${'c'.repeat(64)}`;
+    const result = projectCaptureOutboxEntry({
+      deviceId,
+      payload: capturePayload({
+        context: {
+          app: { bundleId: 'com.apple.Safari', name: 'Safari' },
+          contextFingerprint,
+          document: { name: 'plan.md' },
+          observedAt,
+          policy: { decision: 'allow', version: 'policy_1' },
+        },
+      }),
+      workspaceId,
+    });
+
+    expect(result.capture).toMatchObject({ contextFingerprint });
+    expect(JSON.stringify(result.capture)).not.toContain('/Users/');
+  });
+
   it('falls back to observedAt for capturedAt when the helper does not report it', () => {
     const payload = capturePayload();
 

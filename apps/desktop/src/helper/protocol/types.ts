@@ -69,6 +69,7 @@ export type SafeCaptureContextPayload = {
   window?: { title: string };
   website?: { origin: string; host: string };
   document?: { name: string };
+  contextFingerprint?: string;
   policy: {
     version: string;
     decision: 'allow' | 'redact_context' | 'block_ocr';

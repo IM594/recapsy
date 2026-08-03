@@ -30,6 +30,23 @@ describe('capture result factory', () => {
     ).toBe(true);
   });
 
+  it('accepts an opaque context fingerprint without exposing raw context values', () => {
+    const payload = createSafeCaptureResultPayload(captureResultInput());
+    payload.context.contextFingerprint = `sha256:${'b'.repeat(64)}`;
+
+    expect(
+      validateHelperToMainEnvelope({
+        correlationId: null,
+        messageId: 'msg_fingerprint',
+        payload,
+        protocolVersion: HELPER_PROTOCOL_VERSION,
+        sentAt: observedAt,
+        type: 'capture.result',
+      }).ok,
+    ).toBe(true);
+    expect(JSON.stringify(payload.context)).not.toContain('private');
+  });
+
   it('refuses to construct capture results with unsafe ids or non-positive byte sizes', () => {
     expect(() =>
       createSafeCaptureResultPayload(captureResultInput({ captureId: '../outside' })),

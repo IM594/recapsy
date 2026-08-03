@@ -45,7 +45,7 @@ enum AccessibilityContextSampler {
 
         return CaptureSourceContext.make(
             application: application,
-            document: documentAttribute(selectedWindow),
+            document: documentAttribute(focusedElement) ?? documentAttribute(selectedWindow),
             url: urlAttribute(focusedElement, kAXURLAttribute)
                 ?? urlAttribute(selectedWindow, kAXURLAttribute)
                 ?? urlAttribute(selectedWindow, kAXDocumentAttribute),

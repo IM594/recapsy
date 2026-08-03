@@ -70,6 +70,9 @@ function capturePayloadFromResult(payload: CaptureResultPayload): CaptureOutboxP
     // report it (see `helper/protocol/types.ts`).
     capturedAt: payload.capturedAt ?? payload.observedAt,
     captureType: 'screen',
+    ...(payload.context.contextFingerprint
+      ? { contextFingerprint: payload.context.contextFingerprint }
+      : {}),
     documentPathCandidate: documentPathCandidate(payload.context),
     localEventId: payload.captureId,
     observedAt: payload.observedAt,
