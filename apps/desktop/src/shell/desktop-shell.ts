@@ -27,6 +27,7 @@ export type DesktopShellWindow = {
 export type DesktopShellTray = {
   setToolTip(tooltip: string): void;
   setContextMenu(menu: unknown): void;
+  popUpContextMenu?(): void;
   on(event: 'click', listener: () => void): unknown;
   destroy(): void;
 };
@@ -110,7 +111,7 @@ class DesktopShellController implements DesktopShell {
     this.healthMonitor = options.healthMonitor ?? createDesktopHealthMonitor();
     this.tray = options.adapters.createTray();
     this.tray.on('click', () => {
-      this.runInBackground(() => this.showMainWindow());
+      this.tray.popUpContextMenu?.();
     });
     this.refreshInterval = setInterval(() => {
       this.runInBackground(() => this.refresh());
