@@ -1,0 +1,32 @@
+name: macOS Capture
+
+on:
+  workflow_dispatch:
+
+jobs:
+  desktop-macos:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.19.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.15.1
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test macOS capture and packaged layout
+        env:
+          RECAPSY_CAPTURE_SIGN_IDENTITY: "-"
+        run: pnpm verify:goal:macos
