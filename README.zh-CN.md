@@ -113,7 +113,7 @@ Electron 与 TypeScript 负责主进程与界面。Swift 进程负责采集，�
 
 ## 参与
 
-欢迎 issue，bug 修复欢迎 PR，功能先开 discussion。所有提交须按 [DCO](DCO) 签署：
+流程与代码规则见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)。欢迎 issue，bug 修复欢迎 PR，功能先开 discussion。所有提交须按 [DCO](DCO) 签署：
 
 ```sh
 git commit -s -m "fix(capture): describe the change"

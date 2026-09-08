@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Feature idea or question
+    url: https://github.com/IM594/recapsy/discussions
+    about: Features start as a discussion. Bugs go through the bug report form.
+  - name: Security report
+    url: https://github.com/IM594/recapsy/security/advisories/new
+    about: Report vulnerabilities privately.

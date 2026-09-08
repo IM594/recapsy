@@ -1,0 +1,36 @@
+name: Bug report
+description: Something behaves differently from what the app or the README says.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Recapsy version or commit
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and chip
+      placeholder: macOS 15.6, Apple M2
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Attach screenshots or logs by dragging them here. Redact anything private first.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
