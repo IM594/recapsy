@@ -113,7 +113,7 @@ Electron and TypeScript for the main process and UI. A Swift process for capture
 
 ## Contributing
 
-Issues are welcome. Bug-fix pull requests are welcome. For features, open a discussion first. All commits must be signed off under the [Developer Certificate of Origin](DCO):
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and code rules. Issues are welcome. Bug-fix pull requests are welcome. For features, open a discussion first. All commits must be signed off under the [Developer Certificate of Origin](DCO):
 
 ```sh
 git commit -s -m "fix(capture): describe the change"
