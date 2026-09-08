@@ -22,7 +22,6 @@ Thanks for your interest. Recapsy is small and opinionated, and the rules below 
 - Format: `type(scope): message`, one line, no body, no footer.
 - Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`, `build`, `style`, `revert`.
 - `scope` is required for `feat`, `fix` and `refactor`. It names a module or capability, for example `capture`, `ocr`, `mcp`, `summary`, `review`.
-- Sign every commit off under the [Developer Certificate of Origin](DCO). `git commit -s` adds the line for you. Pull requests with unsigned commits cannot be merged.
 
 ## Code rules
 
@@ -41,4 +40,4 @@ The rebuild is in progress. Setup and test commands will be documented here with
 
 ## License
 
-By contributing you agree that your contributions are licensed under the [MIT License](LICENSE) and certified under the [DCO](DCO).
+By contributing you agree that your contributions are licensed under the [MIT License](LICENSE).
