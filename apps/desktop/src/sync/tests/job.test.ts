@@ -453,6 +453,13 @@ describe('desktop sync job executor', () => {
             model: 'test-model',
             providerName: 'test-provider',
             text: '',
+            activity: {
+              activitySummary: null,
+              entities: [],
+              actionHints: [],
+              embeddingCandidateText: null,
+            },
+            activityStatus: 'omitted' as const,
           };
         },
         async submitOcrResult(input) {
@@ -892,6 +899,13 @@ function createOcrResponse() {
     model: 'test-model',
     providerName: 'test-provider',
     text: 'hello world',
+    activity: {
+      activitySummary: null,
+      entities: [],
+      actionHints: [],
+      embeddingCandidateText: null,
+    },
+    activityStatus: 'omitted' as const,
   };
 }
 
@@ -918,6 +932,14 @@ function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): Stored
       readingOrder: 'top_to_bottom_left_to_right',
       source: 'image_ocr',
     },
+    activity: {
+      activitySummary: null,
+      entities: [],
+      actionHints: [],
+      embeddingCandidateText: null,
+      metadata: { observationStatus: 'omitted' },
+    },
+    activityStatus: 'omitted',
     sourceAssetHash: assetHash,
     ...overrides,
   };

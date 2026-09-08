@@ -10,6 +10,8 @@ import type {
   CapturePolicyRule,
   DeviceCaptureDesiredState,
   DeviceCaptureLivenessResponse,
+  OcrActivityResult,
+  OcrActivityStatus,
   OcrQualityFlag,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
@@ -167,6 +169,8 @@ export type SubmitOcrResultInput = {
   captureId: string;
   sourceAssetHash: string;
   screenText: OcrScreenTextResult;
+  activity: OcrActivityResult;
+  activityStatus: OcrActivityStatus;
   model: string;
   providerName: string;
   durationMs: number;

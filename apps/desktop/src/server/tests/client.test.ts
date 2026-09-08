@@ -616,6 +616,13 @@ describe('desktop server API client', () => {
       expect(request.headers['idempotency-key']).toBe('ocr-operation-1');
       expect(request.query).toMatchObject({ workspaceId });
       return createJsonResponse({
+        activity: {
+          activitySummary: null,
+          entities: [],
+          actionHints: [],
+          embeddingCandidateText: null,
+        },
+        activityStatus: 'omitted',
         blocks: [{ order: 0, text: 'quarterly plan draft' }],
         durationMs: 1200,
         model: 'ocr-model-1',
@@ -632,6 +639,13 @@ describe('desktop server API client', () => {
     });
 
     expect(result).toEqual({
+      activity: {
+        activitySummary: null,
+        entities: [],
+        actionHints: [],
+        embeddingCandidateText: null,
+      },
+      activityStatus: 'omitted',
       blocks: [{ order: 0, text: 'quarterly plan draft' }],
       durationMs: 1200,
       model: 'ocr-model-1',
@@ -753,6 +767,14 @@ describe('desktop server API client', () => {
       model: 'ocr-model-1',
       providerName: 'openai',
       qualityFlags: [],
+      activity: {
+        activitySummary: null,
+        entities: [],
+        actionHints: [],
+        embeddingCandidateText: null,
+        metadata: { observationStatus: 'omitted' },
+      },
+      activityStatus: 'omitted',
       screenText: {
         blocks: [
           { kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'quarterly plan draft' },
@@ -784,6 +806,14 @@ describe('desktop server API client', () => {
         model: 'ocr-model-1',
         providerName: 'openai',
         qualityFlags: [],
+        activity: {
+          activitySummary: null,
+          entities: [],
+          actionHints: [],
+          embeddingCandidateText: null,
+          metadata: { observationStatus: 'omitted' },
+        },
+        activityStatus: 'omitted',
         screenText: {
           blocks: [
             { kind: 'text', readingOrder: 0, source: 'image_ocr', text: 'quarterly plan draft' },

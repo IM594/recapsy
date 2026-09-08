@@ -1786,6 +1786,14 @@ function createStoredOcrResult(overrides: Partial<StoredOcrResult> = {}): Stored
       readingOrder: 'top_to_bottom_left_to_right',
       source: 'image_ocr',
     },
+    activity: {
+      activitySummary: null,
+      entities: [],
+      actionHints: [],
+      embeddingCandidateText: null,
+      metadata: { observationStatus: 'omitted' },
+    },
+    activityStatus: 'omitted',
     sourceAssetHash: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
     ...overrides,
   };

@@ -2,6 +2,8 @@ import type {
   AiOcrResponse,
   AiOcrUsage,
   CaptureNextAction,
+  OcrActivityResult,
+  OcrActivityStatus,
   OcrQualityFlag,
   OcrResultSubmitResponse,
   OcrScreenTextResult,
@@ -56,6 +58,8 @@ export type SyncServerApi = {
     captureId: string;
     sourceAssetHash: string;
     screenText: OcrScreenTextResult;
+    activity: OcrActivityResult;
+    activityStatus: OcrActivityStatus;
     model: string;
     providerName: string;
     durationMs: number;

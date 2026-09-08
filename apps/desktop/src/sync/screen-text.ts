@@ -1,5 +1,8 @@
 import {
   type AiOcrResponse,
+  type OcrActivityResult,
+  OcrActivityResultSchema,
+  type OcrActivityStatus,
   type OcrQualityFlag,
   type OcrScreenTextBlock,
   type OcrScreenTextBlockKind,
@@ -100,6 +103,39 @@ export function deriveOcrQualityFlags(response: AiOcrResponse): OcrQualityFlag[]
   }
 
   return flags;
+}
+
+export function mapOcrActivity(response: AiOcrResponse): {
+  activity: OcrActivityResult;
+  status: OcrActivityStatus;
+} {
+  const status = response.activityStatus;
+  const parsed = OcrActivityResultSchema.safeParse({
+    activitySummary: response.activity.activitySummary ?? null,
+    actionHints: response.activity.actionHints,
+    embeddingCandidateText: response.activity.embeddingCandidateText ?? null,
+    entities: response.activity.entities,
+    metadata: { observationStatus: status },
+  });
+
+  if (!parsed.success) {
+    return {
+      activity: emptyOcrActivity('invalid'),
+      status: 'invalid',
+    };
+  }
+
+  return { activity: parsed.data, status };
+}
+
+function emptyOcrActivity(status: OcrActivityStatus): OcrActivityResult {
+  return {
+    activitySummary: null,
+    actionHints: [],
+    embeddingCandidateText: null,
+    entities: [],
+    metadata: { observationStatus: status },
+  };
 }
 
 function normalizeKind(kind: string | undefined): OcrScreenTextBlockKind {

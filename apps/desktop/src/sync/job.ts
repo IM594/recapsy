@@ -19,7 +19,12 @@ import {
 import { createOcrOperationKey } from './ocr-operation';
 import { reconcileOutboxJobFromServerCapture } from './reconciliation';
 import { computeRetryBackoffDelayMs } from './retry';
-import { OcrResultInvalidError, deriveOcrQualityFlags, mapOcrScreenText } from './screen-text';
+import {
+  OcrResultInvalidError,
+  deriveOcrQualityFlags,
+  mapOcrActivity,
+  mapOcrScreenText,
+} from './screen-text';
 import type {
   RetryBackoffConfig,
   RetryJitterSource,
@@ -203,12 +208,15 @@ async function executeSyncJob(
       throw error;
     }
 
+    const activity = mapOcrActivity(ocrResponse);
     const storedResult: StoredOcrResult = {
       durationMs: ocrResponse.durationMs,
       model: ocrResponse.model,
       providerName: ocrResponse.providerName,
       qualityFlags: deriveOcrQualityFlags(ocrResponse),
       screenText,
+      activity: activity.activity,
+      activityStatus: activity.status,
       sourceAssetHash: asset.hash,
       ...(ocrResponse.usage ? { usage: ocrResponse.usage } : {}),
     };
@@ -276,6 +284,8 @@ async function submitStoredOcrResult(
     providerName: storedResult.providerName,
     qualityFlags: storedResult.qualityFlags,
     screenText: storedResult.screenText,
+    activity: storedResult.activity,
+    activityStatus: storedResult.activityStatus,
     sourceAssetHash: storedResult.sourceAssetHash,
     workspaceId: job.workspaceId,
     ...(storedResult.usage ? { usage: storedResult.usage } : {}),

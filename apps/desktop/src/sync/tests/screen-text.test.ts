@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AiOcrResponse } from '@recapsy/contracts';
-import { deriveOcrQualityFlags, mapOcrScreenText } from '../screen-text';
+import { deriveOcrQualityFlags, mapOcrActivity, mapOcrScreenText } from '../screen-text';
 
 function ocrResponse(blocks: AiOcrResponse['blocks']): AiOcrResponse {
   return {
@@ -9,6 +9,13 @@ function ocrResponse(blocks: AiOcrResponse['blocks']): AiOcrResponse {
     model: 'test-model',
     providerName: 'test-provider',
     text: blocks.map((block) => block.text).join('\n'),
+    activity: {
+      activitySummary: null,
+      entities: [],
+      actionHints: [],
+      embeddingCandidateText: null,
+    },
+    activityStatus: 'omitted',
   };
 }
 
@@ -119,5 +126,44 @@ describe('deriveOcrQualityFlags', () => {
 
   it('reports no quality flags when completion is not observed at all', () => {
     expect(deriveOcrQualityFlags(ocrResponse([{ text: 'no completion signal' }]))).toEqual([]);
+  });
+});
+
+describe('mapOcrActivity', () => {
+  it('maps a complete observer report without mixing it into screen text', () => {
+    expect(
+      mapOcrActivity({
+        ...ocrResponse([]),
+        activity: {
+          activitySummary: '正在编辑 OCR 代码',
+          entities: ['OCR'],
+          actionHints: ['编写代码'],
+          embeddingCandidateText: '编辑 OCR 代码',
+        },
+        activityStatus: 'complete',
+      }),
+    ).toEqual({
+      activity: {
+        actionHints: ['编写代码'],
+        activitySummary: '正在编辑 OCR 代码',
+        embeddingCandidateText: '编辑 OCR 代码',
+        entities: ['OCR'],
+        metadata: { observationStatus: 'complete' },
+      },
+      status: 'complete',
+    });
+  });
+
+  it('returns an empty activity with a reason when the provider omits or invalidates it', () => {
+    expect(mapOcrActivity({ ...ocrResponse([]), activityStatus: 'invalid' })).toEqual({
+      activity: {
+        actionHints: [],
+        activitySummary: null,
+        embeddingCandidateText: null,
+        entities: [],
+        metadata: { observationStatus: 'invalid' },
+      },
+      status: 'invalid',
+    });
   });
 });

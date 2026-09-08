@@ -5,6 +5,8 @@ import type {
   CapturePolicyRule,
   DeviceCaptureDesiredState,
   LocalCapturePolicyRuleKind,
+  OcrActivityResult,
+  OcrActivityStatus,
   OcrQualityFlag,
   OcrScreenTextResult,
 } from '@recapsy/contracts';
@@ -40,6 +42,8 @@ export type SafeOperationalError = {
  */
 export type StoredOcrResult = {
   screenText: OcrScreenTextResult;
+  activity: OcrActivityResult;
+  activityStatus: OcrActivityStatus;
   sourceAssetHash: string;
   model: string;
   providerName: string;

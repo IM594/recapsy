@@ -442,6 +442,8 @@ function toOcrResultSubmitBody(input: SubmitOcrResultInput): Record<string, unkn
     providerName: input.providerName,
     qualityFlags: input.qualityFlags,
     screenText: input.screenText,
+    activity: input.activity,
+    activityStatus: input.activityStatus,
     sourceAssetHash: input.sourceAssetHash,
     workspaceId: input.workspaceId,
     ...(input.usage ? { usage: input.usage } : {}),

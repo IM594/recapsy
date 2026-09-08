@@ -97,14 +97,12 @@ describe('desktop server sync over real HTTP', () => {
       state: 'synced',
       terminalReason: 'ocr_synced',
     });
-    // The thin-proxy flow submits screen text only; the server synthesizes a
-    // fixed activity placeholder (裁决 8), so the timeline summary/title is the
-    // placeholder rather than a generated activity label.
+    // This fixture deliberately omits activity. The server must keep the
+    // capture's safe title and must not invent a placeholder activity label.
     expect(timeline.items).toEqual([
       expect.objectContaining({
-        snippet: 'Processed screenshot OCR',
         sourceApp: 'Code',
-        title: 'Processed screenshot OCR',
+        title: 'Retention Review',
       }),
     ]);
     expect(search.items).toEqual([
@@ -708,6 +706,13 @@ function visionRuntimeReturning(text: string): AiRuntime {
         providerSettingId: 'fake-provider-setting',
         success: true,
         text,
+        activity: {
+          activitySummary: null,
+          entities: [],
+          actionHints: [],
+          embeddingCandidateText: null,
+        },
+        activityStatus: 'omitted',
       };
     },
     async runEmbedding() {
