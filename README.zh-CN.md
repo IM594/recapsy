@@ -63,7 +63,7 @@ Recapsy 在本机记下你每一刻正在做的事，你或你的 agent 问起�
 
 ## 参与
 
-Bug 走 issue 表单，功能先开 discussion。流程与代码规则见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
+Bug 走 issue 表单，功能先开 discussion。首个版本发布前暂不合并外部 PR。流程与代码规则见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
 ## 许可证
 

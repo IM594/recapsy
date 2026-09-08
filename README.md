@@ -63,7 +63,7 @@ Under development, not yet released. Watch the repository for the first release.
 
 ## Contributing
 
-Bugs go through the issue form, features start as a discussion. Workflow and code rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Bugs go through the issue form, features start as a discussion. Outside pull requests are not merged until the first release. Workflow and code rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
