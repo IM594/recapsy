@@ -2,7 +2,7 @@
 
 [English](roadmap.md) · [简体中文](roadmap.zh-CN.md)
 
-Updated 2026-09-08. Versions are split by one question: does anything leave your device? 1.0 is the free, fully local tier. 2.0 is the paid cloud tier. The data model is defined once for 1.0 and implemented in steps.
+Updated 2026-09-08. 1.0 is the free, fully local desktop app. The cloud tier comes after it.
 
 ## 1.0, free and local
 
@@ -28,7 +28,7 @@ Updated 2026-09-08. Versions are split by one question: does anything leave your
 - No telemetry by default.
 
 **Hard targets**
-- From download to running in under ten minutes, without asking the author.
+- From download to running in under ten minutes, with no setup guide needed.
 - Energy impact "Low" in Activity Monitor. The fan does not spin because of Recapsy.
 
 **Requirements**
@@ -39,9 +39,9 @@ Updated 2026-09-08. Versions are split by one question: does anything leave your
 
 Accounts, the cloud tier, mobile, Windows, Linux, a chat interface, browser extensions, a team edition, one-time purchase, usage-based billing, migration of data from earlier prototypes.
 
-## 2.0, paid cloud tier
+## Cloud tier, after 1.0
 
-Hosted models for summaries, cloud OCR, backup and multi-device sync, hosted MCP so the agent on your phone can ask too, accounts and payment. Work starts when fifty people are on the waitlist or ten people ask how to use Recapsy on two machines. Not before.
+Hosted models for summaries, cloud OCR, backup and multi-device sync, hosted MCP so the agent on your phone can ask too, accounts and payment. Timing depends on demand; the waitlist lives in [Discussions](https://github.com/IM594/recapsy/discussions).
 
 ## Tech stack
 
@@ -57,4 +57,4 @@ Electron and TypeScript for the main process and UI. A Swift process for capture
 | 2026-02 | Native Swift experiment |
 | 2026-04 | TypeScript monorepo architecture draft |
 | 2026-05 | Recapsy monorepo with a Swift capture engine and pre-capture privacy interception |
-| 2026-09 | Local-first rebuild begins from a clean `main`; earlier work under tag `archive/prototypes-2026-09` |
+| 2026-09 | Fresh start on `main`; earlier work kept under tag `archive/prototypes-2026-09` |

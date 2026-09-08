@@ -24,7 +24,7 @@ Ten minutes before a review you ask your agent "what did I work on this week?" a
 
 ## It never lies to you
 
-Screen recorders drop frames, compress history and delete quietly. Recapsy makes four promises none of them make.
+Four promises about your data.
 
 | Promise | What it means |
 |---------|---------------|
@@ -45,7 +45,7 @@ Screen recorders drop frames, compress history and delete quietly. Recapsy makes
                                               Daily review page (for humans)
 ```
 
-Everything that runs on every frame runs on your Mac and costs nothing. Summaries run once a day on a model you configure, any OpenAI-compatible endpoint or a local Ollama, and everything else works without them. Anything you ask on demand goes through your own agent over MCP, so there is no chat UI. OCR is PP-OCR on device, scheduled to stay inside the "Low" energy band in Activity Monitor. macOS only.
+Capture, OCR and indexing run on your Mac. Summaries run once a day on a model you configure, any OpenAI-compatible endpoint or a local Ollama, and everything else works without them. Questions go through your own agent over MCP, so there is no chat window to learn. OCR is PP-OCR on device, scheduled to keep energy impact at "Low" in Activity Monitor. macOS only.
 
 What ships in 1.0 and what does not: [docs/roadmap.md](docs/roadmap.md).
 
