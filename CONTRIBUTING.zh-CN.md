@@ -22,7 +22,6 @@
 - 格式：`type(scope): message`，一行，无 body，无 footer。
 - type：`feat`、`fix`、`refactor`、`perf`、`test`、`docs`、`chore`、`ci`、`build`、`style`、`revert`。
 - `feat`、`fix`、`refactor` 必须带 `scope`，scope 是模块或能力名，例如 `capture`、`ocr`、`mcp`、`summary`、`review`。
-- 每个 commit 都按 [DCO](DCO) 签署，`git commit -s` 会自动加上那一行。含未签署 commit 的 PR 无法合并。
 
 ## 代码规则
 
@@ -41,4 +40,4 @@
 
 ## 许可
 
-参与即表示你同意贡献以 [MIT 许可证](LICENSE) 发布，并按 [DCO](DCO) 认证。
+参与即表示你同意贡献以 [MIT 许可证](LICENSE) 发布。
