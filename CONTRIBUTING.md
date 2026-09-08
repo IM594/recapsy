@@ -1,7 +1,5 @@
 # Contributing to Recapsy
 
-[English](CONTRIBUTING.md) · [简体中文](CONTRIBUTING.zh-CN.md)
-
 Thanks for your interest. Recapsy is deliberately small. The rules below keep the codebase consistent whether a change comes from a person or from a coding agent working on their behalf.
 
 ## What to open
