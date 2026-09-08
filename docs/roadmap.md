@@ -1,7 +1,5 @@
 # Roadmap
 
-[English](roadmap.md) · [简体中文](roadmap.zh-CN.md)
-
 Updated 2026-09-08. 1.0 is the free, fully local desktop app. The cloud tier comes after it.
 
 ## 1.0, free and local

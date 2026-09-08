@@ -47,7 +47,7 @@ Recapsy 记录你的 Mac 屏幕，识别上面的文字，全部留在你的电�
 
 截图、识字、索引都在你的 Mac 上完成。总结每天跑一次，用你自己配的模型，任何 OpenAI 兼容地址或本机 Ollama 都行，不配也不影响其他功能。提问交给你自己的 agent 走 MCP，所以没有需要另学的聊天窗口。识字用 PP-OCR 本机运行，调度目标是活动监视器能耗保持“低”。只支持 macOS。
 
-1.0 做什么、不做什么：[docs/roadmap.zh-CN.md](docs/roadmap.zh-CN.md)。
+1.0 做什么、不做什么：[docs/roadmap.md](docs/roadmap.md)（英文）。
 
 ## 当前状态
 
@@ -57,7 +57,7 @@ Recapsy 记录你的 Mac 屏幕，识别上面的文字，全部留在你的电�
 
 ## 参与
 
-Bug 走 issue 表单，功能先开 discussion。流程与代码规则见 [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md)。
+Bug 走 issue 表单，功能先开 discussion。流程与代码规则见 [CONTRIBUTING.md](CONTRIBUTING.md)（英文）。
 
 ## 许可证
 
