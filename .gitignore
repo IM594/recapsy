@@ -1,62 +1,14 @@
-# Dependencies
-node_modules/
-.pnpm-store/
-
-# Build
-dist/
-*.tsbuildinfo
-
-# Build artifacts
-*.apk
-*.dmg
-
-# Database dumps
-*.dump
-backup_*.sql
-
-# Turbo
-.turbo/
-
-# Coverage
-coverage/
-
-# Environment
-.env
-.env.local
-.env.*.local
-apps/server/.env.local-setup
-
-# Data
-data/
-
-# Server runtime temporary assets (TEMP_UPLOAD_DIR / SERVER_TEMP_ASSET_DIR defaults)
-apps/server/tmp/
-
-# OS
+# macOS
 .DS_Store
-Thumbs.db
 
-# IDE
-.idea/
+# node
+node_modules/
+dist/
+*.log
+
+# editors
 .vscode/
-*.swp
-*.swo
-
-# Bun (we use pnpm, not bun for installs)
-bun.lockb
-
-# Generated
-*.gen.ts
-.claude/settings.local.json
-.claude/launch.json
-.claude/worktrees/
-
-# Git worktrees
-.worktrees/
-
-# Temp / generated
-pi-session-*.html
-ui-*.html
+.idea/
 
 # local agent tooling
 .pi/
