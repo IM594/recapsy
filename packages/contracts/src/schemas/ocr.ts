@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AiOcrUsageSchema } from './ai-ocr.js';
+import { AiOcrActivityStatusSchema, AiOcrUsageSchema } from './ai-ocr.js';
 import { IdSchema, IsoDateTimeSchema, MetadataSchema } from './common.js';
 import { ContentHashSchema } from './storage.js';
 
@@ -71,6 +71,8 @@ export const OcrActivityResultSchema = z
   })
   .strict();
 
+export const OcrActivityStatusSchema = AiOcrActivityStatusSchema;
+
 export const OcrResultSchema = z
   .object({
     id: IdSchema,
@@ -104,8 +106,9 @@ export const OcrResultSummarySchema = z
 // server-side persistence and indexing. `captureId` is a path parameter, not a
 // body field. Idempotency key is (capture + sourceAssetHash) — no independent
 // idempotencyKey and no resultVersion in the request (server derives it).
-// layout/activity are never client-supplied; the server synthesizes empty
-// defaults, matching the current server-side OCR behavior. `qualityFlags`,
+// layout is never client-supplied. Activity is an optional observer report
+// parsed by Desktop from the same Vision response; the server stores the
+// status-bearing activity value produced by the same OCR attempt. `qualityFlags`,
 // however, are real facts the desktop derives at OCR time (e.g. a truncated
 // provider response) and submits, so the server stops synthesizing an empty
 // list.
@@ -118,6 +121,8 @@ export const OcrResultSubmitRequestSchema = z
     providerName: z.string().min(1).max(120),
     durationMs: z.number().int().nonnegative(),
     usage: AiOcrUsageSchema.optional(),
+    activity: OcrActivityResultSchema,
+    activityStatus: OcrActivityStatusSchema,
     qualityFlags: z.array(OcrQualityFlagSchema).default([]),
   })
   .strict();
@@ -136,6 +141,7 @@ export type OcrScreenTextBlock = z.infer<typeof OcrScreenTextBlockSchema>;
 export type OcrScreenTextResult = z.infer<typeof OcrScreenTextResultSchema>;
 export type OcrLayoutResult = z.infer<typeof OcrLayoutResultSchema>;
 export type OcrActivityResult = z.infer<typeof OcrActivityResultSchema>;
+export type OcrActivityStatus = z.infer<typeof OcrActivityStatusSchema>;
 export type OcrResult = z.infer<typeof OcrResultSchema>;
 export type OcrResultSummary = z.infer<typeof OcrResultSummarySchema>;
 export type OcrResultSubmitRequest = z.infer<typeof OcrResultSubmitRequestSchema>;

@@ -46,6 +46,17 @@ export const AiOcrCompletionSchema = z
   })
   .strict();
 
+export const AiOcrActivityStatusSchema = z.enum(['complete', 'omitted', 'invalid']);
+
+export const AiOcrActivitySchema = z
+  .object({
+    activitySummary: z.string().min(1).max(2048).nullable().optional(),
+    entities: z.array(z.string().min(1).max(256)).default([]),
+    actionHints: z.array(z.string().min(1).max(512)).default([]),
+    embeddingCandidateText: z.string().min(1).max(4096).nullable().optional(),
+  })
+  .strict();
+
 export const AiOcrResponseSchema = z
   .object({
     text: z.string(),
@@ -54,6 +65,8 @@ export const AiOcrResponseSchema = z
     providerName: z.string().min(1),
     usage: AiOcrUsageSchema.optional(),
     completion: AiOcrCompletionSchema.optional(),
+    activity: AiOcrActivitySchema,
+    activityStatus: AiOcrActivityStatusSchema,
     durationMs: z.number().int().nonnegative(),
     providerRequestId: z.string().min(1).max(128).optional(),
   })
@@ -63,4 +76,6 @@ export type AiOcrBoundingBox = z.infer<typeof AiOcrBoundingBoxSchema>;
 export type AiOcrTextBlock = z.infer<typeof AiOcrTextBlockSchema>;
 export type AiOcrUsage = z.infer<typeof AiOcrUsageSchema>;
 export type AiOcrCompletion = z.infer<typeof AiOcrCompletionSchema>;
+export type AiOcrActivityStatus = z.infer<typeof AiOcrActivityStatusSchema>;
+export type AiOcrActivity = z.infer<typeof AiOcrActivitySchema>;
 export type AiOcrResponse = z.infer<typeof AiOcrResponseSchema>;
