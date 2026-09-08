@@ -1,6 +1,10 @@
 # Contributing to Recapsy
 
-Thanks for your interest. Recapsy is deliberately small. The rules below keep the codebase consistent whether a change comes from a person or from a coding agent working on their behalf.
+Thanks for your interest.
+
+> Recapsy has not shipped yet and the code is changing quickly. Until the first release, outside pull requests are not merged. Bug reports and discussions are welcome and read.
+
+Recapsy is deliberately small. The rules below keep the codebase consistent whether a change comes from a person or from a coding agent working on their behalf.
 
 ## What to open
 
