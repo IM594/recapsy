@@ -2,7 +2,7 @@
 
 # Recapsy
 
-**Give your AI agent a work memory that never lies to you.**
+**Everything you do on your Mac, remembered. Nothing leaves unless you say so.**
 
 [English](README.md) · [简体中文](README.zh-CN.md)
 
@@ -12,15 +12,21 @@
 
 </div>
 
-Recapsy records your Mac screen, reads the text on it, and keeps all of it on your machine. The agent you already use, whether Claude Code, Cursor, Codex or anything else that speaks MCP, asks Recapsy what you were doing and gets answers with the screenshot, the original text and the time attached.
+Recapsy keeps a local record of what you're working on, moment by moment, and answers when you or your agent ask about any of it. Today you ask through Claude Code, Cursor or Codex over MCP, and every answer comes with the screenshot, the original text and the time.
 
-- **The desktop app is free and open source, forever.** Nothing leaves your Mac.
+> “Compare me now with me three months ago. Positive and negative changes, with data.”
+>
+> “What did I actually finish this week? Show me the screenshots.”
+>
+> “What was I reading yesterday afternoon before the call?”
+
+- **The desktop app is free and open source, forever.** Nothing leaves your Mac unless you opt into the cloud tier.
 - **A cloud tier funds the project.** Sync, hosted models, backup and asking from your phone will be a subscription.
 - **Anything that was free stays free.**
 
 ## Why
 
-Ten minutes before a review you ask your agent "what did I work on this week?" and get talking points with real detail: which files, which threads, which afternoon. Without Recapsy that is an hour in git, Slack and Notion. The same move covers year-end reviews, and the everyday case where an agent starts a task by asking where you left off in a project.
+Ten minutes before a review you ask "what did I work on this week?" and get talking points with real detail: which files, which threads, which afternoon. Without Recapsy that is an hour in git, Slack and Notion. Because it has seen every day, bigger questions work too: how your work changed over a quarter, and what the evidence is. And an agent starting a task can first ask where you left off.
 
 ## It never lies to you
 
