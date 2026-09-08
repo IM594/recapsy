@@ -12,3 +12,7 @@ dist/
 
 # local agent tooling
 .pi/
+
+# local AI instructions, never committed
+CLAUDE.md
+.claude/
