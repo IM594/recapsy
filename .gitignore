@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# node
+node_modules/
+dist/
+*.log
+
+# editors
+.vscode/
+.idea/
+
+# local agent tooling
+.pi/
+
+# local AI instructions, never committed
+CLAUDE.md
+.claude/
