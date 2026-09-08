@@ -4,7 +4,7 @@
 
 **Everything you do on your Mac, remembered. Nothing leaves unless you say so.**
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](docs/README.zh-CN.md)
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](#how-it-works)
@@ -63,7 +63,7 @@ Under development, not yet released. Watch the repository for the first release.
 
 ## Contributing
 
-Bugs go through the issue form, features start as a discussion. Outside pull requests are not merged until the first release. Workflow and code rules are in [CONTRIBUTING.md](CONTRIBUTING.md).
+Bugs go through the issue form, features start as a discussion. Outside pull requests are not merged until the first release. The workflow is in [CONTRIBUTING.md](.github/CONTRIBUTING.md) and the code rules in [AGENTS.md](AGENTS.md).
 
 ## License
 

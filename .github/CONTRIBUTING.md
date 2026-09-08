@@ -1,0 +1,32 @@
+# Contributing to Recapsy
+
+Thanks for your interest.
+
+> Recapsy has not shipped yet and the code is changing quickly. Until the first release, outside pull requests are not merged. Bug reports and discussions are welcome and read.
+
+Recapsy is deliberately small. Naming, tests, commits and code rules live in [AGENTS.md](../AGENTS.md), written so that people and coding agents read the same text. This page covers how to take part.
+
+## What to open
+
+- **Bug**: use the bug report form. Include version, macOS version and steps.
+- **Feature**: start a [discussion](https://github.com/IM594/recapsy/discussions) before writing code. Many good ideas fit better as a prompt for your agent than as a feature in the app, and a discussion settles that before anyone spends time on code. Feature pull requests without a prior discussion may be closed.
+- **Security**: see [SECURITY.md](SECURITY.md). Never open a public issue.
+
+## Workflow
+
+1. Branch from `main` as `type/topic`, using the same types as commits: `feat/mcp-citations`, `fix/capture-stall-alert`, `docs/readme-install`.
+2. Keep the pull request focused on one change. Small and complete beats large and partial.
+3. Open the pull request with a title in Conventional Commits form. That title becomes the single commit on `main`, so make it precise.
+4. Pushes to `main` are not allowed. Everything lands through a squash merge.
+
+## Commits and code
+
+Commit format, naming, test layout and code rules are in [AGENTS.md](../AGENTS.md).
+
+## Local setup
+
+Setup and test commands will be documented here together with the first code.
+
+## License
+
+By contributing you agree that your contributions are licensed under the [MIT License](../LICENSE).

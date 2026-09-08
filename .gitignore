@@ -10,9 +10,7 @@ dist/
 .vscode/
 .idea/
 
-# local agent tooling
+# local agent state, never committed
+.claude/settings.local.json
+CLAUDE.local.md
 .pi/
-
-# local AI instructions, never committed
-CLAUDE.md
-.claude/
