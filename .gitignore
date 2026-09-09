@@ -14,3 +14,6 @@ dist/
 .claude/settings.local.json
 CLAUDE.local.md
 .pi/
+
+# local agent rules, never committed
+AGENTS.local.md
