@@ -1,0 +1,21 @@
+name: Pull request references an issue
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  issue-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Look for an issue number in the body
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if grep -Eq '(^|[^A-Za-z0-9/])#[0-9]+' <<<"$BODY"; then
+            exit 0
+          fi
+          echo "::error::The pull request body must reference an issue, for example 'Closes #12'."
+          exit 1
