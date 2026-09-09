@@ -2,6 +2,8 @@
 
 These rules apply to every change in this repository, whether a person or a coding agent makes it. Read them before editing. The human-facing workflow lives in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
+If `AGENTS.local.md` exists in the repository root, read it before doing anything else. It is never committed.
+
 ## What Recapsy is
 
 A macOS desktop app that keeps a local record of what the user is working on, screenshot by screenshot, and answers questions about it. Everything runs on the user's Mac: capture, OCR, indexing, search and summaries. Agents such as Claude Code, Cursor and Codex ask it over MCP. Every answer carries its source: screenshot, recognized text and time.
@@ -33,6 +35,9 @@ Dependencies are pinned. Adding a library needs a discussion first.
 - Production code never imports from a test directory.
 - Swift keeps the standard `Tests/<Target>Tests/` layout.
 - Run the full test suite before opening a pull request. Passing end-to-end checks do not replace unit tests.
+- New behavior comes with a new test. A bug fix starts with a test that reproduces the bug.
+- A new test is run and seen failing before the code that makes it pass is written.
+- Existing tests are not edited, weakened, skipped or deleted to make a run pass. When a test is wrong, the pull request says so and explains why.
 
 ## Code
 
@@ -49,7 +54,8 @@ Dependencies are pinned. Adding a library needs a discussion first.
 - `scope` is required for `feat`, `fix` and `refactor` and names a module or capability, for example `capture`, `ocr`, `mcp`, `summary`, `review`.
 - Branches are named `type/topic` with the same types.
 - `main` only accepts squash merges through pull requests. The pull request title becomes the commit title.
-- A pull request does one thing and links the issue it closes.
+- A pull request does one thing and references the issue it works on in its body, for example `Closes #12`. A pull request without an issue reference does not pass checks.
+- The pull request body lists the commands that were run and what they returned, and states anything that was left undone or could not be verified.
 
 ## Documents
 
@@ -61,5 +67,5 @@ Dependencies are pinned. Adding a library needs a discussion first.
 
 - Prefer the root cause over the quick fix. When a shortcut exists, present both with their trade-offs and let the maintainer decide.
 - For non-trivial changes, propose the approach before implementing it.
-- Delegated sub-agents do not spawn further sub-agents. Verify their results on disk rather than trusting their reports.
+- A delegated agent does not delegate further. Verify its results on disk rather than trusting its report.
 - Remove temporary files, debug output and scratch data before finishing.
