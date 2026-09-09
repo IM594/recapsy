@@ -1,0 +1,19 @@
+name: Ask the board
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  request-board-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GATE_DISPATCH_TOKEN }}
+        run: >
+          gh workflow run board-gate.yml
+          --repo IM594/recapsy-private
+          --field pr=${{ github.event.pull_request.number }}
+          --field sha=${{ github.event.pull_request.head.sha }}
