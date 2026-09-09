@@ -27,6 +27,8 @@ Commit format, naming, test layout and code rules are in [AGENTS.md](../AGENTS.m
 
 You need Node 24 and pnpm 10. Clone the repository and run `pnpm install`, then `pnpm lint`, `pnpm typecheck` and `pnpm test`. The install step sets up git hooks: staged files must pass Biome (`pnpm fix` formats them) and commit messages must follow the Conventional Commits format, otherwise the commit is rejected before it reaches CI.
 
+The capture process is a Swift package in `capture/`. You need Xcode 16.4 or later. Run its tests with `swift test --package-path capture` and format with `swift format --recursive --in-place capture`.
+
 ## License
 
 By contributing you agree that your contributions are licensed under the [MIT License](../LICENSE).

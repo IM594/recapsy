@@ -33,7 +33,7 @@ Dependencies are pinned. Adding a library needs a discussion first.
 - Module tests live in `desktop/src/<module>/tests/`. Cross-module integration tests live in `desktop/tests/integration/`. All test files are named `*.test.ts`.
 - No `__tests__/` directories, no `*.spec.ts`, no tests placed next to source files.
 - Production code never imports from a test directory.
-- Swift keeps the standard `Tests/<Target>Tests/` layout.
+- Swift tests live in `capture/Tests/<Target>Tests/`.
 - Run the full test suite before opening a pull request. Passing end-to-end checks do not replace unit tests.
 - New behavior comes with a new test. A bug fix starts with a test that reproduces the bug.
 - A new test is run and seen failing before the code that makes it pass is written.
