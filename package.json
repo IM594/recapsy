@@ -16,7 +16,10 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "lefthook"
+      "electron",
+      "fs-xattr",
+      "lefthook",
+      "macos-alias"
     ]
   },
   "commitlint": {

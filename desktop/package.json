@@ -1,17 +1,25 @@
 {
   "name": "recapsy-desktop",
+  "productName": "Recapsy",
   "private": true,
   "type": "module",
   "version": "0.0.0",
+  "main": "dist/main.js",
   "engines": {
     "node": ">=24 <25"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "pnpm build && electron-forge start",
+    "make": "pnpm build && electron-forge make",
     "test": "vitest run",
     "typecheck": "tsc"
   },
   "devDependencies": {
+    "@electron-forge/cli": "7.11.2",
+    "@electron-forge/maker-dmg": "7.11.2",
     "@types/node": "24.13.3",
+    "electron": "44.3.0",
     "typescript": "5.9.3",
     "vitest": "5.0.0"
   }

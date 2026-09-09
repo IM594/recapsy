@@ -4,6 +4,7 @@
 # node
 node_modules/
 dist/
+out/
 *.log
 
 # editors
