@@ -8,10 +8,10 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "test": "vitest run",
+    "test": "pnpm -r test",
     "lint": "biome ci .",
     "fix": "biome check --write .",
-    "typecheck": "tsc",
+    "typecheck": "pnpm -r typecheck",
     "prepare": "lefthook install"
   },
   "pnpm": {
@@ -42,9 +42,6 @@
     "@biomejs/biome": "2.5.12",
     "@commitlint/cli": "21.2.2",
     "@commitlint/config-conventional": "21.2.2",
-    "@types/node": "24.13.3",
-    "lefthook": "2.1.12",
-    "typescript": "5.9.3",
-    "vitest": "5.0.0"
+    "lefthook": "2.1.12"
   }
 }

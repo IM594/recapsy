@@ -30,7 +30,7 @@ Dependencies are pinned. Adding a library needs a discussion first.
 
 ## Tests
 
-- Module tests live in `src/<module>/tests/`. Cross-module integration tests live in `tests/integration/`. All test files are named `*.test.ts`.
+- Module tests live in `desktop/src/<module>/tests/`. Cross-module integration tests live in `desktop/tests/integration/`. All test files are named `*.test.ts`.
 - No `__tests__/` directories, no `*.spec.ts`, no tests placed next to source files.
 - Production code never imports from a test directory.
 - Swift keeps the standard `Tests/<Target>Tests/` layout.
