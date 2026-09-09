@@ -51,7 +51,7 @@ Dependencies are pinned. Adding a library needs a discussion first.
 
 - Commit title: `type(scope): message`. One line. No body, no footer, no trailers.
 - Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `chore`, `ci`, `build`, `style`, `revert`.
-- `scope` is required for `feat`, `fix` and `refactor` and names a module or capability, for example `capture`, `ocr`, `mcp`, `summary`, `review`.
+- `scope` is required and names a module or capability, for example `capture`, `ocr`, `mcp`, `summary`, `review`, `repo`, `deps`.
 - Branches are named `type/topic` with the same types.
 - `main` only accepts squash merges through pull requests. The pull request title becomes the commit title.
 - A pull request does one thing and references the issue it works on in its body, for example `Closes #12`. A pull request without an issue reference does not pass checks.

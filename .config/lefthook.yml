@@ -1,0 +1,11 @@
+pre-commit:
+  commands:
+    biome:
+      glob: "*.{ts,js,json}"
+      run: pnpm biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm commitlint --edit {1}
