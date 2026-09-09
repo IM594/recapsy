@@ -25,7 +25,7 @@ Commit format, naming, test layout and code rules are in [AGENTS.md](../AGENTS.m
 
 ## Local setup
 
-You need Node 24 and pnpm 10. Clone the repository and run `pnpm install`, then `pnpm lint`, `pnpm typecheck` and `pnpm test`. The install step sets up git hooks, so commits that do not follow the Conventional Commits format are rejected locally before they reach CI.
+You need Node 24 and pnpm 10. Clone the repository and run `pnpm install`, then `pnpm lint`, `pnpm typecheck` and `pnpm test`. The install step sets up git hooks: staged files must pass Biome (`pnpm fix` formats them) and commit messages must follow the Conventional Commits format, otherwise the commit is rejected before it reaches CI.
 
 ## License
 
