@@ -1,0 +1,40 @@
+name: Pull request body
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pull-request-body:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          ok=true
+
+          has_section() {
+            printf '%s\n' "$BODY" | grep -qE "^## $1" || {
+              echo "::error::Missing required section: ## $1"
+              ok=false
+            }
+          }
+
+          has_section "What and why"
+          has_section "How it was verified"
+          has_section "Checklist"
+
+          printf '%s\n' "$BODY" | grep -qE '(Closes|Refs) #[0-9]+' || {
+            echo "::error::PR body must reference an issue with 'Closes #N' or 'Refs #N'"
+            ok=false
+          }
+
+          "$ok"
