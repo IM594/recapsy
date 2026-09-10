@@ -2,7 +2,7 @@
 
 These rules apply to every change in this repository, whether a person or a coding agent makes it. Read them before editing. The human-facing workflow lives in [.github/CONTRIBUTING.md](.github/CONTRIBUTING.md).
 
-If `AGENTS.local.md` exists in the repository root, read it before doing anything else. It is never committed.
+**Before doing anything else:** if `AGENTS.local.md` exists in the repository root, open it and follow its instructions. It contains mandatory startup steps that must run before you answer the user's first message. It is never committed.
 
 ## What Recapsy is
 
@@ -55,6 +55,7 @@ Dependencies are pinned. Adding a library needs a discussion first.
 - Branches are named `type/topic` with the same types.
 - `main` only accepts squash merges through pull requests. The pull request title becomes the commit title.
 - A pull request does one thing and references the issue it works on in its body, for example `Closes #12`. A pull request without an issue reference does not pass checks.
+- The pull request body must follow `.github/pull_request_template.md` exactly. Fill every section; remove only the `Not done` section when everything is covered.
 - The pull request body lists the commands that were run and what they returned, and states anything that was left undone or could not be verified.
 
 ## Documents
