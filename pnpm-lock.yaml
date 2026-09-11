@@ -21,7 +21,7 @@ importers:
         specifier: 2.1.12
         version: 2.1.12
 
-  desktop:
+  app/desktop:
     devDependencies:
       '@types/node':
         specifier: 24.13.3

@@ -20,7 +20,18 @@ Boundaries that shape every decision:
 
 Electron and TypeScript for the main process and UI. A Swift process for screen capture with pre-capture privacy interception. SQLite with full-text indexing. PP-OCR running on device. An MCP server. Summaries through any OpenAI-compatible endpoint the user configures, including a local Ollama.
 
+The directory layout and architectural decisions are in [docs/architecture.md](docs/architecture.md).
+
 Dependencies are pinned. Adding a library needs a discussion first.
+
+## Architecture constraints
+
+These are enforced by CI and review. See [docs/architecture.md](docs/architecture.md) for the full picture.
+
+- Dependency direction: `core/memory` ← `core/ingest` ← `app/desktop`. `mcp` depends only on `core/memory`, never on `core/ingest` or `core/enrich`. Nothing under `core/` imports Electron.
+- The core entity is a span (a period of unchanged screen content), not a screenshot.
+- Data model: UUIDv7 primary keys, `device_id` on every row, tombstone deletes, source tracking on derived data.
+- Do not build for 2.0 ahead of time: no tenants, authentication, remote transport or accounts.
 
 ## Naming
 
@@ -30,10 +41,10 @@ Dependencies are pinned. Adding a library needs a discussion first.
 
 ## Tests
 
-- Module tests live in `desktop/src/<module>/tests/`. Cross-module integration tests live in `desktop/tests/integration/`. All test files are named `*.test.ts`.
+- Module tests live in `<package>/src/<module>/tests/`. Cross-module integration tests live in `<package>/tests/integration/`. All test files are named `*.test.ts`. For example: `core/memory/src/store/tests/`, `app/desktop/src/tray/tests/`.
 - No `__tests__/` directories, no `*.spec.ts`, no tests placed next to source files.
 - Production code never imports from a test directory.
-- Swift keeps the standard `Tests/<Target>Tests/` layout.
+- Swift tests live in `app/capture/Tests/<Target>Tests/`.
 - Run the full test suite before opening a pull request. Passing end-to-end checks do not replace unit tests.
 - New behavior comes with a new test. A bug fix starts with a test that reproduces the bug.
 - A new test is run and seen failing before the code that makes it pass is written.
