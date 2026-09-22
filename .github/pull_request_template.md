@@ -15,6 +15,6 @@ Closes #
 
 ## Checklist
 
-- [ ] New behavior comes with a new test in `desktop/src/<module>/tests/` or `desktop/tests/integration/`
+- [ ] New behavior comes with a new test in `<package>/src/<module>/tests/` or `<package>/tests/integration/`
 - [ ] No existing test was edited, weakened, skipped or deleted to make the run pass
 - [ ] Feature work has a linked discussion
