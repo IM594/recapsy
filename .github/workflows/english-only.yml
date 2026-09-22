@@ -1,0 +1,89 @@
+name: English only
+
+on:
+  issues:
+    types: [opened, edited, transferred]
+  milestone:
+    types: [created, edited]
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number || github.event.pull_request.number || github.event.milestone.id || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  english-only:
+    runs-on: ubuntu-24.04
+    permissions:
+      issues: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Reject CJK text
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          MILESTONE_TITLE: ${{ github.event.milestone.title }}
+          MILESTONE_DESCRIPTION: ${{ github.event.milestone.description }}
+        run: |
+          CJK='[\x{3000}-\x{303F}\x{3040}-\x{30FF}\x{3400}-\x{4DBF}\x{4E00}-\x{9FFF}\x{F900}-\x{FAFF}\x{FF00}-\x{FFEF}]'
+
+          has_cjk() {
+            printf '%s\n' "$1" | grep -Pq "$CJK"
+          }
+
+          MARKER='<!-- english-only-check -->'
+
+          if [ "$EVENT_NAME" = "milestone" ]; then
+            if has_cjk "${MILESTONE_TITLE}${MILESTONE_DESCRIPTION}"; then
+              echo "::error::Milestone title or description contains CJK text. Public text in this repository must be in English."
+              exit 1
+            fi
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$PR_AUTHOR" = "dependabot[bot]" ]; then
+            echo "Skipping dependabot pull request"
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            title="$PR_TITLE"
+            body="$PR_BODY"
+            number="$PR_NUMBER"
+            cmd=pr
+          else
+            title="$ISSUE_TITLE"
+            body="$ISSUE_BODY"
+            number="$ISSUE_NUMBER"
+            cmd=issue
+          fi
+
+          if has_cjk "${title}${body}"; then
+            gh "$cmd" edit "$number" --add-label needs-english
+
+            existing=$(gh "$cmd" view "$number" --json comments \
+              --jq '.comments[] | select(.author.login == "github-actions[bot]") | .body' \
+              | grep -Fc "$MARKER" || true)
+
+            if [ "$existing" = "0" ]; then
+              gh "$cmd" comment "$number" --body "${MARKER}
+          Public text in this repository is written in English. Please translate the title and body to English so that everyone in the community can read and search it.
+
+          See [CONTRIBUTING.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/.github/CONTRIBUTING.md) for details."
+            fi
+
+            echo "::error::Title or body contains CJK text. Public text must be in English."
+            exit 1
+          fi
+
+          gh "$cmd" edit "$number" --remove-label needs-english 2>/dev/null || true
