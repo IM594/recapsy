@@ -66,7 +66,7 @@ These are enforced by CI and review. See [docs/architecture.md](docs/architectur
 - `scope` is required and names a module or capability, for example `capture`, `ocr`, `mcp`, `summary`, `review`, `repo`, `deps`.
 - Branches are named `type/topic` with the same types.
 - `main` only accepts squash merges through pull requests. The pull request title becomes the commit title.
-- A pull request does one thing and references the issue it works on in its body, for example `Closes #12`. A pull request without an issue reference does not pass checks.
+- A pull request does one thing and closes the issue it works on, for example `Closes #12`. The issue, or its parent issue, is in the single open milestone, which is the current plan; a pull request that closes an issue outside it does not pass checks. Outside contributors close an issue carrying the `accepted` label instead.
 - The pull request body must follow `.github/pull_request_template.md` exactly. Fill every section; remove only the `Not done` section when everything is covered.
 - The pull request body lists the commands that were run and what they returned, and states anything that was left undone or could not be verified.
 

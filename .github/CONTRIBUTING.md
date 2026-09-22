@@ -12,12 +12,15 @@ Recapsy is deliberately small. Naming, tests, commits and code rules live in [AG
 - **Feature**: start a [discussion](https://github.com/IM594/recapsy/discussions) before writing code. Many good ideas fit better as a prompt for your agent than as a feature in the app, and a discussion settles that before anyone spends time on code. Feature pull requests without a prior discussion may be closed.
 - **Security**: see [SECURITY.md](SECURITY.md). Never open a public issue.
 
+Issues, milestones and pull requests are written in English; a workflow labels anything else `needs-english`.
+
 ## Workflow
 
 1. Branch from `main` as `type/topic`, using the same types as commits: `feat/mcp-citations`, `fix/capture-stall-alert`, `docs/readme-install`.
 2. Keep the pull request focused on one change. Small and complete beats large and partial.
 3. Open the pull request with a title in Conventional Commits form. That title becomes the single commit on `main`, so make it precise.
 4. Pushes to `main` are not allowed. Everything lands through a squash merge.
+5. Every pull request closes an issue. The maintainer's pull requests close an issue in the current milestone. Outside pull requests close an issue carrying the `accepted` label, which the maintainer adds after triage.
 
 ## Commits and code
 
