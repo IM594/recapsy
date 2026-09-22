@@ -12,6 +12,8 @@ Recapsy is deliberately small. Naming, tests, commits and code rules live in [AG
 - **Feature**: start a [discussion](https://github.com/IM594/recapsy/discussions) before writing code. Many good ideas fit better as a prompt for your agent than as a feature in the app, and a discussion settles that before anyone spends time on code. Feature pull requests without a prior discussion may be closed.
 - **Security**: see [SECURITY.md](SECURITY.md). Never open a public issue.
 
+Issues, milestones and pull requests are written in English; a workflow labels anything else `needs-english`.
+
 ## Workflow
 
 1. Branch from `main` as `type/topic`, using the same types as commits: `feat/mcp-citations`, `fix/capture-stall-alert`, `docs/readme-install`.
