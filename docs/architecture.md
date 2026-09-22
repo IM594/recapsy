@@ -42,7 +42,7 @@ web      → core/memory (shared types only)
 
 `core/*` never imports Electron. `core/memory` has no internal dependencies.
 
-Dependency direction is enforced by CI using `dependency-cruiser`.
+Dependency direction is enforced by CI using `dependency-cruiser`. `pnpm conventions` runs both the dependency check and a script that verifies test placement, naming conventions and exact-pinned versions.
 
 ## Runtime architecture
 

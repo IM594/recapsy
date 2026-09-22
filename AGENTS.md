@@ -49,6 +49,7 @@ These are enforced by CI and review. See [docs/architecture.md](docs/architectur
 - New behavior comes with a new test. A bug fix starts with a test that reproduces the bug.
 - A new test is run and seen failing before the code that makes it pass is written.
 - Existing tests are not edited, weakened, skipped or deleted to make a run pass. When a test is wrong, the pull request says so and explains why.
+- `pnpm conventions` checks test placement, naming and dependency direction in CI.
 
 ## Code
 

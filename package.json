@@ -12,6 +12,7 @@
     "lint": "biome ci .",
     "fix": "biome check --write .",
     "typecheck": "pnpm -r typecheck",
+    "conventions": "depcruise --config .config/dependency-cruiser.cjs app core mcp && node scripts/check-conventions.mjs",
     "prepare": "lefthook install"
   },
   "pnpm": {
@@ -43,6 +44,7 @@
     "@biomejs/biome": "2.5.14",
     "@commitlint/cli": "21.2.2",
     "@commitlint/config-conventional": "21.2.2",
+    "dependency-cruiser": "18.4.0",
     "lefthook": "2.1.14"
   }
 }
