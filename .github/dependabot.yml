@@ -3,8 +3,7 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     commit-message:
       prefix: build
       include: scope
@@ -13,12 +12,19 @@ updates:
         update-types:
           - minor
           - patch
+    cooldown:
+      default-days: 7
+    # @types/node follows .node-version; typescript majors are adopted deliberately
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     commit-message:
       prefix: ci
       include: scope
@@ -27,3 +33,5 @@ updates:
         update-types:
           - minor
           - patch
+    cooldown:
+      default-days: 7
