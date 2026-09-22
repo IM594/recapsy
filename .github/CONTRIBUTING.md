@@ -20,6 +20,7 @@ Issues, milestones and pull requests are written in English; a workflow labels a
 2. Keep the pull request focused on one change. Small and complete beats large and partial.
 3. Open the pull request with a title in Conventional Commits form. That title becomes the single commit on `main`, so make it precise.
 4. Pushes to `main` are not allowed. Everything lands through a squash merge.
+5. Every pull request closes an issue. The maintainer's pull requests close an issue in the current milestone. Outside pull requests close an issue carrying the `accepted` label, which the maintainer adds after triage.
 
 ## Commits and code
 

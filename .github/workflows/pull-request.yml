@@ -1,0 +1,149 @@
+name: Pull request
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pull-request-title:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$TITLE" | pnpm commitlint
+
+  pull-request-body:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          ok=true
+
+          has_section() {
+            printf '%s\n' "$BODY" | grep -qE "^## $1" || {
+              echo "::error::Missing required section: ## $1"
+              ok=false
+            }
+          }
+
+          has_section "What and why"
+          has_section "How it was verified"
+          has_section "Checklist"
+
+          printf '%s\n' "$BODY" | grep -qE '(Closes|Refs) #[0-9]+' || {
+            echo "::error::PR body must reference an issue with 'Closes #N' or 'Refs #N'"
+            ok=false
+          }
+
+          "$ok"
+
+  plan-gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          REPO_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          fail() { echo "::error::$1"; exit 1; }
+
+          owner="${GITHUB_REPOSITORY%/*}"
+          repo_name="${GITHUB_REPOSITORY#*/}"
+
+          milestones=$(gh api "repos/${GITHUB_REPOSITORY}/milestones?state=open")
+          count=$(printf '%s\n' "$milestones" | jq 'length')
+          [[ "$count" -eq 1 ]] || fail "expected exactly one open milestone, found ${count}"
+
+          ms_title=$(printf '%s\n' "$milestones" | jq -r '.[0].title')
+          ms_due=$(printf '%s\n' "$milestones" | jq -r '.[0].due_on')
+          ms_number=$(printf '%s\n' "$milestones" | jq -r '.[0].number')
+
+          [[ "$ms_due" != "null" && -n "$ms_due" ]] || fail "milestone ${ms_title} has no due date"
+
+          due_date="${ms_due%%T*}"
+          today=$(date -u +%Y-%m-%d)
+          [[ ! "$today" > "$due_date" ]] || fail "milestone ${ms_title} was due ${due_date}"
+
+          if [[ "$PR_AUTHOR" == "dependabot[bot]" ]]; then
+            echo "dependency update, no issue reference needed"
+            exit 0
+          fi
+
+          closing_nums=$(printf '%s\n' "$BODY" \
+            | grep -oiE '(Closes|Closed|Close|Fixes|Fixed|Fix|Resolves|Resolved|Resolve):? #[0-9]+' \
+            | grep -oE '[0-9]+' || true)
+          [[ -n "$closing_nums" ]] || fail "the pull request body must close an issue, for example Closes #12"
+
+          in_milestone() {
+            local ms
+            ms=$(gh api "repos/${GITHUB_REPOSITORY}/issues/$1" --jq '.milestone.number // empty') || return 1
+            [[ "${ms:-}" == "$ms_number" ]]
+          }
+
+          for n in $closing_nums; do
+            issue=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${n}") || fail "#${n} does not exist"
+
+            printf '%s\n' "$issue" | jq -e 'has("pull_request") | not' > /dev/null \
+              || fail "#${n} is a pull request, not an issue"
+
+            state=$(printf '%s\n' "$issue" | jq -r '.state')
+            [[ "$state" == "open" ]] || fail "#${n} is not open"
+
+            if [[ "$PR_AUTHOR" == "$REPO_OWNER" ]]; then
+              issue_ms=$(printf '%s\n' "$issue" | jq -r '.milestone.number // empty')
+              if [[ "${issue_ms:-}" == "$ms_number" ]]; then
+                echo "closes #${n} in milestone ${ms_title}"
+                continue
+              fi
+
+              parent_number=$(gh api graphql -f query='
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    issue(number: $number) { parent { number } }
+                  }
+                }' -f owner="$owner" -f repo="$repo_name" -F number="$n" \
+                --jq '.data.repository.issue.parent.number // empty' 2>/dev/null || true)
+
+              if [[ -n "$parent_number" ]] && in_milestone "$parent_number"; then
+                echo "closes #${n} in milestone ${ms_title}"
+                continue
+              fi
+
+              fail "#${n} is not in milestone ${ms_title}; pull requests by the maintainer close an issue in the current milestone"
+            else
+              labels=$(printf '%s\n' "$issue" | jq -r '.labels[].name')
+              if ! printf '%s\n' "$labels" | grep -qx 'accepted'; then
+                fail "#${n} has not been accepted yet; wait for the accepted label before opening a pull request"
+              fi
+              if printf '%s\n' "$labels" | grep -qx 'needs-english'; then
+                fail "#${n} is labelled needs-english"
+              fi
+              echo "closes #${n} in milestone ${ms_title}"
+            fi
+          done
